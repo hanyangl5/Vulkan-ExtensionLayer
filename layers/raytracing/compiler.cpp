@@ -3,6 +3,7 @@
 #include "compiler.h"
 #include "continuations.h"
 #include "runtime.h"
+#include "bvh_shader.h"
 #include <glslang/Public/ResourceLimits.h>
 #include <glslang/Public/ShaderLang.h>
 #include <glslang/SPIRV/GlslangToSpv.h>
@@ -60,6 +61,20 @@ std::vector<uint32_t> CompileGLSL(const std::string &source, VkShaderStageFlagBi
     return out;
 }
 
+// Older SPIRV-Cross releases know the KHR enumerant but do not give this
+// builtin a GLSL name. Lower it by SPIR-V decoration, independent of debug names
+// and of the emitted fallback spelling (e.g. gl_BuiltIn_5352).
+class RTCompilerGLSL : public spirv_cross::CompilerGLSL {
+  public:
+    using spirv_cross::CompilerGLSL::CompilerGLSL;
+
+  protected:
+    std::string builtin_to_glsl(spv::BuiltIn builtin, spv::StorageClass storage) override {
+        if (builtin == spv::BuiltInRayGeometryIndexKHR) return "int(vel_geometry)";
+        return spirv_cross::CompilerGLSL::builtin_to_glsl(builtin, storage);
+    }
+};
+
 static void Replace(std::string &s, const std::string &name, const std::string &value) {
     s = std::regex_replace(s, std::regex("\\b" + name + "\\b"), value);
 }
@@ -95,7 +110,7 @@ Program Link(const std::vector<Stage> &stages, const std::vector<VkRayTracingSha
                     throw std::runtime_error("Hit/miss continuation execution is not yet connected to the state-machine backend");
             }
         }
-        spirv_cross::CompilerGLSL c(stage.spirv);
+        RTCompilerGLSL c(stage.spirv);
         c.set_entry_point(stage.entry, model);
         // Prefix SPIR-V object/type/function names before GLSL emission. Local
         // scopes remain independent.
@@ -191,13 +206,8 @@ Program Link(const std::vector<Stage> &stages, const std::vector<VkRayTracingSha
     return {CompileGLSL(source, VK_SHADER_STAGE_COMPUTE_BIT), source};
 }
 
-std::vector<uint32_t> BuildShader() {
-    return CompileGLSL(std::string("#version 460\n") + kMemory + kBuilder, VK_SHADER_STAGE_COMPUTE_BIT);
-}
-uint64_t AccelerationStructureSize(uint32_t count, bool top_level) {
-    if (count > (1u << 20)) throw std::runtime_error("Prototype limit is 1048576 primitives");
-    uint64_t capacity = 1;
-    while (capacity < count) capacity *= 2;
-    return 16 + (2 * capacity - 1) * 32 + uint64_t(count) * (top_level ? 112 : 48);
+std::vector<uint32_t> BuildShader(BuildPass pass) {
+    auto prefix = std::string("#version 460\n#define VEL_BUILD_PASS ") + std::to_string(static_cast<uint32_t>(pass)) + "\n";
+    return CompileGLSL(prefix + kMemory + kBVHBuilder, VK_SHADER_STAGE_COMPUTE_BIT);
 }
 }  // namespace vel::rt

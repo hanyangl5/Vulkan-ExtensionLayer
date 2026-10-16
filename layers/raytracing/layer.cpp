@@ -81,7 +81,7 @@ struct Device {
     VkPhysicalDevice physical{};
     PFN_vkGetDeviceProcAddr gdpa{};
     VkPhysicalDeviceMemoryProperties memory{};
-    VkPipeline builder{};
+    std::array<VkPipeline, static_cast<size_t>(vel::rt::BuildPass::Count)> builders{};
     VkPipelineLayout build_layout{};
     std::unordered_map<VkAccelerationStructureKHR, std::unique_ptr<AS>> structures;
     std::unordered_map<VkShaderModule, std::unique_ptr<std::vector<uint32_t>>> modules;
@@ -137,7 +137,11 @@ bool Supported(VkPhysicalDevice p) {
     auto query = reinterpret_cast<PFN_vkGetPhysicalDeviceFeatures2>(i.gipa(i.handle, "vkGetPhysicalDeviceFeatures2"));
     if (!query) return false;
     query(p, &f);
-    return f.features.shaderInt64 && f.features.shaderInt16 && v.bufferDeviceAddress && v11.storageBuffer16BitAccess;
+    VkPhysicalDeviceProperties properties;
+    reinterpret_cast<PFN_vkGetPhysicalDeviceProperties>(i.gipa(i.handle, "vkGetPhysicalDeviceProperties"))(p, &properties);
+    return f.features.shaderInt64 && f.features.shaderInt16 && v.bufferDeviceAddress && v11.storageBuffer16BitAccess &&
+           properties.limits.maxComputeWorkGroupInvocations >= 1024 && properties.limits.maxComputeWorkGroupSize[0] >= 1024 &&
+           properties.limits.maxComputeSharedMemorySize >= 16384;
 }
 template <class T>
 VkResult Enumerate(const std::vector<T> &src, uint32_t *n, T *dst) {
@@ -341,7 +345,7 @@ VEL_EXPORT void VKAPI_CALL vkGetPhysicalDeviceProperties2(VkPhysicalDevice p, Vk
             f->pNext, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_PROPERTIES_KHR)) {
         auto next = a->pNext;
         *a = {VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_PROPERTIES_KHR, next};
-        a->maxGeometryCount = 1;
+        a->maxGeometryCount = vel::rt::kMaxASPrimitives;
         a->maxPrimitiveCount = 1u << 20;
         a->maxInstanceCount = 1u << 20;
         a->minAccelerationStructureScratchOffsetAlignment = 256;
@@ -469,8 +473,11 @@ VEL_EXPORT VkResult VKAPI_CALL vkCreateDevice(VkPhysicalDevice p, const VkDevice
             pl.pushConstantRangeCount = 1;
             pl.pPushConstantRanges = &range;
             Check(D_FN(*d, CreatePipelineLayout)(*out, &pl, nullptr, &d->build_layout));
-            d->builder = Compute(*d, d->build_layout, vel::rt::BuildShader());
+            for (size_t pass = 0; pass < d->builders.size(); ++pass)
+                d->builders[pass] = Compute(*d, d->build_layout, vel::rt::BuildShader(static_cast<vel::rt::BuildPass>(pass)));
         } catch (...) {
+            for (auto pipeline : d->builders)
+                if (pipeline) D_FN(*d, DestroyPipeline)(*out, pipeline, nullptr);
             if (d->build_layout) D_FN(*d, DestroyPipelineLayout)(*out, d->build_layout, nullptr);
             D_FN(*d, DestroyDevice)(*out, alloc);
             *out = VK_NULL_HANDLE;
@@ -502,7 +509,7 @@ VEL_EXPORT void VKAPI_CALL vkDestroyDevice(VkDevice h, const VkAllocationCallbac
         D_FN(d, DestroyDescriptorSetLayout)(d.handle, p->runtime, nullptr);
     }
     for (auto &[h, p] : d.structures) Free(d, p->descriptor);
-    D_FN(d, DestroyPipeline)(h, d.builder, nullptr);
+    for (auto pipeline : d.builders) D_FN(d, DestroyPipeline)(h, pipeline, nullptr);
     D_FN(d, DestroyPipelineLayout)(h, d.build_layout, nullptr);
     D_FN(d, DestroyDevice)(h, a);
     devices.erase(h);
@@ -757,11 +764,18 @@ VEL_EXPORT void VKAPI_CALL vkGetAccelerationStructureBuildSizesKHR(VkDevice, VkA
     LOCK;
     out->accelerationStructureSize = out->buildScratchSize = out->updateScratchSize = 0;
     try {
-        if (ci->geometryCount == 1) {
-            out->accelerationStructureSize =
-                vel::rt::AccelerationStructureSize(counts[0], ci->type == VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR);
-            out->buildScratchSize = 256;
-        }
+        if (ci->type != VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR && ci->type != VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR)
+            return;
+        if (ci->geometryCount > vel::rt::kMaxASPrimitives ||
+            (ci->type == VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR && ci->geometryCount != 1))
+            return;
+        uint64_t total = 0;
+        for (uint32_t i = 0; i < ci->geometryCount; ++i) total += counts[i];
+        if (total > vel::rt::kMaxASPrimitives) return;
+        out->accelerationStructureSize = vel::rt::AccelerationStructureSize(
+            uint32_t(total), ci->type == VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR, ci->geometryCount);
+        out->buildScratchSize = vel::rt::BuildScratchSize(uint32_t(total));
+        if (ci->flags & VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_UPDATE_BIT_KHR) out->updateScratchSize = out->buildScratchSize;
     } catch (...) {
     }
 }
@@ -798,71 +812,155 @@ vkGetAccelerationStructureDeviceAddressKHR(VkDevice h, const VkAccelerationStruc
     LOCK;
     return D(h).structures.at(ci->accelerationStructure)->address;
 }
+namespace {
+void BuilderBarrier(Device &d, VkCommandBuffer cb) {
+    VkMemoryBarrier barrier{VK_STRUCTURE_TYPE_MEMORY_BARRIER};
+    barrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+    barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;
+    D_FN(d, CmdPipelineBarrier)
+    (cb, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 1, &barrier, 0, nullptr, 0, nullptr);
+}
+void BuildDispatch(Device &d, VkCommandBuffer cb, vel::rt::BuildPass pass, const vel::rt::BuildParameters &params,
+                   uint32_t groups) {
+    D_FN(d, CmdBindPipeline)(cb, VK_PIPELINE_BIND_POINT_COMPUTE, d.builders[static_cast<size_t>(pass)]);
+    D_FN(d, CmdPushConstants)(cb, d.build_layout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(params), &params);
+    D_FN(d, CmdDispatch)(cb, std::max(groups, 1u), 1, 1);
+    BuilderBarrier(d, cb);
+}
+void CopyAS(Device &d, VkCommandBuffer cb, const AS &src, AS &dst) {
+    vel::rt::BuildParameters params{};
+    params.src = src.address;
+    params.dst = dst.address;
+    params.count = uint32_t(std::min<uint64_t>(std::min(src.info.size, dst.info.size) / 4, UINT32_MAX));
+    BuildDispatch(d, cb, vel::rt::BuildPass::Copy, params, std::min((params.count + uint64_t(255)) / 256, uint64_t(65535)));
+}
+}  // namespace
+VEL_EXPORT void VKAPI_CALL vkCmdCopyAccelerationStructureKHR(VkCommandBuffer cb, const VkCopyAccelerationStructureInfoKHR *info) {
+    LOCK;
+    auto &d = C(cb);
+    auto &command = d.commands.at(cb);
+    if (info->pNext || (info->mode != VK_COPY_ACCELERATION_STRUCTURE_MODE_CLONE_KHR &&
+                        info->mode != VK_COPY_ACCELERATION_STRUCTURE_MODE_COMPACT_KHR)) {
+        Error(command, "AS copy supports CLONE and the upstream's same-size COMPACT");
+        return;
+    }
+    try {
+        CopyAS(d, cb, *d.structures.at(info->src), *d.structures.at(info->dst));
+        Restore(d, cb);
+    } catch (const std::exception &e) {
+        Error(command, e.what());
+    }
+}
 VEL_EXPORT void VKAPI_CALL vkCmdBuildAccelerationStructuresKHR(VkCommandBuffer cb, uint32_t n,
                                                                const VkAccelerationStructureBuildGeometryInfoKHR *infos,
                                                                const VkAccelerationStructureBuildRangeInfoKHR *const *ranges) {
     LOCK;
     auto &d = C(cb);
     auto &command = d.commands.at(cb);
-    for (uint32_t i = 0; i < n; i++) {
-        const auto &ci = infos[i];
-        if (ci.geometryCount != 1 || ci.mode != VK_BUILD_ACCELERATION_STRUCTURE_MODE_BUILD_KHR || ci.pNext ||
-            (ci.flags & ~(VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR |
-                          VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_BUILD_BIT_KHR))) {
-            Error(command, "Only BUILD, one geometry and preference flags are implemented");
-            return;
-        }
-        const auto &g = ci.pGeometries ? ci.pGeometries[0] : *ci.ppGeometries[0];
-        const auto &r = ranges[i][0];
-        struct Build {
-            uint64_t dst, vertices, indices, transform;
-            uint32_t count, capacity, stride, index, first, offset, transformOffset, top;
-        } b{};
-        b.dst = d.structures.at(ci.dstAccelerationStructure)->address;
-        b.count = r.primitiveCount;
-        b.capacity = 1;
-        if (b.count > (1u << 20)) {
-            Error(command, "Primitive limit exceeded");
-            return;
-        }
-        while (b.capacity < b.count) b.capacity *= 2;
-        b.first = r.firstVertex;
-        b.offset = r.primitiveOffset;
-        b.transformOffset = r.transformOffset;
-        b.top = ci.type == VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR;
-        if (d.structures.at(ci.dstAccelerationStructure)->info.size < vel::rt::AccelerationStructureSize(b.count, b.top)) {
-            Error(command, "AS backing buffer is too small");
-            return;
-        }
-        if (b.top) {
-            if (g.geometryType != VK_GEOMETRY_TYPE_INSTANCES_KHR || g.geometry.instances.arrayOfPointers) {
-                Error(command, "Only contiguous instance arrays are implemented");
-                return;
+    try {
+        for (uint32_t i = 0; i < n; ++i) {
+            const auto &ci = infos[i];
+            constexpr VkBuildAccelerationStructureFlagsKHR supported =
+                VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_UPDATE_BIT_KHR | VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_COMPACTION_BIT_KHR |
+                VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR |
+                VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_BUILD_BIT_KHR | VK_BUILD_ACCELERATION_STRUCTURE_LOW_MEMORY_BIT_KHR;
+            if (ci.pNext || (ci.flags & ~supported) || ci.geometryCount > vel::rt::kMaxASPrimitives ||
+                (ci.type != VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR &&
+                 ci.type != VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR) ||
+                (ci.type == VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR && ci.geometryCount != 1) ||
+                (ci.mode != VK_BUILD_ACCELERATION_STRUCTURE_MODE_BUILD_KHR &&
+                 ci.mode != VK_BUILD_ACCELERATION_STRUCTURE_MODE_UPDATE_KHR))
+                throw std::runtime_error("Unsupported acceleration structure build configuration");
+            std::vector<vel::rt::GeometryInput> geometries;
+            uint64_t total = 0;
+            for (uint32_t j = 0; j < ci.geometryCount; ++j) {
+                const auto &g = ci.pGeometries ? ci.pGeometries[j] : *ci.ppGeometries[j];
+                const auto &r = ranges[i][j];
+                vel::rt::GeometryInput input{};
+                input.base = uint32_t(total);
+                input.count = r.primitiveCount;
+                total += r.primitiveCount;
+                if (total > vel::rt::kMaxASPrimitives) throw std::runtime_error("Primitive limit exceeded");
+                input.first = r.firstVertex;
+                input.offset = r.primitiveOffset;
+                input.transform_offset = r.transformOffset;
+                input.flags = g.flags;
+                if (g.pNext) throw std::runtime_error("Geometry extension chain is not implemented");
+                if (ci.type == VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR) {
+                    if (g.geometryType != VK_GEOMETRY_TYPE_INSTANCES_KHR || g.geometry.instances.pNext)
+                        throw std::runtime_error("TLAS requires instance geometry");
+                    input.vertices = g.geometry.instances.data.deviceAddress;
+                    input.index_type = g.geometry.instances.arrayOfPointers;
+                } else if (g.geometryType == VK_GEOMETRY_TYPE_TRIANGLES_KHR) {
+                    const auto &t = g.geometry.triangles;
+                    if (t.pNext || t.vertexFormat != VK_FORMAT_R32G32B32_SFLOAT || t.vertexStride % 4 ||
+                        t.vertexData.deviceAddress % 4 ||
+                        (t.indexType != VK_INDEX_TYPE_UINT32 && t.indexType != VK_INDEX_TYPE_UINT16 &&
+                         t.indexType != VK_INDEX_TYPE_NONE_KHR))
+                        throw std::runtime_error("Triangle input requires float3 vertices and u16/u32/no indices");
+                    input.vertices = t.vertexData.deviceAddress;
+                    input.indices = t.indexData.deviceAddress;
+                    input.transform = t.transformData.deviceAddress;
+                    input.stride = t.vertexStride;
+                    input.index_type = t.indexType == VK_INDEX_TYPE_UINT32 ? 0 : t.indexType == VK_INDEX_TYPE_UINT16 ? 1 : 2;
+                } else if (g.geometryType == VK_GEOMETRY_TYPE_AABBS_KHR) {
+                    if (g.geometry.aabbs.pNext) throw std::runtime_error("AABB extension chain is not implemented");
+                    input.vertices = g.geometry.aabbs.data.deviceAddress;
+                    input.stride = g.geometry.aabbs.stride;
+                    input.geometry_type = 1;
+                } else
+                    throw std::runtime_error("BLAS requires triangles or AABBs");
+                geometries.push_back(input);
             }
-            b.vertices = g.geometry.instances.data.deviceAddress;
-        } else {
-            const auto &t = g.geometry.triangles;
-            if (g.geometryType != VK_GEOMETRY_TYPE_TRIANGLES_KHR || t.vertexFormat != VK_FORMAT_R32G32B32_SFLOAT || t.pNext ||
-                !(g.flags & VK_GEOMETRY_OPAQUE_BIT_KHR) || t.vertexStride > UINT32_MAX || t.vertexStride % 4 ||
-                t.vertexData.deviceAddress % 4 ||
-                (t.indexType != VK_INDEX_TYPE_UINT32 && t.indexType != VK_INDEX_TYPE_UINT16 &&
-                 t.indexType != VK_INDEX_TYPE_NONE_KHR)) {
-                Error(command,
-                      "Only opaque float3 triangles and u16/u32/no indices "
-                      "are implemented");
-                return;
+            auto &dst = *d.structures.at(ci.dstAccelerationStructure);
+            if (dst.info.type != ci.type ||
+                dst.info.size < vel::rt::AccelerationStructureSize(uint32_t(total), false, ci.geometryCount))
+                throw std::runtime_error("AS backing allocation does not match the build");
+            if (!ci.scratchData.deviceAddress || ci.scratchData.deviceAddress % 256)
+                throw std::runtime_error("Build scratch address must be nonzero and 256-byte aligned");
+            if (geometries.empty()) geometries.push_back({});
+            auto input = Upload(d, geometries.data(), geometries.size() * sizeof(geometries[0]));
+            command.buffers.push_back(input);
+            vel::rt::BuildParameters params{};
+            params.dst = dst.address;
+            params.scratch = ci.scratchData.deviceAddress;
+            params.geometries = Address(d, input.buffer);
+            params.count = uint32_t(total);
+            params.capacity = vel::rt::SortCapacity(params.count);
+            params.geometry_count = ci.geometryCount;
+            params.top = ci.type == VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR;
+            params.flags = ci.flags;
+            params.update = ci.mode == VK_BUILD_ACCELERATION_STRUCTURE_MODE_UPDATE_KHR;
+            uint32_t groups = (params.count + 255) / 256;
+            using Pass = vel::rt::BuildPass;
+            if (params.update) {
+                auto &src = *d.structures.at(ci.srcAccelerationStructure);
+                if (src.info.type != ci.type) throw std::runtime_error("Update source AS type mismatch");
+                if (ci.srcAccelerationStructure != ci.dstAccelerationStructure) CopyAS(d, cb, src, dst);
+                if (params.count) BuildDispatch(d, cb, Pass::Load, params, groups);
+            } else {
+                BuildDispatch(d, cb, Pass::Init, params, std::max((std::max(params.count * 2, ci.geometryCount) + 255) / 256, 1u));
+                if (params.count) BuildDispatch(d, cb, Pass::Load, params, groups);
+                BuildDispatch(d, cb, Pass::Reduce, params, 1);
+                BuildDispatch(d, cb, Pass::Morton, params, (params.capacity + 255) / 256);
+                BuildDispatch(d, cb, Pass::PreSort, params, (params.capacity + 2047) / 2048);
+                for (uint32_t k = 4096; k <= params.capacity; k *= 2) {
+                    params.k = k;
+                    for (uint32_t j = k / 2; j >= 2048; j /= 2) {
+                        params.j = j;
+                        BuildDispatch(d, cb, Pass::OuterSort, params, (params.capacity / 2 + 1023) / 1024);
+                    }
+                    BuildDispatch(d, cb, Pass::InnerSort, params, (params.capacity + 2047) / 2048);
+                }
+                BuildDispatch(d, cb, Pass::Reorder, params, groups);
+                BuildDispatch(d, cb, Pass::Hierarchy, params, groups);
             }
-            b.vertices = t.vertexData.deviceAddress;
-            b.indices = t.indexData.deviceAddress;
-            b.transform = t.transformData.deviceAddress;
-            b.stride = uint32_t(t.vertexStride);
-            b.index = t.indexType == VK_INDEX_TYPE_UINT32 ? 0 : t.indexType == VK_INDEX_TYPE_UINT16 ? 1 : 2;
+            BuildDispatch(d, cb, Pass::ClearFit, params, groups);
+            BuildDispatch(d, cb, Pass::Fit, params, groups);
+            Restore(d, cb);
         }
-        D_FN(d, CmdBindPipeline)(cb, VK_PIPELINE_BIND_POINT_COMPUTE, d.builder);
-        D_FN(d, CmdPushConstants)
-        (cb, d.build_layout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(b), &b);
-        D_FN(d, CmdDispatch)(cb, 1, 1, 1);
-        Restore(d, cb);
+    } catch (const std::exception &e) {
+        Error(command, e.what());
     }
 }
 
@@ -1116,6 +1214,7 @@ PFN_vkVoidFunction Intercept(const char *n) {
     ENTRY(DestroyAccelerationStructureKHR);
     ENTRY(GetAccelerationStructureDeviceAddressKHR);
     ENTRY(CmdBuildAccelerationStructuresKHR);
+    ENTRY(CmdCopyAccelerationStructureKHR);
     ENTRY(AllocateCommandBuffers);
     ENTRY(FreeCommandBuffers);
     ENTRY(BeginCommandBuffer);

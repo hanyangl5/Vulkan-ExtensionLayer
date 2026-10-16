@@ -1,0 +1,8 @@
+// Copyright 2026 The Khronos Group Inc.
+// SPDX-License-Identifier: Apache-2.0
+#pragma once
+namespace vel::rt {
+inline constexpr const char *kBVHBuilder = R"vel_bvh(
+@BVH_SHADER_SOURCE@
+)vel_bvh";
+}

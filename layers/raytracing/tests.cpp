@@ -9,6 +9,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <limits>
 #include <stdexcept>
 #include <vector>
 
@@ -219,6 +220,8 @@ struct Harness {
     }
 };
 
+#include "bvh_tests.h"
+
 static void CheckContinuationRuntime(Harness &t) {
     auto code = vel::rt::CompileGLSL(
         std::string("#version 460\n") + vel::rt::kMemory + vel::rt::kContinuationRuntime + vel::rt::kRuntimeTestShader,
@@ -266,17 +269,30 @@ int main(int argc, char **argv) {
     try {
         std::string variant = argc > 1 ? argv[1] : "u16";
         bool empty = variant == "empty";
+        bool metadata = variant == "metadata";
         std::vector<vel::rt::Stage> stages = {
             {VK_SHADER_STAGE_RAYGEN_BIT_KHR, vel::rt::CompileGLSL(kRaygen, VK_SHADER_STAGE_RAYGEN_BIT_KHR)},
             {VK_SHADER_STAGE_MISS_BIT_KHR, vel::rt::CompileGLSL(kMiss, VK_SHADER_STAGE_MISS_BIT_KHR)},
             {VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR, vel::rt::CompileGLSL(kHit, VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR)}};
-        std::vector<VkRayTracingShaderGroupCreateInfoKHR> groups(3);
-        for (uint32_t i = 0; i < 3; i++) {
+        if (metadata) {
+            stages.resize(2);
+            for (uint32_t g = 0; g < 3; ++g) {
+                std::string hit =
+                    "#version 460\n#extension GL_EXT_ray_tracing : require\n"
+                    "layout(location=0) rayPayloadInEXT vec4 payload;\n"
+                    "void main() { payload=vec4(float(gl_GeometryIndexEXT),float(gl_PrimitiveID)+" +
+                    std::to_string((g + 1) * 100) + ".0,float(gl_InstanceID),1.0); }";
+                stages.push_back(
+                    {VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR, vel::rt::CompileGLSL(hit, VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR)});
+            }
+        }
+        std::vector<VkRayTracingShaderGroupCreateInfoKHR> groups(stages.size());
+        for (uint32_t i = 0; i < groups.size(); i++) {
             groups[i] = {VK_STRUCTURE_TYPE_RAY_TRACING_SHADER_GROUP_CREATE_INFO_KHR};
             groups[i].type =
-                i == 2 ? VK_RAY_TRACING_SHADER_GROUP_TYPE_TRIANGLES_HIT_GROUP_KHR : VK_RAY_TRACING_SHADER_GROUP_TYPE_GENERAL_KHR;
+                i >= 2 ? VK_RAY_TRACING_SHADER_GROUP_TYPE_TRIANGLES_HIT_GROUP_KHR : VK_RAY_TRACING_SHADER_GROUP_TYPE_GENERAL_KHR;
             groups[i].generalShader = i < 2 ? i : VK_SHADER_UNUSED_KHR;
-            groups[i].closestHitShader = i == 2 ? 2 : VK_SHADER_UNUSED_KHR;
+            groups[i].closestHitShader = i >= 2 ? i : VK_SHADER_UNUSED_KHR;
             groups[i].anyHitShader = groups[i].intersectionShader = VK_SHADER_UNUSED_KHR;
         }
         auto linked = vel::rt::Link(stages, groups, 1);
@@ -311,6 +327,14 @@ int main(int argc, char **argv) {
         std::puts("Compiler and rejection checks passed");
         Harness t;
         t.Init();
+        if (variant == "tlas") {
+            CheckTLASBuilder(t);
+            return 0;
+        }
+        if (variant == "builder") {
+            CheckBVHBuilder(t);
+            return 0;
+        }
         if (variant == "runtime") {
             CheckContinuationRuntime(t);
             return 0;
@@ -363,8 +387,15 @@ int main(int argc, char **argv) {
         build.geometryCount = 1;
         build.pGeometries = &geometry;
         uint32_t prims = empty ? 0 : 3;
+        std::array<VkAccelerationStructureGeometryKHR, 3> splitGeometry{geometry, geometry, geometry};
+        uint32_t geometryCounts[] = {1, 1, 1};
+        if (metadata) {
+            build.geometryCount = 3;
+            build.pGeometries = splitGeometry.data();
+        }
         VkAccelerationStructureBuildSizesInfoKHR sizes{VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_SIZES_INFO_KHR};
-        GetAccelerationStructureBuildSizesKHR(t.device, VK_ACCELERATION_STRUCTURE_BUILD_TYPE_DEVICE_KHR, &build, &prims, &sizes);
+        GetAccelerationStructureBuildSizesKHR(t.device, VK_ACCELERATION_STRUCTURE_BUILD_TYPE_DEVICE_KHR, &build,
+                                              metadata ? geometryCounts : &prims, &sizes);
         auto blasBuffer = t.Make(sizes.accelerationStructureSize, VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR);
         auto scratch = t.Make(sizes.buildScratchSize, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
         VkAccelerationStructureCreateInfoKHR ac{VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_CREATE_INFO_KHR};
@@ -377,7 +408,9 @@ int main(int argc, char **argv) {
         build.scratchData.deviceAddress = scratch.address;
         VkAccelerationStructureBuildRangeInfoKHR range{prims, 0, 0, 0};
         if (variant == "u16" || empty) range.primitiveOffset = 2;
-        auto rangePtr = &range;
+        std::array<VkAccelerationStructureBuildRangeInfoKHR, 3> splitRanges{};
+        for (uint32_t g = 0; g < 3; ++g) splitRanges[g] = {1, 2 + g * 6, 0, 0};
+        const VkAccelerationStructureBuildRangeInfoKHR *rangePtr = metadata ? splitRanges.data() : &range;
         t.Begin();
         CmdBuildAccelerationStructuresKHR(t.cb, 1, &build, &rangePtr);
         t.Barrier(VK_PIPELINE_STAGE_ACCELERATION_STRUCTURE_BUILD_BIT_KHR, VK_ACCESS_ACCELERATION_STRUCTURE_WRITE_BIT_KHR,
@@ -404,6 +437,7 @@ int main(int argc, char **argv) {
         ig.geometry.instances.data.deviceAddress = instances.address;
         auto tb = build;
         tb.type = VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR;
+        tb.geometryCount = 1;
         tb.pGeometries = &ig;
         prims = 2;
         range.primitiveCount = 2;
@@ -416,6 +450,9 @@ int main(int argc, char **argv) {
         VkAccelerationStructureKHR tlas;
         Check(CreateAccelerationStructureKHR(t.device, &ac, nullptr, &tlas));
         tb.dstAccelerationStructure = tlas;
+        auto tlasScratch = t.Make(sizes.buildScratchSize, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
+        tb.scratchData.deviceAddress = tlasScratch.address;
+        rangePtr = &range;
         CmdBuildAccelerationStructuresKHR(t.cb, 1, &tb, &rangePtr);
         t.Barrier(VK_PIPELINE_STAGE_ACCELERATION_STRUCTURE_BUILD_BIT_KHR, VK_ACCESS_ACCELERATION_STRUCTURE_WRITE_BIT_KHR,
                   VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR, VK_ACCESS_ACCELERATION_STRUCTURE_READ_BIT_KHR);
@@ -437,9 +474,9 @@ int main(int argc, char **argv) {
         pl.pPushConstantRanges = &push;
         VkPipelineLayout layout;
         Check(vkCreatePipelineLayout(t.device, &pl, nullptr, &layout));
-        std::array<VkShaderModule, 3> modules;
-        std::array<VkPipelineShaderStageCreateInfo, 3> ss{};
-        for (uint32_t i = 0; i < 3; i++) {
+        std::vector<VkShaderModule> modules(stages.size());
+        std::vector<VkPipelineShaderStageCreateInfo> ss(stages.size());
+        for (uint32_t i = 0; i < stages.size(); i++) {
             modules[i] = t.Module(stages[i].spirv);
             ss[i] = {VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO};
             ss[i].stage = stages[i].stage;
@@ -447,9 +484,9 @@ int main(int argc, char **argv) {
             ss[i].pName = "main";
         }
         VkRayTracingPipelineCreateInfoKHR pci{VK_STRUCTURE_TYPE_RAY_TRACING_PIPELINE_CREATE_INFO_KHR};
-        pci.stageCount = 3;
+        pci.stageCount = uint32_t(stages.size());
         pci.pStages = ss.data();
-        pci.groupCount = 3;
+        pci.groupCount = uint32_t(groups.size());
         pci.pGroups = groups.data();
         pci.maxPipelineRayRecursionDepth = 1;
         pci.layout = layout;
@@ -473,16 +510,19 @@ int main(int argc, char **argv) {
         Require(GetRayTracingShaderGroupStackSizeKHR(t.device, pipeline, 2, VK_SHADER_GROUP_SHADER_CLOSEST_HIT_KHR) > 0,
                 "Stack size missing");
         for (auto m : modules) vkDestroyShaderModule(t.device, m, nullptr);
-        std::array<uint8_t, 96> handles;
-        Check(GetRayTracingShaderGroupHandlesKHR(t.device, pipeline, 0, 3, handles.size(), handles.data()));
-        auto sbt = t.Make(256, VK_BUFFER_USAGE_SHADER_BINDING_TABLE_BIT_KHR);
+        std::vector<uint8_t> handles(groups.size() * 32);
+        Check(GetRayTracingShaderGroupHandlesKHR(t.device, pipeline, 0, uint32_t(groups.size()), handles.size(), handles.data()));
+        auto sbt = t.Make(448, VK_BUFFER_USAGE_SHADER_BINDING_TABLE_BIT_KHR);
         // Guarantee the reported 64-byte shader-group base alignment even if the
         // buffer's BDA is less aligned.
         uint64_t sbtOffset = (64 - sbt.address % 64) % 64;
         for (uint32_t i = 0; i < 3; i++)
             std::memcpy(static_cast<uint8_t *>(sbt.mapped) + sbtOffset + i * 64, handles.data() + i * 32, 32);
         VkStridedDeviceAddressRegionKHR rg{sbt.address + sbtOffset, 32, 32}, ms{sbt.address + sbtOffset + 64, 32, 32},
-            hs{sbt.address + sbtOffset + 128, 32, 32}, cs{};
+            hs{sbt.address + sbtOffset + 128, 64, metadata ? 192u : 64u}, cs{};
+        if (metadata)
+            for (uint32_t g = 1; g < 3; ++g)
+                std::memcpy(static_cast<uint8_t *>(sbt.mapped) + sbtOffset + 128 + g * 64, handles.data() + (g + 2) * 32, 32);
         VkDescriptorPoolSize ps[] = {{VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR, 1}, {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1}};
         VkDescriptorPoolCreateInfo dp{VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO};
         dp.maxSets = 1;
@@ -563,16 +603,21 @@ void main() { outData.pixels[116]=vec4(float(params.marker),0,0,0); }
             for (uint32_t y = 0; y < h; y++)
                 for (uint32_t x = 0; x < w; x++) {
                     float px = (float(x) + 0.5f) / w * 7 - 2, py = (float(y) + 0.5f) / h * 4 - 2;
-                    bool inside = false;
+                    bool inside = false, metadataMatches = false;
+                    auto p = pixels + (y * w + x) * 4;
                     for (uint32_t ii = 0; ii < 2; ii++)
                         if (mask & (1u << ii))
                             for (float cx : {0.0f, 2.0f}) {
                                 float lx = (px - float(ii) * 2) / (ii == 1 ? 1.5f : 1.0f), ly = py / (ii == 1 ? 0.75f : 1.0f);
                                 float u = (lx - cx + 1 - (ly + 1) * 0.5f) * 0.5f, v = (ly + 1) * 0.5f;
-                                if (u >= 0 && v >= 0 && u + v <= 1) inside = true;
+                                if (u >= 0 && v >= 0 && u + v <= 1) {
+                                    inside = true;
+                                    uint32_t geo = cx == 0.0f ? 1u : 0u;
+                                    if (p[0] == float(geo) && p[1] == float((geo + 1) * 100) && p[2] == float(ii))
+                                        metadataMatches = true;
+                                }
                             }
                     if (empty) inside = false;
-                    auto p = pixels + (y * w + x) * 4;
                     Require(std::isfinite(p[0]) && std::isfinite(p[1]) && std::isfinite(p[2]), "Non-finite payload");
                     if (std::abs(p[3] - (inside ? 1.f : 0.f)) > 0.001f) {
                         std::fprintf(stderr,
@@ -585,7 +630,10 @@ void main() { outData.pixels[116]=vec4(float(params.marker),0,0,0); }
                     }
                     if (inside) {
                         hits++;
-                        Require(std::abs(p[0] + p[1] + p[2] - 1) < 0.001f, "Invalid barycentrics");
+                        if (metadata)
+                            Require(metadataMatches, "Shader-visible IDs or geometry SBT stride changed after sorting");
+                        else
+                            Require(std::abs(p[0] + p[1] + p[2] - 1) < 0.001f, "Invalid barycentrics");
                     }
                 }
             Require(pixels[(w * h - 1) * 4] == 73, "Compute pipeline or push constant state was not restored");

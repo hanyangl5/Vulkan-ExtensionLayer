@@ -63,6 +63,44 @@ and verified, not silently used to discard upstream features.
   dispatch bounds. This is a component test with hand-written states, **not**
   evidence that arbitrary recursive RT shaders are lowered or executable.
 
+## Integrated GPU builder and AS operations
+
+`bvh.glsl` now replaces the executable serial builder with twelve compute passes:
+initialization, geometry loading, scene reduction, Morton coding, bitonic pre-sort,
+outer and inner merge, record reorder, LBVH hierarchy, counter reset, AABB fitting
+and AS copy. The bitonic network retains the source's 1024-thread/2048-item shared
+kernels and stable key/index tie breaking; Morton bits are interleaved Y/X/Z.
+The hierarchy uses the source's Karras range/split construction, including the
+sorted-index extension for identical Morton codes. Child bounds are published by
+device-scope acquire/release atomics before the final child fits each parent.
+
+The layer records these passes through `vkCmdBuildAccelerationStructuresKHR`,
+with compute barriers between dependent passes. It supports multiple triangle or
+AABB geometries, contiguous/pointer instance arrays, zero-count geometries,
+original shader-visible IDs, per-geometry SBT selection, in-place/out-of-place
+UPDATE, and CLONE/same-size COMPACT. UPDATE uses persistent inverse-sort and
+parent caches; it does not sort or rebuild topology. Procedural **construction**
+does not imply procedural **traversal/shader** execution.
+
+The Vulkan BDA software-AS ABI is now version 2. Its 16-word header stores type,
+primitive count, leaf base, record offset, geometry count/count-table offset,
+inverse-map offset, parent-cache offset, total bytes, flags and version. Nodes
+use eight words (min.xyz/left, max.xyz/right); leaf left fields carry the high-bit
+leaf tag and sorted record index. Uniform 32-word records store triangles or
+AABBs with original primitive/geometry IDs and flags, or the original instance
+plus its inverse transform and original instance index. Persistent arrays follow
+the records. Header offsets use words; total size uses bytes. This layout adapts
+D3D12 wrapped pointers/metadata to Vulkan BDA and is not D3D12 binary compatibility.
+Current scratch regions are separate instead of reproducing upstream aliasing.
+
+Builder tests independently compare CPU stable sorting, bounds, graph structure,
+metadata and refit/copy invariants across more than ten thousand primitives.
+TLAS tests cover 2051 pointer-array instances and AABB updates, and a rendered
+multi-material test observes geometry/primitive/instance IDs and different
+closest-hit shaders selected by SBT stride. These tests pass with native Vulkan
+validation below the layer on Lavapipe. They are not the original D3D12 tests or
+proof of full extension conformance.
+
 ## Work still required for completion
 
 SSA live IDs are not a frame layout. Function-local storage and alias lifetimes,
@@ -72,9 +110,10 @@ splitting, state-function code generation, typed linking, stack sizing and
 scheduler integration. The generated runtime is not connected to the prototype's
 RT execution path.
 
-Any-hit/procedural traversal, all original GPU build passes, refit, copy/query
-paths, shader-record lowering and full API/state compatibility remain unported.
-The existing serial builder and direct-call linker must be replaced. Retaining
+Any-hit/procedural traversal, treelet optimization, scratch aliasing, postbuild
+size queries, shader-record lowering and full API/state compatibility remain
+unported. The direct-call shader linker must still be replaced; the integrated
+LBVH builder is not the complete treelet-optimized upstream build chain. Retaining
 prototype integration tests provides regression coverage but does not reduce the
 required scope. No full-port or arbitrary-game compatibility claim is justified.
 

@@ -14,7 +14,7 @@ jobs:
       - name: Install build and software Vulkan dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y ninja-build libvulkan-dev mesa-vulkan-drivers glslang-dev glslang-tools spirv-tools libspirv-cross-c-shared-dev
+          sudo apt-get install -y ninja-build libvulkan-dev mesa-vulkan-drivers vulkan-validationlayers glslang-dev glslang-tools spirv-tools libspirv-cross-c-shared-dev
       - name: Configure
         run: cmake -S layers/raytracing -B build-rt -G Ninja -DCMAKE_BUILD_TYPE=Debug
       - name: Build
@@ -24,3 +24,9 @@ jobs:
           export VK_ICD_FILENAMES="$(find /usr/share/vulkan/icd.d -name 'lvp_icd*.json' -print -quit)"
           test -n "$VK_ICD_FILENAMES"
           ctest --test-dir build-rt --output-on-failure
+      - name: Validate lowered builder, refit and material dispatch
+        run: |
+          export VK_ICD_FILENAMES="$(find /usr/share/vulkan/icd.d -name 'lvp_icd*.json' -print -quit)"
+          export VK_LAYER_PATH="$PWD/build-rt:/usr/share/vulkan/explicit_layer.d"
+          export VEL_RT_TEST_VALIDATION=1
+          for variant in builder metadata tlas; do ./build-rt/vel_rt_tests "$variant"; done

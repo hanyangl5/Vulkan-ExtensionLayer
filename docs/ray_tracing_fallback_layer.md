@@ -38,7 +38,7 @@ ctest --test-dir build-rt --output-on-failure
 
 The normal repository build can also opt in using `-DBUILD_RAY_TRACING_FALLBACK=ON`, with those additional compiler dependencies installed. Default builds leave the experimental target disabled.
 
-For an application, set `VK_LAYER_PATH` to the build directory containing the JSON manifest and shared library, and explicitly enable `VK_LAYER_HANYANG_ray_tracing_fallback` in instance creation. Request Vulkan 1.2 or newer. ShaderInt64, shaderInt16, storageBuffer16BitAccess, buffer device address and coherent host-visible memory must be supported; the layer enables the required device features internally. The 16-bit storage feature provides correctly aligned UINT16 index loads without reading past a buffer's final index. A spare descriptor-set slot and sufficient compute limits are also needed for the linked program. Only 64-bit builds are supported. The integration test additionally requests Vulkan 1.3 to exercise core synchronization2.
+For an application, set `VK_LAYER_PATH` to the build directory containing the JSON manifest and shared library, and explicitly enable `VK_LAYER_HANYANG_ray_tracing_fallback` in instance creation. Request Vulkan 1.2 or newer. ShaderInt64, shaderInt16, storageBuffer16BitAccess, buffer device address and coherent host-visible memory must be supported; the layer enables the required device features internally. The 16-bit storage feature provides correctly aligned UINT16 index loads without reading past a buffer's final index. The original bitonic kernels require 1024 invocations per workgroup, X workgroup size of at least 1024, and 16 KiB shared memory. These limits are checked before advertising fallback support. A spare descriptor-set slot and sufficient remaining compute limits are also needed for the linked program. Only 64-bit builds are supported. The integration test additionally requests Vulkan 1.3 to exercise core synchronization2.
 
 To choose Mesa's CPU Vulkan implementation explicitly:
 
@@ -51,21 +51,24 @@ This uses a software Vulkan device to verify the same compute path that would ru
 
 ## Supported executable subset
 
-- Device-side BUILD of one geometry per BLAS or TLAS, with up to 1,048,576 primitives or instances.
-- Opaque `R32G32B32_SFLOAT` triangles, float-aligned vertex streams, UINT16/UINT32 indices or nonindexed vertices, and optional triangle build transforms.
-- Contiguous instance arrays, instance masks, instance custom IDs, per-instance SBT offsets, and invertible transforms. Instances may share a BLAS.
-- Raygen, miss and triangle closest-hit stages, including shader selection from SBT group handles.
+- Device-side BUILD of multiple geometries per BLAS (including zero-count geometries), and the required single instance geometry per TLAS; up to 1,048,576 primitives/instances and geometries.
+- `R32G32B32_SFLOAT` triangles, float-aligned vertex streams, UINT16/UINT32 indices or nonindexed vertices, byte primitive offsets, firstVertex and optional triangle build transforms. AABB geometry can be built/refitted; procedural shader execution remains unimplemented.
+- Contiguous instance arrays or arrays of device-address pointers, inactive instances (null BLAS references), masks, custom IDs, SBT offsets, and invertible transforms. Instances may share a BLAS. Sorting preserves original primitive, geometry and instance IDs.
+- Raygen, miss and triangle closest-hit stages, including per-geometry SBT stride and shader selection from group handles.
+- In-place/out-of-place UPDATE using saved inverse-sort and parent caches; CLONE and the upstream fallback's same-size COMPACT copy. True compression and compact-size queries remain unimplemented.
 - A single `vec4` payload at location zero and `vec2` triangle hit attributes. Only raygen may issue TraceRay. Multiple sequential TraceRay calls in raygen do not require recursive lowering.
 - Common launch, ray, primitive and instance builtins listed in `compiler.cpp`. Other builtins are rejected during compilation.
 - Original application descriptor sets and push constants where the emitted linked GLSL remains compatible. Shader record user data is not supported.
 - Direct trace dispatch, deferred pipeline creation completed synchronously, legacy and synchronization2 pipeline-barrier and queue-submit semaphore-stage remapping.
 - Compute pipeline, descriptor binding and push constant restoration around internal dispatches. Private dispatch resources remain alive until command-buffer reset, rerecording, pool reset/free or device destruction, after the application has ensured GPU completion.
 
-The builder constructs a balanced tree in input order, with power-of-two padding. It is a correctness/reference builder: it performs no Morton sorting, SAH optimization, compaction or parallel LBVH construction. It is deliberately not presented as a performance port of Microsoft's GPU builder. Scratch is reported conservatively; the current single-invocation builder does not consume it.
+The serial padded/input-order tree is replaced by a multi-pass GPU builder: parallel geometry loading, per-group/scene AABB reduction, the source's Y/X/Z 30-bit Morton codes, stable key/index bitonic sorting (2048 shared items per 1024-thread group with outer/inner merge passes), primitive/metadata reorder, Karras LBVH hierarchy and bottom-up AABB fitting. Device-scope acquire/release counter operations publish child bounds across workgroups. Scratch now stores the working arrays and must match the queried size and 256-byte address alignment. UPDATE reloads into the original sorted slots and refits without rebuilding the hierarchy.
+
+This is **not yet the complete original builder**: treelet optimization and the original scratch-aliasing strategy remain unported; fast-trace currently uses the same LBVH topology as fast-build. The Vulkan BDA layout is versioned separately (ABI v2); it is not binary-compatible with D3D12 or the previous prototype. See the port contract for its layout.
 
 ## Unsupported cases and failure behavior
 
-Any-hit, intersection/procedural geometry, callable shaders, recursive tracing from hit/miss, arbitrary payload layouts, shader-record data, pipeline libraries, specialization constants, capture/replay, indirect builds/traces, UPDATE, compaction, copy/serialization and host AS construction are not implemented. Secondary-command-buffer state inheritance, device groups, update templates, descriptor buffers, push descriptors, event-based RT synchronization, timestamp-stage translation and general application integration require further work. Use the implemented pipeline barriers and queue-submit paths for RT dependencies. Querying an unimplemented RT command returns null, including on a device that also supports native RT, to prevent mixing incompatible AS formats.
+Any-hit, procedural traversal/intersection shaders, callable shaders, recursive tracing from hit/miss, arbitrary payload layouts, shader-record data, pipeline libraries, specialization constants, capture/replay, indirect builds/traces, true compaction, size-query commands, serialization and host AS construction are not implemented. Secondary-command-buffer state inheritance, device groups, update templates, descriptor buffers, push descriptors, event-based RT synchronization, timestamp-stage translation and general application integration require further work. Use the implemented pipeline barriers and queue-submit paths for RT dependencies. Querying an unimplemented RT command returns null, including on a device that also supports native RT, to prevent mixing incompatible AS formats.
 
 The device-create feature-chain copier currently recognizes loader nodes, Features2, Vulkan11/12/13Features, BufferDeviceAddressFeatures and Synchronization2Features, in addition to the emulated AS/RT feature structs. Other nodes and unsupported optional RT features return `VK_ERROR_FEATURE_NOT_PRESENT`. This intentionally narrow list must be extended before using the layer in a general engine.
 
@@ -77,23 +80,26 @@ Use one common application push-constant block across linked stages. Descriptor 
 
 - `layers/raytracing/layer.cpp`: loader negotiation, intercepts, object tracking, descriptor conversion, feature and barrier translation, command recording and resource lifetime.
 - `layers/raytracing/compiler.cpp`: real application SPIR-V ingestion, stage namespacing, supported builtin/TraceRay lowering, group dispatch generation and compute compilation.
-- `layers/raytracing/runtime.h`: BDA memory access, triangle/instance build shader, BVH traversal, triangle intersections and hit/miss routing.
+- `layers/raytracing/runtime.h`: BDA memory access, BVH traversal, triangle intersections and hit/miss routing.
+- `layers/raytracing/bvh.cpp`, `bvh.h`, `bvh.glsl`: AS/scratch layout, GPU load/reduce/Morton/bitonic/reorder/LBVH/fit/copy kernels.
 - `layers/raytracing/tests.cpp`: offscreen KHR API application and independent CPU hit reference.
 
 ## Validation
 
-Four integration variants cover UINT16, UINT32, nonindexed and empty BLAS inputs. The UINT16 case starts at a two-byte primitive offset. Nonempty variants use three triangles, a padded tree, shared BLAS instances, nonuniform instance scaling, four cull-mask settings, 13 by 9 dispatch dimensions, SBT handles, shader module destruction after linking, command pool resets and application compute-state restoration. Legacy and synchronization2 semaphore waits and barriers are exercised. Shader tests also link debug-stripped SPIR-V and reject unsupported stage/recursion cases. Deferred-operation entry points are exercised synchronously.
+The original four integration variants cover UINT16, UINT32, nonindexed and empty BLAS inputs. The UINT16 case starts at a two-byte primitive offset. Nonempty variants use three triangles, a padded tree, shared BLAS instances, nonuniform instance scaling, four cull-mask settings, 13 by 9 dispatch dimensions, SBT handles, shader module destruction after linking, command pool resets and application compute-state restoration. Legacy and synchronization2 semaphore waits and barriers are exercised. Shader tests also link debug-stripped SPIR-V and reject unsupported stage/recursion cases. Deferred-operation entry points are exercised synchronously.
+
+Additional builder tests cover 0/1/3/4099/10243 primitives, all-equal Morton keys, empty leading/intermediate/trailing geometries, indexed/nonindexed firstVertex, primitive and transform offsets, CPU stable-sort ordering, every node's bounds, parent and inverse caches, unchanged UPDATE connectivity, source preservation for out-of-place UPDATE and exact clone bytes. A TLAS test checks 2051 pointer-array instances against CPU-transformed AABB corners, including negative/nonuniform scale, inactive instances, AABB BLAS/TLAS updates and an all-inactive rebuild. A rendered metadata variant checks original IDs and different per-geometry closest-hit shader selection after sorting.
 
 These tests compare every pixel's hit/miss result with an independent CPU triangle test, check valid barycentric payloads, and verify that a following native compute dispatch runs with the application's restored pipeline and push constants. They are not Vulkan CTS coverage or a performance benchmark.
 
 For a validation layer below the fallback, install `vulkan-validationlayers`, include its manifest directory in `VK_LAYER_PATH`, and run `vel_rt_tests` with `VEL_RT_TEST_VALIDATION=1`. That checks the lowered native calls; it does not establish complete conformance of the emulated extension surface.
 
-## Previous prototype milestones (superseded by the complete port contract)
+## Remaining complete-port work
 
-1. Replace GLSL-text interface rewriting with typed SPIR-V or NIR lowering and linking; introduce explicit continuation frames for arbitrary payloads, nested TraceRay and callable execution.
-2. Implement any-hit traversal resumption, IgnoreIntersection/TerminateRay and procedural intersection shaders, with per-stage and nested-trace tests.
-3. Complete the KHR AS API surface: update, copy, compact-size queries, serialization, indirect and host paths, feature negotiation and API-specific synchronization coverage.
-4. Replace the serial reference builder with Morton sorting and parallel LBVH construction or a reusable software builder, retaining the same software-AS ABI initially.
-5. Expand engine compatibility, state preservation and descriptor models; qualify physical GPU backends, then add systematic CTS coverage before claiming extension conformance.
+1. Generate typed continuation state functions and stack frames for arbitrary payloads and nested TraceRay; integrate the tested runtime instead of direct-call GLSL rewriting.
+2. Implement resumable any-hit/procedural traversal, IgnoreIntersection/TerminateRay and intersection shaders.
+3. Port treelet optimization and original scratch reuse/packing; qualify the fast-trace/fast-build behavior against upstream.
+4. Complete size queries, serialization, remaining API/state/descriptor translation and Vulkan-specific obligations.
+5. Port original behavioral tests, qualify physical GPUs and Windows, and establish conformance coverage.
 
 Point of contact: [@hanyangl5](https://github.com/hanyangl5).
