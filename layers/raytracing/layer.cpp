@@ -955,6 +955,22 @@ VEL_EXPORT void VKAPI_CALL vkCmdBuildAccelerationStructuresKHR(VkCommandBuffer c
                 BuildDispatch(d, cb, Pass::Reorder, params, groups);
                 BuildDispatch(d, cb, Pass::Hierarchy, params, groups);
             }
+            // Treelets operate on the original Karras child orientation. The
+            // final fit alone puts the smaller subtree first for traversal.
+            if (!params.update && !params.top && params.count >= 7 &&
+                !(ci.flags & VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_BUILD_BIT_KHR)) {
+                params.j = 1;
+                BuildDispatch(d, cb, Pass::ClearFit, params, groups);
+                BuildDispatch(d, cb, Pass::Fit, params, groups);
+                uint32_t passes = (ci.flags & VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR) ? 3 : 1;
+                for (uint32_t pass = 0, threshold = 7; pass < passes && threshold <= params.count; ++pass, threshold *= 2) {
+                    params.k = threshold;
+                    BuildDispatch(d, cb, Pass::ClearTreelets, params, groups);
+                    BuildDispatch(d, cb, Pass::FindTreelets, params, groups);
+                    BuildDispatch(d, cb, Pass::ReorderTreelets, params, params.count / threshold);
+                }
+            }
+            params.j = 0;
             BuildDispatch(d, cb, Pass::ClearFit, params, groups);
             BuildDispatch(d, cb, Pass::Fit, params, groups);
             Restore(d, cb);

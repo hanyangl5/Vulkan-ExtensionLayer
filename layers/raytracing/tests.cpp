@@ -333,6 +333,7 @@ int main(int argc, char **argv) {
         }
         if (variant == "builder") {
             CheckBVHBuilder(t);
+            CheckTreeletAABBs(t);
             return 0;
         }
         if (variant == "runtime") {

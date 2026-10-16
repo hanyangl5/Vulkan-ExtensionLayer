@@ -65,14 +65,26 @@ and verified, not silently used to discard upstream features.
 
 ## Integrated GPU builder and AS operations
 
-`bvh.glsl` now replaces the executable serial builder with twelve compute passes:
+`bvh.glsl` now replaces the executable serial builder with fifteen compute kernels:
 initialization, geometry loading, scene reduction, Morton coding, bitonic pre-sort,
 outer and inner merge, record reorder, LBVH hierarchy, counter reset, AABB fitting
-and AS copy. The bitonic network retains the source's 1024-thread/2048-item shared
+and AS copy, plus treelet clearing, base discovery and reordering. The bitonic network retains the source's 1024-thread/2048-item shared
 kernels and stable key/index tie breaking; Morton bits are interleaved Y/X/Z.
 The hierarchy uses the source's Karras range/split construction, including the
 sorted-index extension for identical Morton codes. Child bounds are published by
 device-scope acquire/release atomics before the final child fits each parent.
+
+The BLAS treelet path follows the pinned `TreeletReorder`: expand the largest-area
+internal frontier to seven nodes, evaluate all 127 subsets with dynamic programming,
+reuse six internal nodes, rebuild parent links/bounds, and join sibling groups
+before advancing to their parent. Build flags select zero/one/three passes with
+thresholds 7/14/28. TLAS and UPDATE skip optimization. Initial fitting preserves
+Karras child orientation; only the final fitting pass prioritizes smaller children.
+The collapse-leaf cost bit is used when selecting partitions, but list-leaf emission
+is guarded out in the pinned source (`COMBINE_LEAF_NODES_2ND_PART_TBD`), so the port
+keeps binary leaves and untagged parent-cache entries. Zero-area/empty bounds have
+explicit handling, and shared cost initialization has a barrier before singleton
+replacement to avoid overlapping writes across lanes.
 
 The layer records these passes through `vkCmdBuildAccelerationStructuresKHR`,
 with compute barriers between dependent passes. It supports multiple triangle or
@@ -95,6 +107,10 @@ Current scratch regions are separate instead of reproducing upstream aliasing.
 
 Builder tests independently compare CPU stable sorting, bounds, graph structure,
 metadata and refit/copy invariants across more than ten thousand primitives.
+A second CPU reference recursively constructs the radix tree and runs postorder
+subset DP; every internal node's unordered children must match the GPU result.
+Cases cover thresholds 7/14/28, all build preferences, duplicate Morton keys,
+zero-area triangles and mixed/all-inactive procedural AABBs.
 TLAS tests cover 2051 pointer-array instances and AABB updates, and a rendered
 multi-material test observes geometry/primitive/instance IDs and different
 closest-hit shaders selected by SBT stride. These tests pass with native Vulkan
@@ -110,10 +126,10 @@ splitting, state-function code generation, typed linking, stack sizing and
 scheduler integration. The generated runtime is not connected to the prototype's
 RT execution path.
 
-Any-hit/procedural traversal, treelet optimization, scratch aliasing, postbuild
+Any-hit/procedural traversal, scratch aliasing, postbuild
 size queries, shader-record lowering and full API/state compatibility remain
 unported. The direct-call shader linker must still be replaced; the integrated
-LBVH builder is not the complete treelet-optimized upstream build chain. Retaining
+builder still needs packing/aliasing and upstream differential qualification. Retaining
 prototype integration tests provides regression coverage but does not reduce the
 required scope. No full-port or arbitrary-game compatibility claim is justified.
 

@@ -26,6 +26,9 @@ enum class BuildPass : uint32_t {
     ClearFit,
     Fit,
     Copy,
+    ClearTreelets,
+    FindTreelets,
+    ReorderTreelets,
     Count
 };
 struct BuildParameters {

@@ -64,7 +64,9 @@ This uses a software Vulkan device to verify the same compute path that would ru
 
 The serial padded/input-order tree is replaced by a multi-pass GPU builder: parallel geometry loading, per-group/scene AABB reduction, the source's Y/X/Z 30-bit Morton codes, stable key/index bitonic sorting (2048 shared items per 1024-thread group with outer/inner merge passes), primitive/metadata reorder, Karras LBVH hierarchy and bottom-up AABB fitting. Device-scope acquire/release counter operations publish child bounds across workgroups. Scratch now stores the working arrays and must match the queried size and 256-byte address alignment. UPDATE reloads into the original sorted slots and refits without rebuilding the hierarchy.
 
-This is **not yet the complete original builder**: treelet optimization and the original scratch-aliasing strategy remain unported; fast-trace currently uses the same LBVH topology as fast-build. The Vulkan BDA layout is versioned separately (ABI v2); it is not binary-compatible with D3D12 or the previous prototype. See the port contract for its layout.
+BLAS builds now run the source's seven-frontier-node treelet optimization after LBVH construction. Each 32-thread group evaluates the 127 nonempty subsets with cardinality-ordered dynamic programming, reuses six internal nodes, and resumes bottom-up through sibling completion counters. Default builds run one pass (threshold 7); fast-trace runs up to three (7/14/28); fast-build skips optimization. TLAS and UPDATE skip treelets. A final fit places the smaller subtree first. Empty/zero-area boxes use deterministic frontier selection and finite costs. The source's collapse-cost model is retained; its triangle-list-leaf emission is itself guarded out, so the Vulkan tree retains binary leaves.
+
+This is **not yet a fully qualified original-builder port**: scratch aliasing/packing and D3D12-versus-Vulkan behavioral qualification remain outstanding. The Vulkan BDA layout is versioned separately (ABI v2); it is not binary-compatible with D3D12 or the previous prototype. See the port contract for its layout.
 
 ## Unsupported cases and failure behavior
 
@@ -81,7 +83,7 @@ Use one common application push-constant block across linked stages. Descriptor 
 - `layers/raytracing/layer.cpp`: loader negotiation, intercepts, object tracking, descriptor conversion, feature and barrier translation, command recording and resource lifetime.
 - `layers/raytracing/compiler.cpp`: real application SPIR-V ingestion, stage namespacing, supported builtin/TraceRay lowering, group dispatch generation and compute compilation.
 - `layers/raytracing/runtime.h`: BDA memory access, BVH traversal, triangle intersections and hit/miss routing.
-- `layers/raytracing/bvh.cpp`, `bvh.h`, `bvh.glsl`: AS/scratch layout, GPU load/reduce/Morton/bitonic/reorder/LBVH/fit/copy kernels.
+- `layers/raytracing/bvh.cpp`, `bvh.h`, `bvh.glsl`: AS/scratch layout, GPU load/reduce/Morton/bitonic/reorder/LBVH/treelet/fit/copy kernels.
 - `layers/raytracing/tests.cpp`: offscreen KHR API application and independent CPU hit reference.
 
 ## Validation
@@ -98,7 +100,7 @@ For a validation layer below the fallback, install `vulkan-validationlayers`, in
 
 1. Generate typed continuation state functions and stack frames for arbitrary payloads and nested TraceRay; integrate the tested runtime instead of direct-call GLSL rewriting.
 2. Implement resumable any-hit/procedural traversal, IgnoreIntersection/TerminateRay and intersection shaders.
-3. Port treelet optimization and original scratch reuse/packing; qualify the fast-trace/fast-build behavior against upstream.
+3. Port original scratch reuse/packing and qualify treelet fast-trace/fast-build behavior against upstream.
 4. Complete size queries, serialization, remaining API/state/descriptor translation and Vulkan-specific obligations.
 5. Port original behavioral tests, qualify physical GPUs and Windows, and establish conformance coverage.
 

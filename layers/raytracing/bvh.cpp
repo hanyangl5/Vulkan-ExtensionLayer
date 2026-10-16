@@ -20,10 +20,10 @@ uint64_t AccelerationStructureSize(uint32_t count, bool, uint32_t geometry_count
 uint64_t BuildScratchSize(uint32_t count) {
     auto capacity = SortCapacity(count);
     // Scene AABB; per-workgroup reductions; unsorted records and bounds;
-    // bitonic keys/indices; bottom-up fitting counters. None of these regions
+    // bitonic keys/indices; bottom-up counters; treelet count/base list. These regions
     // alias while live. Vulkan scratch is a BDA, not a descriptor allocation.
     uint64_t words = 8 + uint64_t((count + 255) / 256) * 8 + uint64_t(count) * (kASRecordWords + 8) + uint64_t(capacity) * 2 +
-                     (count ? count - 1 : 0);
+                     (count ? count - 1 : 0) + 1 + count / 7;
     return (words * 4 + 255) & ~uint64_t(255);
 }
 }  // namespace vel::rt

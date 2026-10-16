@@ -24,6 +24,8 @@ layout(push_constant) uniform BuildParameters {
 } b;
 #if VEL_BUILD_PASS == 4 || VEL_BUILD_PASS == 5 || VEL_BUILD_PASS == 6
 layout(local_size_x=1024) in;
+#elif VEL_BUILD_PASS == 14
+layout(local_size_x=32) in;
 #else
 layout(local_size_x=256) in;
 #endif
@@ -39,6 +41,7 @@ uint boxesOffset() { return tempOffset()+b.count*32u; }
 uint keysOffset() { return boxesOffset()+b.count*8u; }
 uint indicesOffset() { return keysOffset()+b.capacity; }
 uint countersOffset() { return indicesOffset()+b.capacity; }
+uint treeletListOffset() { return countersOffset()+leafBase(); }
 uint naddr(uint n) { return 16u+n*8u; }
 vec3 infinity3() { return vec3(1.0/0.0); }
 void bounds(uint64_t address,uint offset,vec3 lo,vec3 hi) { wv(address,offset,lo); wv(address,offset+4u,hi); }
@@ -260,7 +263,7 @@ void main() {
         if(other==0u) return;
         uint p=naddr(parent),left=vu(b.dst,p+3u),right=vu(b.dst,p+7u);
         bool isLeft=left==node,otherSmaller=count>other;
-        if(isLeft?otherSmaller:!otherSmaller) { uint temp=left;left=right;right=temp;ws(b.dst,p+3u,left);ws(b.dst,p+7u,right); }
+        if(b.j==0u && (isLeft?otherSmaller:!otherSmaller)) { uint temp=left;left=right;right=temp;ws(b.dst,p+3u,left);ws(b.dst,p+7u,right); }
         bounds(b.dst,p,min(vv(b.dst,naddr(left)),vv(b.dst,naddr(right))),max(vv(b.dst,naddr(left)+4u),vv(b.dst,naddr(right)+4u)));
         node=parent;count+=other;
     }
@@ -270,4 +273,153 @@ void main() {
     uint limit=min(b.count,vu(b.src,8u)/4u);
     for(uint i=gl_GlobalInvocationID.x;i<limit;i+=gl_NumWorkGroups.x*gl_WorkGroupSize.x) ws(b.dst,i,vu(b.src,i));
 }
+#elif VEL_BUILD_PASS == 12
+void main() {
+    uint i=gl_GlobalInvocationID.x;
+    if(i<leafBase()) ws(b.scratch,countersOffset()+i,0u);
+    if(i==0u) ws(b.scratch,treeletListOffset(),0u);
+    if(i<b.count/7u) ws(b.scratch,treeletListOffset()+1u+i,nodeCount());
+}
+#elif VEL_BUILD_PASS == 13
+// Stop at the first subtree containing at least k primitives. These disjoint
+// bases resume bottom-up optimization using the partially accumulated counts.
+void main() {
+    uint i=gl_GlobalInvocationID.x;
+    if(i>=b.count) return;
+    uint node=nodeCount()-i-1u,num=1u;
+    while(true) {
+        if(num>=b.k) {
+            uint slot=atomicAdd(VELMemory(b.scratch).w[treeletListOffset()],1u);
+            ws(b.scratch,treeletListOffset()+1u+slot,node);
+            return;
+        }
+        if(node==0u) return;
+        uint parent=vu(b.dst,parentOffset()+node);
+        uint other=atomicAdd(VELMemory(b.scratch).w[countersOffset()+parent],num,
+                             gl_ScopeDevice,gl_StorageSemanticsBuffer,gl_SemanticsAcquireRelease);
+        if(other==0u) return;
+        node=parent;num+=other;
+    }
+}
+#elif VEL_BUILD_PASS == 14
+// Adapted from TreeletReorder.hlsl: seven frontier nodes, six reusable internal
+// nodes, all 127 nonempty subsets, and cardinality-ordered partition DP.
+shared uint treeletRoot,frontier[7],internalNodes[6];
+shared float optimalCost[128];
+shared uint optimalPartition[128];
+shared bool finished;
+float surfaceArea(vec3 lo,vec3 hi) {
+    // Empty/inactive boxes contribute zero; unlike the source, do not permit
+    // infinities/NaNs to poison the DP or the frontier-selection fallback.
+    if(any(greaterThan(lo,hi))) return 0.0;
+    vec3 d=hi-lo;
+    return 2.0*(d.x*d.y+d.x*d.z+d.y*d.z);
+}
+float area(uint node) { return surfaceArea(vv(b.dst,naddr(node)),vv(b.dst,naddr(node)+4u)); }
+void formTreelet(uint tid) {
+    if(tid==0u) {
+        internalNodes[0]=treeletRoot;
+        frontier[0]=vu(b.dst,naddr(treeletRoot)+3u);
+        frontier[1]=vu(b.dst,naddr(treeletRoot)+7u);
+        for(uint size=2u;size<7u;size++) {
+            float largest=-1.0;uint chosen=0u;
+            for(uint i=0u;i<size;i++) if(frontier[i]<leafBase()) {
+                float a=area(frontier[i]);
+                if(a>largest) { largest=a;chosen=i; }
+            }
+            uint node=frontier[chosen];internalNodes[size-1u]=node;
+            frontier[chosen]=vu(b.dst,naddr(node)+3u);
+            frontier[size]=vu(b.dst,naddr(node)+7u);
+        }
+    }
+    barrier();
+}
+void findPartitions(uint tid) {
+    for(uint mask=tid;mask<128u;mask+=32u) if(mask!=0u) {
+        vec3 lo=infinity3(),hi=-lo;
+        for(uint i=0u;i<7u;i++) if((mask&(1u<<i))!=0u) {
+            lo=min(lo,vv(b.dst,naddr(frontier[i])));hi=max(hi,vv(b.dst,naddr(frontier[i])+4u));
+        }
+        optimalCost[mask]=surfaceArea(lo,hi);
+    }
+    // Separate initialization from singleton replacement: all writes to the
+    // same entry must be ordered even when the driver uses 32-wide subgroups.
+    barrier();
+    float rootArea=area(treeletRoot);
+    if(tid<7u) optimalCost[1u<<tid]=rootArea>0.0 ? 1.2*area(frontier[tid])/rootArea : 0.0;
+    barrier();
+    for(uint size=2u;size<=7u;size++) {
+        for(uint mask=tid+1u;mask<128u;mask+=32u) if(bitCount(mask)==int(size)) {
+            float lowest=3.402823466e38;uint best=0u;
+            uint delta=(mask-1u)&mask,part=(-delta)&mask;
+            do {
+                float cost=optimalCost[part]+optimalCost[mask^part];
+                if(best==0u||cost<lowest) { lowest=cost;best=part; }
+                part=(part-delta)&mask;
+            } while(part!=0u);
+            float leafCost=optimalCost[mask]*float(size);
+            float internalCost=1.2*optimalCost[mask]+lowest;
+            optimalCost[mask]=min(leafCost,internalCost);
+            optimalPartition[mask]=best|(leafCost<internalCost?128u:0u);
+        }
+        barrier();
+    }
+}
+void reformTree(uint tid) {
+    if(tid!=0u) return;
+    uint masks[7],nodes[7],size=1u,allocated=1u;
+    masks[0]=127u;nodes[0]=internalNodes[0];
+    while(size>0u) {
+        --size;uint mask=masks[size],node=nodes[size];
+        uint leftMask=optimalPartition[mask]&127u,rightMask=mask^leftMask,left,right;
+        if(bitCount(leftMask)>1) { left=internalNodes[allocated++];masks[size]=leftMask;nodes[size++]=left; }
+        else left=frontier[findLSB(leftMask)];
+        if(bitCount(rightMask)>1) { right=internalNodes[allocated++];masks[size]=rightMask;nodes[size++]=right; }
+        else right=frontier[findLSB(rightMask)];
+        ws(b.dst,naddr(node)+3u,left);ws(b.dst,naddr(node)+7u,right);
+        ws(b.dst,parentOffset()+left,node);ws(b.dst,parentOffset()+right,node);
+        // Source collapse flags affect its cost model, but actual list-leaf
+        // emission is guarded out (COMBINE_LEAF_NODES_2ND_PART_TBD). Keep the
+        // Vulkan parent cache untagged and the same binary leaf topology.
+    }
+    for(int i=5;i>=0;i--) {
+        uint node=internalNodes[i],left=vu(b.dst,naddr(node)+3u),right=vu(b.dst,naddr(node)+7u);
+        bounds(b.dst,naddr(node),min(vv(b.dst,naddr(left)),vv(b.dst,naddr(right))),
+               max(vv(b.dst,naddr(left)+4u),vv(b.dst,naddr(right)+4u)));
+    }
+}
+void main() {
+    uint tid=gl_LocalInvocationID.x;
+    if(tid==0u) { treeletRoot=vu(b.scratch,treeletListOffset()+1u+gl_WorkGroupID.x);finished=false; }
+    barrier();
+    if(treeletRoot>=nodeCount()) return;
+    while(true) {
+        formTreelet(tid);findPartitions(tid);reformTree(tid);
+        // Publish all rewritten links/bounds before another workgroup ascends
+        // into this subtree. The atomic acquire/release joins sibling groups.
+        memoryBarrier(gl_ScopeDevice,gl_StorageSemanticsBuffer,gl_SemanticsRelease);
+        barrier();
+        if(tid==0u) {
+            if(treeletRoot==0u) finished=true;
+            else {
+                uint parent=vu(b.dst,parentOffset()+treeletRoot);
+                uint num=vu(b.scratch,countersOffset()+treeletRoot);
+                uint other=atomicAdd(VELMemory(b.scratch).w[countersOffset()+parent],num,
+                                     gl_ScopeDevice,gl_StorageSemanticsBuffer,gl_SemanticsAcquireRelease);
+                if(other==0u) finished=true;
+                else {
+                    uint left=vu(b.dst,naddr(parent)+3u),right=vu(b.dst,naddr(parent)+7u);
+                    bounds(b.dst,naddr(parent),min(vv(b.dst,naddr(left)),vv(b.dst,naddr(right))),
+                           max(vv(b.dst,naddr(left)+4u),vv(b.dst,naddr(right)+4u)));
+                    treeletRoot=parent;
+                }
+            }
+        }
+        barrier();
+        if(finished) return;
+        memoryBarrier(gl_ScopeDevice,gl_StorageSemanticsBuffer,gl_SemanticsAcquireRelease);
+        barrier();
+    }
+}
+
 #endif
