@@ -3,9 +3,9 @@
 name: Ray tracing fallback
 on:
   push:
-    paths: ['layers/raytracing/**', 'docs/ray_tracing_fallback_layer.md', '.github/workflows/raytracing-fallback.yml']
+    paths: ['layers/raytracing/**', 'docs/ray_tracing_fallback*.md', '.github/workflows/raytracing-fallback.yml']
   pull_request:
-    paths: ['layers/raytracing/**', 'docs/ray_tracing_fallback_layer.md', '.github/workflows/raytracing-fallback.yml']
+    paths: ['layers/raytracing/**', 'docs/ray_tracing_fallback*.md', '.github/workflows/raytracing-fallback.yml']
 jobs:
   software-vulkan:
     runs-on: ubuntu-24.04

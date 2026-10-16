@@ -1,0 +1,9 @@
+// Copyright 2026 The Khronos Group Inc.
+// SPDX-License-Identifier: Apache-2.0
+#pragma once
+namespace vel::rt {
+// The embedded shader retains its upstream license and attribution.
+inline constexpr const char *kContinuationRuntime = R"vel_runtime(
+@CONTINUATION_RUNTIME_SOURCE@
+)vel_runtime";
+}

@@ -1,6 +1,7 @@
 // Copyright 2026 The Khronos Group Inc.
 // SPDX-License-Identifier: Apache-2.0
 #include "compiler.h"
+#include "continuations.h"
 #include "runtime.h"
 #include <glslang/Public/ResourceLimits.h>
 #include <glslang/Public/ShaderLang.h>
@@ -15,10 +16,32 @@ namespace vel::rt {
 std::vector<uint32_t> CompileGLSL(const std::string &source, VkShaderStageFlagBits stage) {
     static std::once_flag init;
     std::call_once(init, [] { glslang::InitializeProcess(); });
-    EShLanguage lang = EShLangCompute;
-    if (stage == VK_SHADER_STAGE_RAYGEN_BIT_KHR) lang = EShLangRayGen;
-    if (stage == VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR) lang = EShLangClosestHit;
-    if (stage == VK_SHADER_STAGE_MISS_BIT_KHR) lang = EShLangMiss;
+    EShLanguage lang;
+    switch (stage) {
+        case VK_SHADER_STAGE_COMPUTE_BIT:
+            lang = EShLangCompute;
+            break;
+        case VK_SHADER_STAGE_RAYGEN_BIT_KHR:
+            lang = EShLangRayGen;
+            break;
+        case VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR:
+            lang = EShLangClosestHit;
+            break;
+        case VK_SHADER_STAGE_MISS_BIT_KHR:
+            lang = EShLangMiss;
+            break;
+        case VK_SHADER_STAGE_ANY_HIT_BIT_KHR:
+            lang = EShLangAnyHit;
+            break;
+        case VK_SHADER_STAGE_INTERSECTION_BIT_KHR:
+            lang = EShLangIntersect;
+            break;
+        case VK_SHADER_STAGE_CALLABLE_BIT_KHR:
+            lang = EShLangCallable;
+            break;
+        default:
+            throw std::runtime_error("Unsupported input shader stage");
+    }
     glslang::TShader shader(lang);
     const char *text = source.c_str();
     shader.setStrings(&text, 1);
@@ -65,6 +88,13 @@ Program Link(const std::vector<Stage> &stages, const std::vector<VkRayTracingSha
             default:
                 throw std::runtime_error("Unsupported RT stage; only raygen/miss/closest-hit are implemented");
         }
+        auto continuations = AnalyzeContinuations(stage.spirv, stage.entry, static_cast<uint32_t>(model));
+        if (stage.stage != VK_SHADER_STAGE_RAYGEN_BIT_KHR) {
+            for (const auto &function : continuations.functions) {
+                if (function.can_suspend)
+                    throw std::runtime_error("Hit/miss continuation execution is not yet connected to the state-machine backend");
+            }
+        }
         spirv_cross::CompilerGLSL c(stage.spirv);
         c.set_entry_point(stage.entry, model);
         // Prefix SPIR-V object/type/function names before GLSL emission. Local
@@ -84,10 +114,6 @@ Program Link(const std::vector<Stage> &stages, const std::vector<VkRayTracingSha
             throw std::runtime_error(
                 "Shader record data, callables, ray queries and "
                 "nonuniform indexing are not implemented");
-        if (stage.stage != VK_SHADER_STAGE_RAYGEN_BIT_KHR && glsl.find("traceRayEXT") != std::string::npos)
-            throw std::runtime_error(
-                "TraceRay in hit/miss requires continuation "
-                "lowering, not implemented in this subset");
         glsl = std::regex_replace(glsl, std::regex("#version[^\\n]*\\n"), "");
         glsl = std::regex_replace(glsl, std::regex("#extension GL_EXT_ray_tracing[^\\n]*\\n"), "");
         // A single vec4 payload at location zero is the first executable compiler

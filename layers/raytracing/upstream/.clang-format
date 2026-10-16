@@ -1,0 +1,3 @@
+# Keep the pinned reference sources byte-identical to their Git blobs.
+DisableFormat: true
+SortIncludes: false

@@ -3,6 +3,8 @@
 
 # Compute ray tracing pipeline fallback
 
+The implementation target is now the **complete D3D12 fallback port**, not the executable prototype below. See [the port contract and actual gaps](ray_tracing_fallback_port.md). The complete port is not finished.
+
 `VK_LAYER_HANYANG_ray_tracing_fallback` is an executable prototype of a Vulkan ray tracing pipeline implemented using compute shaders. It accepts ordinary raygen, miss and closest-hit SPIR-V modules, software-builds BLAS/TLAS, reads shader binding tables and translates `vkCmdTraceRaysKHR` into a compute dispatch. No hardware ray tracing instructions are used by the generated compute program.
 
 **This is a restricted experimental subset, not a conformant implementation of the complete KHR extensions and not a drop-in layer for arbitrary games.** The layer exposes the KHR names to exercise their calling convention, but several mandatory extension commands and shader cases remain outside this implementation. Enable it explicitly only for applications within the supported subset. Do not install it as an implicit system layer.
@@ -11,7 +13,7 @@
 
 The starting point is Microsoft's [D3D12RaytracingFallback](https://github.com/microsoft/DirectX-Graphics-Samples/tree/master/Libraries/D3D12RaytracingFallback). Its [uber-shader program](https://github.com/microsoft/DirectX-Graphics-Samples/blob/master/Libraries/D3D12RaytracingFallback/src/UberShaderRayTracingProgram.cpp) links application shaders, traversal and a scheduler into a compute PSO. Its [traversal wrapper](https://github.com/microsoft/DirectX-Graphics-Samples/blob/master/Libraries/D3D12RaytracingFallback/src/TraverseShader.hlsli) selects hit or miss shader IDs from shader tables.
 
-This project reimplements that architecture for Vulkan; it does not port the Windows runtime or DXIL compiler and does not vendor Microsoft source. In particular, the first compiler subset uses synchronous nonrecursive function calls rather than the original continuation/state-machine compiler. General continuations are the next major compiler milestone.
+The executable prototype reimplements only that architecture. Pinned Microsoft runtime/compiler references now live in `layers/raytracing/upstream`, with original licenses. The complete port has begun with typed SPIR-V continuation analysis and a tested GLSL adaptation of the original runtime helpers. The prototype execution path still uses synchronous nonrecursive calls; state-function generation and runtime integration remain unfinished.
 
 | D3D12 fallback concept | Vulkan prototype |
 | --- | --- |
@@ -86,7 +88,7 @@ These tests compare every pixel's hit/miss result with an independent CPU triang
 
 For a validation layer below the fallback, install `vulkan-validationlayers`, include its manifest directory in `VK_LAYER_PATH`, and run `vel_rt_tests` with `VEL_RT_TEST_VALIDATION=1`. That checks the lowered native calls; it does not establish complete conformance of the emulated extension surface.
 
-## Next implementation milestones
+## Previous prototype milestones (superseded by the complete port contract)
 
 1. Replace GLSL-text interface rewriting with typed SPIR-V or NIR lowering and linking; introduce explicit continuation frames for arbitrary payloads, nested TraceRay and callable execution.
 2. Implement any-hit traversal resumption, IgnoreIntersection/TerminateRay and procedural intersection shaders, with per-stage and nested-trace tests.

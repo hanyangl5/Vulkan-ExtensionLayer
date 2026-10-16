@@ -1,6 +1,9 @@
 // Copyright 2026 The Khronos Group Inc.
 // SPDX-License-Identifier: Apache-2.0
 #include "compiler.h"
+#include "continuation_runtime.h"
+#include "runtime.h"
+#include "runtime_test_shader.h"
 #include <array>
 #include <cmath>
 #include <cstdio>
@@ -216,6 +219,49 @@ struct Harness {
     }
 };
 
+static void CheckContinuationRuntime(Harness &t) {
+    auto code = vel::rt::CompileGLSL(
+        std::string("#version 460\n") + vel::rt::kMemory + vel::rt::kContinuationRuntime + vel::rt::kRuntimeTestShader,
+        VK_SHADER_STAGE_COMPUTE_BIT);
+    auto module = t.Module(code);
+    auto output = t.Make(32 * 16 * sizeof(uint32_t), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
+    VkPushConstantRange push{VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(VkDeviceAddress)};
+    VkPipelineLayoutCreateInfo ci{VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO};
+    ci.pushConstantRangeCount = 1;
+    ci.pPushConstantRanges = &push;
+    VkPipelineLayout layout;
+    Check(vkCreatePipelineLayout(t.device, &ci, nullptr, &layout));
+    VkComputePipelineCreateInfo pc{VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO};
+    pc.layout = layout;
+    pc.stage = {VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO};
+    pc.stage.stage = VK_SHADER_STAGE_COMPUTE_BIT;
+    pc.stage.module = module;
+    pc.stage.pName = "main";
+    VkPipeline pipeline;
+    Check(vkCreateComputePipelines(t.device, VK_NULL_HANDLE, 1, &pc, nullptr, &pipeline));
+    t.Begin();
+    vkCmdBindPipeline(t.cb, VK_PIPELINE_BIND_POINT_COMPUTE, pipeline);
+    vkCmdPushConstants(t.cb, layout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(output.address), &output.address);
+    vkCmdDispatch(t.cb, 1, 1, 1);
+    t.Barrier(VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_ACCESS_SHADER_WRITE_BIT, VK_PIPELINE_STAGE_HOST_BIT,
+              VK_ACCESS_HOST_READ_BIT);
+    t.Submit();
+    const auto *values = static_cast<const uint32_t *>(output.mapped);
+    for (uint32_t y = 0; y < 4; ++y) {
+        for (uint32_t x = 0; x < 8; ++x) {
+            uint32_t expected = x < 7 && y < 3 ? 65535u : 0u;
+            uint32_t actual = values[(y * 8 + x) * 16];
+            if (actual != expected)
+                throw std::runtime_error("Continuation runtime mismatch at " + std::to_string(x) + "," + std::to_string(y) + ": " +
+                                         std::to_string(actual) + "/" + std::to_string(expected));
+        }
+    }
+    vkDestroyPipeline(t.device, pipeline, nullptr);
+    vkDestroyPipelineLayout(t.device, layout, nullptr);
+    vkDestroyShaderModule(t.device, module, nullptr);
+    std::puts("Continuation runtime: stack, pending/committed hit attributes, nested ray save/restore and scheduler passed");
+}
+
 int main(int argc, char **argv) {
     try {
         std::string variant = argc > 1 ? argv[1] : "u16";
@@ -265,6 +311,10 @@ int main(int argc, char **argv) {
         std::puts("Compiler and rejection checks passed");
         Harness t;
         t.Init();
+        if (variant == "runtime") {
+            CheckContinuationRuntime(t);
+            return 0;
+        }
 #define PROC(name) auto name = t.Proc<PFN_vk##name>("vk" #name)
         PROC(GetAccelerationStructureBuildSizesKHR);
         PROC(CreateAccelerationStructureKHR);
