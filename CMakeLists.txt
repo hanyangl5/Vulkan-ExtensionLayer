@@ -94,6 +94,12 @@ endif()
 add_subdirectory(layers)
 add_subdirectory(utils)
 
+option(BUILD_RAY_TRACING_FALLBACK "Build the experimental compute RT pipeline fallback subset" OFF)
+if(BUILD_RAY_TRACING_FALLBACK)
+    enable_testing()
+    add_subdirectory(layers/raytracing)
+endif()
+
 option(BUILD_TESTS "Build tests")
 if(BUILD_TESTS)
     enable_testing()

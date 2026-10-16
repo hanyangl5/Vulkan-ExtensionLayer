@@ -17,6 +17,14 @@ If you find a problem with one of the layers, please file an Issue and tag the P
 
 NOTE: Not all layers are supported on every platform, please read the documentation for the layer for details.
 
+## Experimental layers
+
+| Layer | Status | Point of Contact |
+| --- | --- | --- |
+| [VK_LAYER_HANYANG_ray_tracing_fallback](docs/ray_tracing_fallback_layer.md) | Executable compute-based KHR RT pipeline subset; not a conformant implementation of the complete extensions | [@hanyangl5](https://github.com/hanyangl5) |
+
+The ray tracing fallback is opt-in and can be built independently from `layers/raytracing`. It follows the compute traversal and linked shader architecture of Microsoft's D3D12RaytracingFallback, with a new Vulkan runtime and a restricted SPIR-V lowering implementation. See its documentation for supported shaders and API restrictions.
+
 ## Information for Developing or Contributing:
 
 Please see the [CONTRIBUTING.md](CONTRIBUTING.md) file in this repository for more details.
