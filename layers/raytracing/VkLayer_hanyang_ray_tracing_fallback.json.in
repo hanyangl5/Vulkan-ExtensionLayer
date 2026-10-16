@@ -1,0 +1,11 @@
+{
+    "file_format_version": "1.2.0",
+    "layer": {
+        "name": "VK_LAYER_HANYANG_ray_tracing_fallback",
+        "type": "GLOBAL",
+        "library_path": "./@CMAKE_SHARED_LIBRARY_PREFIX@VkLayer_hanyang_ray_tracing_fallback@CMAKE_SHARED_LIBRARY_SUFFIX@",
+        "api_version": "1.2.0",
+        "implementation_version": "1",
+        "description": "Experimental compute ray tracing pipeline fallback subset"
+    }
+}

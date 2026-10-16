@@ -1,0 +1,1524 @@
+{
+  "schema": 1,
+  "notice": "Unmodified reference sources. Not part of the Vulkan build. Their presence is not a Vulkan implementation.",
+  "sources": [
+    {
+      "name": "d3d12",
+      "repository": "microsoft/DirectX-Graphics-Samples",
+      "commit": "e5975f9b0744fc5096dd593ed72bf8f5c004164f",
+      "root": "Libraries/D3D12RaytracingFallback/src"
+    },
+    {
+      "name": "dxc",
+      "repository": "microsoft/DirectXShaderCompiler",
+      "commit": "61e9771fc34bc914565dfc95a11f731f853e8ac9",
+      "root": "lib/DxrFallback"
+    }
+  ],
+  "files": [
+    {
+      "repo": "microsoft/DirectX-Graphics-Samples",
+      "ref": "e5975f9b0744fc5096dd593ed72bf8f5c004164f",
+      "path": "Libraries/D3D12RaytracingFallback/src/AccelerationStructureBuilder.h",
+      "local": "d3d12/AccelerationStructureBuilder.h",
+      "sha": "609cae7dc73701e16b90e7d9729fbab536a07ac8",
+      "size": 2193
+    },
+    {
+      "repo": "microsoft/DirectX-Graphics-Samples",
+      "ref": "e5975f9b0744fc5096dd593ed72bf8f5c004164f",
+      "path": "Libraries/D3D12RaytracingFallback/src/AccelerationStructureBuilderFactory.cpp",
+      "local": "d3d12/AccelerationStructureBuilderFactory.cpp",
+      "sha": "179b621f80860e73bed8a56279e88e97477991a7",
+      "size": 1775
+    },
+    {
+      "repo": "microsoft/DirectX-Graphics-Samples",
+      "ref": "e5975f9b0744fc5096dd593ed72bf8f5c004164f",
+      "path": "Libraries/D3D12RaytracingFallback/src/AccelerationStructureBuilderFactory.h",
+      "local": "d3d12/AccelerationStructureBuilderFactory.h",
+      "sha": "f583f94c1200ac23188ff9bb5356a577c1169543",
+      "size": 1200
+    },
+    {
+      "repo": "microsoft/DirectX-Graphics-Samples",
+      "ref": "e5975f9b0744fc5096dd593ed72bf8f5c004164f",
+      "path": "Libraries/D3D12RaytracingFallback/src/AccelerationStructureValidator.cpp",
+      "local": "d3d12/AccelerationStructureValidator.cpp",
+      "sha": "20be6059632a1ab5a5892b107a4d82565854240b",
+      "size": 923
+    },
+    {
+      "repo": "microsoft/DirectX-Graphics-Samples",
+      "ref": "e5975f9b0744fc5096dd593ed72bf8f5c004164f",
+      "path": "Libraries/D3D12RaytracingFallback/src/AccelerationStructureValidator.h",
+      "local": "d3d12/AccelerationStructureValidator.h",
+      "sha": "ce6b50102cf273bc038ebab1506119c82119f2a2",
+      "size": 3507
+    },
+    {
+      "repo": "microsoft/DirectX-Graphics-Samples",
+      "ref": "e5975f9b0744fc5096dd593ed72bf8f5c004164f",
+      "path": "Libraries/D3D12RaytracingFallback/src/BVHTraversalShaderBuilder.cpp",
+      "local": "d3d12/BVHTraversalShaderBuilder.cpp",
+      "sha": "5839e0be73ff7e29f6b1683382b24124d4dc6d20",
+      "size": 1560
+    },
+    {
+      "repo": "microsoft/DirectX-Graphics-Samples",
+      "ref": "e5975f9b0744fc5096dd593ed72bf8f5c004164f",
+      "path": "Libraries/D3D12RaytracingFallback/src/BVHTraversalShaderBuilder.h",
+      "local": "d3d12/BVHTraversalShaderBuilder.h",
+      "sha": "c2add2afac665243eecef679d894fc5be37cb943",
+      "size": 851
+    },
+    {
+      "repo": "microsoft/DirectX-Graphics-Samples",
+      "ref": "e5975f9b0744fc5096dd593ed72bf8f5c004164f",
+      "path": "Libraries/D3D12RaytracingFallback/src/BVHValidator.cpp",
+      "local": "d3d12/BVHValidator.cpp",
+      "sha": "481f70cdcda6ecb0db0c59feeb64e5ef339c585a",
+      "size": 13365
+    },
+    {
+      "repo": "microsoft/DirectX-Graphics-Samples",
+      "ref": "e5975f9b0744fc5096dd593ed72bf8f5c004164f",
+      "path": "Libraries/D3D12RaytracingFallback/src/BVHValidator.h",
+      "local": "d3d12/BVHValidator.h",
+      "sha": "1ef0031112f393d7a5ae6fbaea9f032b4a504943",
+      "size": 3204
+    },
+    {
+      "repo": "microsoft/DirectX-Graphics-Samples",
+      "ref": "e5975f9b0744fc5096dd593ed72bf8f5c004164f",
+      "path": "Libraries/D3D12RaytracingFallback/src/BitonicIndirectArgsCS.hlsl",
+      "local": "d3d12/BitonicIndirectArgsCS.hlsl",
+      "sha": "5b2f0a55d3cfb608b2b99e709655133debb7befb",
+      "size": 1809
+    },
+    {
+      "repo": "microsoft/DirectX-Graphics-Samples",
+      "ref": "e5975f9b0744fc5096dd593ed72bf8f5c004164f",
+      "path": "Libraries/D3D12RaytracingFallback/src/BitonicInnerSortCS.hlsl",
+      "local": "d3d12/BitonicInnerSortCS.hlsl",
+      "sha": "bf9317cf4c75297023cf468cf28ff72128ea9bef",
+      "size": 3178
+    },
+    {
+      "repo": "microsoft/DirectX-Graphics-Samples",
+      "ref": "e5975f9b0744fc5096dd593ed72bf8f5c004164f",
+      "path": "Libraries/D3D12RaytracingFallback/src/BitonicOuterSortCS.hlsl",
+      "local": "d3d12/BitonicOuterSortCS.hlsl",
+      "sha": "f7ea75029e9e52f5d01b22f8fc00ed4f0f594827",
+      "size": 1378
+    },
+    {
+      "repo": "microsoft/DirectX-Graphics-Samples",
+      "ref": "e5975f9b0744fc5096dd593ed72bf8f5c004164f",
+      "path": "Libraries/D3D12RaytracingFallback/src/BitonicPreSortCS.hlsl",
+      "local": "d3d12/BitonicPreSortCS.hlsl",
+      "sha": "00cd7e1d75d3484c225cf5c55fa72c473ea0a69f",
+      "size": 3535
+    },
+    {
+      "repo": "microsoft/DirectX-Graphics-Samples",
+      "ref": "e5975f9b0744fc5096dd593ed72bf8f5c004164f",
+      "path": "Libraries/D3D12RaytracingFallback/src/BitonicSort.cpp",
+      "local": "d3d12/BitonicSort.cpp",
+      "sha": "8d92f78bda8a57c71036ec61a6fc4d76d9dd7c79",
+      "size": 6552
+    },
+    {
+      "repo": "microsoft/DirectX-Graphics-Samples",
+      "ref": "e5975f9b0744fc5096dd593ed72bf8f5c004164f",
+      "path": "Libraries/D3D12RaytracingFallback/src/BitonicSort.h",
+      "local": "d3d12/BitonicSort.h",
+      "sha": "b914e260d46ad7bbec73fa4be47528c08db32df1",
+      "size": 5850
+    },
+    {
+      "repo": "microsoft/DirectX-Graphics-Samples",
+      "ref": "e5975f9b0744fc5096dd593ed72bf8f5c004164f",
+      "path": "Libraries/D3D12RaytracingFallback/src/BitonicSortCommon.hlsli",
+      "local": "d3d12/BitonicSortCommon.hlsli",
+      "sha": "dd396b86441ed6b66f491bf884259576ced1ae48",
+      "size": 1612
+    },
+    {
+      "repo": "microsoft/DirectX-Graphics-Samples",
+      "ref": "e5975f9b0744fc5096dd593ed72bf8f5c004164f",
+      "path": "Libraries/D3D12RaytracingFallback/src/BottomLevelBuildBVHSplits.hlsl",
+      "local": "d3d12/BottomLevelBuildBVHSplits.hlsl",
+      "sha": "ab3b8f08ca9e3b29259464a01d5fe773b7724292",
+      "size": 521
+    },
+    {
+      "repo": "microsoft/DirectX-Graphics-Samples",
+      "ref": "e5975f9b0744fc5096dd593ed72bf8f5c004164f",
+      "path": "Libraries/D3D12RaytracingFallback/src/BottomLevelComputeAABBs.hlsl",
+      "local": "d3d12/BottomLevelComputeAABBs.hlsl",
+      "sha": "9492ac36e666b60678eaf4a089c0267875ff7962",
+      "size": 1612
+    },
+    {
+      "repo": "microsoft/DirectX-Graphics-Samples",
+      "ref": "e5975f9b0744fc5096dd593ed72bf8f5c004164f",
+      "path": "Libraries/D3D12RaytracingFallback/src/BottomLevelLoadTriangles.hlsli",
+      "local": "d3d12/BottomLevelLoadTriangles.hlsli",
+      "sha": "811df5967b06b7032953005432e9f7aea7413879",
+      "size": 3984
+    },
+    {
+      "repo": "microsoft/DirectX-Graphics-Samples",
+      "ref": "e5975f9b0744fc5096dd593ed72bf8f5c004164f",
+      "path": "Libraries/D3D12RaytracingFallback/src/BottomLevelPrepareForComputeAABBs.hlsl",
+      "local": "d3d12/BottomLevelPrepareForComputeAABBs.hlsl",
+      "sha": "23a545e5fe5cfd776093fbc8f3c917a9cdb4ddda",
+      "size": 2031
+    },
+    {
+      "repo": "microsoft/DirectX-Graphics-Samples",
+      "ref": "e5975f9b0744fc5096dd593ed72bf8f5c004164f",
+      "path": "Libraries/D3D12RaytracingFallback/src/BuildBVHSplits.hlsli",
+      "local": "d3d12/BuildBVHSplits.hlsli",
+      "sha": "2f70315cdb6bdfd7a541e5b637f469847419c902",
+      "size": 3942
+    },
+    {
+      "repo": "microsoft/DirectX-Graphics-Samples",
+      "ref": "e5975f9b0744fc5096dd593ed72bf8f5c004164f",
+      "path": "Libraries/D3D12RaytracingFallback/src/CalculateMortonCodes.hlsli",
+      "local": "d3d12/CalculateMortonCodes.hlsli",
+      "sha": "90b20add03cf46136813810c0465f4caa326532a",
+      "size": 4056
+    },
+    {
+      "repo": "microsoft/DirectX-Graphics-Samples",
+      "ref": "e5975f9b0744fc5096dd593ed72bf8f5c004164f",
+      "path": "Libraries/D3D12RaytracingFallback/src/CalculateMortonCodesBindings.h",
+      "local": "d3d12/CalculateMortonCodesBindings.h",
+      "sha": "7212234b309a17dbe35b98045a63c0f036a55c14",
+      "size": 1643
+    },
+    {
+      "repo": "microsoft/DirectX-Graphics-Samples",
+      "ref": "e5975f9b0744fc5096dd593ed72bf8f5c004164f",
+      "path": "Libraries/D3D12RaytracingFallback/src/CalculateMortonCodesForAABBs.hlsl",
+      "local": "d3d12/CalculateMortonCodesForAABBs.hlsl",
+      "sha": "f04bfd1cea64afd0b4a9cbe8f742b03b7961c43a",
+      "size": 1023
+    },
+    {
+      "repo": "microsoft/DirectX-Graphics-Samples",
+      "ref": "e5975f9b0744fc5096dd593ed72bf8f5c004164f",
+      "path": "Libraries/D3D12RaytracingFallback/src/CalculateMortonCodesForPrimitives.hlsl",
+      "local": "d3d12/CalculateMortonCodesForPrimitives.hlsl",
+      "sha": "ac98efcd3d4e8377000853659f299f805d440cf8",
+      "size": 1066
+    },
+    {
+      "repo": "microsoft/DirectX-Graphics-Samples",
+      "ref": "e5975f9b0744fc5096dd593ed72bf8f5c004164f",
+      "path": "Libraries/D3D12RaytracingFallback/src/CalculateSceneAABBBindings.h",
+      "local": "d3d12/CalculateSceneAABBBindings.h",
+      "sha": "2daeb5b6ab9c142b34ceaac8ea702941d006098b",
+      "size": 1571
+    },
+    {
+      "repo": "microsoft/DirectX-Graphics-Samples",
+      "ref": "e5975f9b0744fc5096dd593ed72bf8f5c004164f",
+      "path": "Libraries/D3D12RaytracingFallback/src/CalculateSceneAABBFromAABBs.hlsl",
+      "local": "d3d12/CalculateSceneAABBFromAABBs.hlsl",
+      "sha": "8a6d041316a624573b27b4df185b51e0491836d6",
+      "size": 1014
+    },
+    {
+      "repo": "microsoft/DirectX-Graphics-Samples",
+      "ref": "e5975f9b0744fc5096dd593ed72bf8f5c004164f",
+      "path": "Libraries/D3D12RaytracingFallback/src/CalculateSceneAABBFromBVHs.hlsl",
+      "local": "d3d12/CalculateSceneAABBFromBVHs.hlsl",
+      "sha": "a4c447a3e0121ffa5057d9147a2a1f06904544d8",
+      "size": 1390
+    },
+    {
+      "repo": "microsoft/DirectX-Graphics-Samples",
+      "ref": "e5975f9b0744fc5096dd593ed72bf8f5c004164f",
+      "path": "Libraries/D3D12RaytracingFallback/src/CalculateSceneAABBFromPrimitives.hlsl",
+      "local": "d3d12/CalculateSceneAABBFromPrimitives.hlsl",
+      "sha": "543bd4c02b62d4b1de19bfb2d1ddcca03a880894",
+      "size": 1620
+    },
+    {
+      "repo": "microsoft/DirectX-Graphics-Samples",
+      "ref": "e5975f9b0744fc5096dd593ed72bf8f5c004164f",
+      "path": "Libraries/D3D12RaytracingFallback/src/ClearBuffers.hlsl",
+      "local": "d3d12/ClearBuffers.hlsl",
+      "sha": "007cb0490ae2eba699451c138464c0acec85261f",
+      "size": 1209
+    },
+    {
+      "repo": "microsoft/DirectX-Graphics-Samples",
+      "ref": "e5975f9b0744fc5096dd593ed72bf8f5c004164f",
+      "path": "Libraries/D3D12RaytracingFallback/src/ComObject.h",
+      "local": "d3d12/ComObject.h",
+      "sha": "1e11cedd89bf65942b2bbcc0b3493a3397b24187",
+      "size": 5146
+    },
+    {
+      "repo": "microsoft/DirectX-Graphics-Samples",
+      "ref": "e5975f9b0744fc5096dd593ed72bf8f5c004164f",
+      "path": "Libraries/D3D12RaytracingFallback/src/ComputeAABBs.hlsli",
+      "local": "d3d12/ComputeAABBs.hlsli",
+      "sha": "a9736989e9f896f3222da87eb3c80d8903a31cf6",
+      "size": 5615
+    },
+    {
+      "repo": "microsoft/DirectX-Graphics-Samples",
+      "ref": "e5975f9b0744fc5096dd593ed72bf8f5c004164f",
+      "path": "Libraries/D3D12RaytracingFallback/src/ConstructAABBBindings.h",
+      "local": "d3d12/ConstructAABBBindings.h",
+      "sha": "c034fdff734478d0c73ea2771b756b7680ea5fd7",
+      "size": 1823
+    },
+    {
+      "repo": "microsoft/DirectX-Graphics-Samples",
+      "ref": "e5975f9b0744fc5096dd593ed72bf8f5c004164f",
+      "path": "Libraries/D3D12RaytracingFallback/src/ConstructAABBPass.cpp",
+      "local": "d3d12/ConstructAABBPass.cpp",
+      "sha": "4efdcf0307a2a9c5bf98b2bcbdfe2d24db156e88",
+      "size": 5298
+    },
+    {
+      "repo": "microsoft/DirectX-Graphics-Samples",
+      "ref": "e5975f9b0744fc5096dd593ed72bf8f5c004164f",
+      "path": "Libraries/D3D12RaytracingFallback/src/ConstructAABBPass.h",
+      "local": "d3d12/ConstructAABBPass.h",
+      "sha": "67493f01fbdb22c98b9b73057a9db010885f010c",
+      "size": 1813
+    },
+    {
+      "repo": "microsoft/DirectX-Graphics-Samples",
+      "ref": "e5975f9b0744fc5096dd593ed72bf8f5c004164f",
+      "path": "Libraries/D3D12RaytracingFallback/src/ConstructHierarchyBindings.h",
+      "local": "d3d12/ConstructHierarchyBindings.h",
+      "sha": "712038f75343a074e30b45259788149bc1bf8cd7",
+      "size": 1232
+    },
+    {
+      "repo": "microsoft/DirectX-Graphics-Samples",
+      "ref": "e5975f9b0744fc5096dd593ed72bf8f5c004164f",
+      "path": "Libraries/D3D12RaytracingFallback/src/ConstructHierarchyPass.cpp",
+      "local": "d3d12/ConstructHierarchyPass.cpp",
+      "sha": "09e88b06388eed10d41aa5586732cfef932d3292",
+      "size": 3447
+    },
+    {
+      "repo": "microsoft/DirectX-Graphics-Samples",
+      "ref": "e5975f9b0744fc5096dd593ed72bf8f5c004164f",
+      "path": "Libraries/D3D12RaytracingFallback/src/ConstructHierarchyPass.h",
+      "local": "d3d12/ConstructHierarchyPass.h",
+      "sha": "bcd083fa1d936695ca8ffbf04868965ef82f71a8",
+      "size": 1380
+    },
+    {
+      "repo": "microsoft/DirectX-Graphics-Samples",
+      "ref": "e5975f9b0744fc5096dd593ed72bf8f5c004164f",
+      "path": "Libraries/D3D12RaytracingFallback/src/CpuBVH2Builder.cpp",
+      "local": "d3d12/CpuBVH2Builder.cpp",
+      "sha": "9ccb7a9b466d5580981257b9dbd0d9719039a014",
+      "size": 22332
+    },
+    {
+      "repo": "microsoft/DirectX-Graphics-Samples",
+      "ref": "e5975f9b0744fc5096dd593ed72bf8f5c004164f",
+      "path": "Libraries/D3D12RaytracingFallback/src/D3D12RaytracingFallback.cpp",
+      "local": "d3d12/D3D12RaytracingFallback.cpp",
+      "sha": "af0ac014d99200d34174669d7c368396a00e4521",
+      "size": 2128
+    },
+    {
+      "repo": "microsoft/DirectX-Graphics-Samples",
+      "ref": "e5975f9b0744fc5096dd593ed72bf8f5c004164f",
+      "path": "Libraries/D3D12RaytracingFallback/src/DebugLog.h",
+      "local": "d3d12/DebugLog.h",
+      "sha": "d22fb4526243bd8b0a2cc59554fd33990a26799e",
+      "size": 966
+    },
+    {
+      "repo": "microsoft/DirectX-Graphics-Samples",
+      "ref": "e5975f9b0744fc5096dd593ed72bf8f5c004164f",
+      "path": "Libraries/D3D12RaytracingFallback/src/DebugLog.hlsli",
+      "local": "d3d12/DebugLog.hlsli",
+      "sha": "dea4a0cf04b69911b39b49147148ae4308941011",
+      "size": 1374
+    },
+    {
+      "repo": "microsoft/DirectX-Graphics-Samples",
+      "ref": "e5975f9b0744fc5096dd593ed72bf8f5c004164f",
+      "path": "Libraries/D3D12RaytracingFallback/src/DxbcParser.cpp",
+      "local": "d3d12/DxbcParser.cpp",
+      "sha": "fb90e41073a77dafa526644fc034ce51998d7218",
+      "size": 7240
+    },
+    {
+      "repo": "microsoft/DirectX-Graphics-Samples",
+      "ref": "e5975f9b0744fc5096dd593ed72bf8f5c004164f",
+      "path": "Libraries/D3D12RaytracingFallback/src/DxbcParser.h",
+      "local": "d3d12/DxbcParser.h",
+      "sha": "e63544ae379739028e3e9109b966beb5a9794b83",
+      "size": 159
+    },
+    {
+      "repo": "microsoft/DirectX-Graphics-Samples",
+      "ref": "e5975f9b0744fc5096dd593ed72bf8f5c004164f",
+      "path": "Libraries/D3D12RaytracingFallback/src/DxilShaderPatcher.cpp",
+      "local": "d3d12/DxilShaderPatcher.cpp",
+      "sha": "63932eb92c005ef8119bd646cf77c4c6c78e6783",
+      "size": 5110
+    },
+    {
+      "repo": "microsoft/DirectX-Graphics-Samples",
+      "ref": "e5975f9b0744fc5096dd593ed72bf8f5c004164f",
+      "path": "Libraries/D3D12RaytracingFallback/src/DxilShaderPatcher.h",
+      "local": "d3d12/DxilShaderPatcher.h",
+      "sha": "aaf4f7a055b045c4e327901af66417a0c9e3e239",
+      "size": 2252
+    },
+    {
+      "repo": "microsoft/DirectX-Graphics-Samples",
+      "ref": "e5975f9b0744fc5096dd593ed72bf8f5c004164f",
+      "path": "Libraries/D3D12RaytracingFallback/src/DynamicIndexTest.hlsl",
+      "local": "d3d12/DynamicIndexTest.hlsl",
+      "sha": "400e65bf5e9ecaa1d7b7a2e63038d18dce1e876e",
+      "size": 710
+    },
+    {
+      "repo": "microsoft/DirectX-Graphics-Samples",
+      "ref": "e5975f9b0744fc5096dd593ed72bf8f5c004164f",
+      "path": "Libraries/D3D12RaytracingFallback/src/EmulatedPointer.hlsli",
+      "local": "d3d12/EmulatedPointer.hlsli",
+      "sha": "ee4588bff85b49edb1b8958d0744e97c3fbcde18",
+      "size": 1047
+    },
+    {
+      "repo": "microsoft/DirectX-Graphics-Samples",
+      "ref": "e5975f9b0744fc5096dd593ed72bf8f5c004164f",
+      "path": "Libraries/D3D12RaytracingFallback/src/EmulatedPointerIntrinsics.hlsli",
+      "local": "d3d12/EmulatedPointerIntrinsics.hlsli",
+      "sha": "71df0c7fc0dcb8dd030c1e699fcb0155a84d98fb",
+      "size": 1078
+    },
+    {
+      "repo": "microsoft/DirectX-Graphics-Samples",
+      "ref": "e5975f9b0744fc5096dd593ed72bf8f5c004164f",
+      "path": "Libraries/D3D12RaytracingFallback/src/ExperimentalRaytracing.h",
+      "local": "d3d12/ExperimentalRaytracing.h",
+      "sha": "dc025b34dff0f5c0f4c27ba790372406c4b8fa6e",
+      "size": 15916
+    },
+    {
+      "repo": "microsoft/DirectX-Graphics-Samples",
+      "ref": "e5975f9b0744fc5096dd593ed72bf8f5c004164f",
+      "path": "Libraries/D3D12RaytracingFallback/src/FallbackDebug.cpp",
+      "local": "d3d12/FallbackDebug.cpp",
+      "sha": "04a5a62a0af76947e779674b710741e6e3584efa",
+      "size": 2640
+    },
+    {
+      "repo": "microsoft/DirectX-Graphics-Samples",
+      "ref": "e5975f9b0744fc5096dd593ed72bf8f5c004164f",
+      "path": "Libraries/D3D12RaytracingFallback/src/FallbackDebug.h",
+      "local": "d3d12/FallbackDebug.h",
+      "sha": "6230445e628e4a6028d1a04e803949604c562d9a",
+      "size": 823
+    },
+    {
+      "repo": "microsoft/DirectX-Graphics-Samples",
+      "ref": "e5975f9b0744fc5096dd593ed72bf8f5c004164f",
+      "path": "Libraries/D3D12RaytracingFallback/src/FallbackDxil.h",
+      "local": "d3d12/FallbackDxil.h",
+      "sha": "b7dc9df2e8d980b57fe0b90b16284f0082b09d09",
+      "size": 2222
+    },
+    {
+      "repo": "microsoft/DirectX-Graphics-Samples",
+      "ref": "e5975f9b0744fc5096dd593ed72bf8f5c004164f",
+      "path": "Libraries/D3D12RaytracingFallback/src/FallbackLayer.cpp",
+      "local": "d3d12/FallbackLayer.cpp",
+      "sha": "9328eaef36cdffe24357fc5f9d88b413b3834d01",
+      "size": 34058
+    },
+    {
+      "repo": "microsoft/DirectX-Graphics-Samples",
+      "ref": "e5975f9b0744fc5096dd593ed72bf8f5c004164f",
+      "path": "Libraries/D3D12RaytracingFallback/src/FallbackLayer.h",
+      "local": "d3d12/FallbackLayer.h",
+      "sha": "4009cdf350662c3617040417135ea872ef7ec493",
+      "size": 9561
+    },
+    {
+      "repo": "microsoft/DirectX-Graphics-Samples",
+      "ref": "e5975f9b0744fc5096dd593ed72bf8f5c004164f",
+      "path": "Libraries/D3D12RaytracingFallback/src/FallbackLayerUnitTests/D3D12Context.cpp",
+      "local": "d3d12/FallbackLayerUnitTests/D3D12Context.cpp",
+      "sha": "a7025708b59510c9b7813ed376bb976b0889d440",
+      "size": 8129
+    },
+    {
+      "repo": "microsoft/DirectX-Graphics-Samples",
+      "ref": "e5975f9b0744fc5096dd593ed72bf8f5c004164f",
+      "path": "Libraries/D3D12RaytracingFallback/src/FallbackLayerUnitTests/D3D12Context.h",
+      "local": "d3d12/FallbackLayerUnitTests/D3D12Context.h",
+      "sha": "f7993ef4549423418ac4fd47368f17c0ce511eaa",
+      "size": 1567
+    },
+    {
+      "repo": "microsoft/DirectX-Graphics-Samples",
+      "ref": "e5975f9b0744fc5096dd593ed72bf8f5c004164f",
+      "path": "Libraries/D3D12RaytracingFallback/src/FallbackLayerUnitTests/D3DTestHelper.h",
+      "local": "d3d12/FallbackLayerUnitTests/D3DTestHelper.h",
+      "sha": "d91a3c6ea5c753d9e20bacd1345ce16106b56908",
+      "size": 691
+    },
+    {
+      "repo": "microsoft/DirectX-Graphics-Samples",
+      "ref": "e5975f9b0744fc5096dd593ed72bf8f5c004164f",
+      "path": "Libraries/D3D12RaytracingFallback/src/FallbackLayerUnitTests/DynamicIndexTest.hlsl",
+      "local": "d3d12/FallbackLayerUnitTests/DynamicIndexTest.hlsl",
+      "sha": "400e65bf5e9ecaa1d7b7a2e63038d18dce1e876e",
+      "size": 710
+    },
+    {
+      "repo": "microsoft/DirectX-Graphics-Samples",
+      "ref": "e5975f9b0744fc5096dd593ed72bf8f5c004164f",
+      "path": "Libraries/D3D12RaytracingFallback/src/FallbackLayerUnitTests/ReadDataBuffer.hlsl",
+      "local": "d3d12/FallbackLayerUnitTests/ReadDataBuffer.hlsl",
+      "sha": "bf8f50b1599fccbc628dca61c5b532f01a19fd00",
+      "size": 555
+    },
+    {
+      "repo": "microsoft/DirectX-Graphics-Samples",
+      "ref": "e5975f9b0744fc5096dd593ed72bf8f5c004164f",
+      "path": "Libraries/D3D12RaytracingFallback/src/FallbackLayerUnitTests/ReadDataRWBuffer.hlsl",
+      "local": "d3d12/FallbackLayerUnitTests/ReadDataRWBuffer.hlsl",
+      "sha": "bab9388756004fff6aecd8c90dfaf534c18d6c08",
+      "size": 565
+    },
+    {
+      "repo": "microsoft/DirectX-Graphics-Samples",
+      "ref": "e5975f9b0744fc5096dd593ed72bf8f5c004164f",
+      "path": "Libraries/D3D12RaytracingFallback/src/FallbackLayerUnitTests/ReadDataRWByteAddressBuffer.hlsl",
+      "local": "d3d12/FallbackLayerUnitTests/ReadDataRWByteAddressBuffer.hlsl",
+      "sha": "695d26190779a7dadf4cae6dbbd35307024a6173",
+      "size": 606
+    },
+    {
+      "repo": "microsoft/DirectX-Graphics-Samples",
+      "ref": "e5975f9b0744fc5096dd593ed72bf8f5c004164f",
+      "path": "Libraries/D3D12RaytracingFallback/src/FallbackLayerUnitTests/ReadDataRWTexture1D.hlsl",
+      "local": "d3d12/FallbackLayerUnitTests/ReadDataRWTexture1D.hlsl",
+      "sha": "c80537b5110cd298c22415816f6c3e2b70183acb",
+      "size": 568
+    },
+    {
+      "repo": "microsoft/DirectX-Graphics-Samples",
+      "ref": "e5975f9b0744fc5096dd593ed72bf8f5c004164f",
+      "path": "Libraries/D3D12RaytracingFallback/src/FallbackLayerUnitTests/ReadDataRWTexture1DArray.hlsl",
+      "local": "d3d12/FallbackLayerUnitTests/ReadDataRWTexture1DArray.hlsl",
+      "sha": "15adb73bf43172b5849d6b2c43d821f2811561d3",
+      "size": 582
+    },
+    {
+      "repo": "microsoft/DirectX-Graphics-Samples",
+      "ref": "e5975f9b0744fc5096dd593ed72bf8f5c004164f",
+      "path": "Libraries/D3D12RaytracingFallback/src/FallbackLayerUnitTests/ReadDataRWTexture2D.hlsl",
+      "local": "d3d12/FallbackLayerUnitTests/ReadDataRWTexture2D.hlsl",
+      "sha": "383e5677c1babccd1168d12be287405eedefa21a",
+      "size": 577
+    },
+    {
+      "repo": "microsoft/DirectX-Graphics-Samples",
+      "ref": "e5975f9b0744fc5096dd593ed72bf8f5c004164f",
+      "path": "Libraries/D3D12RaytracingFallback/src/FallbackLayerUnitTests/ReadDataRWTexture2DArray.hlsl",
+      "local": "d3d12/FallbackLayerUnitTests/ReadDataRWTexture2DArray.hlsl",
+      "sha": "75ce0f4f2a23e397a8f345010934264d7ddeab20",
+      "size": 585
+    },
+    {
+      "repo": "microsoft/DirectX-Graphics-Samples",
+      "ref": "e5975f9b0744fc5096dd593ed72bf8f5c004164f",
+      "path": "Libraries/D3D12RaytracingFallback/src/FallbackLayerUnitTests/ReadDataRWTexture3D.hlsl",
+      "local": "d3d12/FallbackLayerUnitTests/ReadDataRWTexture3D.hlsl",
+      "sha": "6b88d918e1f724a71bf033042b3da4aa4922cdf6",
+      "size": 580
+    },
+    {
+      "repo": "microsoft/DirectX-Graphics-Samples",
+      "ref": "e5975f9b0744fc5096dd593ed72bf8f5c004164f",
+      "path": "Libraries/D3D12RaytracingFallback/src/FallbackLayerUnitTests/ReadDataTexture1D.hlsl",
+      "local": "d3d12/FallbackLayerUnitTests/ReadDataTexture1D.hlsl",
+      "sha": "94a9dbdc7be9906b8c374dd3610dfb3a7eb9d1a0",
+      "size": 558
+    },
+    {
+      "repo": "microsoft/DirectX-Graphics-Samples",
+      "ref": "e5975f9b0744fc5096dd593ed72bf8f5c004164f",
+      "path": "Libraries/D3D12RaytracingFallback/src/FallbackLayerUnitTests/ReadDataTexture1DArray.hlsl",
+      "local": "d3d12/FallbackLayerUnitTests/ReadDataTexture1DArray.hlsl",
+      "sha": "d6bff94cd33970b571c4a8fd05f903cd0f86fa4a",
+      "size": 572
+    },
+    {
+      "repo": "microsoft/DirectX-Graphics-Samples",
+      "ref": "e5975f9b0744fc5096dd593ed72bf8f5c004164f",
+      "path": "Libraries/D3D12RaytracingFallback/src/FallbackLayerUnitTests/ReadDataTexture2D.hlsl",
+      "local": "d3d12/FallbackLayerUnitTests/ReadDataTexture2D.hlsl",
+      "sha": "52d25f77d6d84a85a87c9ec2f7f5d6dba971801b",
+      "size": 567
+    },
+    {
+      "repo": "microsoft/DirectX-Graphics-Samples",
+      "ref": "e5975f9b0744fc5096dd593ed72bf8f5c004164f",
+      "path": "Libraries/D3D12RaytracingFallback/src/FallbackLayerUnitTests/ReadDataTexture2DArray.hlsl",
+      "local": "d3d12/FallbackLayerUnitTests/ReadDataTexture2DArray.hlsl",
+      "sha": "99736bb91c11ca68385298fc84159e5bfb5902df",
+      "size": 575
+    },
+    {
+      "repo": "microsoft/DirectX-Graphics-Samples",
+      "ref": "e5975f9b0744fc5096dd593ed72bf8f5c004164f",
+      "path": "Libraries/D3D12RaytracingFallback/src/FallbackLayerUnitTests/ReadRootConstants.hlsl",
+      "local": "d3d12/FallbackLayerUnitTests/ReadRootConstants.hlsl",
+      "sha": "d24dc3d647c95a7ceb467a37cf9a837c8f8db51d",
+      "size": 903
+    },
+    {
+      "repo": "microsoft/DirectX-Graphics-Samples",
+      "ref": "e5975f9b0744fc5096dd593ed72bf8f5c004164f",
+      "path": "Libraries/D3D12RaytracingFallback/src/FallbackLayerUnitTests/SharedReadData.hlsli",
+      "local": "d3d12/FallbackLayerUnitTests/SharedReadData.hlsli",
+      "sha": "0a2e0bc1c5181781375b1bc1c0b3284a3fee4149",
+      "size": 667
+    },
+    {
+      "repo": "microsoft/DirectX-Graphics-Samples",
+      "ref": "e5975f9b0744fc5096dd593ed72bf8f5c004164f",
+      "path": "Libraries/D3D12RaytracingFallback/src/FallbackLayerUnitTests/SimpleRayTracing.hlsl",
+      "local": "d3d12/FallbackLayerUnitTests/SimpleRayTracing.hlsl",
+      "sha": "c4c02748df15f5753f6d4632e712e9c99942b5c7",
+      "size": 1572
+    },
+    {
+      "repo": "microsoft/DirectX-Graphics-Samples",
+      "ref": "e5975f9b0744fc5096dd593ed72bf8f5c004164f",
+      "path": "Libraries/D3D12RaytracingFallback/src/FallbackLayerUnitTests/SimpleRaygen.hlsl",
+      "local": "d3d12/FallbackLayerUnitTests/SimpleRaygen.hlsl",
+      "sha": "74aafc174202138deb8154081b8a9370ebe8ae39",
+      "size": 741
+    },
+    {
+      "repo": "microsoft/DirectX-Graphics-Samples",
+      "ref": "e5975f9b0744fc5096dd593ed72bf8f5c004164f",
+      "path": "Libraries/D3D12RaytracingFallback/src/FallbackLayerUnitTests/Validate.hlsli",
+      "local": "d3d12/FallbackLayerUnitTests/Validate.hlsli",
+      "sha": "832a5646400e62cfdd690d4ec5733809c2909dc2",
+      "size": 473
+    },
+    {
+      "repo": "microsoft/DirectX-Graphics-Samples",
+      "ref": "e5975f9b0744fc5096dd593ed72bf8f5c004164f",
+      "path": "Libraries/D3D12RaytracingFallback/src/FallbackLayerUnitTests/fallbacklayerunittests.cpp",
+      "local": "d3d12/FallbackLayerUnitTests/fallbacklayerunittests.cpp",
+      "sha": "27d5fe0fcb03264e8a429e6778df3fa5f46f4b27",
+      "size": 200685
+    },
+    {
+      "repo": "microsoft/DirectX-Graphics-Samples",
+      "ref": "e5975f9b0744fc5096dd593ed72bf8f5c004164f",
+      "path": "Libraries/D3D12RaytracingFallback/src/FallbackLayerUnitTests/stdafx.cpp",
+      "local": "d3d12/FallbackLayerUnitTests/stdafx.cpp",
+      "sha": "9383973ba0bf60f4abf0f761e2382786a53d590f",
+      "size": 737
+    },
+    {
+      "repo": "microsoft/DirectX-Graphics-Samples",
+      "ref": "e5975f9b0744fc5096dd593ed72bf8f5c004164f",
+      "path": "Libraries/D3D12RaytracingFallback/src/FallbackLayerUnitTests/stdafx.h",
+      "local": "d3d12/FallbackLayerUnitTests/stdafx.h",
+      "sha": "26df971ec58a931d963fc848dc4757b7ba5b6b26",
+      "size": 347
+    },
+    {
+      "repo": "microsoft/DirectX-Graphics-Samples",
+      "ref": "e5975f9b0744fc5096dd593ed72bf8f5c004164f",
+      "path": "Libraries/D3D12RaytracingFallback/src/FallbackLayerUnitTests/targetver.h",
+      "local": "d3d12/FallbackLayerUnitTests/targetver.h",
+      "sha": "ebfab34357464a7b66bacd4776b0b8617e23579d",
+      "size": 742
+    },
+    {
+      "repo": "microsoft/DirectX-Graphics-Samples",
+      "ref": "e5975f9b0744fc5096dd593ed72bf8f5c004164f",
+      "path": "Libraries/D3D12RaytracingFallback/src/FindTreelets.hlsl",
+      "local": "d3d12/FindTreelets.hlsl",
+      "sha": "0b326f32c038e83f4ba2e059d84e7dfa11277896",
+      "size": 2987
+    },
+    {
+      "repo": "microsoft/DirectX-Graphics-Samples",
+      "ref": "e5975f9b0744fc5096dd593ed72bf8f5c004164f",
+      "path": "Libraries/D3D12RaytracingFallback/src/GetBVHCompactedSize.hlsl",
+      "local": "d3d12/GetBVHCompactedSize.hlsl",
+      "sha": "df390323a0a3cb84ad5945400a9e1734f8b4cf1a",
+      "size": 1673
+    },
+    {
+      "repo": "microsoft/DirectX-Graphics-Samples",
+      "ref": "e5975f9b0744fc5096dd593ed72bf8f5c004164f",
+      "path": "Libraries/D3D12RaytracingFallback/src/GetBVHCompactedSizeBindings.h",
+      "local": "d3d12/GetBVHCompactedSizeBindings.h",
+      "sha": "bab527fa1c431520f6f97d1a11f59de7344cbca2",
+      "size": 2278
+    },
+    {
+      "repo": "microsoft/DirectX-Graphics-Samples",
+      "ref": "e5975f9b0744fc5096dd593ed72bf8f5c004164f",
+      "path": "Libraries/D3D12RaytracingFallback/src/GpuBVH2Builder.cpp",
+      "local": "d3d12/GpuBVH2Builder.cpp",
+      "sha": "ba2582aea1ba8c25c5dd1b9eeba0b8b171957bc3",
+      "size": 20731
+    },
+    {
+      "repo": "microsoft/DirectX-Graphics-Samples",
+      "ref": "e5975f9b0744fc5096dd593ed72bf8f5c004164f",
+      "path": "Libraries/D3D12RaytracingFallback/src/GpuBVH2Copy.cpp",
+      "local": "d3d12/GpuBVH2Copy.cpp",
+      "sha": "6762354acde9599a518f0caea3aa9a6c3735c0f7",
+      "size": 2235
+    },
+    {
+      "repo": "microsoft/DirectX-Graphics-Samples",
+      "ref": "e5975f9b0744fc5096dd593ed72bf8f5c004164f",
+      "path": "Libraries/D3D12RaytracingFallback/src/GpuBvh2Builder.h",
+      "local": "d3d12/GpuBvh2Builder.h",
+      "sha": "44fe098298ac97d8d7d1e33f7a533b4122edb192",
+      "size": 6955
+    },
+    {
+      "repo": "microsoft/DirectX-Graphics-Samples",
+      "ref": "e5975f9b0744fc5096dd593ed72bf8f5c004164f",
+      "path": "Libraries/D3D12RaytracingFallback/src/GpuBvh2Copy.h",
+      "local": "d3d12/GpuBvh2Copy.h",
+      "sha": "0d169036d19a65b0eed5186f7bc561182b64cb0d",
+      "size": 1067
+    },
+    {
+      "repo": "microsoft/DirectX-Graphics-Samples",
+      "ref": "e5975f9b0744fc5096dd593ed72bf8f5c004164f",
+      "path": "Libraries/D3D12RaytracingFallback/src/GpuBvh2Copy.hlsl",
+      "local": "d3d12/GpuBvh2Copy.hlsl",
+      "sha": "6c2441b4123cd11addd04cc81fe29a7e010d7fe3",
+      "size": 987
+    },
+    {
+      "repo": "microsoft/DirectX-Graphics-Samples",
+      "ref": "e5975f9b0744fc5096dd593ed72bf8f5c004164f",
+      "path": "Libraries/D3D12RaytracingFallback/src/GpuBvh2CopyBindings.h",
+      "local": "d3d12/GpuBvh2CopyBindings.h",
+      "sha": "40d3158d4f7e376d00cdaea712426a3648e6b77d",
+      "size": 1016
+    },
+    {
+      "repo": "microsoft/DirectX-Graphics-Samples",
+      "ref": "e5975f9b0744fc5096dd593ed72bf8f5c004164f",
+      "path": "Libraries/D3D12RaytracingFallback/src/HLSLRayTracingInternalPrototypes.h",
+      "local": "d3d12/HLSLRayTracingInternalPrototypes.h",
+      "sha": "128c230b52bb008a22a4b348fa354298d9594c7f",
+      "size": 2891
+    },
+    {
+      "repo": "microsoft/DirectX-Graphics-Samples",
+      "ref": "e5975f9b0744fc5096dd593ed72bf8f5c004164f",
+      "path": "Libraries/D3D12RaytracingFallback/src/HlslCompat.h",
+      "local": "d3d12/HlslCompat.h",
+      "sha": "bf1495a4737b905bb4322c7a096515ace2fd4896",
+      "size": 2474
+    },
+    {
+      "repo": "microsoft/DirectX-Graphics-Samples",
+      "ref": "e5975f9b0744fc5096dd593ed72bf8f5c004164f",
+      "path": "Libraries/D3D12RaytracingFallback/src/LoadInstancesBindings.h",
+      "local": "d3d12/LoadInstancesBindings.h",
+      "sha": "2982cd61e6f21775381a5c6a36baf2317a1e7098",
+      "size": 1746
+    },
+    {
+      "repo": "microsoft/DirectX-Graphics-Samples",
+      "ref": "e5975f9b0744fc5096dd593ed72bf8f5c004164f",
+      "path": "Libraries/D3D12RaytracingFallback/src/LoadInstancesPass.cpp",
+      "local": "d3d12/LoadInstancesPass.cpp",
+      "sha": "9d18371df7543b157c945ef19ae6c76ce4c46e7e",
+      "size": 4409
+    },
+    {
+      "repo": "microsoft/DirectX-Graphics-Samples",
+      "ref": "e5975f9b0744fc5096dd593ed72bf8f5c004164f",
+      "path": "Libraries/D3D12RaytracingFallback/src/LoadInstancesPass.h",
+      "local": "d3d12/LoadInstancesPass.h",
+      "sha": "36228cf72f0c7237ea2afdadde44cefa200dc9d6",
+      "size": 1421
+    },
+    {
+      "repo": "microsoft/DirectX-Graphics-Samples",
+      "ref": "e5975f9b0744fc5096dd593ed72bf8f5c004164f",
+      "path": "Libraries/D3D12RaytracingFallback/src/LoadPrimitivesBindings.h",
+      "local": "d3d12/LoadPrimitivesBindings.h",
+      "sha": "f8019fb82e2d1bd1501981a799bfa2e0bac1e23c",
+      "size": 2371
+    },
+    {
+      "repo": "microsoft/DirectX-Graphics-Samples",
+      "ref": "e5975f9b0744fc5096dd593ed72bf8f5c004164f",
+      "path": "Libraries/D3D12RaytracingFallback/src/LoadPrimitivesPass.cpp",
+      "local": "d3d12/LoadPrimitivesPass.cpp",
+      "sha": "6bc0f4c8838db64e21d4a904b2405ba78109fc4a",
+      "size": 9326
+    },
+    {
+      "repo": "microsoft/DirectX-Graphics-Samples",
+      "ref": "e5975f9b0744fc5096dd593ed72bf8f5c004164f",
+      "path": "Libraries/D3D12RaytracingFallback/src/LoadPrimitivesPass.h",
+      "local": "d3d12/LoadPrimitivesPass.h",
+      "sha": "7cd64fe62cb746e2449e52e368b8e0372c6fd8a2",
+      "size": 1704
+    },
+    {
+      "repo": "microsoft/DirectX-Graphics-Samples",
+      "ref": "e5975f9b0744fc5096dd593ed72bf8f5c004164f",
+      "path": "Libraries/D3D12RaytracingFallback/src/LoadProceduralGeometry.hlsl",
+      "local": "d3d12/LoadProceduralGeometry.hlsl",
+      "sha": "73838a135504e8b588931fff05817fbcfe676291",
+      "size": 1375
+    },
+    {
+      "repo": "microsoft/DirectX-Graphics-Samples",
+      "ref": "e5975f9b0744fc5096dd593ed72bf8f5c004164f",
+      "path": "Libraries/D3D12RaytracingFallback/src/LoadTrianglesFromR16IndexBuffer.hlsl",
+      "local": "d3d12/LoadTrianglesFromR16IndexBuffer.hlsl",
+      "sha": "85820418b1a8609d8222255fcde28462355b3f10",
+      "size": 506
+    },
+    {
+      "repo": "microsoft/DirectX-Graphics-Samples",
+      "ref": "e5975f9b0744fc5096dd593ed72bf8f5c004164f",
+      "path": "Libraries/D3D12RaytracingFallback/src/LoadTrianglesFromR32IndexBuffer.hlsl",
+      "local": "d3d12/LoadTrianglesFromR32IndexBuffer.hlsl",
+      "sha": "af3a176ab6241c58ed406281206b6934bb7c079c",
+      "size": 506
+    },
+    {
+      "repo": "microsoft/DirectX-Graphics-Samples",
+      "ref": "e5975f9b0744fc5096dd593ed72bf8f5c004164f",
+      "path": "Libraries/D3D12RaytracingFallback/src/LoadTrianglesNoIndexBuffer.hlsl",
+      "local": "d3d12/LoadTrianglesNoIndexBuffer.hlsl",
+      "sha": "d12a8e68dc83e0404436b585cc437dbb1c9e1b21",
+      "size": 502
+    },
+    {
+      "repo": "microsoft/DirectX-Graphics-Samples",
+      "ref": "e5975f9b0744fc5096dd593ed72bf8f5c004164f",
+      "path": "Libraries/D3D12RaytracingFallback/src/MinimalTraverseShaderLib.hlsl",
+      "local": "d3d12/MinimalTraverseShaderLib.hlsl",
+      "sha": "040ab2dc850b237ce65eb519c79b58d9d54c9e86",
+      "size": 527
+    },
+    {
+      "repo": "microsoft/DirectX-Graphics-Samples",
+      "ref": "e5975f9b0744fc5096dd593ed72bf8f5c004164f",
+      "path": "Libraries/D3D12RaytracingFallback/src/MortonCodesCalculator.cpp",
+      "local": "d3d12/MortonCodesCalculator.cpp",
+      "sha": "cabd6253089eff7804485f91d9423949d9434867",
+      "size": 3464
+    },
+    {
+      "repo": "microsoft/DirectX-Graphics-Samples",
+      "ref": "e5975f9b0744fc5096dd593ed72bf8f5c004164f",
+      "path": "Libraries/D3D12RaytracingFallback/src/MortonCodesCalculator.h",
+      "local": "d3d12/MortonCodesCalculator.h",
+      "sha": "962e6e11fb46dee56e5f6dd5ba2b7d3cd21be04f",
+      "size": 1329
+    },
+    {
+      "repo": "microsoft/DirectX-Graphics-Samples",
+      "ref": "e5975f9b0744fc5096dd593ed72bf8f5c004164f",
+      "path": "Libraries/D3D12RaytracingFallback/src/NativeRayTracing.h",
+      "local": "d3d12/NativeRayTracing.h",
+      "sha": "7b1c69eca2b6cb66b127471e8b43f2a817f418eb",
+      "size": 9037
+    },
+    {
+      "repo": "microsoft/DirectX-Graphics-Samples",
+      "ref": "e5975f9b0744fc5096dd593ed72bf8f5c004164f",
+      "path": "Libraries/D3D12RaytracingFallback/src/NullTraverseLib.hlsl",
+      "local": "d3d12/NullTraverseLib.hlsl",
+      "sha": "4ddd470e53c184bff7919fb217ff07245ae9adbd",
+      "size": 1616
+    },
+    {
+      "repo": "microsoft/DirectX-Graphics-Samples",
+      "ref": "e5975f9b0744fc5096dd593ed72bf8f5c004164f",
+      "path": "Libraries/D3D12RaytracingFallback/src/PostBuildInfoQuery.cpp",
+      "local": "d3d12/PostBuildInfoQuery.cpp",
+      "sha": "0b4dc5ded71a8c963f3c6b679655479069ca4cf3",
+      "size": 2974
+    },
+    {
+      "repo": "microsoft/DirectX-Graphics-Samples",
+      "ref": "e5975f9b0744fc5096dd593ed72bf8f5c004164f",
+      "path": "Libraries/D3D12RaytracingFallback/src/PostBuildInfoQuery.h",
+      "local": "d3d12/PostBuildInfoQuery.h",
+      "sha": "17fa9616b152bc6b290227cd5538e5e0842c9718",
+      "size": 1138
+    },
+    {
+      "repo": "microsoft/DirectX-Graphics-Samples",
+      "ref": "e5975f9b0744fc5096dd593ed72bf8f5c004164f",
+      "path": "Libraries/D3D12RaytracingFallback/src/PropertySheets/Debug.props",
+      "local": "d3d12/PropertySheets/Debug.props",
+      "sha": "557440dfb1fd855e1fdc77c7ef16079aaa753b49",
+      "size": 1113
+    },
+    {
+      "repo": "microsoft/DirectX-Graphics-Samples",
+      "ref": "e5975f9b0744fc5096dd593ed72bf8f5c004164f",
+      "path": "Libraries/D3D12RaytracingFallback/src/PropertySheets/OrganizedBuild.props",
+      "local": "d3d12/PropertySheets/OrganizedBuild.props",
+      "sha": "dd4166465fa5d96082ab3c9857193f2bb4df3820",
+      "size": 283
+    },
+    {
+      "repo": "microsoft/DirectX-Graphics-Samples",
+      "ref": "e5975f9b0744fc5096dd593ed72bf8f5c004164f",
+      "path": "Libraries/D3D12RaytracingFallback/src/PropertySheets/Profile.props",
+      "local": "d3d12/PropertySheets/Profile.props",
+      "sha": "71bfead4b6e7c93d6a77ad369502191a8a5ae6e3",
+      "size": 1133
+    },
+    {
+      "repo": "microsoft/DirectX-Graphics-Samples",
+      "ref": "e5975f9b0744fc5096dd593ed72bf8f5c004164f",
+      "path": "Libraries/D3D12RaytracingFallback/src/PropertySheets/Release.props",
+      "local": "d3d12/PropertySheets/Release.props",
+      "sha": "c53aa0787a30265784696b0b0f4c407dbed542c7",
+      "size": 1141
+    },
+    {
+      "repo": "microsoft/DirectX-Graphics-Samples",
+      "ref": "e5975f9b0744fc5096dd593ed72bf8f5c004164f",
+      "path": "Libraries/D3D12RaytracingFallback/src/PropertySheets/UWP.props",
+      "local": "d3d12/PropertySheets/UWP.props",
+      "sha": "9ccaf66b5b4e0b7582ba5c8d9ef612fa5deedb72",
+      "size": 1898
+    },
+    {
+      "repo": "microsoft/DirectX-Graphics-Samples",
+      "ref": "e5975f9b0744fc5096dd593ed72bf8f5c004164f",
+      "path": "Libraries/D3D12RaytracingFallback/src/PropertySheets/VS14.props",
+      "local": "d3d12/PropertySheets/VS14.props",
+      "sha": "5ac3f8532021fb858508f8957dd7b911ab991f53",
+      "size": 1837
+    },
+    {
+      "repo": "microsoft/DirectX-Graphics-Samples",
+      "ref": "e5975f9b0744fc5096dd593ed72bf8f5c004164f",
+      "path": "Libraries/D3D12RaytracingFallback/src/PropertySheets/VS15.props",
+      "local": "d3d12/PropertySheets/VS15.props",
+      "sha": "f76396a17b57baf12645f7d10dd50bfb90cd3ed4",
+      "size": 1838
+    },
+    {
+      "repo": "microsoft/DirectX-Graphics-Samples",
+      "ref": "e5975f9b0744fc5096dd593ed72bf8f5c004164f",
+      "path": "Libraries/D3D12RaytracingFallback/src/PropertySheets/Win32.props",
+      "local": "d3d12/PropertySheets/Win32.props",
+      "sha": "085f19f2d3e3179c70ad42c4abb441510dadca1a",
+      "size": 493
+    },
+    {
+      "repo": "microsoft/DirectX-Graphics-Samples",
+      "ref": "e5975f9b0744fc5096dd593ed72bf8f5c004164f",
+      "path": "Libraries/D3D12RaytracingFallback/src/RayTracingHelper.hlsli",
+      "local": "d3d12/RayTracingHelper.hlsli",
+      "sha": "c02a5720f2e1df8831e35b71ef2d3c23d7ac8a85",
+      "size": 14005
+    },
+    {
+      "repo": "microsoft/DirectX-Graphics-Samples",
+      "ref": "e5975f9b0744fc5096dd593ed72bf8f5c004164f",
+      "path": "Libraries/D3D12RaytracingFallback/src/RayTracingHlslCompat.h",
+      "local": "d3d12/RayTracingHlslCompat.h",
+      "sha": "e3daf595e971c187ab3331e8762a0abaf5abaea8",
+      "size": 11834
+    },
+    {
+      "repo": "microsoft/DirectX-Graphics-Samples",
+      "ref": "e5975f9b0744fc5096dd593ed72bf8f5c004164f",
+      "path": "Libraries/D3D12RaytracingFallback/src/RayTracingProgram.h",
+      "local": "d3d12/RayTracingProgram.h",
+      "sha": "b4b9255d3093f87a6538dab44847af804cb5997d",
+      "size": 1881
+    },
+    {
+      "repo": "microsoft/DirectX-Graphics-Samples",
+      "ref": "e5975f9b0744fc5096dd593ed72bf8f5c004164f",
+      "path": "Libraries/D3D12RaytracingFallback/src/RayTracingProgramFactory.cpp",
+      "local": "d3d12/RayTracingProgramFactory.cpp",
+      "sha": "01f01ebdcfd97f4ef68f4f4be5685aaf899c3125",
+      "size": 2439
+    },
+    {
+      "repo": "microsoft/DirectX-Graphics-Samples",
+      "ref": "e5975f9b0744fc5096dd593ed72bf8f5c004164f",
+      "path": "Libraries/D3D12RaytracingFallback/src/RayTracingProgramFactory.h",
+      "local": "d3d12/RayTracingProgramFactory.h",
+      "sha": "320717d187a9b3ef30fdfba92d0793c84910ff7c",
+      "size": 2506
+    },
+    {
+      "repo": "microsoft/DirectX-Graphics-Samples",
+      "ref": "e5975f9b0744fc5096dd593ed72bf8f5c004164f",
+      "path": "Libraries/D3D12RaytracingFallback/src/RaytracingCompatibilityDebug.h",
+      "local": "d3d12/RaytracingCompatibilityDebug.h",
+      "sha": "321e1312f27cf9548dc1b2641fca924b7051e721",
+      "size": 864
+    },
+    {
+      "repo": "microsoft/DirectX-Graphics-Samples",
+      "ref": "e5975f9b0744fc5096dd593ed72bf8f5c004164f",
+      "path": "Libraries/D3D12RaytracingFallback/src/RearrangeBVHs.hlsl",
+      "local": "d3d12/RearrangeBVHs.hlsl",
+      "sha": "2464352c60ede8201ef24fbeb523b1dcd0a4e563",
+      "size": 1860
+    },
+    {
+      "repo": "microsoft/DirectX-Graphics-Samples",
+      "ref": "e5975f9b0744fc5096dd593ed72bf8f5c004164f",
+      "path": "Libraries/D3D12RaytracingFallback/src/RearrangeElementsPass.cpp",
+      "local": "d3d12/RearrangeElementsPass.cpp",
+      "sha": "f171a2f7632139545e6388e85376a2f5ea9d8308",
+      "size": 4028
+    },
+    {
+      "repo": "microsoft/DirectX-Graphics-Samples",
+      "ref": "e5975f9b0744fc5096dd593ed72bf8f5c004164f",
+      "path": "Libraries/D3D12RaytracingFallback/src/RearrangeElementsPass.h",
+      "local": "d3d12/RearrangeElementsPass.h",
+      "sha": "70cd69416d599490382d9b141898faee961adea3",
+      "size": 1561
+    },
+    {
+      "repo": "microsoft/DirectX-Graphics-Samples",
+      "ref": "e5975f9b0744fc5096dd593ed72bf8f5c004164f",
+      "path": "Libraries/D3D12RaytracingFallback/src/RearrangeTriangles.hlsl",
+      "local": "d3d12/RearrangeTriangles.hlsl",
+      "sha": "0c9eb69bc02bb8401e7fbe86c102f47504bcff1c",
+      "size": 1434
+    },
+    {
+      "repo": "microsoft/DirectX-Graphics-Samples",
+      "ref": "e5975f9b0744fc5096dd593ed72bf8f5c004164f",
+      "path": "Libraries/D3D12RaytracingFallback/src/RearrangeTrianglesBindings.h",
+      "local": "d3d12/RearrangeTrianglesBindings.h",
+      "sha": "3b2170d983095a96bb6e0fcb7910ae59f0b59dfa",
+      "size": 1428
+    },
+    {
+      "repo": "microsoft/DirectX-Graphics-Samples",
+      "ref": "e5975f9b0744fc5096dd593ed72bf8f5c004164f",
+      "path": "Libraries/D3D12RaytracingFallback/src/SceneAABBCalculator.cpp",
+      "local": "d3d12/SceneAABBCalculator.cpp",
+      "sha": "737ebd1dd3a8f695553abfd638ef78f1f6b5792f",
+      "size": 5136
+    },
+    {
+      "repo": "microsoft/DirectX-Graphics-Samples",
+      "ref": "e5975f9b0744fc5096dd593ed72bf8f5c004164f",
+      "path": "Libraries/D3D12RaytracingFallback/src/SceneAABBCalculator.h",
+      "local": "d3d12/SceneAABBCalculator.h",
+      "sha": "ccd3777904442a245c77f9d0a463d31ec7c9d0fe",
+      "size": 1430
+    },
+    {
+      "repo": "microsoft/DirectX-Graphics-Samples",
+      "ref": "e5975f9b0744fc5096dd593ed72bf8f5c004164f",
+      "path": "Libraries/D3D12RaytracingFallback/src/ShaderPass.h",
+      "local": "d3d12/ShaderPass.h",
+      "sha": "520ce6bee43108b0d9943febc6a5f58744cb8181",
+      "size": 558
+    },
+    {
+      "repo": "microsoft/DirectX-Graphics-Samples",
+      "ref": "e5975f9b0744fc5096dd593ed72bf8f5c004164f",
+      "path": "Libraries/D3D12RaytracingFallback/src/ShaderUtil.hlsli",
+      "local": "d3d12/ShaderUtil.hlsli",
+      "sha": "5c94712040740babdde4c110445bfb7d9fc7b2d9",
+      "size": 1099
+    },
+    {
+      "repo": "microsoft/DirectX-Graphics-Samples",
+      "ref": "e5975f9b0744fc5096dd593ed72bf8f5c004164f",
+      "path": "Libraries/D3D12RaytracingFallback/src/SharedReadData.hlsli",
+      "local": "d3d12/SharedReadData.hlsli",
+      "sha": "58210db7d5e8dd4d9c6c54dad0e72993f6e6b833",
+      "size": 683
+    },
+    {
+      "repo": "microsoft/DirectX-Graphics-Samples",
+      "ref": "e5975f9b0744fc5096dd593ed72bf8f5c004164f",
+      "path": "Libraries/D3D12RaytracingFallback/src/SimpleRayTracing.hlsl",
+      "local": "d3d12/SimpleRayTracing.hlsl",
+      "sha": "764b644b5c1f90c62486ccd9f6eabb795d3ca7e2",
+      "size": 1628
+    },
+    {
+      "repo": "microsoft/DirectX-Graphics-Samples",
+      "ref": "e5975f9b0744fc5096dd593ed72bf8f5c004164f",
+      "path": "Libraries/D3D12RaytracingFallback/src/SimpleRaygen.hlsl",
+      "local": "d3d12/SimpleRaygen.hlsl",
+      "sha": "74aafc174202138deb8154081b8a9370ebe8ae39",
+      "size": 741
+    },
+    {
+      "repo": "microsoft/DirectX-Graphics-Samples",
+      "ref": "e5975f9b0744fc5096dd593ed72bf8f5c004164f",
+      "path": "Libraries/D3D12RaytracingFallback/src/StateMachineLib.hlsl",
+      "local": "d3d12/StateMachineLib.hlsl",
+      "sha": "68e1b7509b1f060d93c646b1530f34bf5da9e331",
+      "size": 903
+    },
+    {
+      "repo": "microsoft/DirectX-Graphics-Samples",
+      "ref": "e5975f9b0744fc5096dd593ed72bf8f5c004164f",
+      "path": "Libraries/D3D12RaytracingFallback/src/StateObjectProcessing.cpp",
+      "local": "d3d12/StateObjectProcessing.cpp",
+      "sha": "141e75ace415bd32885163f33de6fbba0204f1e8",
+      "size": 167016
+    },
+    {
+      "repo": "microsoft/DirectX-Graphics-Samples",
+      "ref": "e5975f9b0744fc5096dd593ed72bf8f5c004164f",
+      "path": "Libraries/D3D12RaytracingFallback/src/StateObjectProcessing.hpp",
+      "local": "d3d12/StateObjectProcessing.hpp",
+      "sha": "2a1d6863d741c7e46e030e66625fef4a2862a18a",
+      "size": 48211
+    },
+    {
+      "repo": "microsoft/DirectX-Graphics-Samples",
+      "ref": "e5975f9b0744fc5096dd593ed72bf8f5c004164f",
+      "path": "Libraries/D3D12RaytracingFallback/src/TopLevelBuildBVHSplits.hlsl",
+      "local": "d3d12/TopLevelBuildBVHSplits.hlsl",
+      "sha": "ab3b8f08ca9e3b29259464a01d5fe773b7724292",
+      "size": 521
+    },
+    {
+      "repo": "microsoft/DirectX-Graphics-Samples",
+      "ref": "e5975f9b0744fc5096dd593ed72bf8f5c004164f",
+      "path": "Libraries/D3D12RaytracingFallback/src/TopLevelComputeAABBs.hlsl",
+      "local": "d3d12/TopLevelComputeAABBs.hlsl",
+      "sha": "af49d3ca4d4b9dce70f9390f6797d39272b848e0",
+      "size": 1487
+    },
+    {
+      "repo": "microsoft/DirectX-Graphics-Samples",
+      "ref": "e5975f9b0744fc5096dd593ed72bf8f5c004164f",
+      "path": "Libraries/D3D12RaytracingFallback/src/TopLevelLoadAABBs.hlsli",
+      "local": "d3d12/TopLevelLoadAABBs.hlsli",
+      "sha": "9cb8c55a7127e0593e01635fa1fd0c58156317d4",
+      "size": 3680
+    },
+    {
+      "repo": "microsoft/DirectX-Graphics-Samples",
+      "ref": "e5975f9b0744fc5096dd593ed72bf8f5c004164f",
+      "path": "Libraries/D3D12RaytracingFallback/src/TopLevelLoadAABBsFromArrayOfInstances.hlsl",
+      "local": "d3d12/TopLevelLoadAABBsFromArrayOfInstances.hlsl",
+      "sha": "77f99a6d08dd5cc97f1de7a2c704f8812c7a5bc8",
+      "size": 498
+    },
+    {
+      "repo": "microsoft/DirectX-Graphics-Samples",
+      "ref": "e5975f9b0744fc5096dd593ed72bf8f5c004164f",
+      "path": "Libraries/D3D12RaytracingFallback/src/TopLevelLoadAABBsFromArrayOfPointers.hlsl",
+      "local": "d3d12/TopLevelLoadAABBsFromArrayOfPointers.hlsl",
+      "sha": "c495ebd50e6dec31f9fc0aba64f0858f8b348833",
+      "size": 497
+    },
+    {
+      "repo": "microsoft/DirectX-Graphics-Samples",
+      "ref": "e5975f9b0744fc5096dd593ed72bf8f5c004164f",
+      "path": "Libraries/D3D12RaytracingFallback/src/TopLevelPrepareForComputeAABBs.hlsl",
+      "local": "d3d12/TopLevelPrepareForComputeAABBs.hlsl",
+      "sha": "d3f704bf881949f847817f5eafbca4cdff396584",
+      "size": 2503
+    },
+    {
+      "repo": "microsoft/DirectX-Graphics-Samples",
+      "ref": "e5975f9b0744fc5096dd593ed72bf8f5c004164f",
+      "path": "Libraries/D3D12RaytracingFallback/src/TraversalShaderBuilder.h",
+      "local": "d3d12/TraversalShaderBuilder.h",
+      "sha": "f467ac2fd9a0718871df931ccce8c55b7b3463f4",
+      "size": 759
+    },
+    {
+      "repo": "microsoft/DirectX-Graphics-Samples",
+      "ref": "e5975f9b0744fc5096dd593ed72bf8f5c004164f",
+      "path": "Libraries/D3D12RaytracingFallback/src/TraverseFunction.hlsli",
+      "local": "d3d12/TraverseFunction.hlsli",
+      "sha": "3f6bcb506e9df190700345deb623e1b15464fc6b",
+      "size": 25987
+    },
+    {
+      "repo": "microsoft/DirectX-Graphics-Samples",
+      "ref": "e5975f9b0744fc5096dd593ed72bf8f5c004164f",
+      "path": "Libraries/D3D12RaytracingFallback/src/TraverseShader.hlsli",
+      "local": "d3d12/TraverseShader.hlsli",
+      "sha": "68d1bcc46840fa21225a6f315120ed9756e7168b",
+      "size": 2031
+    },
+    {
+      "repo": "microsoft/DirectX-Graphics-Samples",
+      "ref": "e5975f9b0744fc5096dd593ed72bf8f5c004164f",
+      "path": "Libraries/D3D12RaytracingFallback/src/TraverseShaderLib.hlsl",
+      "local": "d3d12/TraverseShaderLib.hlsl",
+      "sha": "2c628c25187a6aade9591776dfa66d7e3cb26305",
+      "size": 468
+    },
+    {
+      "repo": "microsoft/DirectX-Graphics-Samples",
+      "ref": "e5975f9b0744fc5096dd593ed72bf8f5c004164f",
+      "path": "Libraries/D3D12RaytracingFallback/src/TreeletReorder.cpp",
+      "local": "d3d12/TreeletReorder.cpp",
+      "sha": "6aa31a8c0fca2d786581e6c9bd8f2c35e4683577",
+      "size": 5707
+    },
+    {
+      "repo": "microsoft/DirectX-Graphics-Samples",
+      "ref": "e5975f9b0744fc5096dd593ed72bf8f5c004164f",
+      "path": "Libraries/D3D12RaytracingFallback/src/TreeletReorder.h",
+      "local": "d3d12/TreeletReorder.h",
+      "sha": "ffc8777312e42f74262a54d381f202106979f578",
+      "size": 1899
+    },
+    {
+      "repo": "microsoft/DirectX-Graphics-Samples",
+      "ref": "e5975f9b0744fc5096dd593ed72bf8f5c004164f",
+      "path": "Libraries/D3D12RaytracingFallback/src/TreeletReorder.hlsl",
+      "local": "d3d12/TreeletReorder.hlsl",
+      "sha": "e8d1bd73f7d4f4880816c490732800064e360c49",
+      "size": 12694
+    },
+    {
+      "repo": "microsoft/DirectX-Graphics-Samples",
+      "ref": "e5975f9b0744fc5096dd593ed72bf8f5c004164f",
+      "path": "Libraries/D3D12RaytracingFallback/src/TreeletReorderBindings.h",
+      "local": "d3d12/TreeletReorderBindings.h",
+      "sha": "d587504a4f477862e61aa8499adecabf2c56666a",
+      "size": 4338
+    },
+    {
+      "repo": "microsoft/DirectX-Graphics-Samples",
+      "ref": "e5975f9b0744fc5096dd593ed72bf8f5c004164f",
+      "path": "Libraries/D3D12RaytracingFallback/src/UberShaderBindings.h",
+      "local": "d3d12/UberShaderBindings.h",
+      "sha": "477fc8b0787ea50ace9339446feed4fc5d8fdd5f",
+      "size": 2618
+    },
+    {
+      "repo": "microsoft/DirectX-Graphics-Samples",
+      "ref": "e5975f9b0744fc5096dd593ed72bf8f5c004164f",
+      "path": "Libraries/D3D12RaytracingFallback/src/UberShaderRayTracingProgram.cpp",
+      "local": "d3d12/UberShaderRayTracingProgram.cpp",
+      "sha": "93cf24b6c7fe2d76387a391fe1b9622a54d2f978",
+      "size": 13165
+    },
+    {
+      "repo": "microsoft/DirectX-Graphics-Samples",
+      "ref": "e5975f9b0744fc5096dd593ed72bf8f5c004164f",
+      "path": "Libraries/D3D12RaytracingFallback/src/UberShaderRayTracingProgram.h",
+      "local": "d3d12/UberShaderRayTracingProgram.h",
+      "sha": "f9a3c41c6bd638114ffc02b636c28e3720f32496",
+      "size": 2100
+    },
+    {
+      "repo": "microsoft/DirectX-Graphics-Samples",
+      "ref": "e5975f9b0744fc5096dd593ed72bf8f5c004164f",
+      "path": "Libraries/D3D12RaytracingFallback/src/Util.h",
+      "local": "d3d12/Util.h",
+      "sha": "eb5ae9e60221794683345d233309c9d4e33ebec5",
+      "size": 6370
+    },
+    {
+      "repo": "microsoft/DirectX-Graphics-Samples",
+      "ref": "e5975f9b0744fc5096dd593ed72bf8f5c004164f",
+      "path": "Libraries/D3D12RaytracingFallback/src/WaveDimensions.h",
+      "local": "d3d12/WaveDimensions.h",
+      "sha": "f5ef9d7c8d28e37fcda999d13de00400058bd8ae",
+      "size": 933
+    },
+    {
+      "repo": "microsoft/DirectX-Graphics-Samples",
+      "ref": "e5975f9b0744fc5096dd593ed72bf8f5c004164f",
+      "path": "Libraries/D3D12RaytracingFallback/src/dxc/dxcapi.h",
+      "local": "d3d12/dxc/dxcapi.h",
+      "sha": "fd9a996e40df4c14893fe581d11fae1830079c0d",
+      "size": 17139
+    },
+    {
+      "repo": "microsoft/DirectX-Graphics-Samples",
+      "ref": "e5975f9b0744fc5096dd593ed72bf8f5c004164f",
+      "path": "Libraries/D3D12RaytracingFallback/src/dxc/dxcapi.use.h",
+      "local": "d3d12/dxc/dxcapi.use.h",
+      "sha": "d502de20097c3d984d7bed0d5264600d1a447619",
+      "size": 5646
+    },
+    {
+      "repo": "microsoft/DirectX-Graphics-Samples",
+      "ref": "e5975f9b0744fc5096dd593ed72bf8f5c004164f",
+      "path": "Libraries/D3D12RaytracingFallback/src/dxc/dxcdxrfallbackcompiler.h",
+      "local": "d3d12/dxc/dxcdxrfallbackcompiler.h",
+      "sha": "2833d312456b44fe598af3f95f081c87274f496d",
+      "size": 4577
+    },
+    {
+      "repo": "microsoft/DirectX-Graphics-Samples",
+      "ref": "e5975f9b0744fc5096dd593ed72bf8f5c004164f",
+      "path": "Libraries/D3D12RaytracingFallback/src/dxc/hlsl/DxilConstants.h",
+      "local": "d3d12/dxc/hlsl/DxilConstants.h",
+      "sha": "1844bdd4edff7b50429a4d54238d060256e3eb30",
+      "size": 38212
+    },
+    {
+      "repo": "microsoft/DirectX-Graphics-Samples",
+      "ref": "e5975f9b0744fc5096dd593ed72bf8f5c004164f",
+      "path": "Libraries/D3D12RaytracingFallback/src/dxc/hlsl/DxilContainer.h",
+      "local": "d3d12/dxc/hlsl/DxilContainer.h",
+      "sha": "8fc6910f4f89a971ff3a06ff8b68fcdcddcf26a8",
+      "size": 19477
+    },
+    {
+      "repo": "microsoft/DirectX-Graphics-Samples",
+      "ref": "e5975f9b0744fc5096dd593ed72bf8f5c004164f",
+      "path": "Libraries/D3D12RaytracingFallback/src/dxc/hlsl/DxilRuntimeReflection.h",
+      "local": "d3d12/dxc/hlsl/DxilRuntimeReflection.h",
+      "sha": "413893a29142dd36fab047bdad18db23b2bb9499",
+      "size": 16592
+    },
+    {
+      "repo": "microsoft/DirectX-Graphics-Samples",
+      "ref": "e5975f9b0744fc5096dd593ed72bf8f5c004164f",
+      "path": "Libraries/D3D12RaytracingFallback/src/dxc/hlsl/DxilRuntimeReflection.inl",
+      "local": "d3d12/dxc/hlsl/DxilRuntimeReflection.inl",
+      "sha": "bb5c562a08d5e5e5330fd64342abbf535e90ceb4",
+      "size": 16444
+    },
+    {
+      "repo": "microsoft/DirectX-Graphics-Samples",
+      "ref": "e5975f9b0744fc5096dd593ed72bf8f5c004164f",
+      "path": "Libraries/D3D12RaytracingFallback/src/fallbacklayerunittests.cpp",
+      "local": "d3d12/fallbacklayerunittests.cpp",
+      "sha": "6b5a17ab10d5bac75c041448911d44158ce6c52b",
+      "size": 172098
+    },
+    {
+      "repo": "microsoft/DirectX-Graphics-Samples",
+      "ref": "e5975f9b0744fc5096dd593ed72bf8f5c004164f",
+      "path": "Libraries/D3D12RaytracingFallback/src/pch.cpp",
+      "local": "d3d12/pch.cpp",
+      "sha": "5acfbaf920d7632b346a6603fb5dd4e7de236764",
+      "size": 453
+    },
+    {
+      "repo": "microsoft/DirectX-Graphics-Samples",
+      "ref": "e5975f9b0744fc5096dd593ed72bf8f5c004164f",
+      "path": "Libraries/D3D12RaytracingFallback/src/pch.h",
+      "local": "d3d12/pch.h",
+      "sha": "c8d1e3a85e81b02f694ca364f5af87eefec57c84",
+      "size": 2644
+    },
+    {
+      "repo": "microsoft/DirectXShaderCompiler",
+      "ref": "61e9771fc34bc914565dfc95a11f731f853e8ac9",
+      "path": "lib/DxrFallback/CMakeLists.txt",
+      "local": "dxc/CMakeLists.txt",
+      "sha": "393f9483bc9930082aa96a9661a588dd14d92dd9",
+      "size": 328
+    },
+    {
+      "repo": "microsoft/DirectXShaderCompiler",
+      "ref": "61e9771fc34bc914565dfc95a11f731f853e8ac9",
+      "path": "lib/DxrFallback/DxrFallbackCompiler.cpp",
+      "local": "dxc/DxrFallbackCompiler.cpp",
+      "sha": "db48a238a09c3d1b3956cf179ae463d5c2613d20",
+      "size": 31794
+    },
+    {
+      "repo": "microsoft/DirectXShaderCompiler",
+      "ref": "61e9771fc34bc914565dfc95a11f731f853e8ac9",
+      "path": "lib/DxrFallback/FunctionBuilder.h",
+      "local": "dxc/FunctionBuilder.h",
+      "sha": "eb7b265c10ef0b6b8de2b3e1ee06004afc89d0f7",
+      "size": 4159
+    },
+    {
+      "repo": "microsoft/DirectXShaderCompiler",
+      "ref": "61e9771fc34bc914565dfc95a11f731f853e8ac9",
+      "path": "lib/DxrFallback/LLVMBuild.txt",
+      "local": "dxc/LLVMBuild.txt",
+      "sha": "be483a48abd547387a3cd248464bf27a56846213",
+      "size": 542
+    },
+    {
+      "repo": "microsoft/DirectXShaderCompiler",
+      "ref": "61e9771fc34bc914565dfc95a11f731f853e8ac9",
+      "path": "lib/DxrFallback/LLVMUtils.cpp",
+      "local": "dxc/LLVMUtils.cpp",
+      "sha": "6ceea0096ece95747401ef8fdbb40d03ee328350",
+      "size": 3400
+    },
+    {
+      "repo": "microsoft/DirectXShaderCompiler",
+      "ref": "61e9771fc34bc914565dfc95a11f731f853e8ac9",
+      "path": "lib/DxrFallback/LLVMUtils.h",
+      "local": "dxc/LLVMUtils.h",
+      "sha": "3dafe11978554566bdd55457253dc6cdcb3de86a",
+      "size": 1182
+    },
+    {
+      "repo": "microsoft/DirectXShaderCompiler",
+      "ref": "61e9771fc34bc914565dfc95a11f731f853e8ac9",
+      "path": "lib/DxrFallback/LiveValues.cpp",
+      "local": "dxc/LiveValues.cpp",
+      "sha": "baa53691dfa5538782e6907bfcb00197336a9d22",
+      "size": 10783
+    },
+    {
+      "repo": "microsoft/DirectXShaderCompiler",
+      "ref": "61e9771fc34bc914565dfc95a11f731f853e8ac9",
+      "path": "lib/DxrFallback/LiveValues.h",
+      "local": "dxc/LiveValues.h",
+      "sha": "57e856c8fc5051dc7afc56ce866a202e41397d4f",
+      "size": 2999
+    },
+    {
+      "repo": "microsoft/DirectXShaderCompiler",
+      "ref": "61e9771fc34bc914565dfc95a11f731f853e8ac9",
+      "path": "lib/DxrFallback/Reducibility.cpp",
+      "local": "dxc/Reducibility.cpp",
+      "sha": "a822b57452c60ad14137948e6fa457d27bcea5e7",
+      "size": 9403
+    },
+    {
+      "repo": "microsoft/DirectXShaderCompiler",
+      "ref": "61e9771fc34bc914565dfc95a11f731f853e8ac9",
+      "path": "lib/DxrFallback/Reducibility.h",
+      "local": "dxc/Reducibility.h",
+      "sha": "9504f212f6ffe7368e0fd62d2c7e39733e41ffdf",
+      "size": 250
+    },
+    {
+      "repo": "microsoft/DirectXShaderCompiler",
+      "ref": "61e9771fc34bc914565dfc95a11f731f853e8ac9",
+      "path": "lib/DxrFallback/StateFunctionTransform.cpp",
+      "local": "dxc/StateFunctionTransform.cpp",
+      "sha": "5bf58f485897a053fa126828e8e2a70393b6dc0d",
+      "size": 65991
+    },
+    {
+      "repo": "microsoft/DirectXShaderCompiler",
+      "ref": "61e9771fc34bc914565dfc95a11f731f853e8ac9",
+      "path": "lib/DxrFallback/StateFunctionTransform.h",
+      "local": "dxc/StateFunctionTransform.h",
+      "sha": "7701f1d1f1fadd0eb6772a64cde5b04500b48cc8",
+      "size": 13109
+    },
+    {
+      "repo": "microsoft/DirectXShaderCompiler",
+      "ref": "61e9771fc34bc914565dfc95a11f731f853e8ac9",
+      "path": "lib/DxrFallback/readme.md",
+      "local": "dxc/readme.md",
+      "sha": "6affa3307df3b0791f39e35177d4143453489ca3",
+      "size": 2167
+    },
+    {
+      "repo": "microsoft/DirectXShaderCompiler",
+      "ref": "61e9771fc34bc914565dfc95a11f731f853e8ac9",
+      "path": "lib/DxrFallback/runtime.h",
+      "local": "dxc/runtime.h",
+      "sha": "3078bdea564c65fee02366a7c2b69df1fd046a11",
+      "size": 99618
+    },
+    {
+      "repo": "microsoft/DirectXShaderCompiler",
+      "ref": "61e9771fc34bc914565dfc95a11f731f853e8ac9",
+      "path": "lib/DxrFallback/runtime/rewriteRuntime.py",
+      "local": "dxc/runtime/rewriteRuntime.py",
+      "sha": "725a8412c8a6eab035a744f908d0f8bf3dc87f99",
+      "size": 1581
+    },
+    {
+      "repo": "microsoft/DirectXShaderCompiler",
+      "ref": "61e9771fc34bc914565dfc95a11f731f853e8ac9",
+      "path": "lib/DxrFallback/runtime/runtime.c",
+      "local": "dxc/runtime/runtime.c",
+      "sha": "3b60664bf78519e76aca855f538762aa9176f4b5",
+      "size": 19488
+    },
+    {
+      "repo": "microsoft/DirectXShaderCompiler",
+      "ref": "61e9771fc34bc914565dfc95a11f731f853e8ac9",
+      "path": "lib/DxrFallback/runtime/script.cmd",
+      "local": "dxc/runtime/script.cmd",
+      "sha": "ca0066dbe3e424868b90c322851434cdb1ba8fb8",
+      "size": 228
+    },
+    {
+      "repo": "microsoft/DirectX-Graphics-Samples",
+      "ref": "e5975f9b0744fc5096dd593ed72bf8f5c004164f",
+      "path": "LICENSE",
+      "local": "d3d12/LICENSE",
+      "sha": "b8b569d7746d98d07183806fb4af673fca6dfb57",
+      "size": 1077
+    },
+    {
+      "repo": "microsoft/DirectXShaderCompiler",
+      "ref": "61e9771fc34bc914565dfc95a11f731f853e8ac9",
+      "path": "LICENSE.TXT",
+      "local": "dxc/LICENSE.TXT",
+      "sha": "8987f9b91c3bbd6c86dc103ecd4038ec9dfcc2af",
+      "size": 29241
+    },
+    {
+      "repo": "microsoft/DirectX-Graphics-Samples",
+      "ref": "e5975f9b0744fc5096dd593ed72bf8f5c004164f",
+      "path": "Libraries/D3D12RaytracingFallback/Include/D3D12RaytracingFallback.h",
+      "local": "d3d12/Include/D3D12RaytracingFallback.h",
+      "sha": "173f16f8427bd62b639ed17728e11229e58e004b",
+      "size": 6577
+    },
+    {
+      "repo": "microsoft/DirectXShaderCompiler",
+      "ref": "61e9771fc34bc914565dfc95a11f731f853e8ac9",
+      "path": "include/dxc/DxrFallback/DxrFallbackCompiler.h",
+      "local": "dxc/include/DxrFallbackCompiler.h",
+      "sha": "377e3fc716044e81575fe3809da07682989d13e2",
+      "size": 4659
+    },
+    {
+      "repo": "microsoft/DirectX-Graphics-Samples",
+      "ref": "e5975f9b0744fc5096dd593ed72bf8f5c004164f",
+      "path": "Libraries/D3D12RaytracingFallback/developerguide.md",
+      "local": "d3d12/developerguide.md",
+      "sha": "9b24e0fa49a289b11ce6b183708ef4f72bf4c8fc",
+      "size": 24657
+    }
+  ]
+}
