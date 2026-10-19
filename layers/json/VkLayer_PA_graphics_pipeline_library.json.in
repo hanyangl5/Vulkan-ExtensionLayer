@@ -1,0 +1,11 @@
+{
+    "file_format_version" : "1.2.0",
+    "layer": {
+        "name": "VK_LAYER_PA_graphics_pipeline_library",
+        "type": "GLOBAL",
+        "library_path": "@JSON_LIBRARY_PATH@",
+        "api_version": "@JSON_VERSION@",
+        "implementation_version": "1",
+        "description": "Transparent GPL pipeline-state-object acceleration layer"
+    }
+}

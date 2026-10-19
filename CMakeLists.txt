@@ -33,7 +33,7 @@ include(GNUInstallDirs)
 set_property(GLOBAL PROPERTY USE_FOLDERS ON)
 
 if(WIN32)
-    add_compile_definitions(VK_USE_PLATFORM_WIN32_KHR)
+    add_compile_definitions(VK_USE_PLATFORM_WIN32_KHR _CRT_SECURE_NO_WARNINGS NOMINMAX WIN32_LEAN_AND_MEAN)
 elseif(ANDROID)
     add_compile_definitions(VK_USE_PLATFORM_ANDROID_KHR)
 elseif(NOT APPLE)
@@ -74,13 +74,11 @@ if(MSVC)
     add_link_options("$<$<CONFIG:Release>:/OPT:REF>")
     # Merge duplicate data/functions
     add_link_options("$<$<CONFIG:Release>:/OPT:ICF>")
-
-    # Allow usage of unsafe CRT functions and minimize what Windows.h leaks
-    add_compile_definitions(_CRT_SECURE_NO_WARNINGS NOMINMAX WIN32_LEAN_AND_MEAN)
 endif()
 
 find_package(VulkanHeaders CONFIG)
 find_package(VulkanUtilityLibraries CONFIG)
+find_package(Threads REQUIRED)
 
 # Workaround AppleClang using the wrong headers when there are headers in /usr/local/include
 if (CMAKE_CXX_COMPILER_ID STREQUAL AppleClang AND TARGET Vulkan::Headers AND TARGET Vulkan::LayerSettings AND CMAKE_VERSION VERSION_GREATER_EQUAL 3.25)
@@ -95,7 +93,13 @@ add_subdirectory(layers)
 add_subdirectory(utils)
 
 option(BUILD_TESTS "Build tests")
-if(BUILD_TESTS)
+option(BUILD_GPL_TESTS "Build graphics pipeline library host tests (no GPU required)" ${BUILD_TESTS})
+if(BUILD_TESTS OR BUILD_GPL_TESTS)
     enable_testing()
+endif()
+if(BUILD_TESTS)
     add_subdirectory(tests)
+endif()
+if(BUILD_GPL_TESTS AND NOT ANDROID AND NOT IOS)
+    add_subdirectory(tests/graphics_pipeline_library)
 endif()

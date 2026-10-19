@@ -12,7 +12,7 @@ There are some extensions and features in Vulkan that are not available everywhe
 | [VK_LAYER_KHRONOS_synchronization2](docs/synchronization2_layer.md)   | VK_KHR_synchronization2   | 1       | layers/synchronization2.cpp | [@jeremyg-lunarg](https://github.com/jeremyg-lunarg) |
 | [VK_LAYER_KHRONOS_shader_object](docs/shader_object_layer.md)      | VK_EXT_shader_object| 1       | layers/shader_object.cpp    | [@daniel-story](https://github.com/daniel-story) |
 | [VK_LAYER_KHRONOS_memory_decompression](docs/memory_decompression_layer.md)   | VK_NV_memory_decompression   | 1       | layers/decompression/decompression.cpp | [@vkushwaha-nv](https://github.com/vkushwaha-nv) |
-| [VK_LAYER_PA_graphics_pipeline_library]   | /   | 1       | / | / |
+| [VK_LAYER_PA_graphics_pipeline_library](docs/graphics_pipeline_library_layer.md) | None (internal GPL acceleration) | 1 | layers/graphics_pipeline_library/graphics_pipeline_library.cpp | [@hanyangl5](https://github.com/hanyangl5) |
 | [VK_LAYER_PA_ray_tracing]   | /   | 1       | / | / |
 
 If you find a problem with one of the layers, please file an Issue and tag the Point of Contact listed in the table above.

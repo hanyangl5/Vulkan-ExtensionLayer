@@ -46,7 +46,20 @@ target_sources(VkLayer_khronos_memory_decompression PRIVATE
     decompression/decompression.h
 )
 
-set(EXTENSION_LAYERS VkLayer_khronos_synchronization2 VkLayer_khronos_shader_object VkLayer_khronos_memory_decompression)
+if(IOS)
+    add_library(VkLayer_PA_graphics_pipeline_library SHARED)
+else()
+    add_library(VkLayer_PA_graphics_pipeline_library MODULE)
+endif()
+target_sources(VkLayer_PA_graphics_pipeline_library PRIVATE
+    graphics_pipeline_library/graphics_pipeline_library.cpp
+    graphics_pipeline_library/graphics_pipeline_library.h
+    graphics_pipeline_library/dynamic_state_extensions.h
+)
+target_link_libraries(VkLayer_PA_graphics_pipeline_library PRIVATE Threads::Threads)
+
+set(EXTENSION_LAYERS VkLayer_khronos_synchronization2 VkLayer_khronos_shader_object VkLayer_khronos_memory_decompression
+    VkLayer_PA_graphics_pipeline_library)
 
 if (NOT WIN32)
     # timeline_semaphore.c requires a C compiler
@@ -75,8 +88,8 @@ foreach(extension_layer ${EXTENSION_LAYERS})
         )
     endif()
 
-    if(MSVC)
-        target_link_options(${extension_layer} PRIVATE /DEF:${CMAKE_CURRENT_SOURCE_DIR}/${extension_layer}.def)
+    if(WIN32 AND NOT MINGW)
+        target_link_options(${extension_layer} PRIVATE "LINKER:/DEF:${CMAKE_CURRENT_SOURCE_DIR}/${extension_layer}.def")
         target_compile_definitions(${extension_layer} PUBLIC NOMINMAX)
     elseif(MINGW)
         target_sources(${extension_layer} PRIVATE ${extension_layer}.def)

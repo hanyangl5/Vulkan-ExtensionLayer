@@ -4,6 +4,19 @@ SPDX-PackageSupplier = "The Khronos Group, Inc."
 SPDX-PackageDownloadLocation = "https://github.com/KhronosGroup/Vulkan-ExtensionLayer/"
 
 [[annotations]]
+path = [
+    "layers/graphics_pipeline_library/**",
+    "tests/graphics_pipeline_library/*.cpp",
+    "tests/graphics_pipeline_library/*.inc",
+    "layers/VkLayer_PA_graphics_pipeline_library.def",
+    "layers/libVkLayer_PA_graphics_pipeline_library.map",
+    "layers/json/VkLayer_PA_graphics_pipeline_library.json.in",
+]
+precedence = "aggregate"
+SPDX-FileCopyrightText = "2026 Xiaomi"
+SPDX-License-Identifier = "Apache-2.0"
+
+[[annotations]]
 path = "layers/decompression/**"
 precedence = "aggregate"
 SPDX-FileCopyrightText = ["2023-2025 The Khronos Group, Inc.", "2023 NVIDIA CORPORATION & AFFILIATES"]
