@@ -745,7 +745,123 @@ static void Run() {
 }
 }  // namespace cache_key_regression
 
+namespace split_state_regression {
+static uint32_t binding;
+static float width;
+static bool expect_dynamic;
+static VkSampleCountFlagBits samples;
+
+static VKAPI_ATTR VkResult VKAPI_CALL Observe(VkDevice device, VkPipelineCache cache, uint32_t count,
+                                              const VkGraphicsPipelineCreateInfo* ci, const VkAllocationCallbacks* allocator,
+                                              VkPipeline* output) {
+    auto gpl = reinterpret_cast<const VkGraphicsPipelineLibraryCreateInfoEXT*>(
+        Node(ci->pNext, VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_LIBRARY_CREATE_INFO_EXT));
+    if (gpl && gpl->flags == (VK_GRAPHICS_PIPELINE_LIBRARY_VERTEX_INPUT_INTERFACE_BIT_EXT |
+                              VK_GRAPHICS_PIPELINE_LIBRARY_PRE_RASTERIZATION_SHADERS_BIT_EXT)) {
+        Require(ci->pInputAssemblyState && ci->pVertexInputState && ci->pRasterizationState,
+                "A combined VI/PR library must own input and raster state together");
+        Require(
+            ci->pVertexInputState->pVertexBindingDescriptions[0].binding == binding && ci->pRasterizationState->lineWidth == width,
+            "Combined libraries must use the input layout and original static line width");
+        if (expect_dynamic)
+            for (auto state : {VK_DYNAMIC_STATE_PRIMITIVE_RESTART_ENABLE, VK_DYNAMIC_STATE_LINE_WIDTH})
+                Require(HasDynamicState(*ci, state), "A combined library lost one subset's dynamic-state declaration");
+    }
+    if (gpl && gpl->flags == VK_GRAPHICS_PIPELINE_LIBRARY_FRAGMENT_SHADER_BIT_EXT)
+        Require(ci->pMultisampleState && ci->pMultisampleState->rasterizationSamples == samples,
+                "FS must retain multisample state even with sampleShadingEnable false");
+    return NextCreate(device, cache, count, ci, allocator, output);
+}
+
+static void CombinedLibraries() {
+    Fixture f;
+    f.ia.topology = VK_PRIMITIVE_TOPOLOGY_LINE_LIST;
+    Require(!CombineVertexInputWithPreRaster(f.ci, f.device), "Other drivers should retain separate VI and PR libraries");
+    f.device.combine_line_pre_raster = true;
+    Require(CombineVertexInputWithPreRaster(f.ci, f.device), "The line-width workaround must combine VI/PR on affected devices");
+    f.rs.rasterizerDiscardEnable = VK_TRUE;
+    Require(!CombineVertexInputWithPreRaster(f.ci, f.device), "Discarded rasterization does not need the line workaround");
+    f.rs.rasterizerDiscardEnable = VK_FALSE;
+    f.stages[0].stage = VK_SHADER_STAGE_MESH_BIT_EXT;
+    Require(!CombineVertexInputWithPreRaster(f.ci, f.device), "Mesh pipelines must not acquire vertex-input state");
+    f.stages[0].stage = VK_SHADER_STAGE_VERTEX_BIT;
+
+    VkVertexInputBindingDescription desc{0, 16, VK_VERTEX_INPUT_RATE_VERTEX};
+    VkVertexInputAttributeDescription attr{0, 0, VK_FORMAT_R32G32B32A32_SFLOAT, 0};
+    f.vi.vertexBindingDescriptionCount = f.vi.vertexAttributeDescriptionCount = 1;
+    f.vi.pVertexBindingDescriptions = &desc;
+    f.vi.pVertexAttributeDescriptions = &attr;
+    binding = 0;
+    width = f.rs.lineWidth = 5.0f;
+    samples = f.ms.rasterizationSamples;
+    expect_dynamic = false;
+    f.device.vtable.CreateGraphicsPipelines = Observe;
+    VkPipeline output;
+    Require(
+        f.Create(1, &f.ci, &output) == VK_SUCCESS && calls.size() == 4 && calls.back().linked_libraries == 3 && native_index == 0,
+        "Line pipelines must still convert using one combined library, two fragment libraries and one link");
+    auto count = calls.size();
+    binding = desc.binding = attr.binding = 1;
+    Require(f.Create(1, &f.ci, &output) == VK_SUCCESS && calls.size() == count + 2,
+            "A changed vertex layout must rebuild combined VI/PR without rebuilding fragment libraries");
+    count = calls.size();
+    width = f.rs.lineWidth = 7.0f;
+    Require(f.Create(1, &f.ci, &output) == VK_SUCCESS && calls.size() == count + 2,
+            "Static line widths must distinguish combined libraries");
+
+    VkDynamicState states[] = {VK_DYNAMIC_STATE_LINE_WIDTH, VK_DYNAMIC_STATE_PRIMITIVE_RESTART_ENABLE};
+    VkPipelineDynamicStateCreateInfo dynamic{VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO, nullptr, 0, 2, states};
+    f.ci.pDynamicState = &dynamic;
+    expect_dynamic = true;
+    Require(f.Create(1, &f.ci, &output) == VK_SUCCESS, "A combined library must support dynamic line width and restart");
+    count = calls.size();
+    f.rs.lineWidth = 0.0f;
+    f.ia.primitiveRestartEnable = VK_TRUE;
+    Require(f.Create(1, &f.ci, &output) == VK_SUCCESS && calls.size() == count + 1,
+            "Ignored dynamic VI/PR fields must reuse the combined library");
+    f.ci.flags = VK_PIPELINE_CREATE_VIEW_INDEX_FROM_DEVICE_INDEX_BIT;
+    Require(LibraryFlagsForSubset(f.ci, GplSubset::kVertexInputAndPreRaster) & VK_PIPELINE_CREATE_VIEW_INDEX_FROM_DEVICE_INDEX_BIT,
+            "Combined libraries must retain pre-raster flags");
+}
+
+static void FragmentState() {
+    Fixture f;
+    f.ms.rasterizationSamples = VK_SAMPLE_COUNT_4_BIT;
+    f.ms.sampleShadingEnable = VK_FALSE;
+    f.device.vtable.CreateGraphicsPipelines = Observe;
+    samples = VK_SAMPLE_COUNT_4_BIT;
+    VkPipeline output;
+    Require(f.Create(1, &f.ci, &output) == VK_SUCCESS && native_index == 0,
+            "Per-sample input-attachment shaders must remain convertible without explicit sample shading");
+    auto count = calls.size();
+    samples = f.ms.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
+    Require(f.Create(1, &f.ci, &output) == VK_SUCCESS && calls.size() == count + 3,
+            "Changing sample count must rebuild both fragment libraries while preserving pre-raster state");
+
+    auto ctx = Context(f.ci, false, true);
+    const auto* indices = reinterpret_cast<const VkRenderingInputAttachmentIndexInfo*>(
+        Node(ctx.fragment_shader_extensions.head, VK_STRUCTURE_TYPE_RENDERING_INPUT_ATTACHMENT_INDEX_INFO));
+    Require(indices && indices->colorAttachmentCount == 1 && indices->pColorAttachmentInputIndices[0] == 0 &&
+                !indices->pDepthInputAttachmentIndex && !indices->pStencilInputAttachmentIndex && f.rendering.pNext == nullptr,
+            "Implicit local-read color indices must become an owned identity map without changing the application chain");
+    ctx = Context(f.ci);
+    Require(!Node(ctx.fragment_shader_extensions.head, VK_STRUCTURE_TYPE_RENDERING_INPUT_ATTACHMENT_INDEX_INFO),
+            "Applications without the local-read feature must not receive an input-index structure");
+    uint32_t explicit_index = VK_ATTACHMENT_UNUSED;
+    VkRenderingInputAttachmentIndexInfo explicit_info{VK_STRUCTURE_TYPE_RENDERING_INPUT_ATTACHMENT_INDEX_INFO, f.ci.pNext, 1,
+                                                      &explicit_index};
+    f.ci.pNext = &explicit_info;
+    ctx = Context(f.ci, false, true);
+    indices = reinterpret_cast<const VkRenderingInputAttachmentIndexInfo*>(
+        Node(ctx.fragment_shader_extensions.head, VK_STRUCTURE_TYPE_RENDERING_INPUT_ATTACHMENT_INDEX_INFO));
+    Require(indices && indices->pColorAttachmentInputIndices == &explicit_index,
+            "Application-provided input mappings must not be replaced by the identity mapping");
+}
+}  // namespace split_state_regression
+
 int main() {
+    split_state_regression::CombinedLibraries();
+    split_state_regression::FragmentState();
     dispatch_version_regression::Run();
     cache_key_regression::Run();
     FlagsAndExtensions();

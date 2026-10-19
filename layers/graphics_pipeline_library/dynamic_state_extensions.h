@@ -35,10 +35,10 @@ constexpr VkPipelineCreateFlags2 kConvertiblePipelineFlags = kCommonLibraryFlags
 
 VkPipelineCreateFlags2 LibraryFlagsForSubset(const VkGraphicsPipelineCreateInfo& ci, GplSubset subset) {
     VkPipelineCreateFlags2 mask = kCommonLibraryFlags;
-    if (subset == GplSubset::kPreRaster || subset == GplSubset::kFragmentShader)
+    if (ContainsSubset(subset, GplSubset::kPreRasterAndFragmentShader))
         mask |= VK_PIPELINE_CREATE_2_VIEW_INDEX_FROM_DEVICE_INDEX_BIT;
-    if (subset == GplSubset::kFragmentShader) mask |= kFragmentAttachmentFlags;
-    if (subset == GplSubset::kFragmentOutput) mask |= kFragmentOutputFlags;
+    if (ContainsSubset(subset, GplSubset::kFragmentShader)) mask |= kFragmentAttachmentFlags;
+    if (ContainsSubset(subset, GplSubset::kFragmentOutput)) mask |= kFragmentOutputFlags;
     return EffectivePipelineFlags(ci) & mask;
 }
 
@@ -118,10 +118,6 @@ void WriteConversionFeedback(const VkGraphicsPipelineCreateInfo& ci, uint64_t na
         *info.pPipelineCreationFeedback = {VK_PIPELINE_CREATION_FEEDBACK_VALID_BIT, nanoseconds};
         for (uint32_t i = 0; i < info.pipelineStageCreationFeedbackCount; ++i) info.pPipelineStageCreationFeedbacks[i] = {0, 0};
     }
-}
-
-bool FragmentShaderUsesMultisampling(const VkGraphicsPipelineCreateInfo& ci) {
-    return ci.renderPass != VK_NULL_HANDLE || (ci.pMultisampleState && ci.pMultisampleState->sampleShadingEnable);
 }
 
 const VkPipelineColorBlendStateCreateInfo* FragmentOutputColorBlendState(const VkGraphicsPipelineCreateInfo& ci,

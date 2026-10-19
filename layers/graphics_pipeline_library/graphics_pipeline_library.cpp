@@ -253,7 +253,7 @@ GplSubset ClassifyDynamicState(VkDynamicState state) {
 
 // Dispatch-table initialization
 
-void LayerDispatchInstance::Initialize(VkInstance instance, PFN_vkGetInstanceProcAddr gipa) {
+void LayerDispatchInstance::Initialize(VkInstance instance, PFN_vkGetInstanceProcAddr gipa, uint32_t api_version) {
     auto load = [&](const char* name) { return gipa(instance, name); };
     GetInstanceProcAddr = gipa;
     DestroyInstance = reinterpret_cast<PFN_vkDestroyInstance>(load("vkDestroyInstance"));
@@ -261,24 +261,17 @@ void LayerDispatchInstance::Initialize(VkInstance instance, PFN_vkGetInstancePro
         reinterpret_cast<PFN_vkEnumerateDeviceExtensionProperties>(load("vkEnumerateDeviceExtensionProperties"));
     GetPhysicalDeviceProperties = reinterpret_cast<PFN_vkGetPhysicalDeviceProperties>(load("vkGetPhysicalDeviceProperties"));
 
-    GetPhysicalDeviceProperties2 = reinterpret_cast<PFN_vkGetPhysicalDeviceProperties2>(load("vkGetPhysicalDeviceProperties2"));
-    if (!GetPhysicalDeviceProperties2) {
-        GetPhysicalDeviceProperties2 =
-            reinterpret_cast<PFN_vkGetPhysicalDeviceProperties2>(load("vkGetPhysicalDeviceProperties2KHR"));
-    }
-    GetPhysicalDeviceFeatures2 = reinterpret_cast<PFN_vkGetPhysicalDeviceFeatures2>(load("vkGetPhysicalDeviceFeatures2"));
-    if (!GetPhysicalDeviceFeatures2) {
-        GetPhysicalDeviceFeatures2 = reinterpret_cast<PFN_vkGetPhysicalDeviceFeatures2>(load("vkGetPhysicalDeviceFeatures2KHR"));
-    }
+    GetPhysicalDeviceProperties2 = reinterpret_cast<PFN_vkGetPhysicalDeviceProperties2>(
+        load(api_version >= VK_API_VERSION_1_1 ? "vkGetPhysicalDeviceProperties2" : "vkGetPhysicalDeviceProperties2KHR"));
+    GetPhysicalDeviceFeatures2 = reinterpret_cast<PFN_vkGetPhysicalDeviceFeatures2>(
+        load(api_version >= VK_API_VERSION_1_1 ? "vkGetPhysicalDeviceFeatures2" : "vkGetPhysicalDeviceFeatures2KHR"));
 }
 
-void LayerDispatchDevice::Initialize(VkDevice device, PFN_vkGetDeviceProcAddr gdpa) {
-    // Resolve the core name first, then the EXT alias, so the table works whether the states are
-    // core 1.3 or provided by VK_EXT_extended_dynamic_state / VK_EXT_private_data.
-    auto load = [&](const char* core, const char* ext) {
-        PFN_vkVoidFunction fn = gdpa(device, core);
-        if (!fn && ext) fn = gdpa(device, ext);
-        return fn;
+void LayerDispatchDevice::Initialize(VkDevice device, PFN_vkGetDeviceProcAddr gdpa, uint32_t api_version) {
+    // A non-null core pointer beyond the requested API version must not be called.
+    auto load = [&](const char* core, const char* ext, uint32_t core_version = VK_API_VERSION_1_0) {
+        const char* name = api_version >= core_version ? core : ext;
+        return name ? gdpa(device, name) : nullptr;
     };
 
     GetDeviceProcAddr = gdpa;
@@ -288,25 +281,27 @@ void LayerDispatchDevice::Initialize(VkDevice device, PFN_vkGetDeviceProcAddr gd
     CmdBindPipeline = reinterpret_cast<PFN_vkCmdBindPipeline>(load("vkCmdBindPipeline", nullptr));
     DestroyRenderPass = reinterpret_cast<PFN_vkDestroyRenderPass>(load("vkDestroyRenderPass", nullptr));
     CreateRenderPass = reinterpret_cast<PFN_vkCreateRenderPass>(load("vkCreateRenderPass", nullptr));
-    CreateRenderPass2 = reinterpret_cast<PFN_vkCreateRenderPass2>(load("vkCreateRenderPass2", "vkCreateRenderPass2KHR"));
+    CreateRenderPass2 =
+        reinterpret_cast<PFN_vkCreateRenderPass2>(load("vkCreateRenderPass2", "vkCreateRenderPass2KHR", VK_API_VERSION_1_2));
     DestroyShaderModule = reinterpret_cast<PFN_vkDestroyShaderModule>(load("vkDestroyShaderModule", nullptr));
     DestroyPipelineLayout = reinterpret_cast<PFN_vkDestroyPipelineLayout>(load("vkDestroyPipelineLayout", nullptr));
 
-    CreatePrivateDataSlot =
-        reinterpret_cast<PFN_vkCreatePrivateDataSlot>(load("vkCreatePrivateDataSlot", "vkCreatePrivateDataSlotEXT"));
-    DestroyPrivateDataSlot =
-        reinterpret_cast<PFN_vkDestroyPrivateDataSlot>(load("vkDestroyPrivateDataSlot", "vkDestroyPrivateDataSlotEXT"));
-    SetPrivateData = reinterpret_cast<PFN_vkSetPrivateData>(load("vkSetPrivateData", "vkSetPrivateDataEXT"));
-    GetPrivateData = reinterpret_cast<PFN_vkGetPrivateData>(load("vkGetPrivateData", "vkGetPrivateDataEXT"));
+    CreatePrivateDataSlot = reinterpret_cast<PFN_vkCreatePrivateDataSlot>(
+        load("vkCreatePrivateDataSlot", "vkCreatePrivateDataSlotEXT", VK_API_VERSION_1_3));
+    DestroyPrivateDataSlot = reinterpret_cast<PFN_vkDestroyPrivateDataSlot>(
+        load("vkDestroyPrivateDataSlot", "vkDestroyPrivateDataSlotEXT", VK_API_VERSION_1_3));
+    SetPrivateData = reinterpret_cast<PFN_vkSetPrivateData>(load("vkSetPrivateData", "vkSetPrivateDataEXT", VK_API_VERSION_1_3));
+    GetPrivateData = reinterpret_cast<PFN_vkGetPrivateData>(load("vkGetPrivateData", "vkGetPrivateDataEXT", VK_API_VERSION_1_3));
 
-    CmdSetCullMode = reinterpret_cast<PFN_vkCmdSetCullMode>(load("vkCmdSetCullMode", "vkCmdSetCullModeEXT"));
-    CmdSetFrontFace = reinterpret_cast<PFN_vkCmdSetFrontFace>(load("vkCmdSetFrontFace", "vkCmdSetFrontFaceEXT"));
-    CmdSetDepthTestEnable =
-        reinterpret_cast<PFN_vkCmdSetDepthTestEnable>(load("vkCmdSetDepthTestEnable", "vkCmdSetDepthTestEnableEXT"));
-    CmdSetDepthWriteEnable =
-        reinterpret_cast<PFN_vkCmdSetDepthWriteEnable>(load("vkCmdSetDepthWriteEnable", "vkCmdSetDepthWriteEnableEXT"));
-    CmdSetDepthCompareOp =
-        reinterpret_cast<PFN_vkCmdSetDepthCompareOp>(load("vkCmdSetDepthCompareOp", "vkCmdSetDepthCompareOpEXT"));
+    CmdSetCullMode = reinterpret_cast<PFN_vkCmdSetCullMode>(load("vkCmdSetCullMode", "vkCmdSetCullModeEXT", VK_API_VERSION_1_3));
+    CmdSetFrontFace =
+        reinterpret_cast<PFN_vkCmdSetFrontFace>(load("vkCmdSetFrontFace", "vkCmdSetFrontFaceEXT", VK_API_VERSION_1_3));
+    CmdSetDepthTestEnable = reinterpret_cast<PFN_vkCmdSetDepthTestEnable>(
+        load("vkCmdSetDepthTestEnable", "vkCmdSetDepthTestEnableEXT", VK_API_VERSION_1_3));
+    CmdSetDepthWriteEnable = reinterpret_cast<PFN_vkCmdSetDepthWriteEnable>(
+        load("vkCmdSetDepthWriteEnable", "vkCmdSetDepthWriteEnableEXT", VK_API_VERSION_1_3));
+    CmdSetDepthCompareOp = reinterpret_cast<PFN_vkCmdSetDepthCompareOp>(
+        load("vkCmdSetDepthCompareOp", "vkCmdSetDepthCompareOpEXT", VK_API_VERSION_1_3));
 }
 
 // RenderPass generation tracking
@@ -438,6 +433,8 @@ constexpr VkShaderStageFlags kPreRasterStages = VK_SHADER_STAGE_VERTEX_BIT | VK_
 struct LibBuildCtx {
     const VkGraphicsPipelineCreateInfo* ci = nullptr;
     VkPipelineCache pipeline_cache = VK_NULL_HANDLE;
+    bool combine_vertex_input = false;
+    bool materialize_input_indices = false;
 
     VkPipelineRasterizationStateCreateInfo raster_normalized{};
     VkPipelineDepthStencilStateCreateInfo depth_normalized{};
@@ -456,6 +453,27 @@ struct LibBuildCtx {
     LibraryExtensionChain fragment_output_extensions;
     LibraryExtensionChain link_extensions;
 };
+
+bool CombineVertexInputWithPreRaster(const VkGraphicsPipelineCreateInfo& ci, const DeviceData& device_data) {
+    if (!device_data.combine_line_pre_raster || UsesMeshShader(ci) || !RasterizationEnabled(ci)) return false;
+    // NVIDIA's separated VI/PR path does not apply static line width when the pipeline is bound.
+    // Compile line rasterization with its input topology, including stages that can output lines.
+    if (HasDynamicState(ci, VK_DYNAMIC_STATE_PRIMITIVE_TOPOLOGY) || HasDynamicState(ci, VK_DYNAMIC_STATE_POLYGON_MODE_EXT))
+        return true;
+    if (ci.pRasterizationState && ci.pRasterizationState->polygonMode == VK_POLYGON_MODE_LINE) return true;
+    for (uint32_t i = 0; i < ci.stageCount; ++i)
+        if (ci.pStages[i].stage & (VK_SHADER_STAGE_GEOMETRY_BIT | VK_SHADER_STAGE_TESSELLATION_EVALUATION_BIT)) return true;
+    if (!ci.pInputAssemblyState) return false;
+    switch (ci.pInputAssemblyState->topology) {
+        case VK_PRIMITIVE_TOPOLOGY_LINE_LIST:
+        case VK_PRIMITIVE_TOPOLOGY_LINE_STRIP:
+        case VK_PRIMITIVE_TOPOLOGY_LINE_LIST_WITH_ADJACENCY:
+        case VK_PRIMITIVE_TOPOLOGY_LINE_STRIP_WITH_ADJACENCY:
+            return true;
+        default:
+            return false;
+    }
+}
 
 bool SubStateChainSupported(const void* state, const VkGraphicsPipelineCreateInfo& ci) {
     // All of the VkPipeline*StateCreateInfo structs begin with { sType, pNext }.
@@ -582,21 +600,46 @@ void BuildDynamicStateBuckets(const VkGraphicsPipelineCreateInfo& ci, StateMask 
         GplSubset subsets = TopLevelExtensionSubset(node->sType);
         size_t size = TopLevelExtensionSize(node->sType);
         if (ContainsSubset(subsets, GplSubset::kVertexInput)) ctx->vertex_input_extensions.Prepend(node, size);
-        if (ContainsSubset(subsets, GplSubset::kPreRaster)) ctx->pre_raster_extensions.Prepend(node, size);
+        if (ContainsSubset(subsets, GplSubset::kPreRaster) ||
+            (ctx->combine_vertex_input && ContainsSubset(subsets, GplSubset::kVertexInput)))
+            ctx->pre_raster_extensions.Prepend(node, size);
         if (ContainsSubset(subsets, GplSubset::kFragmentShader)) ctx->fragment_shader_extensions.Prepend(node, size);
         if (ContainsSubset(subsets, GplSubset::kFragmentOutput))
             ctx->fragment_output_extensions.Prepend(node, size, ci.renderPass == VK_NULL_HANDLE && RasterizationEnabled(ci));
         if (node->sType == VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO) ctx->link_extensions.Prepend(node, size);
+    }
+    if (ctx->materialize_input_indices && ci.renderPass == VK_NULL_HANDLE && RasterizationEnabled(ci)) {
+        const VkPipelineRenderingCreateInfo* rendering = nullptr;
+        bool explicit_indices = false;
+        for (auto node = static_cast<const VkBaseInStructure*>(ci.pNext); node; node = node->pNext) {
+            if (node->sType == VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO)
+                rendering = reinterpret_cast<const VkPipelineRenderingCreateInfo*>(node);
+            explicit_indices |= node->sType == VK_STRUCTURE_TYPE_RENDERING_INPUT_ATTACHMENT_INDEX_INFO;
+        }
+        if (rendering && rendering->colorAttachmentCount && !explicit_indices) {
+            // Make the default mapping explicit when formats are ignored by standalone FS libraries.
+            auto& chain = ctx->fragment_shader_extensions;
+            chain.identity_maps.emplace_back(rendering->colorAttachmentCount);
+            auto& indices = chain.identity_maps.back();
+            for (uint32_t i = 0; i < indices.size(); ++i) indices[i] = i;
+            VkRenderingInputAttachmentIndexInfo info{VK_STRUCTURE_TYPE_RENDERING_INPUT_ATTACHMENT_INDEX_INFO,
+                                                     nullptr,
+                                                     rendering->colorAttachmentCount,
+                                                     indices.data(),
+                                                     nullptr,
+                                                     nullptr};
+            chain.Prepend(reinterpret_cast<const VkBaseInStructure*>(&info), sizeof(info));
+        }
     }
     if (ci.pDynamicState) {
         for (uint32_t i = 0; i < ci.pDynamicState->dynamicStateCount; ++i) {
             VkDynamicState state = ci.pDynamicState->pDynamicStates[i];
             GplSubset subsets = ClassifyDynamicState(state);
             if (ContainsSubset(subsets, GplSubset::kVertexInput)) ctx->vertex_input_dynamic.push_back(state);
-            if (ContainsSubset(subsets, GplSubset::kPreRaster)) ctx->pre_raster_dynamic.push_back(state);
-            if (ContainsSubset(subsets, GplSubset::kFragmentShader) &&
-                (subsets != GplSubset::kFragmentShaderAndOutput || FragmentShaderUsesMultisampling(ci)))
-                ctx->fragment_shader_dynamic.push_back(state);
+            if (ContainsSubset(subsets, GplSubset::kPreRaster) ||
+                (ctx->combine_vertex_input && ContainsSubset(subsets, GplSubset::kVertexInput)))
+                ctx->pre_raster_dynamic.push_back(state);
+            if (ContainsSubset(subsets, GplSubset::kFragmentShader)) ctx->fragment_shader_dynamic.push_back(state);
             if (ContainsSubset(subsets, GplSubset::kFragmentOutput)) ctx->fragment_output_dynamic.push_back(state);
         }
     }
@@ -708,8 +751,29 @@ std::string MakeVertexInputKey(const LibBuildCtx& ctx) {
     const VkPipelineInputAssemblyStateCreateInfo* ia = ctx.ci->pInputAssemblyState;
     if (ia) {
         k.AppendU32(ia->flags);
-        k.AppendU32(ia->topology);
-        k.AppendU32(ia->primitiveRestartEnable);
+        VkPrimitiveTopology topology = ia->topology;
+        if (HasDynamicState(*ctx.ci, VK_DYNAMIC_STATE_PRIMITIVE_TOPOLOGY)) {
+            // Keep topology classes separate for devices that restrict dynamic topology changes.
+            switch (topology) {
+                case VK_PRIMITIVE_TOPOLOGY_LINE_LIST:
+                case VK_PRIMITIVE_TOPOLOGY_LINE_STRIP:
+                case VK_PRIMITIVE_TOPOLOGY_LINE_LIST_WITH_ADJACENCY:
+                case VK_PRIMITIVE_TOPOLOGY_LINE_STRIP_WITH_ADJACENCY:
+                    topology = VK_PRIMITIVE_TOPOLOGY_LINE_LIST;
+                    break;
+                case VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST:
+                case VK_PRIMITIVE_TOPOLOGY_TRIANGLE_STRIP:
+                case VK_PRIMITIVE_TOPOLOGY_TRIANGLE_FAN:
+                case VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST_WITH_ADJACENCY:
+                case VK_PRIMITIVE_TOPOLOGY_TRIANGLE_STRIP_WITH_ADJACENCY:
+                    topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+                    break;
+                default:
+                    break;
+            }
+        }
+        k.AppendU32(topology);
+        k.AppendU32(HasDynamicState(*ctx.ci, VK_DYNAMIC_STATE_PRIMITIVE_RESTART_ENABLE) ? 0 : ia->primitiveRestartEnable);
         AppendExtensionChain(k, ia->pNext, *ctx.ci);
     } else {
         k.AppendU32(0xffffffffu);
@@ -721,8 +785,14 @@ std::string MakeVertexInputKey(const LibBuildCtx& ctx) {
 
 std::string MakePreRasterKey(const LibBuildCtx& ctx, DeviceData& device_data) {
     KeyBuilder k;
-    k.AppendU32(1);  // subset tag
-    k.AppendU64(LibraryFlagsForSubset(*ctx.ci, GplSubset::kPreRaster));
+    k.AppendU32(ctx.combine_vertex_input ? 4 : 1);  // subset tag
+    const auto subset = ctx.combine_vertex_input ? GplSubset::kVertexInputAndPreRaster : GplSubset::kPreRaster;
+    k.AppendU64(LibraryFlagsForSubset(*ctx.ci, subset));
+    if (ctx.combine_vertex_input) {
+        const auto vertex_input_key = MakeVertexInputKey(ctx);
+        k.AppendU64(vertex_input_key.size());
+        k.AppendBytes(vertex_input_key.data(), vertex_input_key.size());
+    }
     k.AppendU32(static_cast<uint32_t>(ctx.pre_raster_stages.size()));
     for (const auto& stage : ctx.pre_raster_stages) AppendStage(k, stage, device_data);
 
@@ -808,7 +878,7 @@ std::string MakeFragmentShaderKey(const LibBuildCtx& ctx, DeviceData& device_dat
         k.AppendU32(0xffffffffu);
     }
 
-    AppendMultisampleState(k, FragmentShaderUsesMultisampling(*ctx.ci) ? ctx.ci->pMultisampleState : nullptr, *ctx.ci);
+    AppendMultisampleState(k, ctx.ci->pMultisampleState, *ctx.ci);
     AppendExtensionChain(k, ctx.fragment_shader_extensions.head, *ctx.ci, GplSubset::kFragmentShader);
     k.AppendU64(device_data.PipelineLayoutGeneration(ctx.ci->layout));
     k.AppendU64(device_data.RenderPassGeneration(ctx.ci->renderPass));
@@ -896,6 +966,10 @@ VkPipeline BuildVertexInputLibrary(DeviceData& device_data, const void* context)
 VkPipeline BuildPreRasterLibrary(DeviceData& device_data, const void* context) {
     const auto& ctx = *static_cast<const LibBuildCtx*>(context);
     VkGraphicsPipelineCreateInfo lib{};
+    if (ctx.combine_vertex_input) {
+        lib.pVertexInputState = ctx.ci->pVertexInputState;
+        lib.pInputAssemblyState = ctx.ci->pInputAssemblyState;
+    }
     lib.stageCount = static_cast<uint32_t>(ctx.pre_raster_stages.size());
     lib.pStages = ctx.pre_raster_stages.data();
     lib.pViewportState = RasterizationEnabled(*ctx.ci) ? ctx.ci->pViewportState : nullptr;
@@ -904,7 +978,8 @@ VkPipeline BuildPreRasterLibrary(DeviceData& device_data, const void* context) {
     lib.layout = ctx.ci->layout;
     lib.renderPass = ctx.ci->renderPass;
     lib.subpass = ctx.ci->subpass;
-    return CreateLibraryPipeline(device_data, ctx, GplSubset::kPreRaster, lib, ctx.pre_raster_dynamic, ctx.pre_raster_extensions);
+    const auto subset = ctx.combine_vertex_input ? GplSubset::kVertexInputAndPreRaster : GplSubset::kPreRaster;
+    return CreateLibraryPipeline(device_data, ctx, subset, lib, ctx.pre_raster_dynamic, ctx.pre_raster_extensions);
 }
 
 VkPipeline BuildFragmentShaderLibrary(DeviceData& device_data, const void* context) {
@@ -912,7 +987,9 @@ VkPipeline BuildFragmentShaderLibrary(DeviceData& device_data, const void* conte
     VkGraphicsPipelineCreateInfo lib{};
     lib.stageCount = static_cast<uint32_t>(ctx.fragment_stages.size());
     lib.pStages = ctx.fragment_stages.data();
-    lib.pMultisampleState = FragmentShaderUsesMultisampling(*ctx.ci) ? ctx.ci->pMultisampleState : nullptr;
+    // Opaque shader modules can require per-sample execution even when sampleShadingEnable is false.
+    // Keep the original multisample state and its dynamic-state declarations on both fragment parts.
+    lib.pMultisampleState = ctx.ci->pMultisampleState;
     VkPipelineRasterizationStateCreateInfo raster{VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO};
     raster.lineWidth = 1.0f;
     lib.pRasterizationState = &raster;
@@ -967,6 +1044,8 @@ VkPipeline ConvertOnePipeline(DeviceData& device_data, const VkGraphicsPipelineC
     LibBuildCtx ctx;
     ctx.ci = &ci;
     ctx.pipeline_cache = pipeline_cache;
+    ctx.combine_vertex_input = CombineVertexInputWithPreRaster(ci, device_data);
+    ctx.materialize_input_indices = device_data.dynamic_rendering_local_read;
     const bool rasterization = RasterizationEnabled(ci);
 
     // EDS3 permits null static state structs when all their fields are dynamic.
@@ -1002,7 +1081,7 @@ VkPipeline ConvertOnePipeline(DeviceData& device_data, const VkGraphicsPipelineC
     // Mesh pipelines do not consume vertex input or input assembly state. A standalone vertex-input
     // library would still require those states, so omit that subset entirely (VUID flags-08898).
     VkPipeline vertex_input = VK_NULL_HANDLE;
-    if (!uses_mesh_shader) {
+    if (!uses_mesh_shader && !ctx.combine_vertex_input) {
         vertex_input = device_data.cache.GetOrBuild(MakeVertexInputKey(ctx), device_data, &ctx, BuildVertexInputLibrary, &built);
         if (vertex_input == VK_NULL_HANDLE) return VK_NULL_HANDLE;
     }
@@ -1390,7 +1469,7 @@ static VKAPI_ATTR VkResult VKAPI_CALL CreateInstance(const VkInstanceCreateInfo*
     instance_data->api_version = (pCreateInfo->pApplicationInfo && pCreateInfo->pApplicationInfo->apiVersion)
                                      ? pCreateInfo->pApplicationInfo->apiVersion
                                      : VK_API_VERSION_1_0;
-    instance_data->vtable.Initialize(*pInstance, gipa);
+    instance_data->vtable.Initialize(*pInstance, gipa, instance_data->api_version);
     instance_data_map.insert_or_assign(DispatchKey(*pInstance), instance_data);
     return VK_SUCCESS;
 }
@@ -1422,6 +1501,7 @@ static VKAPI_ATTR VkResult VKAPI_CALL CreateDevice(VkPhysicalDevice physicalDevi
     // Probe the physical device's own apiVersion (capabilities are gated on core 1.3 in places).
     uint32_t device_api_version = instance_data->api_version;
     bool multiview_instance_input_workaround = false;
+    bool combine_line_pre_raster = false;
     if (instance_data->vtable.GetPhysicalDeviceProperties) {
         VkPhysicalDeviceProperties properties{};
         instance_data->vtable.GetPhysicalDeviceProperties(physicalDevice, &properties);
@@ -1430,6 +1510,7 @@ static VKAPI_ATTR VkResult VKAPI_CALL CreateDevice(VkPhysicalDevice physicalDevi
         // observed device/driver. Scope the native fallback to this combination, not all instances.
         multiview_instance_input_workaround =
             properties.vendorID == 0x8086 && properties.deviceID == 0x7d51 && properties.driverVersion == 1661338;
+        combine_line_pre_raster = properties.vendorID == 0x10de;
     }
 
     ExtensionPresence present = QueryDeviceExtensions(*instance_data, physicalDevice);
@@ -1544,7 +1625,15 @@ static VKAPI_ATTR VkResult VKAPI_CALL CreateDevice(VkPhysicalDevice physicalDevi
     device_data->caps = caps;
     device_data->tier = tier;
     device_data->multiview_instance_input_workaround = multiview_instance_input_workaround;
-    device_data->vtable.Initialize(*pDevice, gdpa);
+    device_data->combine_line_pre_raster = combine_line_pre_raster;
+    FeaturePresence local_read =
+        ScanFeature(pCreateInfo->pNext, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DYNAMIC_RENDERING_LOCAL_READ_FEATURES,
+                    offsetof(VkPhysicalDeviceDynamicRenderingLocalReadFeatures, dynamicRenderingLocalRead));
+    if (local_read == FeaturePresence::kAbsent)
+        local_read = ScanFeature(pCreateInfo->pNext, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_4_FEATURES,
+                                 offsetof(VkPhysicalDeviceVulkan14Features, dynamicRenderingLocalRead));
+    device_data->dynamic_rendering_local_read = local_read == FeaturePresence::kPresentTrue;
+    device_data->vtable.Initialize(*pDevice, gdpa, device_api_version);
 
     if (tier == Tier::kDynamize) {
         VkPrivateDataSlotCreateInfo slot_info{VK_STRUCTURE_TYPE_PRIVATE_DATA_SLOT_CREATE_INFO, nullptr, 0};

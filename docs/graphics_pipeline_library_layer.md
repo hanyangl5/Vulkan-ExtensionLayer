@@ -53,8 +53,10 @@ state. Dynamic discard retains all applicable subsets.
 
 Both traditional render passes and dynamic rendering are supported. Shader keys include view masks;
 output keys include attachment formats. Fragment-shader keys also include the color-attachment count
-because it sizes implicit local-read mappings. With dynamic rendering and sample shading disabled,
-multisampling belongs only to the output library.
+because it sizes implicit local-read mappings. Both fragment libraries retain multisample state and
+its dynamic-state declarations: opaque shaders can require per-sample execution even when
+`sampleShadingEnable` is false. When local read is enabled, omitted color input mappings are made
+explicit on standalone fragment-shader libraries without changing their identity-map semantics.
 
 Cache keys serialize state values and array contents, excluding ignored dynamic arrays and pointer
 addresses and structure padding. Ignored dynamic scalar values are excluded as well; dynamic
@@ -92,6 +94,11 @@ application's allocator. A pipeline record contains only the promoted-state mask
   passing through the CPU bind hook. Pure GPL conversion remains available.
 - Intel Arc 130T (`8086:7d51`) with Vulkan driver version `1661338` uses native creation for multiview
   with instance-rate or dynamic vertex input, for both rendering paths.
+- On NVIDIA devices, pipelines that can rasterize lines combine vertex input and pre-rasterization
+  into one cached library. This preserves static line width across static/dynamic pipeline switches
+  (reproduced on RTX 3080, driver 596.49). The combined key includes vertex-input state; both subsets'
+  dynamic states and creation flags are retained. Fragment libraries remain separate, and conversion
+  still uses GPL without LTO. Mesh pipelines continue to omit vertex-input state.
 
 After 256 completed conversions, a distribution gate disables further conversion when the number of
 new expensive shader libraries divided by converted pipelines reaches at least 4/5. Bind-time state
@@ -136,6 +143,13 @@ Desktop validation uses Clang with `BUILD_WERROR=ON`. A GPU smoke probe on an NV
 creates, binds and submits four state variants with validation enabled; the expected summary is
 `converted=4`, `expensive_libraries=2`, `downgraded=0`. This probe does not compare rendered images,
 and the migrated PA layer has not undergone a complete CTS run here.
+
+A targeted CTS regression run on RTX 3080 with driver 596.49 covers 3,042 cases across 56 groups,
+including dynamic rendering, multiview and mesh shaders. The 26 image failures found before the
+VI/PR and fragment-state fixes now pass while still converting through GPL. Their validation run
+also passes; a separate 141-case validation set reports 133 passes and 8 unsupported cases.
+The selected suite retains four failures also seen without the layer and one shader-module-identifier
+pipeline-cache quality warning. These results are not a complete CTS conformance claim.
 
 ## Enable and diagnose
 

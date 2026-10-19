@@ -87,6 +87,7 @@ enum class GplSubset : uint32_t {
     kPreRaster = VK_GRAPHICS_PIPELINE_LIBRARY_PRE_RASTERIZATION_SHADERS_BIT_EXT,
     kFragmentShader = VK_GRAPHICS_PIPELINE_LIBRARY_FRAGMENT_SHADER_BIT_EXT,
     kFragmentOutput = VK_GRAPHICS_PIPELINE_LIBRARY_FRAGMENT_OUTPUT_INTERFACE_BIT_EXT,
+    kVertexInputAndPreRaster = 1 | 2,
     kPreRasterAndFragmentShader = 2 | 4,
     kFragmentShaderAndOutput = 4 | 8,
     kShadersAndFragmentOutput = 2 | 4 | 8,
@@ -166,7 +167,7 @@ struct LayerDispatchDevice {
 // hash collision can ever cause two semantically different libraries to be shared. The cache
 // version tag is mixed in first; bump it whenever the conversion logic changes.
 
-static constexpr uint32_t kCacheVersionTag = 7;
+static constexpr uint32_t kCacheVersionTag = 8;
 
 class KeyBuilder {
   public:
@@ -261,6 +262,8 @@ struct DeviceData {
     std::atomic<uint64_t> expensive_library_count{0};
     std::atomic<bool> gate_downgraded{false};
     bool multiview_instance_input_workaround = false;
+    bool combine_line_pre_raster = false;
+    bool dynamic_rendering_local_read = false;
 
     uint64_t RenderPassGeneration(VkRenderPass render_pass);
     void ForgetRenderPass(VkRenderPass render_pass);

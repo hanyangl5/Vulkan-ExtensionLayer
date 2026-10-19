@@ -28,8 +28,8 @@ int main() {
             "Shared multisample states were not copied to both traditional-render-pass libraries");
     ci.renderPass = VK_NULL_HANDLE;
     auto rendering = Context(ci);
-    Require(rendering.fragment_shader_dynamic.empty() && rendering.fragment_output_dynamic.size() == 4,
-            "Dynamic rendering without sample shading must not add multisample state to the fragment shader");
+    Require(rendering.fragment_shader_dynamic.size() == 4 && rendering.fragment_output_dynamic.size() == 4,
+            "Both fragment libraries must preserve multisample state for implicit per-sample shader execution");
 
     VkPipelineMultisampleStateCreateInfo ms{VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO};
     ms.rasterizationSamples = VK_SAMPLE_COUNT_64_BIT;

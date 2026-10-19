@@ -12,9 +12,11 @@ static void Require(bool condition, const char* message) {
     }
 }
 
-static LibBuildCtx Context(const VkGraphicsPipelineCreateInfo& ci) {
+static LibBuildCtx Context(const VkGraphicsPipelineCreateInfo& ci, bool combine_vertex_input = false, bool local_read = false) {
     LibBuildCtx ctx;
     ctx.ci = &ci;
+    ctx.combine_vertex_input = combine_vertex_input;
+    ctx.materialize_input_indices = local_read;
     ctx.raster_normalized.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
     ctx.raster_normalized.lineWidth = 1.0f;
     if (ci.pRasterizationState) ctx.raster_normalized = *ci.pRasterizationState;
