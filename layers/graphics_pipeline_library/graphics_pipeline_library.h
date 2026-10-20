@@ -142,7 +142,13 @@ struct LayerDispatchDevice {
     PFN_vkDestroyRenderPass DestroyRenderPass = nullptr;
     PFN_vkCreateRenderPass CreateRenderPass = nullptr;
     PFN_vkCreateRenderPass2 CreateRenderPass2 = nullptr;
+    PFN_vkCreateShaderModule CreateShaderModule = nullptr;
     PFN_vkDestroyShaderModule DestroyShaderModule = nullptr;
+    PFN_vkCreateSampler CreateSampler = nullptr;
+    PFN_vkDestroySampler DestroySampler = nullptr;
+    PFN_vkCreateDescriptorSetLayout CreateDescriptorSetLayout = nullptr;
+    PFN_vkDestroyDescriptorSetLayout DestroyDescriptorSetLayout = nullptr;
+    PFN_vkCreatePipelineLayout CreatePipelineLayout = nullptr;
     PFN_vkDestroyPipelineLayout DestroyPipelineLayout = nullptr;
 
     // Private data: core 1.3 or VK_EXT_private_data.
@@ -167,7 +173,7 @@ struct LayerDispatchDevice {
 // hash collision can ever cause two semantically different libraries to be shared. The cache
 // version tag is mixed in first; bump it whenever the conversion logic changes.
 
-static constexpr uint32_t kCacheVersionTag = 8;
+static constexpr uint32_t kCacheVersionTag = 10;
 
 class KeyBuilder {
   public:
@@ -191,7 +197,7 @@ class KeyBuilder {
 //
 // Concurrent create calls that need the same library block on a condition variable rather than
 // building it twice. A build failure wakes the waiters so they fall back instead of hanging. The
-// cache owns the library handles until device destruction.
+// cache owns successful library handles until device destruction; failed builds can be retried.
 
 struct DeviceData;
 
@@ -208,7 +214,7 @@ class LibraryCache {
     void DestroyAll(DeviceData& device_data);
 
   private:
-    enum class State { kBuilding, kReady, kFailed };
+    enum class State { kBuilding, kReady };
     struct Entry {
         State state = State::kBuilding;
         VkPipeline handle = VK_NULL_HANDLE;
@@ -217,6 +223,22 @@ class LibraryCache {
     std::mutex mutex_;
     std::condition_variable cv_;
     std::unordered_map<std::string, Entry> entries_;
+};
+
+// Exact content interning. Unknown definitions receive a unique lifetime identity instead.
+class ObjectIdentityCache {
+  public:
+    uint64_t Get(uint64_t handle);
+    uint64_t Intern(std::string content);
+    void Register(uint64_t handle, std::string content, bool known);
+    void Forget(uint64_t handle);
+
+  private:
+    uint64_t InternLocked(std::string content);
+    std::mutex mutex_;
+    std::unordered_map<uint64_t, uint64_t> live_;
+    std::unordered_map<std::string, uint64_t> contents_;
+    uint64_t next_identity_ = 1;
 };
 
 // Per-object data
@@ -238,44 +260,35 @@ struct DeviceData {
 
     LibraryCache cache;
 
-    // RenderPass generation tracking. Handles may be recycled after destruction, so a
-    // raw handle value is not a stable cache ingredient; we assign a monotonic generation per live
-    // handle and invalidate it on destroy.
+    // Render-pass metadata is live-object state; content identities survive object destruction.
     std::mutex render_pass_mutex;
-    std::unordered_map<VkRenderPass, uint64_t> render_pass_generation;
+    ObjectIdentityCache render_pass_identities;
     std::unordered_map<VkRenderPass, std::vector<uint32_t>> render_pass_view_masks;
     std::unordered_map<VkRenderPass, std::vector<bool>> render_pass_color_attachments;
-    uint64_t next_render_pass_generation = 1;
 
-    // Shader module handles may be recycled while libraries using the old shader remain cached.
-    std::mutex shader_module_mutex;
-    std::unordered_map<VkShaderModule, uint64_t> shader_module_generation;
-    uint64_t next_shader_module_generation = 1;
-    std::mutex pipeline_layout_mutex;
-    std::unordered_map<VkPipelineLayout, uint64_t> pipeline_layout_generation;
-    uint64_t next_pipeline_layout_generation = 1;
+    ObjectIdentityCache shader_module_identities;
+    ObjectIdentityCache sampler_identities;
+    ObjectIdentityCache descriptor_set_layout_identities;
+    ObjectIdentityCache pipeline_layout_identities;
 
-    // Variant-distribution gate. If dynamization is not actually collapsing state
-    // variants onto shared expensive libraries, GPL cannot help, so we downgrade to passthrough and
-    // log once.
+    // Lifetime statistics only; pipeline counts and library sharing do not disable conversion.
     std::atomic<uint64_t> converted_pipeline_count{0};
     std::atomic<uint64_t> expensive_library_count{0};
-    std::atomic<bool> gate_downgraded{false};
     bool multiview_instance_input_workaround = false;
     bool combine_line_pre_raster = false;
     bool dynamic_rendering_local_read = false;
 
-    uint64_t RenderPassGeneration(VkRenderPass render_pass);
+    uint64_t RenderPassIdentity(VkRenderPass render_pass);
     void ForgetRenderPass(VkRenderPass render_pass);
     void SetRenderPassViewMasks(VkRenderPass render_pass, std::vector<uint32_t> masks);
     uint32_t RenderPassViewMask(VkRenderPass render_pass, uint32_t subpass);
     void SetRenderPassColorAttachments(VkRenderPass render_pass, std::vector<bool> uses_color);
     bool RenderPassUsesColorAttachment(VkRenderPass render_pass, uint32_t subpass);
-    uint64_t ShaderModuleGeneration(VkShaderModule shader_module);
+    uint64_t ShaderModuleIdentity(VkShaderModule shader_module);
     void ForgetShaderModule(VkShaderModule shader_module);
-    uint64_t PipelineLayoutGeneration(VkPipelineLayout layout);
+    uint64_t PipelineLayoutIdentity(VkPipelineLayout layout);
     void ForgetPipelineLayout(VkPipelineLayout layout);
-    bool ConversionEnabled() const { return tier != Tier::kPassthrough && !gate_downgraded.load(std::memory_order_relaxed); }
+    bool ConversionEnabled() const { return tier != Tier::kPassthrough; }
 };
 
 // Shared helpers

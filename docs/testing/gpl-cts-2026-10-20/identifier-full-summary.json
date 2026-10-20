@@ -1,0 +1,1063 @@
+{
+  "groups": 56,
+  "cases": 3042,
+  "counts": {
+    "Pass": 2581,
+    "NotSupported": 443,
+    "InternalError": 14,
+    "Fail": 4
+  },
+  "converted": 4292,
+  "recorded_graphics_psos": 7216,
+  "shader_libraries": 8502,
+  "validation": true,
+  "dll_sha256": "7b03fbabdd81ace4eb99731ee68af3ddc75fe4cca94cae37aec00fa78b31a500",
+  "groups_detail": [
+    {
+      "group": "api_pipeline",
+      "cases": 11,
+      "counts": {
+        "Pass": 11
+      },
+      "converted": 4,
+      "recorded_graphics_psos": 4,
+      "conversion_pct": 100.0,
+      "reasons": {
+        "converted": 4
+      },
+      "shader_libraries": 7
+    },
+    {
+      "group": "dynamic_state",
+      "cases": 61,
+      "counts": {
+        "Pass": 61
+      },
+      "converted": 83,
+      "recorded_graphics_psos": 83,
+      "conversion_pct": 100.0,
+      "reasons": {
+        "converted": 83
+      },
+      "shader_libraries": 166
+    },
+    {
+      "group": "attachment_feedback_loop_layout",
+      "cases": 48,
+      "counts": {
+        "Pass": 33,
+        "NotSupported": 12,
+        "InternalError": 3
+      },
+      "converted": 37,
+      "recorded_graphics_psos": 37,
+      "conversion_pct": 100.0,
+      "reasons": {
+        "converted": 37
+      },
+      "shader_libraries": 74
+    },
+    {
+      "group": "bind_buffers_2",
+      "cases": 48,
+      "counts": {
+        "Pass": 48
+      },
+      "converted": 48,
+      "recorded_graphics_psos": 48,
+      "conversion_pct": 100.0,
+      "reasons": {
+        "converted": 48
+      },
+      "shader_libraries": 96
+    },
+    {
+      "group": "bind_point",
+      "cases": 48,
+      "counts": {
+        "Pass": 48
+      },
+      "converted": 32,
+      "recorded_graphics_psos": 32,
+      "conversion_pct": 100.0,
+      "reasons": {
+        "converted": 32
+      },
+      "shader_libraries": 64
+    },
+    {
+      "group": "blend",
+      "cases": 96,
+      "counts": {
+        "NotSupported": 30,
+        "Pass": 66
+      },
+      "converted": 207,
+      "recorded_graphics_psos": 207,
+      "conversion_pct": 100.0,
+      "reasons": {
+        "converted": 207
+      },
+      "shader_libraries": 414
+    },
+    {
+      "group": "blend_operation_advanced",
+      "cases": 48,
+      "counts": {
+        "Pass": 35,
+        "NotSupported": 13
+      },
+      "converted": 39,
+      "recorded_graphics_psos": 39,
+      "conversion_pct": 100.0,
+      "reasons": {
+        "converted": 39
+      },
+      "shader_libraries": 78
+    },
+    {
+      "group": "cache",
+      "cases": 128,
+      "counts": {
+        "Pass": 128
+      },
+      "converted": 575,
+      "recorded_graphics_psos": 575,
+      "conversion_pct": 100.0,
+      "reasons": {
+        "converted": 575
+      },
+      "shader_libraries": 1150
+    },
+    {
+      "group": "color_write_enable",
+      "cases": 48,
+      "counts": {
+        "Pass": 48
+      },
+      "converted": 77,
+      "recorded_graphics_psos": 77,
+      "conversion_pct": 100.0,
+      "reasons": {
+        "converted": 77
+      },
+      "shader_libraries": 154
+    },
+    {
+      "group": "color_write_enable_maxa",
+      "cases": 24,
+      "counts": {
+        "Pass": 24
+      },
+      "converted": 96,
+      "recorded_graphics_psos": 96,
+      "conversion_pct": 100.0,
+      "reasons": {
+        "converted": 96
+      },
+      "shader_libraries": 192
+    },
+    {
+      "group": "creation_cache_control",
+      "cases": 18,
+      "counts": {
+        "Pass": 18
+      },
+      "converted": 6,
+      "recorded_graphics_psos": 22,
+      "conversion_pct": 27.272727272727273,
+      "reasons": {
+        "converted": 6,
+        "conversion/link failed": 1,
+        "dependency/control batch": 15
+      },
+      "shader_libraries": 3
+    },
+    {
+      "group": "creation_feedback",
+      "cases": 13,
+      "counts": {
+        "Pass": 13
+      },
+      "converted": 0,
+      "recorded_graphics_psos": 30,
+      "conversion_pct": 0.0,
+      "reasons": {
+        "derivative flag": 30
+      },
+      "shader_libraries": 0
+    },
+    {
+      "group": "depth",
+      "cases": 96,
+      "counts": {
+        "Pass": 79,
+        "NotSupported": 17
+      },
+      "converted": 303,
+      "recorded_graphics_psos": 303,
+      "conversion_pct": 100.0,
+      "reasons": {
+        "converted": 303
+      },
+      "shader_libraries": 600
+    },
+    {
+      "group": "depth_range_unrestricted",
+      "cases": 48,
+      "counts": {
+        "Pass": 48
+      },
+      "converted": 60,
+      "recorded_graphics_psos": 60,
+      "conversion_pct": 100.0,
+      "reasons": {
+        "converted": 60
+      },
+      "shader_libraries": 120
+    },
+    {
+      "group": "derivative",
+      "cases": 3,
+      "counts": {
+        "Pass": 3
+      },
+      "converted": 0,
+      "recorded_graphics_psos": 0,
+      "conversion_pct": null,
+      "reasons": {},
+      "shader_libraries": 0
+    },
+    {
+      "group": "descriptor_limits",
+      "cases": 48,
+      "counts": {
+        "Pass": 48
+      },
+      "converted": 24,
+      "recorded_graphics_psos": 24,
+      "conversion_pct": 100.0,
+      "reasons": {
+        "converted": 24
+      },
+      "shader_libraries": 48
+    },
+    {
+      "group": "dynamic_control_points",
+      "cases": 3,
+      "counts": {
+        "Pass": 3
+      },
+      "converted": 6,
+      "recorded_graphics_psos": 6,
+      "conversion_pct": 100.0,
+      "reasons": {
+        "converted": 6
+      },
+      "shader_libraries": 12
+    },
+    {
+      "group": "dynamic_offset",
+      "cases": 48,
+      "counts": {
+        "Pass": 48
+      },
+      "converted": 38,
+      "recorded_graphics_psos": 38,
+      "conversion_pct": 100.0,
+      "reasons": {
+        "converted": 38
+      },
+      "shader_libraries": 76
+    },
+    {
+      "group": "dynamic_vertex_attribute",
+      "cases": 1,
+      "counts": {
+        "Pass": 1
+      },
+      "converted": 2,
+      "recorded_graphics_psos": 2,
+      "conversion_pct": 100.0,
+      "reasons": {
+        "converted": 2
+      },
+      "shader_libraries": 4
+    },
+    {
+      "group": "early_destroy",
+      "cases": 9,
+      "counts": {
+        "Pass": 9
+      },
+      "converted": 11,
+      "recorded_graphics_psos": 11,
+      "conversion_pct": 100.0,
+      "reasons": {
+        "converted": 11
+      },
+      "shader_libraries": 11
+    },
+    {
+      "group": "empty_fs",
+      "cases": 8,
+      "counts": {
+        "Pass": 8
+      },
+      "converted": 8,
+      "recorded_graphics_psos": 8,
+      "conversion_pct": 100.0,
+      "reasons": {
+        "converted": 8
+      },
+      "shader_libraries": 16
+    },
+    {
+      "group": "executable_properties",
+      "cases": 16,
+      "counts": {
+        "Pass": 16
+      },
+      "converted": 9,
+      "recorded_graphics_psos": 24,
+      "conversion_pct": 37.5,
+      "reasons": {
+        "converted": 9,
+        "capture flag": 15
+      },
+      "shader_libraries": 18
+    },
+    {
+      "group": "extended_dynamic_state",
+      "cases": 384,
+      "counts": {
+        "Pass": 371,
+        "NotSupported": 13
+      },
+      "converted": 686,
+      "recorded_graphics_psos": 688,
+      "conversion_pct": 99.70930232558139,
+      "reasons": {
+        "converted": 686,
+        "unsupported rasterization pNext": 2
+      },
+      "shader_libraries": 1372
+    },
+    {
+      "group": "framebuffer_attachment",
+      "cases": 48,
+      "counts": {
+        "Pass": 48
+      },
+      "converted": 148,
+      "recorded_graphics_psos": 148,
+      "conversion_pct": 100.0,
+      "reasons": {
+        "converted": 148
+      },
+      "shader_libraries": 296
+    },
+    {
+      "group": "input_assembly",
+      "cases": 198,
+      "counts": {
+        "Pass": 198
+      },
+      "converted": 220,
+      "recorded_graphics_psos": 220,
+      "conversion_pct": 100.0,
+      "reasons": {
+        "converted": 220
+      },
+      "shader_libraries": 439
+    },
+    {
+      "group": "input_attribute_offset",
+      "cases": 48,
+      "counts": {
+        "Pass": 48
+      },
+      "converted": 48,
+      "recorded_graphics_psos": 48,
+      "conversion_pct": 100.0,
+      "reasons": {
+        "converted": 48
+      },
+      "shader_libraries": 96
+    },
+    {
+      "group": "interface_matching",
+      "cases": 96,
+      "counts": {
+        "Pass": 83,
+        "NotSupported": 13
+      },
+      "converted": 83,
+      "recorded_graphics_psos": 83,
+      "conversion_pct": 100.0,
+      "reasons": {
+        "converted": 83
+      },
+      "shader_libraries": 166
+    },
+    {
+      "group": "logic_op",
+      "cases": 48,
+      "counts": {
+        "NotSupported": 18,
+        "Pass": 30
+      },
+      "converted": 30,
+      "recorded_graphics_psos": 30,
+      "conversion_pct": 100.0,
+      "reasons": {
+        "converted": 30
+      },
+      "shader_libraries": 60
+    },
+    {
+      "group": "logic_op_na_formats",
+      "cases": 48,
+      "counts": {
+        "NotSupported": 25,
+        "Pass": 23
+      },
+      "converted": 23,
+      "recorded_graphics_psos": 23,
+      "conversion_pct": 100.0,
+      "reasons": {
+        "converted": 23
+      },
+      "shader_libraries": 46
+    },
+    {
+      "group": "matched_attachments",
+      "cases": 2,
+      "counts": {
+        "Pass": 2
+      },
+      "converted": 2,
+      "recorded_graphics_psos": 2,
+      "conversion_pct": 100.0,
+      "reasons": {
+        "converted": 2
+      },
+      "shader_libraries": 4
+    },
+    {
+      "group": "max_varyings",
+      "cases": 6,
+      "counts": {
+        "NotSupported": 3,
+        "Pass": 3
+      },
+      "converted": 3,
+      "recorded_graphics_psos": 3,
+      "conversion_pct": 100.0,
+      "reasons": {
+        "converted": 3
+      },
+      "shader_libraries": 6
+    },
+    {
+      "group": "misc",
+      "cases": 13,
+      "counts": {
+        "Pass": 12,
+        "InternalError": 1
+      },
+      "converted": 13,
+      "recorded_graphics_psos": 13,
+      "conversion_pct": 100.0,
+      "reasons": {
+        "converted": 13
+      },
+      "shader_libraries": 26
+    },
+    {
+      "group": "multisample",
+      "cases": 96,
+      "counts": {
+        "Pass": 54,
+        "NotSupported": 41,
+        "Fail": 1
+      },
+      "converted": 137,
+      "recorded_graphics_psos": 153,
+      "conversion_pct": 89.54248366013071,
+      "reasons": {
+        "converted": 137,
+        "dependency/control batch": 16
+      },
+      "shader_libraries": 274
+    },
+    {
+      "group": "multisample_interpolation",
+      "cases": 48,
+      "counts": {
+        "Pass": 25,
+        "NotSupported": 23
+      },
+      "converted": 25,
+      "recorded_graphics_psos": 25,
+      "conversion_pct": 100.0,
+      "reasons": {
+        "converted": 25
+      },
+      "shader_libraries": 50
+    },
+    {
+      "group": "multisample_shader_builtin",
+      "cases": 48,
+      "counts": {
+        "NotSupported": 21,
+        "Fail": 3,
+        "Pass": 24
+      },
+      "converted": 114,
+      "recorded_graphics_psos": 114,
+      "conversion_pct": 100.0,
+      "reasons": {
+        "converted": 114
+      },
+      "shader_libraries": 228
+    },
+    {
+      "group": "multisample_with_fragment_shading_rate",
+      "cases": 48,
+      "counts": {
+        "Pass": 21,
+        "NotSupported": 27
+      },
+      "converted": 55,
+      "recorded_graphics_psos": 55,
+      "conversion_pct": 100.0,
+      "reasons": {
+        "converted": 55
+      },
+      "shader_libraries": 110
+    },
+    {
+      "group": "no_position",
+      "cases": 48,
+      "counts": {
+        "Pass": 48
+      },
+      "converted": 0,
+      "recorded_graphics_psos": 48,
+      "conversion_pct": 0.0,
+      "reasons": {
+        "derivative flag": 48
+      },
+      "shader_libraries": 0
+    },
+    {
+      "group": "pipeline_binary",
+      "cases": 34,
+      "counts": {
+        "Pass": 30,
+        "NotSupported": 4
+      },
+      "converted": 1,
+      "recorded_graphics_psos": 44,
+      "conversion_pct": 2.272727272727273,
+      "reasons": {
+        "derivative flag": 7,
+        "unsupported top-level pNext": 21,
+        "converted": 1,
+        "unhandled create flag": 15
+      },
+      "shader_libraries": 2
+    },
+    {
+      "group": "pipeline_cache",
+      "cases": 14,
+      "counts": {
+        "Pass": 14
+      },
+      "converted": 16,
+      "recorded_graphics_psos": 16,
+      "conversion_pct": 100.0,
+      "reasons": {
+        "converted": 16
+      },
+      "shader_libraries": 32
+    },
+    {
+      "group": "primitive_restart_index",
+      "cases": 48,
+      "counts": {
+        "NotSupported": 48
+      },
+      "converted": 0,
+      "recorded_graphics_psos": 0,
+      "conversion_pct": null,
+      "reasons": {},
+      "shader_libraries": 0
+    },
+    {
+      "group": "push_constant",
+      "cases": 48,
+      "counts": {
+        "Pass": 44,
+        "NotSupported": 4
+      },
+      "converted": 50,
+      "recorded_graphics_psos": 50,
+      "conversion_pct": 100.0,
+      "reasons": {
+        "converted": 50
+      },
+      "shader_libraries": 100
+    },
+    {
+      "group": "push_descriptor",
+      "cases": 48,
+      "counts": {
+        "Pass": 48
+      },
+      "converted": 27,
+      "recorded_graphics_psos": 27,
+      "conversion_pct": 100.0,
+      "reasons": {
+        "converted": 27
+      },
+      "shader_libraries": 54
+    },
+    {
+      "group": "shader_module_identifier",
+      "cases": 64,
+      "counts": {
+        "Pass": 64
+      },
+      "converted": 53,
+      "recorded_graphics_psos": 66,
+      "conversion_pct": 80.3030303030303,
+      "reasons": {
+        "converted": 53,
+        "capture flag": 6,
+        "conversion/link failed": 7
+      },
+      "shader_libraries": 97
+    },
+    {
+      "group": "shader_stencil_export",
+      "cases": 6,
+      "counts": {
+        "NotSupported": 6
+      },
+      "converted": 0,
+      "recorded_graphics_psos": 0,
+      "conversion_pct": null,
+      "reasons": {},
+      "shader_libraries": 0
+    },
+    {
+      "group": "spec_constant",
+      "cases": 64,
+      "counts": {
+        "Pass": 64
+      },
+      "converted": 32,
+      "recorded_graphics_psos": 32,
+      "conversion_pct": 100.0,
+      "reasons": {
+        "converted": 32
+      },
+      "shader_libraries": 64
+    },
+    {
+      "group": "stencil",
+      "cases": 96,
+      "counts": {
+        "NotSupported": 29,
+        "Pass": 67
+      },
+      "converted": 220,
+      "recorded_graphics_psos": 220,
+      "conversion_pct": 100.0,
+      "reasons": {
+        "converted": 220
+      },
+      "shader_libraries": 440
+    },
+    {
+      "group": "vertex_input",
+      "cases": 96,
+      "counts": {
+        "Pass": 45,
+        "NotSupported": 48,
+        "InternalError": 3
+      },
+      "converted": 52,
+      "recorded_graphics_psos": 52,
+      "conversion_pct": 100.0,
+      "reasons": {
+        "converted": 52
+      },
+      "shader_libraries": 103
+    },
+    {
+      "group": "native_fast_gpl_dynamic",
+      "cases": 61,
+      "counts": {
+        "Pass": 61
+      },
+      "converted": 17,
+      "recorded_graphics_psos": 327,
+      "conversion_pct": 5.198776758409786,
+      "reasons": {
+        "unsupported top-level pNext": 310,
+        "converted": 17
+      },
+      "shader_libraries": 34
+    },
+    {
+      "group": "native_gpl_graphics_library",
+      "cases": 64,
+      "counts": {
+        "Pass": 59,
+        "InternalError": 5
+      },
+      "converted": 7,
+      "recorded_graphics_psos": 2035,
+      "conversion_pct": 0.343980343980344,
+      "reasons": {
+        "unsupported top-level pNext": 2028,
+        "converted": 7
+      },
+      "shader_libraries": 14
+    },
+    {
+      "group": "native_lto_gpl_dynamic",
+      "cases": 61,
+      "counts": {
+        "Pass": 61
+      },
+      "converted": 17,
+      "recorded_graphics_psos": 327,
+      "conversion_pct": 5.198776758409786,
+      "reasons": {
+        "unsupported top-level pNext": 310,
+        "converted": 17
+      },
+      "shader_libraries": 34
+    },
+    {
+      "group": "dynamic_rendering",
+      "cases": 64,
+      "counts": {
+        "Pass": 41,
+        "NotSupported": 21,
+        "InternalError": 2
+      },
+      "converted": 73,
+      "recorded_graphics_psos": 155,
+      "conversion_pct": 47.096774193548384,
+      "reasons": {
+        "converted": 73,
+        "unsupported top-level pNext": 82
+      },
+      "shader_libraries": 131
+    },
+    {
+      "group": "renderpass2",
+      "cases": 64,
+      "counts": {
+        "NotSupported": 25,
+        "Pass": 39
+      },
+      "converted": 46,
+      "recorded_graphics_psos": 46,
+      "conversion_pct": 100.0,
+      "reasons": {
+        "converted": 46
+      },
+      "shader_libraries": 92
+    },
+    {
+      "group": "multiview_dynamic_rendering",
+      "cases": 32,
+      "counts": {
+        "Pass": 32
+      },
+      "converted": 168,
+      "recorded_graphics_psos": 168,
+      "conversion_pct": 100.0,
+      "reasons": {
+        "converted": 168
+      },
+      "shader_libraries": 308
+    },
+    {
+      "group": "multiview_renderpass2",
+      "cases": 32,
+      "counts": {
+        "Pass": 32
+      },
+      "converted": 167,
+      "recorded_graphics_psos": 167,
+      "conversion_pct": 100.0,
+      "reasons": {
+        "converted": 167
+      },
+      "shader_libraries": 334
+    },
+    {
+      "group": "mesh_ext",
+      "cases": 64,
+      "counts": {
+        "Pass": 63,
+        "NotSupported": 1
+      },
+      "converted": 63,
+      "recorded_graphics_psos": 74,
+      "conversion_pct": 85.13513513513513,
+      "reasons": {
+        "converted": 63,
+        "unsupported top-level pNext": 11
+      },
+      "shader_libraries": 125
+    },
+    {
+      "group": "mesh_nv",
+      "cases": 32,
+      "counts": {
+        "Pass": 31,
+        "NotSupported": 1
+      },
+      "converted": 31,
+      "recorded_graphics_psos": 31,
+      "conversion_pct": 100.0,
+      "reasons": {
+        "converted": 31
+      },
+      "shader_libraries": 62
+    }
+  ],
+  "differences_vs_original_nonvalidation_baseline": [
+    {
+      "group": "attachment_feedback_loop_layout",
+      "case": "dEQP-VK.pipeline.monolithic.attachment_feedback_loop_layout.sampler.general.combined_image_sampler.image_type.1d.format.r8g8b8a8_unorm_color_read_dynamic_bad_static",
+      "baseline": "Pass",
+      "status": "InternalError",
+      "message": "4 API usage errors found"
+    },
+    {
+      "group": "attachment_feedback_loop_layout",
+      "case": "dEQP-VK.pipeline.monolithic.attachment_feedback_loop_layout.sampler.general.combined_image_sampler.image_type.1d_unnormalized.format.d24_unorm_s8_uint_stencil_read_dynamic_zero_static",
+      "baseline": "Pass",
+      "status": "InternalError",
+      "message": "4 API usage errors found"
+    },
+    {
+      "group": "attachment_feedback_loop_layout",
+      "case": "dEQP-VK.pipeline.monolithic.attachment_feedback_loop_layout.sampler.general.combined_image_sampler.image_type.2d.format.d24_unorm_s8_uint_depth_read_dynamic_bad_static",
+      "baseline": "Pass",
+      "status": "InternalError",
+      "message": "2 API usage errors found"
+    },
+    {
+      "group": "misc",
+      "case": "dEQP-VK.pipeline.monolithic.misc.no_rendering_unused_attachment",
+      "baseline": "Pass",
+      "status": "InternalError",
+      "message": "1 API usage errors found"
+    },
+    {
+      "group": "vertex_input",
+      "case": "dEQP-VK.pipeline.monolithic.vertex_input.legacy_vertex_attributes.single_binding.r16g16_unorm.shader_int_stride_1_memory_offset_1",
+      "baseline": "Pass",
+      "status": "InternalError",
+      "message": "1 API usage errors found"
+    },
+    {
+      "group": "vertex_input",
+      "case": "dEQP-VK.pipeline.monolithic.vertex_input.legacy_vertex_attributes.single_binding.r32_sint.shader_float_stride_0_attribute_offset_1_memory_offset_1",
+      "baseline": "Pass",
+      "status": "InternalError",
+      "message": "1 API usage errors found"
+    },
+    {
+      "group": "vertex_input",
+      "case": "dEQP-VK.pipeline.monolithic.vertex_input.legacy_vertex_attributes.single_binding.r32_sint.shader_int_stride_1_memory_offset_1",
+      "baseline": "Pass",
+      "status": "InternalError",
+      "message": "1 API usage errors found"
+    },
+    {
+      "group": "native_gpl_graphics_library",
+      "case": "dEQP-VK.pipeline.pipeline_library.graphics_library.misc.always_null_set_layout.set_0_unused_optimized_lib",
+      "baseline": "Pass",
+      "status": "InternalError",
+      "message": "1 API usage errors found"
+    },
+    {
+      "group": "native_gpl_graphics_library",
+      "case": "dEQP-VK.pipeline.pipeline_library.graphics_library.misc.always_null_set_layout.set_0_used_fast_lib",
+      "baseline": "Pass",
+      "status": "InternalError",
+      "message": "1 API usage errors found"
+    },
+    {
+      "group": "native_gpl_graphics_library",
+      "case": "dEQP-VK.pipeline.pipeline_library.graphics_library.misc.always_null_set_layout.set_1_unused_optimized_lib",
+      "baseline": "Pass",
+      "status": "InternalError",
+      "message": "1 API usage errors found"
+    },
+    {
+      "group": "native_gpl_graphics_library",
+      "case": "dEQP-VK.pipeline.pipeline_library.graphics_library.misc.always_null_set_layout.set_1_used_optimized_lib",
+      "baseline": "Pass",
+      "status": "InternalError",
+      "message": "1 API usage errors found"
+    },
+    {
+      "group": "native_gpl_graphics_library",
+      "case": "dEQP-VK.pipeline.pipeline_library.graphics_library.misc.always_null_set_layout.set_3_used_trim_optimized_lib",
+      "baseline": "Pass",
+      "status": "InternalError",
+      "message": "1 API usage errors found"
+    },
+    {
+      "group": "dynamic_rendering",
+      "case": "dEQP-VK.renderpasses.dynamic_rendering.primary_cmd_buff.custom_resolve.fast_lib.color_multi_upload_multi_resolve_simple",
+      "baseline": "Pass",
+      "status": "InternalError",
+      "message": "2 API usage errors found"
+    },
+    {
+      "group": "dynamic_rendering",
+      "case": "dEQP-VK.renderpasses.dynamic_rendering.primary_cmd_buff.custom_resolve.fast_lib.mix_multi_upload_multi_resolve_d32s8_no_stencil",
+      "baseline": "Pass",
+      "status": "InternalError",
+      "message": "1 API usage errors found"
+    }
+  ],
+  "new_regressions_after_matching_validation_controls": [],
+  "native_validation_control_count": 14,
+  "native_validation_controls": [
+    {
+      "case": "dEQP-VK.pipeline.monolithic.attachment_feedback_loop_layout.sampler.general.combined_image_sampler.image_type.1d.format.r8g8b8a8_unorm_color_read_dynamic_bad_static",
+      "baseline_validation": "InternalError",
+      "layer_validation": "InternalError",
+      "vuids": [
+        "VUID-VkGraphicsPipelineCreateInfo-pNext-12427"
+      ]
+    },
+    {
+      "case": "dEQP-VK.pipeline.monolithic.attachment_feedback_loop_layout.sampler.general.combined_image_sampler.image_type.1d_unnormalized.format.d24_unorm_s8_uint_stencil_read_dynamic_zero_static",
+      "baseline_validation": "InternalError",
+      "layer_validation": "InternalError",
+      "vuids": [
+        "VUID-VkGraphicsPipelineCreateInfo-pNext-12427"
+      ]
+    },
+    {
+      "case": "dEQP-VK.pipeline.monolithic.attachment_feedback_loop_layout.sampler.general.combined_image_sampler.image_type.2d.format.d24_unorm_s8_uint_depth_read_dynamic_bad_static",
+      "baseline_validation": "InternalError",
+      "layer_validation": "InternalError",
+      "vuids": [
+        "VUID-VkGraphicsPipelineCreateInfo-pNext-12427"
+      ]
+    },
+    {
+      "case": "dEQP-VK.renderpasses.dynamic_rendering.primary_cmd_buff.custom_resolve.fast_lib.color_multi_upload_multi_resolve_simple",
+      "baseline_validation": "InternalError",
+      "layer_validation": "InternalError",
+      "vuids": [
+        "VUID-VkGraphicsPipelineCreateInfo-renderPass-09652"
+      ]
+    },
+    {
+      "case": "dEQP-VK.renderpasses.dynamic_rendering.primary_cmd_buff.custom_resolve.fast_lib.mix_multi_upload_multi_resolve_d32s8_no_stencil",
+      "baseline_validation": "InternalError",
+      "layer_validation": "InternalError",
+      "vuids": [
+        "VUID-VkGraphicsPipelineCreateInfo-renderPass-09652"
+      ]
+    },
+    {
+      "case": "dEQP-VK.pipeline.monolithic.misc.no_rendering_unused_attachment",
+      "baseline_validation": "InternalError",
+      "layer_validation": "InternalError",
+      "vuids": [
+        "VUID-vkCmdBeginRendering-pRenderingInfo-09592"
+      ]
+    },
+    {
+      "case": "dEQP-VK.pipeline.pipeline_library.graphics_library.misc.always_null_set_layout.set_0_unused_optimized_lib",
+      "baseline_validation": "InternalError",
+      "layer_validation": "InternalError",
+      "vuids": [
+        "VUID-VkGraphicsPipelineCreateInfo-pLibraries-06681"
+      ]
+    },
+    {
+      "case": "dEQP-VK.pipeline.pipeline_library.graphics_library.misc.always_null_set_layout.set_0_used_fast_lib",
+      "baseline_validation": "InternalError",
+      "layer_validation": "InternalError",
+      "vuids": [
+        "VUID-VkGraphicsPipelineCreateInfo-pLibraries-06681"
+      ]
+    },
+    {
+      "case": "dEQP-VK.pipeline.pipeline_library.graphics_library.misc.always_null_set_layout.set_1_unused_optimized_lib",
+      "baseline_validation": "InternalError",
+      "layer_validation": "InternalError",
+      "vuids": [
+        "VUID-VkGraphicsPipelineCreateInfo-pLibraries-06681"
+      ]
+    },
+    {
+      "case": "dEQP-VK.pipeline.pipeline_library.graphics_library.misc.always_null_set_layout.set_1_used_optimized_lib",
+      "baseline_validation": "InternalError",
+      "layer_validation": "InternalError",
+      "vuids": [
+        "VUID-VkGraphicsPipelineCreateInfo-pLibraries-06681"
+      ]
+    },
+    {
+      "case": "dEQP-VK.pipeline.pipeline_library.graphics_library.misc.always_null_set_layout.set_3_used_trim_optimized_lib",
+      "baseline_validation": "InternalError",
+      "layer_validation": "InternalError",
+      "vuids": [
+        "VUID-VkGraphicsPipelineCreateInfo-pLibraries-06681"
+      ]
+    },
+    {
+      "case": "dEQP-VK.pipeline.monolithic.vertex_input.legacy_vertex_attributes.single_binding.r16g16_unorm.shader_int_stride_1_memory_offset_1",
+      "baseline_validation": "InternalError",
+      "layer_validation": "InternalError",
+      "vuids": [
+        "VUID-vkCmdDraw-None-02721"
+      ]
+    },
+    {
+      "case": "dEQP-VK.pipeline.monolithic.vertex_input.legacy_vertex_attributes.single_binding.r32_sint.shader_float_stride_0_attribute_offset_1_memory_offset_1",
+      "baseline_validation": "InternalError",
+      "layer_validation": "InternalError",
+      "vuids": [
+        "VUID-vkCmdDraw-None-02721"
+      ]
+    },
+    {
+      "case": "dEQP-VK.pipeline.monolithic.vertex_input.legacy_vertex_attributes.single_binding.r32_sint.shader_int_stride_1_memory_offset_1",
+      "baseline_validation": "InternalError",
+      "layer_validation": "InternalError",
+      "vuids": [
+        "VUID-vkCmdDraw-None-02721"
+      ]
+    }
+  ],
+  "source_sha256": {
+    "compatibility_tests.cpp": "cf00021059a1a7c3304292e3624d5fa9bbcff79f2fe76e1ab00b96805f2da78b",
+    "dynamic_state_extensions.h": "bf90067a807790f54cdccdab1787998e532c430974e6247a9ccca32b6c25f1a6",
+    "graphics_pipeline_library.cpp": "5004dae6b0e54f35754e88a45a30943ce42e719e04c93daa26cf6d8eb28dd703",
+    "graphics_pipeline_library.h": "987e7d3a8513cd925a44e4378f75119d1021d2ef3ec73bad8594104459bcdddc"
+  },
+  "conversion_pct": 59.47893569844789,
+  "quality_warnings": 0,
+  "note": "Full selected suite with Validation enabled; original baseline was without Validation. All 14 InternalErrors reproduce without the GPL layer with identical VUID sets. Four Fail cases also fail in the original native baseline."
+}

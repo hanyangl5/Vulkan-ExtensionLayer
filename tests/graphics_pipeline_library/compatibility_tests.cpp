@@ -859,7 +859,364 @@ static void FragmentState() {
 }
 }  // namespace split_state_regression
 
+namespace identifier_regression {
+static VkPipelineCache expected_cache;
+static bool require_compile_control;
+static bool fail_identifier_once;
+
+static VKAPI_ATTR VkResult VKAPI_CALL Observe(VkDevice device, VkPipelineCache cache, uint32_t count,
+                                              const VkGraphicsPipelineCreateInfo* ci, const VkAllocationCallbacks* allocator,
+                                              VkPipeline* output) {
+    Require(cache == expected_cache, "All GPL builds, links and native fallbacks must receive the application pipeline cache");
+    if (require_compile_control)
+        Require(EffectivePipelineFlags(*ci) & VK_PIPELINE_CREATE_2_FAIL_ON_PIPELINE_COMPILE_REQUIRED_BIT,
+                "A speculative request must never trigger unguarded compilation in an internal creation call");
+    if (Node(ci->pNext, VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_LIBRARY_CREATE_INFO_EXT)) {
+        for (uint32_t i = 0; i < ci->stageCount; ++i) {
+            const auto* identifier = StageIdentifier(ci->pStages[i]);
+            if (identifier && identifier->identifierSize && fail_identifier_once) {
+                fail_identifier_once = false;
+                *output = VK_NULL_HANDLE;
+                return VK_PIPELINE_COMPILE_REQUIRED;
+            }
+        }
+    }
+    return NextCreate(device, cache, count, ci, allocator, output);
+}
+
+static void Run() {
+    Fixture f;
+    expected_cache = Handle<VkPipelineCache>(0x9000);
+    require_compile_control = false;
+    fail_identifier_once = false;
+    f.device.vtable.CreateGraphicsPipelines = Observe;
+    VkPipeline output;
+    auto create = [&] { return CreateGraphicsPipelines(f.handle, expected_cache, 1, &f.ci, nullptr, &output); };
+    Require(create() == VK_SUCCESS && native_index == 0, "Module-backed cache priming should use GPL");
+    auto ctx = Context(f.ci);
+    const auto module_key = MakePreRasterKey(ctx, f.device);
+    f.ci.flags = VK_PIPELINE_CREATE_FAIL_ON_PIPELINE_COMPILE_REQUIRED_BIT;
+    ctx = Context(f.ci);
+    Require(module_key == MakePreRasterKey(ctx, f.device), "Compile control must not fragment library cache identity");
+    require_compile_control = true;
+    auto count = calls.size();
+    Require(create() == VK_SUCCESS && calls.size() == count + 1 && native_index == 0,
+            "A warmed module-backed speculative request should reuse its libraries and link with compile control");
+
+    uint8_t bytes[2][4] = {{1, 2, 3, 4}, {5, 6, 7, 8}};
+    VkPipelineShaderStageModuleIdentifierCreateInfoEXT ids[2] = {
+        {VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_MODULE_IDENTIFIER_CREATE_INFO_EXT, nullptr, 4, bytes[0]},
+        {VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_MODULE_IDENTIFIER_CREATE_INFO_EXT, nullptr, 4, bytes[1]}};
+    for (uint32_t i = 0; i < 2; ++i) {
+        f.stages[i].module = VK_NULL_HANDLE;
+        f.stages[i].pNext = &ids[i];
+    }
+    Require(!ConvertBlocker(f.ci, &f.device), "Identifier-only stages must remain eligible for GPL");
+    ctx = Context(f.ci);
+    const auto identifier_key = MakePreRasterKey(ctx, f.device);
+    Require(module_key != identifier_key,
+            "Identifier-built libraries must not be reused by module-backed links without required compile control");
+    count = calls.size();
+    Require(create() == VK_SUCCESS && calls.size() == count + 3 && native_index == 0,
+            "Identifier requests must build GPL shader libraries and link instead of switching to monolithic creation");
+    uint8_t copy[4];
+    std::memcpy(copy, bytes[0], sizeof(copy));
+    ids[0].pIdentifier = copy;
+    count = calls.size();
+    Require(create() == VK_SUCCESS && calls.size() == count + 1, "Identifier addresses must not distinguish libraries");
+    ++copy[0];
+    ctx = Context(f.ci);
+    Require(identifier_key != MakePreRasterKey(ctx, f.device), "Different identifier bytes must distinguish shader libraries");
+    fail_identifier_once = true;
+    native_results = {VK_PIPELINE_COMPILE_REQUIRED};
+    Require(create() == VK_PIPELINE_COMPILE_REQUIRED && !output && native_index == 1,
+            "A cold identifier miss must preserve compile-required and a null output through native fallback");
+    Require(create() == VK_SUCCESS && output && native_index == 1,
+            "A transient compile-required miss must not poison later attempts after the driver cache is primed");
+
+    require_compile_control = false;
+    f.ci.flags = 0;
+    for (uint32_t i = 0; i < 2; ++i) {
+        ids[i].identifierSize = 0;
+        ids[i].pIdentifier = reinterpret_cast<const uint8_t*>(uintptr_t{1});
+        f.stages[i].module = Handle<VkShaderModule>(i == 0 ? 0x2000 : 0x3000);
+    }
+    ctx = Context(f.ci);
+    Require(module_key == MakePreRasterKey(ctx, f.device), "Zero-size identifiers must be ignored without reading their data");
+    count = calls.size();
+    Require(create() == VK_SUCCESS && calls.size() == count + 1,
+            "Module-backed links must continue reusing their original non-identifier libraries");
+}
+}  // namespace identifier_regression
+
+namespace content_identity_regression {
+static uintptr_t next_object = 0x1000000;
+static uintptr_t recycled_object;
+static VkResult object_result;
+
+template <typename Info, typename Object>
+static VKAPI_ATTR VkResult VKAPI_CALL CreateObject(VkDevice, const Info*, const VkAllocationCallbacks*, Object* output) {
+    if (object_result == VK_SUCCESS) {
+        *output = Handle<Object>(recycled_object ? recycled_object : next_object++);
+        recycled_object = 0;
+    }
+    return object_result;
+}
+
+template <typename Object>
+static VKAPI_ATTR void VKAPI_CALL DestroyObject(VkDevice, Object, const VkAllocationCallbacks*) {}
+
+static void Run() {
+    Fixture f;
+    recycled_object = 0;
+    object_result = VK_SUCCESS;
+    auto& v = f.device.vtable;
+    v.CreateShaderModule = CreateObject<VkShaderModuleCreateInfo, VkShaderModule>;
+    v.DestroyShaderModule = DestroyObject<VkShaderModule>;
+    v.CreateSampler = CreateObject<VkSamplerCreateInfo, VkSampler>;
+    v.DestroySampler = DestroyObject<VkSampler>;
+    v.CreateDescriptorSetLayout = CreateObject<VkDescriptorSetLayoutCreateInfo, VkDescriptorSetLayout>;
+    v.DestroyDescriptorSetLayout = DestroyObject<VkDescriptorSetLayout>;
+    v.CreatePipelineLayout = CreateObject<VkPipelineLayoutCreateInfo, VkPipelineLayout>;
+    v.DestroyPipelineLayout = DestroyObject<VkPipelineLayout>;
+    v.CreateRenderPass = CreateObject<VkRenderPassCreateInfo, VkRenderPass>;
+    v.CreateRenderPass2 = CreateObject<VkRenderPassCreateInfo2, VkRenderPass>;
+    v.DestroyRenderPass = DestroyObject<VkRenderPass>;
+    for (const char* name : {"vkCreateShaderModule", "vkCreateSampler", "vkDestroySampler", "vkCreateDescriptorSetLayout",
+                             "vkDestroyDescriptorSetLayout", "vkCreatePipelineLayout"})
+        Require(FindIntercept(name) && GetDeviceProcAddr(f.handle, name) == FindIntercept(name),
+                "Content tracking must be reachable through both instance and device dispatch");
+
+    uint32_t words[] = {0x07230203, 0x10000, 0, 10, 0};
+    VkShaderModuleCreateInfo shader{VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO, nullptr, 0, sizeof(words), words};
+    VkShaderModule shaders[2];
+    for (auto& module : shaders)
+        Require(CreateShaderModule(f.handle, &shader, nullptr, &module) == VK_SUCCESS, "Shader creation wrapper failed");
+    Require(shaders[0] != shaders[1] && f.device.ShaderModuleIdentity(shaders[0]) == f.device.ShaderModuleIdentity(shaders[1]),
+            "Equal SPIR-V in different objects must have equal shader identities");
+    f.stages[0].module = shaders[0];
+    VkPipeline output;
+    Require(f.Create(1, &f.ci, &output) == VK_SUCCESS && calls.size() == 5, "Initial shader libraries were not built");
+    f.stages[0].module = shaders[1];
+    auto count = calls.size();
+    Require(f.Create(1, &f.ci, &output) == VK_SUCCESS && calls.size() == count + 1,
+            "An equal shader object must reuse GPL libraries and only link a new executable");
+    const auto original_identity = f.device.ShaderModuleIdentity(shaders[0]);
+    DestroyShaderModule(f.handle, shaders[0], nullptr);
+    recycled_object = CastToUint64(shaders[0]);
+    ++words[3];
+    Require(CreateShaderModule(f.handle, &shader, nullptr, &shaders[0]) == VK_SUCCESS &&
+                f.device.ShaderModuleIdentity(shaders[0]) != original_identity,
+            "A recycled shader handle with changed code must not alias the destroyed shader");
+    --words[3];
+    f.stages[0].module = VK_NULL_HANDLE;
+    f.stages[0].pNext = &shader;
+    count = calls.size();
+    Require(f.Create(1, &f.ci, &output) == VK_SUCCESS && calls.size() == count + 1,
+            "Inline SPIR-V and an equal module-backed shader must reuse the same libraries");
+    f.stages[0].module = shaders[1];
+    f.stages[0].pNext = nullptr;
+    object_result = VK_ERROR_OUT_OF_HOST_MEMORY;
+    Require(CreateShaderModule(f.handle, &shader, nullptr, &shaders[1]) == object_result &&
+                f.device.ShaderModuleIdentity(shaders[1]) == original_identity,
+            "Failed creation must not alter a live object's content identity");
+    object_result = VK_SUCCESS;
+    VkBaseInStructure unknown{VK_STRUCTURE_TYPE_MAX_ENUM, nullptr};
+    shader.pNext = &unknown;
+    VkShaderModule opaque[2];
+    for (auto& module : opaque) CreateShaderModule(f.handle, &shader, nullptr, &module);
+    Require(f.device.ShaderModuleIdentity(opaque[0]) != f.device.ShaderModuleIdentity(opaque[1]),
+            "Unknown shader extensions must keep distinct lifetime identities");
+    shader.pNext = nullptr;
+
+    VkSamplerCreateInfo sampler_info{VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO};
+    sampler_info.magFilter = sampler_info.minFilter = VK_FILTER_LINEAR;
+    sampler_info.maxLod = 1.0f;
+    VkSampler samplers[3];
+    for (uint32_t i = 0; i < 2; ++i) CreateSampler(f.handle, &sampler_info, nullptr, &samplers[i]);
+    VkDescriptorSetLayoutBinding bindings[] = {{4, VK_DESCRIPTOR_TYPE_SAMPLER, 1, VK_SHADER_STAGE_FRAGMENT_BIT, &samplers[0]},
+                                               {0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1, VK_SHADER_STAGE_VERTEX_BIT, nullptr}};
+    VkDescriptorBindingFlags binding_flags[] = {VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT, 0};
+    VkDescriptorSetLayoutBindingFlagsCreateInfo flags{VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_BINDING_FLAGS_CREATE_INFO, nullptr, 2,
+                                                      binding_flags};
+    VkDescriptorSetLayoutCreateInfo set_info{VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO, &flags, 0, 2, bindings};
+    VkDescriptorSetLayout sets[3];
+    CreateDescriptorSetLayout(f.handle, &set_info, nullptr, &sets[0]);
+    bindings[0].pImmutableSamplers = &samplers[1];
+    std::swap(bindings[0], bindings[1]);
+    std::swap(binding_flags[0], binding_flags[1]);
+    CreateDescriptorSetLayout(f.handle, &set_info, nullptr, &sets[1]);
+    VkPushConstantRange ranges[] = {{VK_SHADER_STAGE_VERTEX_BIT, 0, 16}, {VK_SHADER_STAGE_FRAGMENT_BIT, 16, 16}};
+    VkPipelineLayoutCreateInfo layout_info{VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO, nullptr, 0, 1, &sets[0], 2, ranges};
+    VkPipelineLayout layouts[3];
+    CreatePipelineLayout(f.handle, &layout_info, nullptr, &layouts[0]);
+    layout_info.pSetLayouts = &sets[1];
+    std::swap(ranges[0], ranges[1]);
+    CreatePipelineLayout(f.handle, &layout_info, nullptr, &layouts[1]);
+    Require(f.device.PipelineLayoutIdentity(layouts[0]) == f.device.PipelineLayoutIdentity(layouts[1]),
+            "Equal bindings, flags, immutable samplers and push constants must match independently of array order and handles");
+    f.ci.layout = layouts[0];
+    Require(f.Create(1, &f.ci, &output) == VK_SUCCESS, "Pipeline with tracked layout failed");
+    f.ci.layout = layouts[1];
+    count = calls.size();
+    Require(f.Create(1, &f.ci, &output) == VK_SUCCESS && calls.size() == count + 1,
+            "Equivalent pipeline-layout objects must reuse both shader libraries");
+    DestroyDescriptorSetLayout(f.handle, sets[0], nullptr);
+    DestroySampler(f.handle, samplers[0], nullptr);
+    DestroyPipelineLayout(f.handle, layouts[0], nullptr);
+    recycled_object = CastToUint64(layouts[0]);
+    CreatePipelineLayout(f.handle, &layout_info, nullptr, &layouts[0]);
+    Require(f.device.PipelineLayoutIdentity(layouts[0]) == f.device.PipelineLayoutIdentity(layouts[1]),
+            "Recreating identical layout content must preserve identity after the original dependencies are destroyed");
+    sampler_info.minFilter = VK_FILTER_NEAREST;
+    CreateSampler(f.handle, &sampler_info, nullptr, &samplers[2]);
+    bindings[1].pImmutableSamplers = &samplers[2];
+    CreateDescriptorSetLayout(f.handle, &set_info, nullptr, &sets[2]);
+    layout_info.pSetLayouts = &sets[2];
+    CreatePipelineLayout(f.handle, &layout_info, nullptr, &layouts[2]);
+    Require(f.device.PipelineLayoutIdentity(layouts[2]) != f.device.PipelineLayoutIdentity(layouts[1]),
+            "Changed immutable sampler content must distinguish pipeline layouts");
+    layout_info.pSetLayouts = &sets[1];
+    ranges[0].size += 4;
+    VkPipelineLayout changed;
+    CreatePipelineLayout(f.handle, &layout_info, nullptr, &changed);
+    Require(f.device.PipelineLayoutIdentity(changed) != f.device.PipelineLayoutIdentity(layouts[1]),
+            "Changed push constants must distinguish layouts");
+    ranges[0].size -= 4;
+    layout_info.flags = VK_PIPELINE_LAYOUT_CREATE_INDEPENDENT_SETS_BIT_EXT;
+    CreatePipelineLayout(f.handle, &layout_info, nullptr, &changed);
+    Require(f.device.PipelineLayoutIdentity(changed) != f.device.PipelineLayoutIdentity(layouts[1]),
+            "Independent-set and other layout flags must not be lost");
+    layout_info.pNext = &unknown;
+    VkPipelineLayout unknown_layouts[2];
+    for (auto& layout : unknown_layouts) CreatePipelineLayout(f.handle, &layout_info, nullptr, &layout);
+    Require(f.device.PipelineLayoutIdentity(unknown_layouts[0]) != f.device.PipelineLayoutIdentity(unknown_layouts[1]),
+            "Unknown layout extensions must keep distinct lifetime identities");
+
+    VkAttachmentDescription attachment{0,
+                                       VK_FORMAT_R8G8B8A8_UNORM,
+                                       VK_SAMPLE_COUNT_1_BIT,
+                                       VK_ATTACHMENT_LOAD_OP_CLEAR,
+                                       VK_ATTACHMENT_STORE_OP_STORE,
+                                       VK_ATTACHMENT_LOAD_OP_DONT_CARE,
+                                       VK_ATTACHMENT_STORE_OP_DONT_CARE,
+                                       VK_IMAGE_LAYOUT_UNDEFINED,
+                                       VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL};
+    VkAttachmentReference ref{0, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL};
+    VkSubpassDescription subpass{};
+    subpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
+    subpass.colorAttachmentCount = 1;
+    subpass.pColorAttachments = &ref;
+    VkRenderPassCreateInfo render_info{VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO, nullptr, 0, 1, &attachment, 1, &subpass};
+    VkRenderPass passes[3];
+    for (uint32_t i = 0; i < 2; ++i) CreateRenderPass(f.handle, &render_info, nullptr, &passes[i]);
+    f.ci.pNext = nullptr;
+    f.ci.renderPass = passes[0];
+    Require(f.Create(1, &f.ci, &output) == VK_SUCCESS, "Legacy pipeline with a tracked render pass failed");
+    f.ci.renderPass = passes[1];
+    count = calls.size();
+    Require(f.Create(1, &f.ci, &output) == VK_SUCCESS && calls.size() == count + 1,
+            "Equal render-pass objects must reuse shader and fragment-output libraries");
+    DestroyRenderPass(f.handle, passes[0], nullptr);
+    recycled_object = CastToUint64(passes[0]);
+    attachment.format = VK_FORMAT_R16G16B16A16_SFLOAT;
+    CreateRenderPass(f.handle, &render_info, nullptr, &passes[0]);
+    Require(f.device.RenderPassIdentity(passes[0]) != f.device.RenderPassIdentity(passes[1]),
+            "Recycled render-pass handles with different formats must not reuse stale libraries");
+    render_info.pNext = &unknown;
+    for (uint32_t i = 0; i < 2; ++i) CreateRenderPass(f.handle, &render_info, nullptr, &passes[i]);
+    Require(f.device.RenderPassIdentity(passes[0]) != f.device.RenderPassIdentity(passes[1]),
+            "Unknown render-pass extensions must keep separate identities");
+    VkAttachmentDescription2 attachment2{VK_STRUCTURE_TYPE_ATTACHMENT_DESCRIPTION_2};
+    attachment2.format = attachment.format;
+    attachment2.samples = VK_SAMPLE_COUNT_1_BIT;
+    VkAttachmentReference2 ref2{VK_STRUCTURE_TYPE_ATTACHMENT_REFERENCE_2, nullptr, 0, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL};
+    VkSubpassDescription2 subpass2{VK_STRUCTURE_TYPE_SUBPASS_DESCRIPTION_2};
+    subpass2.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
+    subpass2.colorAttachmentCount = 1;
+    subpass2.pColorAttachments = &ref2;
+    VkRenderPassCreateInfo2 render2{VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO_2, nullptr, 0, 1, &attachment2, 1, &subpass2};
+    for (uint32_t i = 0; i < 2; ++i) CreateRenderPass2(f.handle, &render2, nullptr, &passes[i]);
+    Require(f.device.RenderPassIdentity(passes[0]) == f.device.RenderPassIdentity(passes[1]),
+            "Equal render-pass-2 definitions must share content identity");
+    ref2.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    CreateRenderPass2(f.handle, &render2, nullptr, &passes[2]);
+    Require(f.device.RenderPassIdentity(passes[0]) != f.device.RenderPassIdentity(passes[2]),
+            "Nested render-pass-2 attachment-reference state must distinguish definitions");
+    VkSubpassDescriptionDepthStencilResolve resolve{VK_STRUCTURE_TYPE_SUBPASS_DESCRIPTION_DEPTH_STENCIL_RESOLVE};
+    resolve.pDepthStencilResolveAttachment = reinterpret_cast<const VkAttachmentReference2*>(uintptr_t{1});
+    subpass2.pNext = &resolve;
+    for (uint32_t i = 0; i < 2; ++i) CreateRenderPass2(f.handle, &render2, nullptr, &passes[i]);
+    Require(f.device.RenderPassIdentity(passes[0]) == f.device.RenderPassIdentity(passes[1]),
+            "Disabled depth/stencil resolve must not inspect an ignored resolve attachment pointer");
+}
+}  // namespace content_identity_regression
+
+namespace multisample_identity_regression {
+static VKAPI_ATTR VkResult VKAPI_CALL Observe(VkDevice device, VkPipelineCache cache, uint32_t count,
+                                              const VkGraphicsPipelineCreateInfo* ci, const VkAllocationCallbacks* allocator,
+                                              VkPipeline* output) {
+    if (Node(ci->pNext, VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_LIBRARY_CREATE_INFO_EXT) && ci->pMultisampleState) {
+        const auto& ms = *ci->pMultisampleState;
+        Require(ms.rasterizationSamples == VK_SAMPLE_COUNT_1_BIT && !ms.pSampleMask && !ms.alphaToCoverageEnable &&
+                    !ms.alphaToOneEnable && ms.minSampleShading == 0.0f,
+                "Cached FS/FO libraries must receive identical canonical values for ignored multisample fields");
+    }
+    return NextCreate(device, cache, count, ci, allocator, output);
+}
+
+static void Run() {
+    Fixture f;
+    f.device.vtable.CreateGraphicsPipelines = Observe;
+    VkDynamicState states[] = {VK_DYNAMIC_STATE_SAMPLE_MASK_EXT, VK_DYNAMIC_STATE_RASTERIZATION_SAMPLES_EXT,
+                               VK_DYNAMIC_STATE_ALPHA_TO_COVERAGE_ENABLE_EXT, VK_DYNAMIC_STATE_ALPHA_TO_ONE_ENABLE_EXT};
+    VkPipelineDynamicStateCreateInfo dynamic{VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO, nullptr, 0, 4, states};
+    f.ci.pDynamicState = &dynamic;
+    f.ms.rasterizationSamples = VK_SAMPLE_COUNT_4_BIT;
+    f.ms.pSampleMask = reinterpret_cast<const VkSampleMask*>(uintptr_t{1});
+    f.ms.alphaToCoverageEnable = f.ms.alphaToOneEnable = VK_TRUE;
+    f.ms.minSampleShading = 0.75f;
+    VkPipeline output;
+    Require(f.Create(1, &f.ci, &output) == VK_SUCCESS, "Initial dynamic multisample pipeline failed");
+    f.ms.rasterizationSamples = VK_SAMPLE_COUNT_64_BIT;
+    f.ms.pSampleMask = nullptr;
+    f.ms.alphaToCoverageEnable = f.ms.alphaToOneEnable = VK_FALSE;
+    f.ms.minSampleShading = 0.25f;
+    f.attachment.blendEnable = VK_TRUE;
+    const auto count = calls.size();
+    Require(f.Create(1, &f.ci, &output) == VK_SUCCESS && calls.size() == count + 2,
+            "A reused FS library and newly built FO library must agree despite different ignored application values");
+    f.ci.pDynamicState = nullptr;
+    f.ms.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
+    const auto null_mask = Key(f.ci, GplSubset::kFragmentShader);
+    VkSampleMask all_samples = ~VkSampleMask{0};
+    f.ms.pSampleMask = &all_samples;
+    Require(null_mask != Key(f.ci, GplSubset::kFragmentShader),
+            "A NULL mask must not collide with an explicit all-ones mask in the shared FS/FO key");
+}
+}  // namespace multisample_identity_regression
+
+static void ContinuousConversion() {
+    Fixture f;
+    constexpr uint32_t pipeline_count = 1024;
+    for (uint32_t i = 0; i < pipeline_count; ++i) {
+        // Distinct shader identities prevent PR/FS sharing and used to trip the distribution gate.
+        f.stages[0].module = Handle<VkShaderModule>(0x100000 + i * 2);
+        f.stages[1].module = Handle<VkShaderModule>(0x100001 + i * 2);
+        VkPipeline output = VK_NULL_HANDLE;
+        Require(f.Create(1, &f.ci, &output) == VK_SUCCESS && output != VK_NULL_HANDLE && native_index == 0 &&
+                    calls.back().linked_libraries == 4,
+                "Eligible pipelines must continue converting even when shader libraries are not shared");
+    }
+    Require(f.device.converted_pipeline_count == pipeline_count && f.device.expensive_library_count == pipeline_count * 2,
+            "Conversion statistics must continue beyond the former warmup threshold");
+}
+
 int main() {
+    multisample_identity_regression::Run();
+    content_identity_regression::Run();
+    identifier_regression::Run();
+    ContinuousConversion();
     split_state_regression::CombinedLibraries();
     split_state_regression::FragmentState();
     dispatch_version_regression::Run();

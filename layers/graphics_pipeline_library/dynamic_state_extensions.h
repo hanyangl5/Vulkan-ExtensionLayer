@@ -29,9 +29,9 @@ constexpr VkPipelineCreateFlags2 kFragmentAttachmentFlags =
 constexpr VkPipelineCreateFlags2 kFragmentOutputFlags = VK_PIPELINE_CREATE_2_COLOR_ATTACHMENT_FEEDBACK_LOOP_BIT_EXT |
                                                         VK_PIPELINE_CREATE_2_DEPTH_STENCIL_ATTACHMENT_FEEDBACK_LOOP_BIT_EXT |
                                                         VK_PIPELINE_CREATE_2_ENABLE_LEGACY_DITHERING_BIT_EXT;
-constexpr VkPipelineCreateFlags2 kConvertiblePipelineFlags = kCommonLibraryFlags | kFragmentAttachmentFlags | kFragmentOutputFlags |
-                                                             VK_PIPELINE_CREATE_2_VIEW_INDEX_FROM_DEVICE_INDEX_BIT |
-                                                             VK_PIPELINE_CREATE_2_EARLY_RETURN_ON_FAILURE_BIT;
+constexpr VkPipelineCreateFlags2 kConvertiblePipelineFlags =
+    kCommonLibraryFlags | kFragmentAttachmentFlags | kFragmentOutputFlags | VK_PIPELINE_CREATE_2_VIEW_INDEX_FROM_DEVICE_INDEX_BIT |
+    VK_PIPELINE_CREATE_2_EARLY_RETURN_ON_FAILURE_BIT | VK_PIPELINE_CREATE_2_FAIL_ON_PIPELINE_COMPILE_REQUIRED_BIT;
 
 VkPipelineCreateFlags2 LibraryFlagsForSubset(const VkGraphicsPipelineCreateInfo& ci, GplSubset subset) {
     VkPipelineCreateFlags2 mask = kCommonLibraryFlags;
@@ -78,10 +78,18 @@ const VkShaderModuleCreateInfo* InlineShader(const VkPipelineShaderStageCreateIn
     return nullptr;
 }
 
+const VkPipelineShaderStageModuleIdentifierCreateInfoEXT* StageIdentifier(const VkPipelineShaderStageCreateInfo& stage) {
+    for (auto node = static_cast<const VkBaseInStructure*>(stage.pNext); node; node = node->pNext)
+        if (node->sType == VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_MODULE_IDENTIFIER_CREATE_INFO_EXT)
+            return reinterpret_cast<const VkPipelineShaderStageModuleIdentifierCreateInfoEXT*>(node);
+    return nullptr;
+}
+
 bool SupportedStageChain(const VkPipelineShaderStageCreateInfo& stage) {
     for (auto node = static_cast<const VkBaseInStructure*>(stage.pNext); node; node = node->pNext) {
         switch (node->sType) {
             case VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO:
+            case VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_MODULE_IDENTIFIER_CREATE_INFO_EXT:
             case VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_REQUIRED_SUBGROUP_SIZE_CREATE_INFO:
             case VK_STRUCTURE_TYPE_PIPELINE_ROBUSTNESS_CREATE_INFO:
                 break;
@@ -89,7 +97,10 @@ bool SupportedStageChain(const VkPipelineShaderStageCreateInfo& stage) {
                 return false;
         }
     }
-    return stage.module != VK_NULL_HANDLE || InlineShader(stage) != nullptr;
+    const auto* identifier = StageIdentifier(stage);
+    if ((identifier && identifier->identifierSize != 0) || stage.module != VK_NULL_HANDLE) return true;
+    const auto* code = InlineShader(stage);
+    return code && ShaderModuleChainSupported(*code);
 }
 
 void AppendRobustness(KeyBuilder& key, const VkPipelineRobustnessCreateInfo& s) {
@@ -101,7 +112,10 @@ void AppendRobustness(KeyBuilder& key, const VkPipelineRobustnessCreateInfo& s) 
 
 void AppendStageExtensions(KeyBuilder& key, const VkPipelineShaderStageCreateInfo& stage) {
     for (auto node = static_cast<const VkBaseInStructure*>(stage.pNext); node; node = node->pNext) {
-        if (node->sType == VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO) continue;  // code is keyed separately
+        // Code and identifier bytes are keyed separately; zero-size identifiers are ignored.
+        if (node->sType == VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO ||
+            node->sType == VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_MODULE_IDENTIFIER_CREATE_INFO_EXT)
+            continue;
         key.AppendU32(node->sType);
         if (node->sType == VK_STRUCTURE_TYPE_PIPELINE_ROBUSTNESS_CREATE_INFO)
             AppendRobustness(key, *reinterpret_cast<const VkPipelineRobustnessCreateInfo*>(node));

@@ -1,0 +1,56 @@
+{
+  "groups": 56,
+  "cases": 3042,
+  "counts": {
+    "Pass": 2594,
+    "NotSupported": 443,
+    "Fail": 4,
+    "QualityWarning": 1
+  },
+  "converted_psos": 3491,
+  "recorded_graphics_psos": 6426,
+  "recorded_passthrough_psos": 2935,
+  "recorded_conversion_pct": 54.32617491441021,
+  "full_conversion_pct": null,
+  "full_ratio_unavailable_groups": [
+    "cache",
+    "depth",
+    "extended_dynamic_state"
+  ],
+  "reasons": {
+    "converted": 3491,
+    "unhandled create flag": 28,
+    "dependency/control batch": 31,
+    "derivative flag": 85,
+    "capture flag": 21,
+    "unsupported rasterization pNext": 2,
+    "unsupported top-level pNext": 2762,
+    "unsupported shader stage/code": 6
+  },
+  "shader_libraries": 6913,
+  "measurement": "recorded creation requests, including retries; not unique pipeline states or test-case coverage",
+  "source_commit": "8d0d4ef2d29be609a1ca8271418ca80ce737697a",
+  "full_suite_dll_sha256": "2305aac3d57be17ba55619020f03dcf8d6dd378e77d59e7723170a050ad8b354",
+  "exact_final_dll_sha256": "5bd886191b73e7237bc69b1b938d8cb8fda56457a9f635336a45e44903b216e3",
+  "per_case_conversion_counts_available": false,
+  "by_scope": [
+    {
+      "scope": "monolithic/API",
+      "groups": 53,
+      "cases": 2856,
+      "converted_psos": 3450,
+      "recorded_graphics_psos": 3737,
+      "recorded_passthrough_psos": 287,
+      "recorded_conversion_pct": 92.32004281509232
+    },
+    {
+      "scope": "native GPL control",
+      "groups": 3,
+      "cases": 186,
+      "converted_psos": 41,
+      "recorded_graphics_psos": 2689,
+      "recorded_passthrough_psos": 2648,
+      "recorded_conversion_pct": 1.5247303830420231
+    }
+  ]
+}

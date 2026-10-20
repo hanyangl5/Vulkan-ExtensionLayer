@@ -55,6 +55,7 @@ target_sources(VkLayer_PA_graphics_pipeline_library PRIVATE
     graphics_pipeline_library/graphics_pipeline_library.cpp
     graphics_pipeline_library/graphics_pipeline_library.h
     graphics_pipeline_library/dynamic_state_extensions.h
+    graphics_pipeline_library/object_content_keys.h
 )
 target_link_libraries(VkLayer_PA_graphics_pipeline_library PRIVATE Threads::Threads)
 

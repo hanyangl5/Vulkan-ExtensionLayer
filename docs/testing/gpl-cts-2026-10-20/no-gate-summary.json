@@ -1,0 +1,66 @@
+{
+  "groups": 3,
+  "cases": 608,
+  "counts": {
+    "Pass": 578,
+    "NotSupported": 30
+  },
+  "converted": 1564,
+  "shader_libraries": 3122,
+  "regressions": [],
+  "validation": true,
+  "dll_sha256": "c9a8ab0231ed93edce16e1956a07a3da0fda614b9a549ef164da66c27e7f19dc",
+  "groups_detail": [
+    {
+      "name": "cache",
+      "cases": 128,
+      "counts": {
+        "Pass": 128
+      },
+      "converted": 575,
+      "shader_libraries": 1150,
+      "reasons": {
+        "converted": 575,
+        "native_batch_calls": 0,
+        "gate_events": 0
+      },
+      "elapsed_s": 13.181836099996872
+    },
+    {
+      "name": "depth",
+      "cases": 96,
+      "counts": {
+        "Pass": 79,
+        "NotSupported": 17
+      },
+      "converted": 303,
+      "shader_libraries": 600,
+      "reasons": {
+        "converted": 303,
+        "native_batch_calls": 0,
+        "gate_events": 0
+      },
+      "elapsed_s": 1.9890560999992886
+    },
+    {
+      "name": "extended_dynamic_state",
+      "cases": 384,
+      "counts": {
+        "Pass": 371,
+        "NotSupported": 13
+      },
+      "converted": 686,
+      "shader_libraries": 1372,
+      "reasons": {
+        "converted": 686,
+        "unsupported rasterization pNext": 2,
+        "native_batch_calls": 0,
+        "gate_events": 0
+      },
+      "elapsed_s": 4.986568000000261
+    }
+  ],
+  "recorded_graphics_psos": 1566,
+  "recorded_conversion_pct": 99.87228607918263,
+  "note": "Post-gate-removal validation rerun of three groups only; original 3042-case snapshot is unchanged."
+}

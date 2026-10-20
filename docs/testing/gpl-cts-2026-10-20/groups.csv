@@ -1,0 +1,57 @@
+﻿group,scope,cases,pass_count,not_supported,fail,quality_warning,converted_psos,recorded_passthrough_psos,recorded_graphics_psos,recorded_conversion_pct,full_ratio_available,downgraded_devices,shader_libraries,layer_elapsed_s,baseline_elapsed_s,passthrough_reasons
+api_pipeline,monolithic/API,11,11,0,0,0,4,0,4,100.0,True,0,7,3.2368,1.4424,{}
+dynamic_state,monolithic/API,61,61,0,0,0,83,0,83,100.0,True,0,166,3.0205,1.6595,{}
+attachment_feedback_loop_layout,monolithic/API,48,36,12,0,0,37,0,37,100.0,True,0,74,3.7715,1.8554,{}
+bind_buffers_2,monolithic/API,48,48,0,0,0,48,0,48,100.0,True,0,96,4.8156,2.1964,{}
+bind_point,monolithic/API,48,48,0,0,0,32,0,32,100.0,True,0,64,3.1166,2.0875,{}
+blend,monolithic/API,96,66,30,0,0,207,0,207,100.0,True,0,414,3.5718,2.4716,{}
+blend_operation_advanced,monolithic/API,48,35,13,0,0,39,0,39,100.0,True,0,78,2.3089,1.566,{}
+cache,monolithic/API,128,128,0,0,0,256,0,256,100.0,False,1,512,13.6359,10.2346,{}
+color_write_enable,monolithic/API,48,48,0,0,0,77,0,77,100.0,True,0,154,3.2415,1.7715,{}
+color_write_enable_maxa,monolithic/API,24,24,0,0,0,96,0,96,100.0,True,0,192,10.4914,1.877,{}
+creation_cache_control,monolithic/API,18,18,0,0,0,3,19,22,13.6364,True,0,3,2.2662,1.2591,"{""dependency/control batch"": 15, ""unhandled create flag"": 4}"
+creation_feedback,monolithic/API,13,13,0,0,0,0,30,30,0.0,True,0,0,2.4127,1.4726,"{""derivative flag"": 30}"
+depth,monolithic/API,96,79,17,0,0,256,0,256,100.0,False,1,510,2.6608,2.0678,{}
+depth_range_unrestricted,monolithic/API,48,48,0,0,0,60,0,60,100.0,True,0,120,2.2866,1.5864,{}
+derivative,monolithic/API,3,3,0,0,0,0,0,0,,True,0,0,1.7167,1.5817,{}
+descriptor_limits,monolithic/API,48,48,0,0,0,24,0,24,100.0,True,0,48,2.9592,1.9976,{}
+dynamic_control_points,monolithic/API,3,3,0,0,0,6,0,6,100.0,True,0,12,2.6921,1.2026,{}
+dynamic_offset,monolithic/API,48,48,0,0,0,38,0,38,100.0,True,0,76,4.6743,1.8786,{}
+dynamic_vertex_attribute,monolithic/API,1,1,0,0,0,2,0,2,100.0,True,0,4,2.4025,1.2247,{}
+early_destroy,monolithic/API,9,9,0,0,0,11,0,11,100.0,True,0,11,2.7027,1.5243,{}
+empty_fs,monolithic/API,8,8,0,0,0,8,0,8,100.0,True,0,16,2.6163,1.1691,{}
+executable_properties,monolithic/API,16,16,0,0,0,9,15,24,37.5,True,0,18,2.4613,1.8042,"{""capture flag"": 15}"
+extended_dynamic_state,monolithic/API,384,371,13,0,0,265,2,267,99.2509,False,1,530,15.4058,7.9279,"{""unsupported rasterization pNext"": 2}"
+framebuffer_attachment,monolithic/API,48,48,0,0,0,148,0,148,100.0,True,0,296,2.3646,1.66,{}
+input_assembly,monolithic/API,198,198,0,0,0,220,0,220,100.0,True,0,439,14.4378,3.9997,{}
+input_attribute_offset,monolithic/API,48,48,0,0,0,48,0,48,100.0,True,0,96,2.4777,1.5705,{}
+interface_matching,monolithic/API,96,83,13,0,0,83,0,83,100.0,True,0,166,3.8114,2.461,{}
+logic_op,monolithic/API,48,30,18,0,0,30,0,30,100.0,True,0,60,1.9528,1.3713,{}
+logic_op_na_formats,monolithic/API,48,23,25,0,0,23,0,23,100.0,True,0,46,1.8149,1.3703,{}
+matched_attachments,monolithic/API,2,2,0,0,0,2,0,2,100.0,True,0,4,1.7161,1.1209,{}
+max_varyings,monolithic/API,6,3,3,0,0,3,0,3,100.0,True,0,6,2.4889,1.3042,{}
+misc,monolithic/API,13,13,0,0,0,13,0,13,100.0,True,0,26,2.9326,1.3362,{}
+multisample,monolithic/API,96,54,41,1,0,137,16,153,89.5425,True,0,274,3.6904,2.5462,"{""dependency/control batch"": 16}"
+multisample_interpolation,monolithic/API,48,25,23,0,0,25,0,25,100.0,True,0,50,2.2797,1.4737,{}
+multisample_shader_builtin,monolithic/API,48,24,21,3,0,114,0,114,100.0,True,0,228,3.2917,1.8567,{}
+multisample_with_fragment_shading_rate,monolithic/API,48,21,27,0,0,55,0,55,100.0,True,0,110,3.3197,1.704,{}
+no_position,monolithic/API,48,48,0,0,0,0,48,48,0.0,True,0,0,4.2869,2.5787,"{""derivative flag"": 48}"
+pipeline_binary,monolithic/API,34,30,4,0,0,1,43,44,2.2727,True,0,2,4.2322,1.9446,"{""derivative flag"": 7, ""unhandled create flag"": 15, ""unsupported top-level pNext"": 21}"
+pipeline_cache,monolithic/API,14,14,0,0,0,16,0,16,100.0,True,0,32,3.1967,1.2461,{}
+primitive_restart_index,monolithic/API,48,0,48,0,0,0,0,0,,True,0,0,2.4136,1.0177,{}
+push_constant,monolithic/API,48,44,4,0,0,50,0,50,100.0,True,0,100,2.436,1.6636,{}
+push_descriptor,monolithic/API,48,48,0,0,0,27,0,27,100.0,True,0,54,11.0675,5.2786,{}
+shader_module_identifier,monolithic/API,64,63,0,0,1,42,21,63,66.6667,True,0,78,8.0057,3.3651,"{""capture flag"": 6, ""unhandled create flag"": 9, ""unsupported shader stage/code"": 6}"
+shader_stencil_export,monolithic/API,6,0,6,0,0,0,0,0,,True,0,0,2.0105,1.0363,{}
+spec_constant,monolithic/API,64,64,0,0,0,32,0,32,100.0,True,0,64,3.7197,1.7956,{}
+stencil,monolithic/API,96,67,29,0,0,220,0,220,100.0,True,0,440,3.6726,1.8885,{}
+vertex_input,monolithic/API,96,48,48,0,0,52,0,52,100.0,True,0,103,4.1417,2.0467,{}
+native_fast_gpl_dynamic,native GPL control,61,61,0,0,0,17,310,327,5.1988,True,0,34,3.2703,1.6514,"{""unsupported top-level pNext"": 310}"
+native_gpl_graphics_library,native GPL control,64,64,0,0,0,7,2028,2035,0.344,True,0,14,13.5293,6.8133,"{""unsupported top-level pNext"": 2028}"
+native_lto_gpl_dynamic,native GPL control,61,61,0,0,0,17,310,327,5.1988,True,0,34,2.9886,2.1473,"{""unsupported top-level pNext"": 310}"
+dynamic_rendering,monolithic/API,64,43,21,0,0,73,82,155,47.0968,True,0,131,3.8642,2.9743,"{""unsupported top-level pNext"": 82}"
+renderpass2,monolithic/API,64,39,25,0,0,46,0,46,100.0,True,0,92,2.3656,1.8024,{}
+multiview_dynamic_rendering,monolithic/API,32,32,0,0,0,168,0,168,100.0,True,0,308,15.054,2.0678,{}
+multiview_renderpass2,monolithic/API,32,32,0,0,0,167,0,167,100.0,True,0,334,2.1237,1.9689,{}
+mesh_ext,monolithic/API,64,63,1,0,0,63,11,74,85.1351,True,0,125,2.5349,2.0791,"{""unsupported top-level pNext"": 11}"
+mesh_nv,monolithic/API,32,31,1,0,0,31,0,31,100.0,True,0,62,3.1615,2.5311,{}

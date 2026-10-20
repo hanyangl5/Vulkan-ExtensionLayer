@@ -23,6 +23,10 @@
 #include <cstdlib>
 #include <utility>
 
+#if defined(__ANDROID__)
+#include <android/log.h>
+#endif
+
 #include <vulkan/vk_layer.h>
 #include <vulkan/utility/vk_concurrent_unordered_map.hpp>
 
@@ -63,7 +67,7 @@ static DeviceData* GetDeviceData(const void* object) {
 
 // Diagnostic logging. The repo's LOG() macro writes to stdout, which GUI-subsystem hosts discard;
 // PA_GPL_LOG_FILE routes the layer's own messages to a file so such hosts can be inspected.
-// Falls back to stdout otherwise. PA_GPL_LOG>=2 additionally enables per-pipeline debug lines.
+// Otherwise uses Android logcat (PA_GPL tag) or stdout. PA_GPL_LOG>=2 enables per-pipeline debug lines.
 // The original XIAOMI_GPL_LOG and XIAOMI_GPL_LOG_FILE variables remain supported as aliases.
 static const char* LogSetting(const char* name, const char* legacy_name) {
     const char* value = std::getenv(name);
@@ -85,6 +89,12 @@ static void LayerMessageV(const char* fmt, va_list args) {
         return path ? std::fopen(path, "w") : nullptr;
     }();
     std::unique_lock<std::mutex> lock(log_mutex);
+#if defined(__ANDROID__)
+    if (!file) {
+        __android_log_vprint(ANDROID_LOG_INFO, "PA_GPL", fmt, args);
+        return;
+    }
+#endif
     std::vfprintf(file ? file : stdout, fmt, args);
     std::fflush(file ? file : stdout);
 }
@@ -283,6 +293,12 @@ void LayerDispatchDevice::Initialize(VkDevice device, PFN_vkGetDeviceProcAddr gd
     CreateRenderPass = reinterpret_cast<PFN_vkCreateRenderPass>(load("vkCreateRenderPass", nullptr));
     CreateRenderPass2 =
         reinterpret_cast<PFN_vkCreateRenderPass2>(load("vkCreateRenderPass2", "vkCreateRenderPass2KHR", VK_API_VERSION_1_2));
+    CreateShaderModule = reinterpret_cast<PFN_vkCreateShaderModule>(load("vkCreateShaderModule", nullptr));
+    CreateSampler = reinterpret_cast<PFN_vkCreateSampler>(load("vkCreateSampler", nullptr));
+    DestroySampler = reinterpret_cast<PFN_vkDestroySampler>(load("vkDestroySampler", nullptr));
+    CreateDescriptorSetLayout = reinterpret_cast<PFN_vkCreateDescriptorSetLayout>(load("vkCreateDescriptorSetLayout", nullptr));
+    DestroyDescriptorSetLayout = reinterpret_cast<PFN_vkDestroyDescriptorSetLayout>(load("vkDestroyDescriptorSetLayout", nullptr));
+    CreatePipelineLayout = reinterpret_cast<PFN_vkCreatePipelineLayout>(load("vkCreatePipelineLayout", nullptr));
     DestroyShaderModule = reinterpret_cast<PFN_vkDestroyShaderModule>(load("vkDestroyShaderModule", nullptr));
     DestroyPipelineLayout = reinterpret_cast<PFN_vkDestroyPipelineLayout>(load("vkDestroyPipelineLayout", nullptr));
 
@@ -304,22 +320,43 @@ void LayerDispatchDevice::Initialize(VkDevice device, PFN_vkGetDeviceProcAddr gd
         load("vkCmdSetDepthCompareOp", "vkCmdSetDepthCompareOpEXT", VK_API_VERSION_1_3));
 }
 
-// RenderPass generation tracking
+// Content identities and live-object metadata
 
-uint64_t DeviceData::RenderPassGeneration(VkRenderPass render_pass) {
-    std::unique_lock<std::mutex> lock(render_pass_mutex);
-    auto it = render_pass_generation.find(render_pass);
-    if (it != render_pass_generation.end()) {
-        return it->second;
-    }
-    uint64_t generation = next_render_pass_generation++;
-    render_pass_generation.emplace(render_pass, generation);
-    return generation;
+uint64_t ObjectIdentityCache::InternLocked(std::string content) {
+    auto result = contents_.emplace(std::move(content), next_identity_);
+    if (result.second) ++next_identity_;
+    return result.first->second;
 }
+
+uint64_t ObjectIdentityCache::Get(uint64_t handle) {
+    if (handle == 0) return 0;
+    std::unique_lock<std::mutex> lock(mutex_);
+    auto result = live_.emplace(handle, next_identity_);
+    if (result.second) ++next_identity_;
+    return result.first->second;
+}
+
+uint64_t ObjectIdentityCache::Intern(std::string content) {
+    std::unique_lock<std::mutex> lock(mutex_);
+    return InternLocked(std::move(content));
+}
+
+void ObjectIdentityCache::Register(uint64_t handle, std::string content, bool known) {
+    if (handle == 0) return;
+    std::unique_lock<std::mutex> lock(mutex_);
+    live_[handle] = known ? InternLocked(std::move(content)) : next_identity_++;
+}
+
+void ObjectIdentityCache::Forget(uint64_t handle) {
+    std::unique_lock<std::mutex> lock(mutex_);
+    live_.erase(handle);
+}
+
+uint64_t DeviceData::RenderPassIdentity(VkRenderPass render_pass) { return render_pass_identities.Get(CastToUint64(render_pass)); }
 
 void DeviceData::ForgetRenderPass(VkRenderPass render_pass) {
     std::unique_lock<std::mutex> lock(render_pass_mutex);
-    render_pass_generation.erase(render_pass);
+    render_pass_identities.Forget(CastToUint64(render_pass));
     render_pass_view_masks.erase(render_pass);
     render_pass_color_attachments.erase(render_pass);
 }
@@ -347,33 +384,17 @@ bool DeviceData::RenderPassUsesColorAttachment(VkRenderPass render_pass, uint32_
     return it == render_pass_color_attachments.end() || subpass >= it->second.size() || it->second[subpass];
 }
 
-uint64_t DeviceData::ShaderModuleGeneration(VkShaderModule shader_module) {
-    std::unique_lock<std::mutex> lock(shader_module_mutex);
-    auto it = shader_module_generation.find(shader_module);
-    if (it != shader_module_generation.end()) return it->second;
-    uint64_t generation = next_shader_module_generation++;
-    shader_module_generation.emplace(shader_module, generation);
-    return generation;
+uint64_t DeviceData::ShaderModuleIdentity(VkShaderModule shader_module) {
+    return shader_module_identities.Get(CastToUint64(shader_module));
 }
 
-void DeviceData::ForgetShaderModule(VkShaderModule shader_module) {
-    std::unique_lock<std::mutex> lock(shader_module_mutex);
-    shader_module_generation.erase(shader_module);
+void DeviceData::ForgetShaderModule(VkShaderModule shader_module) { shader_module_identities.Forget(CastToUint64(shader_module)); }
+
+uint64_t DeviceData::PipelineLayoutIdentity(VkPipelineLayout layout) {
+    return pipeline_layout_identities.Get(CastToUint64(layout));
 }
 
-uint64_t DeviceData::PipelineLayoutGeneration(VkPipelineLayout layout) {
-    std::unique_lock<std::mutex> lock(pipeline_layout_mutex);
-    auto it = pipeline_layout_generation.find(layout);
-    if (it != pipeline_layout_generation.end()) return it->second;
-    uint64_t generation = next_pipeline_layout_generation++;
-    pipeline_layout_generation.emplace(layout, generation);
-    return generation;
-}
-
-void DeviceData::ForgetPipelineLayout(VkPipelineLayout layout) {
-    std::unique_lock<std::mutex> lock(pipeline_layout_mutex);
-    pipeline_layout_generation.erase(layout);
-}
+void DeviceData::ForgetPipelineLayout(VkPipelineLayout layout) { pipeline_layout_identities.Forget(CastToUint64(layout)); }
 
 // Single-flight library cache
 
@@ -392,9 +413,14 @@ VkPipeline LibraryCache::GetOrBuild(const std::string& key, DeviceData& device_d
             VkPipeline handle = builder(device_data, context);
 
             lock.lock();
-            auto& entry = entries_[key];
-            entry.handle = handle;
-            entry.state = (handle != VK_NULL_HANDLE) ? State::kReady : State::kFailed;
+            if (handle != VK_NULL_HANDLE) {
+                auto& entry = entries_[key];
+                entry.handle = handle;
+                entry.state = State::kReady;
+            } else {
+                // A compile-required miss can succeed after the application primes its pipeline cache.
+                entries_.erase(key);
+            }
             cv_.notify_all();
             if (was_built_out) *was_built_out = true;
             return handle;
@@ -403,7 +429,7 @@ VkPipeline LibraryCache::GetOrBuild(const std::string& key, DeviceData& device_d
             cv_.wait(lock);  // Woken on ready or failure; re-check the entry.
             continue;
         }
-        // Ready or Failed: Failed carries VK_NULL_HANDLE, which the caller treats as a build failure.
+        // Only successful builds are retained; waiters may retry after a failed build.
         return it->second.handle;
     }
 }
@@ -426,6 +452,7 @@ constexpr VkShaderStageFlags kPreRasterStages = VK_SHADER_STAGE_VERTEX_BIT | VK_
                                                 VK_SHADER_STAGE_TESSELLATION_EVALUATION_BIT | VK_SHADER_STAGE_GEOMETRY_BIT |
                                                 VK_SHADER_STAGE_TASK_BIT_EXT | VK_SHADER_STAGE_MESH_BIT_EXT;
 
+#include "object_content_keys.h"
 #include "dynamic_state_extensions.h"
 
 // Everything the four builders need. Lives on the stack of the converting CreateGraphicsPipelines
@@ -681,14 +708,23 @@ void AppendDynamicStates(KeyBuilder& k, const std::vector<VkDynamicState>& state
 void AppendStage(KeyBuilder& k, const VkPipelineShaderStageCreateInfo& stage, DeviceData& device_data) {
     k.AppendU32(stage.flags);
     k.AppendU32(stage.stage);
+    const auto* identifier = StageIdentifier(stage);
     const auto* code = InlineShader(stage);
-    k.AppendU32(code ? 1 : 0);
-    if (code) {
-        k.AppendU32(code->flags);
-        k.AppendU64(code->codeSize);
-        k.AppendBytes(code->pCode, code->codeSize);
+    const bool uses_identifier = identifier && identifier->identifierSize != 0;
+    // Keep identifier-built libraries distinct: consuming them requires compile-control flags,
+    // even if a later module-backed request describes the same shader. The driver's pipeline
+    // cache resolves module and identifier equivalence across these two library representations.
+    k.AppendU32(uses_identifier ? 2 : 0);
+    if (uses_identifier) {
+        k.AppendU32(identifier->identifierSize);
+        k.AppendBytes(identifier->pIdentifier, identifier->identifierSize);
+    } else if (code) {
+        std::string content;
+        [[maybe_unused]] const bool known = ShaderContentKey(*code, content);
+        ASSERT(known);  // Unsupported inline module chains are rejected by ConvertBlocker.
+        k.AppendU64(device_data.shader_module_identities.Intern(std::move(content)));
     } else {
-        k.AppendU64(device_data.ShaderModuleGeneration(stage.module));
+        k.AppendU64(device_data.ShaderModuleIdentity(stage.module));
     }
     AppendStageExtensions(k, stage);
     AppendString(k, stage.pName);
@@ -716,13 +752,14 @@ void AppendMultisampleState(KeyBuilder& k, const VkPipelineMultisampleStateCreat
     bool mask_uses_count = !dynamic_mask && ms->pSampleMask;
     k.AppendU32(HasDynamicState(ci, VK_DYNAMIC_STATE_RASTERIZATION_SAMPLES_EXT) && !mask_uses_count ? 0 : ms->rasterizationSamples);
     k.AppendU32(ms->sampleShadingEnable);
-    AppendPod(k, ms->minSampleShading);
-    if (!dynamic_mask && ms->pSampleMask) {
+    AppendPod(k, ms->sampleShadingEnable ? ms->minSampleShading : 0.0f);
+    // A NULL mask and one explicit all-ones word used to serialize to the same sentinel.
+    // Keep their definitions distinct so independently cached FS/FO libraries agree at link time.
+    k.AppendU32(mask_uses_count);
+    if (mask_uses_count) {
         uint32_t words = (ms->rasterizationSamples + 31u) / 32u;
         if (words == 0) words = 1;
         for (uint32_t i = 0; i < words; ++i) AppendPod(k, ms->pSampleMask[i]);
-    } else {
-        k.AppendU32(0xffffffffu);
     }
     k.AppendU32(HasDynamicState(ci, VK_DYNAMIC_STATE_ALPHA_TO_COVERAGE_ENABLE_EXT) ? 0 : ms->alphaToCoverageEnable);
     k.AppendU32(HasDynamicState(ci, VK_DYNAMIC_STATE_ALPHA_TO_ONE_ENABLE_EXT) ? 0 : ms->alphaToOneEnable);
@@ -838,8 +875,8 @@ std::string MakePreRasterKey(const LibBuildCtx& ctx, DeviceData& device_data) {
     AppendExtensionChain(k, rs.pNext, *ctx.ci);
     AppendExtensionChain(k, ctx.pre_raster_extensions.head, *ctx.ci, GplSubset::kPreRaster);
 
-    k.AppendU64(device_data.PipelineLayoutGeneration(ctx.ci->layout));
-    k.AppendU64(device_data.RenderPassGeneration(ctx.ci->renderPass));
+    k.AppendU64(device_data.PipelineLayoutIdentity(ctx.ci->layout));
+    k.AppendU64(device_data.RenderPassIdentity(ctx.ci->renderPass));
     k.AppendU32(ctx.ci->subpass);
     AppendDynamicStates(k, ctx.pre_raster_dynamic);
     return k.Get();
@@ -880,8 +917,8 @@ std::string MakeFragmentShaderKey(const LibBuildCtx& ctx, DeviceData& device_dat
 
     AppendMultisampleState(k, ctx.ci->pMultisampleState, *ctx.ci);
     AppendExtensionChain(k, ctx.fragment_shader_extensions.head, *ctx.ci, GplSubset::kFragmentShader);
-    k.AppendU64(device_data.PipelineLayoutGeneration(ctx.ci->layout));
-    k.AppendU64(device_data.RenderPassGeneration(ctx.ci->renderPass));
+    k.AppendU64(device_data.PipelineLayoutIdentity(ctx.ci->layout));
+    k.AppendU64(device_data.RenderPassIdentity(ctx.ci->renderPass));
     k.AppendU32(ctx.ci->subpass);
     AppendDynamicStates(k, ctx.fragment_shader_dynamic);
     return k.Get();
@@ -923,7 +960,7 @@ std::string MakeFragmentOutputKey(const LibBuildCtx& ctx, DeviceData& device_dat
     }
     AppendMultisampleState(k, ctx.ci->pMultisampleState, *ctx.ci);
     AppendExtensionChain(k, ctx.fragment_output_extensions.head, *ctx.ci, GplSubset::kFragmentOutput);
-    k.AppendU64(device_data.RenderPassGeneration(ctx.ci->renderPass));
+    k.AppendU64(device_data.RenderPassIdentity(ctx.ci->renderPass));
     k.AppendU32(ctx.ci->subpass);
     AppendDynamicStates(k, ctx.fragment_output_dynamic);
     return k.Get();
@@ -943,8 +980,24 @@ VkPipeline CreateLibraryPipeline(DeviceData& device_data, const LibBuildCtx& ctx
     lib.pNext = &gpl;
     lib.pDynamicState = dynamic_states.empty() ? nullptr : &dynamic;
     lib.basePipelineIndex = -1;
+    // Shared FS/FO state must match the normalized key even when the libraries were built
+    // by different requests. Ignored application values must not survive in a cached library.
+    VkPipelineMultisampleStateCreateInfo multisample{};
+    if (lib.pMultisampleState) {
+        multisample = *lib.pMultisampleState;
+        if (HasDynamicState(*ctx.ci, VK_DYNAMIC_STATE_SAMPLE_MASK_EXT)) multisample.pSampleMask = nullptr;
+        if (HasDynamicState(*ctx.ci, VK_DYNAMIC_STATE_RASTERIZATION_SAMPLES_EXT) && !multisample.pSampleMask)
+            multisample.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
+        if (HasDynamicState(*ctx.ci, VK_DYNAMIC_STATE_ALPHA_TO_COVERAGE_ENABLE_EXT)) multisample.alphaToCoverageEnable = VK_FALSE;
+        if (HasDynamicState(*ctx.ci, VK_DYNAMIC_STATE_ALPHA_TO_ONE_ENABLE_EXT)) multisample.alphaToOneEnable = VK_FALSE;
+        if (!multisample.sampleShadingEnable) multisample.minSampleShading = 0.0f;
+        lib.pMultisampleState = &multisample;
+    }
     VkPipelineCreateFlags2CreateInfo flags2{};
-    ApplyPipelineFlags(lib, VK_PIPELINE_CREATE_2_LIBRARY_BIT_KHR | LibraryFlagsForSubset(*ctx.ci, subset), *ctx.ci, flags2);
+    // Execution control is forwarded to every creation call, but does not distinguish library keys.
+    const auto compile_control = EffectivePipelineFlags(*ctx.ci) & VK_PIPELINE_CREATE_2_FAIL_ON_PIPELINE_COMPILE_REQUIRED_BIT;
+    ApplyPipelineFlags(lib, VK_PIPELINE_CREATE_2_LIBRARY_BIT_KHR | LibraryFlagsForSubset(*ctx.ci, subset) | compile_control,
+                       *ctx.ci, flags2);
 
     // Cached libraries outlive application pipeline allocators and use the default allocator,
     // matching LibraryCache::DestroyAll. The final executable uses the application's allocator.
@@ -1014,27 +1067,6 @@ VkPipeline BuildFragmentOutputLibrary(DeviceData& device_data, const void* conte
     lib.subpass = ctx.ci->subpass;
     return CreateLibraryPipeline(device_data, ctx, GplSubset::kFragmentOutput, lib, ctx.fragment_output_dynamic,
                                  ctx.fragment_output_extensions);
-}
-
-// Stop conversion when the warmup shows too little sharing of expensive shader libraries.
-constexpr uint64_t kGateWarmup = 256;  // converted pipelines before the gate may trip
-constexpr uint64_t kGateRatioNum = 4;  // trip when expensive_libs/converted >= 4/5 (little sharing)
-constexpr uint64_t kGateRatioDen = 5;
-
-void MaybeTripVariantGate(DeviceData& device_data) {
-    if (device_data.gate_downgraded.load(std::memory_order_relaxed)) return;
-    uint64_t converted = device_data.converted_pipeline_count.load(std::memory_order_relaxed);
-    if (converted < kGateWarmup) return;
-    uint64_t expensive = device_data.expensive_library_count.load(std::memory_order_relaxed);
-    if (expensive * kGateRatioDen >= converted * kGateRatioNum) {
-        bool expected = false;
-        if (device_data.gate_downgraded.compare_exchange_strong(expected, true)) {
-            LayerMessage(
-                "[%s] variant distribution near 1 (%llu expensive libraries for %llu converted pipelines); "
-                "downgrading to passthrough.\n",
-                kLayerName, static_cast<unsigned long long>(expensive), static_cast<unsigned long long>(converted));
-        }
-    }
 }
 
 // Build the four libraries, link them, and (when applicable) attach the bind-time record. Returns
@@ -1145,7 +1177,6 @@ VkPipeline ConvertOnePipeline(DeviceData& device_data, const VkGraphicsPipelineC
     }
 
     device_data.converted_pipeline_count.fetch_add(1, std::memory_order_relaxed);
-    MaybeTripVariantGate(device_data);
     return executable;
 }
 
@@ -1160,7 +1191,7 @@ static VKAPI_ATTR VkResult VKAPI_CALL CreateGraphicsPipelines(VkDevice device, V
     DeviceData* device_data = GetDeviceData(device);
     ASSERT(device_data != nullptr);
 
-    // Fast path: the layer is inert on this device, or the variant gate downgraded it.
+    // Fast path: this device does not support or enable conversion.
     if (!device_data->ConversionEnabled()) {
         return device_data->vtable.CreateGraphicsPipelines(device, pipelineCache, createInfoCount, pCreateInfos, pAllocator,
                                                            pPipelines);
@@ -1187,7 +1218,7 @@ static VKAPI_ATTR VkResult VKAPI_CALL CreateGraphicsPipelines(VkDevice device, V
     for (uint32_t i = 0; i < createInfoCount; ++i) {
         const VkGraphicsPipelineCreateInfo& ci = pCreateInfos[i];
         VkPipeline converted = VK_NULL_HANDLE;
-        const char* blocker = device_data->ConversionEnabled() ? ConvertBlocker(ci, device_data) : "variant gate passthrough";
+        const char* blocker = ConvertBlocker(ci, device_data);
         if (!blocker) {
             const auto started = std::chrono::steady_clock::now();
             StateMask promoted = ComputePromotedMask(ci, *device_data);
@@ -1293,6 +1324,9 @@ static VKAPI_ATTR VkResult VKAPI_CALL CreateRenderPass(VkDevice device, const Vk
     DeviceData* data = GetDeviceData(device);
     VkResult result = data->vtable.CreateRenderPass(device, pCreateInfo, pAllocator, pRenderPass);
     if (result == VK_SUCCESS) {
+        std::string content;
+        const bool known = RenderPassContentKey(*pCreateInfo, content);
+        data->render_pass_identities.Register(CastToUint64(*pRenderPass), std::move(content), known);
         std::vector<bool> uses_color(pCreateInfo->subpassCount, false);
         for (uint32_t i = 0; i < pCreateInfo->subpassCount; ++i)
             for (uint32_t c = 0; c < pCreateInfo->pSubpasses[i].colorAttachmentCount; ++c)
@@ -1317,6 +1351,9 @@ static VKAPI_ATTR VkResult VKAPI_CALL CreateRenderPass2(VkDevice device, const V
     DeviceData* data = GetDeviceData(device);
     VkResult result = data->vtable.CreateRenderPass2(device, pCreateInfo, pAllocator, pRenderPass);
     if (result == VK_SUCCESS) {
+        std::string content;
+        const bool known = RenderPassContentKey(*pCreateInfo, content);
+        data->render_pass_identities.Register(CastToUint64(*pRenderPass), std::move(content), known);
         std::vector<bool> uses_color(pCreateInfo->subpassCount, false);
         for (uint32_t i = 0; i < pCreateInfo->subpassCount; ++i)
             for (uint32_t c = 0; c < pCreateInfo->pSubpasses[i].colorAttachmentCount; ++c)
@@ -1327,6 +1364,69 @@ static VKAPI_ATTR VkResult VKAPI_CALL CreateRenderPass2(VkDevice device, const V
         std::vector<uint32_t> masks;
         for (uint32_t i = 0; i < pCreateInfo->subpassCount; ++i) masks.push_back(pCreateInfo->pSubpasses[i].viewMask);
         data->SetRenderPassViewMasks(*pRenderPass, std::move(masks));
+    }
+    return result;
+}
+
+static VKAPI_ATTR VkResult VKAPI_CALL CreateShaderModule(VkDevice device, const VkShaderModuleCreateInfo* pCreateInfo,
+                                                         const VkAllocationCallbacks* pAllocator, VkShaderModule* pShaderModule) {
+    DeviceData* data = GetDeviceData(device);
+    VkResult result = data->vtable.CreateShaderModule(device, pCreateInfo, pAllocator, pShaderModule);
+    if (result == VK_SUCCESS) {
+        std::string content;
+        const bool known = ShaderContentKey(*pCreateInfo, content);
+        data->shader_module_identities.Register(CastToUint64(*pShaderModule), std::move(content), known);
+    }
+    return result;
+}
+
+static VKAPI_ATTR VkResult VKAPI_CALL CreateSampler(VkDevice device, const VkSamplerCreateInfo* pCreateInfo,
+                                                    const VkAllocationCallbacks* pAllocator, VkSampler* pSampler) {
+    DeviceData* data = GetDeviceData(device);
+    VkResult result = data->vtable.CreateSampler(device, pCreateInfo, pAllocator, pSampler);
+    if (result == VK_SUCCESS) {
+        std::string content;
+        const bool known = SamplerContentKey(*pCreateInfo, content);
+        data->sampler_identities.Register(CastToUint64(*pSampler), std::move(content), known);
+    }
+    return result;
+}
+
+static VKAPI_ATTR void VKAPI_CALL DestroySampler(VkDevice device, VkSampler sampler, const VkAllocationCallbacks* pAllocator) {
+    DeviceData* data = GetDeviceData(device);
+    data->sampler_identities.Forget(CastToUint64(sampler));
+    data->vtable.DestroySampler(device, sampler, pAllocator);
+}
+
+static VKAPI_ATTR VkResult VKAPI_CALL CreateDescriptorSetLayout(VkDevice device, const VkDescriptorSetLayoutCreateInfo* pCreateInfo,
+                                                                const VkAllocationCallbacks* pAllocator,
+                                                                VkDescriptorSetLayout* pSetLayout) {
+    DeviceData* data = GetDeviceData(device);
+    VkResult result = data->vtable.CreateDescriptorSetLayout(device, pCreateInfo, pAllocator, pSetLayout);
+    if (result == VK_SUCCESS) {
+        std::string content;
+        const bool known = DescriptorSetLayoutContentKey(*pCreateInfo, *data, content);
+        data->descriptor_set_layout_identities.Register(CastToUint64(*pSetLayout), std::move(content), known);
+    }
+    return result;
+}
+
+static VKAPI_ATTR void VKAPI_CALL DestroyDescriptorSetLayout(VkDevice device, VkDescriptorSetLayout descriptorSetLayout,
+                                                             const VkAllocationCallbacks* pAllocator) {
+    DeviceData* data = GetDeviceData(device);
+    data->descriptor_set_layout_identities.Forget(CastToUint64(descriptorSetLayout));
+    data->vtable.DestroyDescriptorSetLayout(device, descriptorSetLayout, pAllocator);
+}
+
+static VKAPI_ATTR VkResult VKAPI_CALL CreatePipelineLayout(VkDevice device, const VkPipelineLayoutCreateInfo* pCreateInfo,
+                                                           const VkAllocationCallbacks* pAllocator,
+                                                           VkPipelineLayout* pPipelineLayout) {
+    DeviceData* data = GetDeviceData(device);
+    VkResult result = data->vtable.CreatePipelineLayout(device, pCreateInfo, pAllocator, pPipelineLayout);
+    if (result == VK_SUCCESS) {
+        std::string content;
+        const bool known = PipelineLayoutContentKey(*pCreateInfo, *data, content);
+        data->pipeline_layout_identities.Register(CastToUint64(*pPipelineLayout), std::move(content), known);
     }
     return result;
 }
@@ -1665,10 +1765,9 @@ static VKAPI_ATTR void VKAPI_CALL DestroyDevice(VkDevice device, const VkAllocat
     PFN_vkDestroyDevice destroy_device = device_data->vtable.DestroyDevice;
 
     if (device_data->tier != Tier::kPassthrough) {
-        LayerMessage("[%s] device %p summary: converted=%llu expensive_libraries=%llu downgraded=%d\n", kLayerName,
-                     static_cast<void*>(device), static_cast<unsigned long long>(device_data->converted_pipeline_count.load()),
-                     static_cast<unsigned long long>(device_data->expensive_library_count.load()),
-                     device_data->gate_downgraded.load() ? 1 : 0);
+        LayerMessage("[%s] device %p summary: converted=%llu expensive_libraries=%llu\n", kLayerName, static_cast<void*>(device),
+                     static_cast<unsigned long long>(device_data->converted_pipeline_count.load()),
+                     static_cast<unsigned long long>(device_data->expensive_library_count.load()));
     }
 
     device_data->cache.DestroyAll(*device_data);
@@ -1745,6 +1844,14 @@ static VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL GetDeviceProcAddr(VkDevice devic
         if ((strcmp(pName, "vkCreateRenderPass2") == 0 || strcmp(pName, "vkCreateRenderPass2KHR") == 0) &&
             device_data->vtable.CreateRenderPass2)
             return reinterpret_cast<PFN_vkVoidFunction>(CreateRenderPass2);
+        if (strcmp(pName, "vkCreateShaderModule") == 0) return reinterpret_cast<PFN_vkVoidFunction>(CreateShaderModule);
+        if (strcmp(pName, "vkCreateSampler") == 0) return reinterpret_cast<PFN_vkVoidFunction>(CreateSampler);
+        if (strcmp(pName, "vkDestroySampler") == 0) return reinterpret_cast<PFN_vkVoidFunction>(DestroySampler);
+        if (strcmp(pName, "vkCreateDescriptorSetLayout") == 0)
+            return reinterpret_cast<PFN_vkVoidFunction>(CreateDescriptorSetLayout);
+        if (strcmp(pName, "vkDestroyDescriptorSetLayout") == 0)
+            return reinterpret_cast<PFN_vkVoidFunction>(DestroyDescriptorSetLayout);
+        if (strcmp(pName, "vkCreatePipelineLayout") == 0) return reinterpret_cast<PFN_vkVoidFunction>(CreatePipelineLayout);
         if (strcmp(pName, "vkDestroyShaderModule") == 0) return reinterpret_cast<PFN_vkVoidFunction>(DestroyShaderModule);
         if (strcmp(pName, "vkDestroyPipelineLayout") == 0) return reinterpret_cast<PFN_vkVoidFunction>(DestroyPipelineLayout);
     }
@@ -1783,6 +1890,12 @@ static PFN_vkVoidFunction FindIntercept(const char* name) {
         {"vkCreateRenderPass", reinterpret_cast<PFN_vkVoidFunction>(CreateRenderPass)},
         {"vkCreateRenderPass2", reinterpret_cast<PFN_vkVoidFunction>(CreateRenderPass2)},
         {"vkCreateRenderPass2KHR", reinterpret_cast<PFN_vkVoidFunction>(CreateRenderPass2)},
+        {"vkCreateShaderModule", reinterpret_cast<PFN_vkVoidFunction>(CreateShaderModule)},
+        {"vkCreateSampler", reinterpret_cast<PFN_vkVoidFunction>(CreateSampler)},
+        {"vkDestroySampler", reinterpret_cast<PFN_vkVoidFunction>(DestroySampler)},
+        {"vkCreateDescriptorSetLayout", reinterpret_cast<PFN_vkVoidFunction>(CreateDescriptorSetLayout)},
+        {"vkDestroyDescriptorSetLayout", reinterpret_cast<PFN_vkVoidFunction>(DestroyDescriptorSetLayout)},
+        {"vkCreatePipelineLayout", reinterpret_cast<PFN_vkVoidFunction>(CreatePipelineLayout)},
         {"vkDestroyShaderModule", reinterpret_cast<PFN_vkVoidFunction>(DestroyShaderModule)},
         {"vkDestroyPipelineLayout", reinterpret_cast<PFN_vkVoidFunction>(DestroyPipelineLayout)},
     };

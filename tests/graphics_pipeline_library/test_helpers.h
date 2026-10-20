@@ -33,7 +33,8 @@ static LibBuildCtx Context(const VkGraphicsPipelineCreateInfo& ci, bool combine_
 }
 
 static std::string Key(const VkGraphicsPipelineCreateInfo& ci, GplSubset subset) {
-    DeviceData data;
+    // Content IDs are device-local; comparisons must use one synthetic device.
+    static DeviceData data;
     auto ctx = Context(ci);
     switch (subset) {
         case GplSubset::kVertexInput:

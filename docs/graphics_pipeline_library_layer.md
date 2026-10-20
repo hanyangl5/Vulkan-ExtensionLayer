@@ -55,15 +55,34 @@ Both traditional render passes and dynamic rendering are supported. Shader keys 
 output keys include attachment formats. Fragment-shader keys also include the color-attachment count
 because it sizes implicit local-read mappings. Both fragment libraries retain multisample state and
 its dynamic-state declarations: opaque shaders can require per-sample execution even when
-`sampleShadingEnable` is false. When local read is enabled, omitted color input mappings are made
+`sampleShadingEnable` is false. Ignored dynamic multisample fields are normalized in the actual
+library create info as well as the key, so a reused FS library and a newly built FO library have
+identical shared multisample definitions. When local read is enabled, omitted color input mappings are made
 explicit on standalone fragment-shader libraries without changing their identity-map semantics.
 
 Cache keys serialize state values and array contents, excluding ignored dynamic arrays and pointer
 addresses and structure padding. Ignored dynamic scalar values are excluded as well; dynamic
 primitive topology retains its topology class for devices that restrict topology changes.
-Inline SPIR-V, required subgroup sizes and supported stage chains participate in shader
-identity. Shader modules, pipeline layouts and render passes have lifetime generations, so recycled
-handles do not reuse stale libraries. Colorless render-pass subpasses omit ignored blend state.
+Inline SPIR-V, required subgroup sizes and supported stage chains participate in shader identity.
+Shader modules with equal SPIR-V and creation flags share a device-local content ID, including
+inline modules. Descriptor set layouts are identified by bindings, binding flags, mutable type lists
+and immutable-sampler identities. Pipeline layouts include those set-layout identities, layout flags
+and push-constant ranges. Equal layout definitions can therefore reuse libraries across object handles.
+Binding and push-constant array ordering is normalized where it does not change the definition.
+
+Render passes reuse identities only for equal serialized definitions within the same creation API;
+this does not implement the broader Vulkan render-pass compatibility rules. Known multiview,
+input-aspect, separate stencil layout, depth/stencil resolve, shading-rate and synchronization2
+structures are serialized by value. Unknown object extension chains retain a distinct identity for
+each object lifetime. Samplers currently use content identity only without extension chains.
+Destroyed handles lose their live mapping, so reusing a handle for different content cannot return
+stale libraries. Colorless render-pass subpasses omit ignored blend state.
+
+Content IDs are interned using complete serialized definitions, with string equality resolving hash
+collisions. One copy of each unique definition, including supported shader SPIR-V, remains until
+device destruction, alongside the library cache. Pipeline keys contain short IDs instead of copying
+SPIR-V for every module-backed request. Application object handles, allocators and lifetimes are
+preserved; only the internal libraries are shared.
 
 Top-level extension headers are copied separately for each library. Payload arrays are borrowed only
 during synchronous creation and serialized by value for cache lookup. They are not retained.
@@ -74,8 +93,7 @@ application's allocator. A pipeline record contains only the promoted-state mask
 
 ## Native fallback and failure handling
 
-- Unknown chains, dynamic states or flags, identifier-only shaders, capture and LTO requests stay
-  native. Flags2 takes precedence over legacy flags, and supported flags are routed to their owning
+- Unknown chains, dynamic states or flags, capture and LTO requests stay native. Flags2 takes precedence over legacy flags, and supported flags are routed to their owning
   libraries without adding a Flags2 carrier to applications that did not use one.
 - Batches containing derivative dependencies, library requests or compile-required control stay
   intact. Independent entries may convert separately while preserving successful handles, failure
@@ -100,9 +118,20 @@ application's allocator. A pipeline record contains only the promoted-state mask
   dynamic states and creation flags are retained. Fragment libraries remain separate, and conversion
   still uses GPL without LTO. Mesh pipelines continue to omit vertex-input state.
 
-After 256 completed conversions, a distribution gate disables further conversion when the number of
-new expensive shader libraries divided by converted pipelines reaches at least 4/5. Bind-time state
-restoration continues for pipelines converted before the gate trips.
+Conversion has no pipeline-count or library-sharing threshold. Eligible requests continue to use
+GPL for the device lifetime, even when every request needs new shader libraries. Conversion and
+expensive-library counts are diagnostic statistics only. Device capability checks and per-request
+native fallback still apply; cached libraries remain owned until device destruction.
+
+Single-pipeline shader-module-identifier requests use the same GPL partitioning as module-backed
+requests. The application's pipeline cache is passed to every library build and link, including
+`FAIL_ON_PIPELINE_COMPILE_REQUIRED` on all internal calls for speculative requests. This execution
+control does not distinguish library keys. Identifier bytes do distinguish shader libraries from
+module-backed libraries: libraries created with identifiers impose additional compile-control
+requirements when linked. The driver's pipeline cache resolves their shader equivalence. Zero-size
+identifiers are ignored. Failed builds are not retained in the library cache, so a compile-required
+miss can be retried after the application primes its pipeline cache. Dependency/control batches
+retain their original native handling.
 
 Successful conversion reports whole-pipeline creation duration in feedback, clears unavailable
 per-stage feedback, and does not claim an application pipeline-cache hit. Native fallback preserves
@@ -135,21 +164,35 @@ ctest --test-dir build -C Debug -R graphics_pipeline_library --output-on-failure
 ```
 
 The two host suites cover dynamic-state routing, ignored arrays, rendering cache keys, Flags2,
-inline shaders, handle reuse, discard, feedback and batch semantics. Failure-path regressions cover
-private-data attachment and native error propagation, all five bind-time restored values, consumed
-loader links and output slots on device retry, and independent-interpolation fallback.
+inline shaders, handle reuse, discard, feedback and batch semantics. A 1,024-pipeline regression uses
+unique VS/FS identities to verify continuous conversion without shader-library sharing. Content
+identity tests cover equal shaders, layouts and render passes, immutable samplers, inline modules,
+changed definitions after handle recycling, unknown chains and creation failures. Failure-path
+regressions cover private-data attachment and native error propagation, all five bind-time restored
+values, consumed loader links and output slots on device retry, and independent-interpolation fallback.
 
 Desktop validation uses Clang with `BUILD_WERROR=ON`. A GPU smoke probe on an NVIDIA GeForce RTX 3080
 creates, binds and submits four state variants with validation enabled; the expected summary is
-`converted=4`, `expensive_libraries=2`, `downgraded=0`. This probe does not compare rendered images,
+`converted=4`, `expensive_libraries=2`. This probe does not compare rendered images,
 and the migrated PA layer has not undergone a complete CTS run here.
 
 A targeted CTS regression run on RTX 3080 with driver 596.49 covers 3,042 cases across 56 groups,
 including dynamic rendering, multiview and mesh shaders. The 26 image failures found before the
 VI/PR and fragment-state fixes now pass while still converting through GPL. Their validation run
 also passes; a separate 141-case validation set reports 133 passes and 8 unsupported cases.
-The selected suite retains four failures also seen without the layer and one shader-module-identifier
-pipeline-cache quality warning. These results are not a complete CTS conformance claim.
+The original selected suite retained four failures also seen without the layer and one
+shader-module-identifier pipeline-cache quality warning. After routing identifier requests through
+GPL, all 64 selected shader-module-identifier cases pass with validation enabled; the original
+`hlsl_tessellation` warning no longer occurs. These results are not a complete CTS conformance claim.
+
+After removing the conversion gate, the three previously downgraded groups (`cache`, `depth`,
+`extended_dynamic_state`) were rerun with validation enabled: 578 passes, 30 unsupported cases and
+no failures across 608 cases. They converted 1,564 PSOs, including requests past the former threshold.
+
+Content-based cross-object reuse was checked against the same selected 3,042 cases with validation:
+all case statuses and validation VUID sets remain unchanged. PR/FS library creation decreased from
+8,502 to 2,832 for the same 4,292 converted pipelines. This is a library-count comparison rather
+than a controlled compilation-time benchmark; see the [content reuse report](testing/gpl-cts-2026-10-20/content-reuse.md).
 
 ## Enable and diagnose
 
@@ -172,3 +215,35 @@ Alternatively enable the same layer name in `vkCreateInstance` or Vulkan Configu
 Set `PA_GPL_LOG=2` for per-pipeline diagnostics and `PA_GPL_LOG_FILE=<path>` for file output. The
 original `XIAOMI_GPL_LOG` and `XIAOMI_GPL_LOG_FILE` remain aliases; PA variables take precedence.
 Default output reports the device tier and destruction-time statistics.
+
+### Android
+
+Build the layer and its dependencies for arm64-v8a with the Android NDK and c++_static.
+See the Android section of BUILD.md. Android loads the .so without a JSON manifest.
+Default diagnostic output uses logcat with tag PA_GPL; file output remains supported.
+
+On 2026-10-20, the connected ARM64 Android device (0182200148488540, API 37) loaded
+libVkLayer_PA_graphics_pipeline_library.so from the debuggable Vulkan Samples app data directory.
+The per-app GPU debug configuration selects com.khronos.vulkan_samples and
+VK_LAYER_PA_graphics_pipeline_library. The original settings were saved locally in
+build-android/gpu-settings-before.txt before deployment.
+
+The hello_triangle sample completed 60 frames with tier=dynamize, converted=1 and
+expensive_libraries=2. Logs are saved locally in build-android/device-layer-log.txt.
+The device reports an NVIDIA GeForce RTX 5090 Vulkan driver, GPL support and
+FastLinking=false. This verifies loading and conversion, not mobile GPU performance.
+
+Per-app layer settings persist across reboots. To disable this deployment:
+
+```sh
+adb shell settings put global enable_gpu_debug_layers 0
+```
+
+To inspect diagnostics:
+
+```sh
+adb logcat -s PA_GPL
+```
+
+For per-app deployment and loading restrictions, see the
+[Android layer guide](https://developer.android.com/ndk/guides/graphics/validation-layer).
