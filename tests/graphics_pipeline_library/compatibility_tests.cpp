@@ -1,6 +1,7 @@
 // Copyright 2026 Xiaomi. SPDX-License-Identifier: Apache-2.0
 // API-level failure semantics and cache identity, independent of any Vulkan driver.
 #include "test_helpers.h"
+#include <thread>
 
 template <typename T>
 static T Handle(uintptr_t value) {
@@ -23,6 +24,7 @@ static std::vector<VkResult> native_results;
 static size_t native_index;
 static bool fail_library_once;
 static uintptr_t next_pipeline = 0x10000;
+static VKAPI_ATTR void VKAPI_CALL IgnoreDestroy(VkDevice, VkPipeline, const VkAllocationCallbacks*) {}
 
 static VKAPI_ATTR VkResult VKAPI_CALL NextCreate(VkDevice, VkPipelineCache, uint32_t count, const VkGraphicsPipelineCreateInfo* ci,
                                                  const VkAllocationCallbacks*, VkPipeline* output) {
@@ -80,7 +82,7 @@ struct Fixture {
     VkPipelineColorBlendAttachmentState attachment{};
     VkPipelineColorBlendStateCreateInfo cb{VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO};
     VkGraphicsPipelineCreateInfo ci{VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO};
-    Fixture() {
+    explicit Fixture(size_t library_capacity = LibraryCache::kDefaultCapacity) : device(library_capacity) {
         calls.clear();
         native_results.clear();
         native_index = 0;
@@ -89,6 +91,7 @@ struct Fixture {
         device.tier = Tier::kPureGpl;
         device.caps.gpl_independent_interp = true;
         device.vtable.CreateGraphicsPipelines = NextCreate;
+        device.vtable.DestroyPipeline = IgnoreDestroy;
         device_data_map.insert_or_assign(dispatch, &device);
         rs.lineWidth = 1;
         ms.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
@@ -1210,9 +1213,136 @@ static void ContinuousConversion() {
     }
     Require(f.device.converted_pipeline_count == pipeline_count && f.device.expensive_library_count == pipeline_count * 2,
             "Conversion statistics must continue beyond the former warmup threshold");
+    const auto stats = f.device.cache.GetStats();
+    Require(stats[1].built == 1 && stats[1].hits == pipeline_count - 1 && stats[8].built == 1 &&
+                stats[8].hits == pipeline_count - 1 && stats[2].built == pipeline_count && stats[2].hits == 0 &&
+                stats[4].built == pipeline_count && stats[4].hits == 0,
+            "Subset counters must distinguish VI/FO reuse from unique PR/FS builds");
 }
 
+static void CacheReuseStatistics() {
+    Fixture f;
+    fail_library_once = true;
+    VkPipeline output = VK_NULL_HANDLE;
+    Require(f.Create(1, &f.ci, &output) == VK_SUCCESS && native_index == 1,
+            "A failed VI build must fall back before the successful retry");
+    for (uint32_t i = 0; i < 3; ++i) Require(f.Create(1, &f.ci, &output) == VK_SUCCESS, "Repeated conversion failed");
+    const auto stats = f.device.cache.GetStats();
+    for (uint32_t subset : {1u, 2u, 4u, 8u})
+        Require(stats[subset].built == 1 && stats[subset].hits == 2 && stats[subset].in_flight == 0 &&
+                    stats[subset].failures == (subset == 1 ? 1u : 0u),
+                "Failed builds must not count as successful builds or hits; a successful retry can be reused");
+}
+
+namespace bounded_cache_regression {
+static std::vector<VkPipeline> destroyed;
+static VKAPI_ATTR void VKAPI_CALL Destroy(VkDevice, VkPipeline pipeline, const VkAllocationCallbacks* allocator) {
+    Require(!allocator, "Cached libraries must be destroyed with their default allocator");
+    destroyed.push_back(pipeline);
+}
+static VkPipeline Build(DeviceData&, const void* context) { return *static_cast<const VkPipeline*>(context); }
+
+static void Run() {
+    destroyed.clear();
+    Fixture f;
+    f.device.vtable.DestroyPipeline = Destroy;
+    LibraryCache cache(2);
+    VkPipeline handles[] = {Handle<VkPipeline>(0x100), Handle<VkPipeline>(0x200), Handle<VkPipeline>(0x300)};
+    bool built;
+    auto a = cache.GetOrBuild("a", f.device, &handles[0], Build, &built, GplSubset::kPreRaster);
+    cache.GetOrBuild("b", f.device, &handles[1], Build, &built, GplSubset::kPreRaster);
+    Require(cache.GetOrBuild("a", f.device, &handles[0], Build, &built, GplSubset::kPreRaster) == a && !built,
+            "A cache hit must refresh recency and return the same lease");
+    auto c = cache.GetOrBuild("c", f.device, &handles[2], Build, &built, GplSubset::kPreRaster);
+    Require(cache.ResidentCount() == 2 && destroyed.size() == 1 && destroyed[0] == handles[1],
+            "LRU overflow must destroy the unused oldest library");
+    Require(cache.GetStats()[2].resident == 2 && cache.GetStats()[2].evicted == 1,
+            "Subset residency must count retained libraries, not cumulative builds");
+    cache.DestroyAll(f.device);
+    Require(destroyed.size() == 1 && f.device.library_lifetime.live == 2 && cache.GetStats()[2].resident == 0,
+            "Cache removal must preserve libraries leased by an in-progress link");
+    a.reset();
+    c.reset();
+    Require(destroyed.size() == 3 && f.device.library_lifetime.live == 0 && cache.GetStats()[2].evicted == 1,
+            "The final lease must destroy each library exactly once");
+
+    destroyed.clear();
+    Fixture linked(4);
+    linked.device.vtable.DestroyPipeline = Destroy;
+    VkPipeline first, second;
+    Require(linked.Create(1, &linked.ci, &first) == VK_SUCCESS, "Initial executable creation failed");
+    linked.ia.topology = VK_PRIMITIVE_TOPOLOGY_LINE_LIST;
+    linked.stages[0].module = Handle<VkShaderModule>(0x5000);
+    linked.stages[1].module = Handle<VkShaderModule>(0x6000);
+    linked.attachment.blendEnable = VK_TRUE;
+    Require(linked.Create(1, &linked.ci, &second) == VK_SUCCESS && linked.device.cache.ResidentCount() == 4 &&
+                linked.device.library_lifetime.live == 8 && destroyed.empty(),
+            "Eviction must preserve all libraries referenced by live executable pipelines, including pure GPL");
+    DestroyPipeline(linked.handle, first, nullptr);
+    Require(destroyed.size() == 5 && destroyed[0] == first && linked.device.library_lifetime.live == 4,
+            "Evicted dependencies must be released after their executable, not before");
+    DestroyPipeline(linked.handle, second, nullptr);
+    linked.device.cache.DestroyAll(linked.device);
+    Require(destroyed.size() == 10 && linked.device.library_lifetime.live == 0 && linked.device.pipeline_libraries.empty(),
+            "Executable and cache cleanup must release all dependencies exactly once");
+}
+
+struct ConcurrentBuild {
+    std::mutex mutex;
+    std::condition_variable cv;
+    bool entered = false;
+    bool finish = false;
+    std::atomic<uint32_t> started{0};
+    std::atomic<uint32_t> builds{0};
+};
+static VkPipeline ConcurrentBuilder(DeviceData&, const void* context) {
+    auto& state = *const_cast<ConcurrentBuild*>(static_cast<const ConcurrentBuild*>(context));
+    ++state.builds;
+    std::unique_lock<std::mutex> lock(state.mutex);
+    state.entered = true;
+    state.cv.notify_all();
+    state.cv.wait(lock, [&] { return state.finish; });
+    return Handle<VkPipeline>(0x7000);
+}
+static void Concurrent() {
+    Fixture f;
+    ConcurrentBuild state;
+    LibraryCache cache(1);
+    std::array<LibraryCache::Handle, 6> leases;
+    std::array<std::thread, 6> threads;
+    for (size_t i = 0; i < threads.size(); ++i) {
+        threads[i] = std::thread([&, i] {
+            {
+                std::unique_lock<std::mutex> lock(state.mutex);
+                ++state.started;
+            }
+            state.cv.notify_all();
+            bool built;
+            leases[i] = cache.GetOrBuild("same", f.device, &state, ConcurrentBuilder, &built, GplSubset::kFragmentShader);
+        });
+    }
+    {
+        std::unique_lock<std::mutex> lock(state.mutex);
+        state.cv.wait(lock, [&] { return state.entered && state.started == threads.size(); });
+        state.finish = true;
+    }
+    state.cv.notify_all();
+    for (auto& thread : threads) thread.join();
+    for (const auto& lease : leases) Require(lease == leases[0], "Concurrent requests must share one library generation");
+    const auto stats = cache.GetStats()[4];
+    Require(state.builds == 1 && stats.built == 1 && stats.hits == 5 && stats.in_flight == 0,
+            "Single-flight builds and cache counters must remain correct under concurrency");
+    cache.DestroyAll(f.device);
+    Require(f.device.library_lifetime.live == 1, "Concurrent leases must survive removal of cache ownership");
+    leases = {};
+    Require(f.device.library_lifetime.live == 0, "Concurrent leases must release the library after their last user");
+}
+}  // namespace bounded_cache_regression
+
 int main() {
+    bounded_cache_regression::Run();
+    bounded_cache_regression::Concurrent();
+    CacheReuseStatistics();
     multisample_identity_regression::Run();
     content_identity_regression::Run();
     identifier_regression::Run();

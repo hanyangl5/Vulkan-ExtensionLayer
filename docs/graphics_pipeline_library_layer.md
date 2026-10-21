@@ -5,7 +5,7 @@ This layer transparently accelerates graphics pipeline creation on drivers suppo
 vertex-input, pre-rasterization, fragment-shader and fragment-output libraries, then links them
 without LTO. It exposes no additional Vulkan extensions to applications.
 
-The implementation and original host tests came from `xiaomi-vulkan-graphics-pipeline-library-layer`
+The implementation came from `xiaomi-vulkan-graphics-pipeline-library-layer`
 commit `9a2dad3c3b14714ae650f050d405e8a81f9e1246`, retaining Xiaomi's Apache-2.0 notices. The loader name
 is `VK_LAYER_PA_graphics_pipeline_library`; the binary and manifest use `VkLayer_PA_graphics_pipeline_library`.
 
@@ -88,8 +88,15 @@ Top-level extension headers are copied separately for each library. Payload arra
 during synchronous creation and serialized by value for cache lookup. They are not retained.
 
 The cache synchronizes builds of each key so concurrent callers do not compile duplicate libraries.
-Libraries use the default allocator and live until device destruction; executable pipelines use the
-application's allocator. A pipeline record contains only the promoted-state mask and original values.
+The LRU cache retains at most 16,384 ready libraries per device, shared across all GPL subsets. Eviction drops cache ownership;
+in-progress links and live executable pipelines retain shared references to their libraries.
+An evicted library is destroyed only after its last user releases it, with the default allocator.
+Executable pipelines use the application's allocator. Dependencies remain alive through downstream
+executable destruction, including pure-GPL pipelines without private data. This follows the
+[pipeline library lifetime rules](https://docs.vulkan.org/spec/latest/chapters/pipelines.html#pipelines-library).
+A pipeline record contains only the promoted-state mask and original values. Active application
+pipelines and concurrent builds can keep more than 16,384 libraries alive; the cap bounds extra cache
+retention, not memory required by the application's live objects.
 
 ## Native fallback and failure handling
 
@@ -113,15 +120,15 @@ application's allocator. A pipeline record contains only the promoted-state mask
 - Intel Arc 130T (`8086:7d51`) with Vulkan driver version `1661338` uses native creation for multiview
   with instance-rate or dynamic vertex input, for both rendering paths.
 - On NVIDIA devices, pipelines that can rasterize lines combine vertex input and pre-rasterization
-  into one cached library. This preserves static line width across static/dynamic pipeline switches
-  (reproduced on RTX 3080, driver 596.49). The combined key includes vertex-input state; both subsets'
+  into one cached library. This preserves static line width across static/dynamic pipeline switches.
+  The combined key includes vertex-input state; both subsets'
   dynamic states and creation flags are retained. Fragment libraries remain separate, and conversion
   still uses GPL without LTO. Mesh pipelines continue to omit vertex-input state.
 
 Conversion has no pipeline-count or library-sharing threshold. Eligible requests continue to use
 GPL for the device lifetime, even when every request needs new shader libraries. Conversion and
 expensive-library counts are diagnostic statistics only. Device capability checks and per-request
-native fallback still apply; cached libraries remain owned until device destruction.
+native fallback still apply. Cache eviction changes library residency without disabling conversion.
 
 Single-pipeline shader-module-identifier requests use the same GPL partitioning as module-backed
 requests. The application's pipeline cache is passed to every library build and link, including
@@ -148,51 +155,12 @@ builds. Sources use the repository's clang-format configuration.
 The library cache remains layer-specific because it coordinates in-progress builds and owns driver
 pipelines. Extension-chain allowlists and lifetime generations protect conversion correctness;
 capability checks and native fallback preserve valid application requests. File logging supplements
-the shared logging facilities. Host tests share explicit helpers rather than including another test
-program or redefining its entry point.
+the shared logging facilities.
 
-## Build and test
+## Build
 
 Use the repository's [build instructions](../BUILD.md). The layer is built and installed alongside the
-existing layers and requires Vulkan 1.4 headers. Host tests run with `BUILD_TESTS=ON`, or independently
-of GoogleTest/SPIR-V test dependencies with:
-
-```sh
-cmake -S . -B build -DUPDATE_DEPS=ON -DBUILD_TESTS=OFF -DBUILD_GPL_TESTS=ON -DCMAKE_BUILD_TYPE=Debug
-cmake --build build --config Debug
-ctest --test-dir build -C Debug -R graphics_pipeline_library --output-on-failure
-```
-
-The two host suites cover dynamic-state routing, ignored arrays, rendering cache keys, Flags2,
-inline shaders, handle reuse, discard, feedback and batch semantics. A 1,024-pipeline regression uses
-unique VS/FS identities to verify continuous conversion without shader-library sharing. Content
-identity tests cover equal shaders, layouts and render passes, immutable samplers, inline modules,
-changed definitions after handle recycling, unknown chains and creation failures. Failure-path
-regressions cover private-data attachment and native error propagation, all five bind-time restored
-values, consumed loader links and output slots on device retry, and independent-interpolation fallback.
-
-Desktop validation uses Clang with `BUILD_WERROR=ON`. A GPU smoke probe on an NVIDIA GeForce RTX 3080
-creates, binds and submits four state variants with validation enabled; the expected summary is
-`converted=4`, `expensive_libraries=2`. This probe does not compare rendered images,
-and the migrated PA layer has not undergone a complete CTS run here.
-
-A targeted CTS regression run on RTX 3080 with driver 596.49 covers 3,042 cases across 56 groups,
-including dynamic rendering, multiview and mesh shaders. The 26 image failures found before the
-VI/PR and fragment-state fixes now pass while still converting through GPL. Their validation run
-also passes; a separate 141-case validation set reports 133 passes and 8 unsupported cases.
-The original selected suite retained four failures also seen without the layer and one
-shader-module-identifier pipeline-cache quality warning. After routing identifier requests through
-GPL, all 64 selected shader-module-identifier cases pass with validation enabled; the original
-`hlsl_tessellation` warning no longer occurs. These results are not a complete CTS conformance claim.
-
-After removing the conversion gate, the three previously downgraded groups (`cache`, `depth`,
-`extended_dynamic_state`) were rerun with validation enabled: 578 passes, 30 unsupported cases and
-no failures across 608 cases. They converted 1,564 PSOs, including requests past the former threshold.
-
-Content-based cross-object reuse was checked against the same selected 3,042 cases with validation:
-all case statuses and validation VUID sets remain unchanged. PR/FS library creation decreased from
-8,502 to 2,832 for the same 4,292 converted pipelines. This is a library-count comparison rather
-than a controlled compilation-time benchmark; see the [content reuse report](testing/gpl-cts-2026-10-20/content-reuse.md).
+existing layers and requires Vulkan 1.4 headers.
 
 ## Enable and diagnose
 
@@ -216,24 +184,25 @@ Set `PA_GPL_LOG=2` for per-pipeline diagnostics and `PA_GPL_LOG_FILE=<path>` for
 original `XIAOMI_GPL_LOG` and `XIAOMI_GPL_LOG_FILE` remain aliases; PA variables take precedence.
 Default output reports the device tier and destruction-time statistics.
 
+Set `PA_GPL_STATS=1` before launch for per-request cache snapshots. On Android,
+`adb shell setprop debug.pa_gpl.stats 1` enables the same diagnostics on the next launch,
+without a process wrapper. Each snapshot identifies the device and reports successful library
+builds and cache hits separately for VI, PR, FS, FO and combined VI/PR, plus failed and in-progress
+builds. Cache hits count reuse operations, not distinct reused objects. Converted PSO counts can
+lag library lookups while other threads are building or linking. Detailed logging is disabled by
+default; cache totals are also reported at device destruction. `resident` counts LRU entries,
+`live`/`peak` count actual library handles (including executable dependencies), and `evicted` counts
+removed cache entries, which need not destroy a handle immediately.
+`resident_by_subset` and `evicted_by_subset` split those totals in VI/PR/FS/FO/combined-VI-PR order.
+Build counts include recreating an evicted key; they are not counts of distinct state definitions.
+
 ### Android
 
 Build the layer and its dependencies for arm64-v8a with the Android NDK and c++_static.
 See the Android section of BUILD.md. Android loads the .so without a JSON manifest.
 Default diagnostic output uses logcat with tag PA_GPL; file output remains supported.
 
-On 2026-10-20, the connected ARM64 Android device (0182200148488540, API 37) loaded
-libVkLayer_PA_graphics_pipeline_library.so from the debuggable Vulkan Samples app data directory.
-The per-app GPU debug configuration selects com.khronos.vulkan_samples and
-VK_LAYER_PA_graphics_pipeline_library. The original settings were saved locally in
-build-android/gpu-settings-before.txt before deployment.
-
-The hello_triangle sample completed 60 frames with tier=dynamize, converted=1 and
-expensive_libraries=2. Logs are saved locally in build-android/device-layer-log.txt.
-The device reports an NVIDIA GeForce RTX 5090 Vulkan driver, GPL support and
-FastLinking=false. This verifies loading and conversion, not mobile GPU performance.
-
-Per-app layer settings persist across reboots. To disable this deployment:
+Per-app layer settings persist across reboots. To disable GPU debug layers:
 
 ```sh
 adb shell settings put global enable_gpu_debug_layers 0

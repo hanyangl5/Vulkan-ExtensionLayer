@@ -25,6 +25,7 @@
 
 #if defined(__ANDROID__)
 #include <android/log.h>
+#include <sys/system_properties.h>
 #endif
 
 #include <vulkan/vk_layer.h>
@@ -398,50 +399,139 @@ void DeviceData::ForgetPipelineLayout(VkPipelineLayout layout) { pipeline_layout
 
 // Single-flight library cache
 
-VkPipeline LibraryCache::GetOrBuild(const std::string& key, DeviceData& device_data, const void* context, Builder builder,
-                                    bool* was_built_out) {
+LibraryHandle::LibraryHandle(VkPipeline pipeline, DeviceData& device_data)
+    : pipeline(pipeline),
+      device(device_data.device),
+      destroy(device_data.vtable.DestroyPipeline),
+      lifetime(device_data.library_lifetime) {
+    const uint64_t live = lifetime.live.fetch_add(1, std::memory_order_relaxed) + 1;
+    uint64_t peak = lifetime.peak.load(std::memory_order_relaxed);
+    while (peak < live && !lifetime.peak.compare_exchange_weak(peak, live, std::memory_order_relaxed)) {
+    }
+}
+
+LibraryHandle::~LibraryHandle() {
+    destroy(device, pipeline, nullptr);
+    lifetime.live.fetch_sub(1, std::memory_order_relaxed);
+}
+
+LibraryCache::Handle LibraryCache::GetOrBuild(const std::string& key, DeviceData& device_data, const void* context, Builder builder,
+                                              bool* was_built_out, GplSubset subset) {
     if (was_built_out) *was_built_out = false;
 
+    // Release evicted handles after unlocking: driver destruction must not hold the cache lock.
+    std::vector<Handle> evicted;
     std::unique_lock<std::mutex> lock(mutex_);
+    auto& stats = stats_[static_cast<uint32_t>(subset)];
     for (;;) {
         auto it = entries_.find(key);
         if (it == entries_.end()) {
-            entries_.emplace(key, Entry{State::kBuilding, VK_NULL_HANDLE});
+            entries_.try_emplace(key);
+            ++stats.in_flight;
             lock.unlock();
 
             // Expensive work happens with the lock released so other keys can make progress.
             VkPipeline handle = builder(device_data, context);
 
             lock.lock();
+            --stats.in_flight;
+            Handle library;
             if (handle != VK_NULL_HANDLE) {
+                ++stats.built;
+                ++stats.resident;
+                library = std::make_shared<LibraryHandle>(handle, device_data);
                 auto& entry = entries_[key];
-                entry.handle = handle;
+                entry.handle = library;
+                entry.subset = subset;
                 entry.state = State::kReady;
+                lru_.push_front(key);
+                entry.lru = lru_.begin();
+                while (lru_.size() > capacity_) {
+                    auto victim = entries_.find(lru_.back());
+                    ++stats_[static_cast<uint32_t>(victim->second.subset)].evicted;
+                    --stats_[static_cast<uint32_t>(victim->second.subset)].resident;
+                    evicted.push_back(std::move(victim->second.handle));
+                    entries_.erase(victim);
+                    lru_.pop_back();
+                }
             } else {
+                ++stats.failures;
                 // A compile-required miss can succeed after the application primes its pipeline cache.
                 entries_.erase(key);
             }
             cv_.notify_all();
             if (was_built_out) *was_built_out = true;
-            return handle;
+            return library;
         }
         if (it->second.state == State::kBuilding) {
             cv_.wait(lock);  // Woken on ready or failure; re-check the entry.
             continue;
         }
         // Only successful builds are retained; waiters may retry after a failed build.
+        ++stats.hits;
+        lru_.splice(lru_.begin(), lru_, it->second.lru);
         return it->second.handle;
     }
 }
 
-void LibraryCache::DestroyAll(DeviceData& device_data) {
+std::array<LibraryCacheStats, 16> LibraryCache::GetStats() {
     std::unique_lock<std::mutex> lock(mutex_);
-    for (auto& kv : entries_) {
-        if (kv.second.handle != VK_NULL_HANDLE) {
-            device_data.vtable.DestroyPipeline(device_data.device, kv.second.handle, nullptr);
-        }
+    return stats_;
+}
+
+size_t LibraryCache::ResidentCount() {
+    std::unique_lock<std::mutex> lock(mutex_);
+    return lru_.size();
+}
+
+static void LogLibraryStats(DeviceData& data, bool final = false) {
+    static const bool enabled = [] {
+        const char* value = std::getenv("PA_GPL_STATS");
+        if (value) return std::atoi(value) != 0;
+#if defined(__ANDROID__)
+        char property[PROP_VALUE_MAX]{};
+        __system_property_get("debug.pa_gpl.stats", property);
+        return std::atoi(property) != 0;
+#else
+        return false;
+#endif
+    }();
+    if (!final && !enabled) return;
+    const auto stats = data.cache.GetStats();
+    LayerMessage(
+        "[%s] device %p cache: converted=%llu VI=%llu/%llu PR=%llu/%llu FS=%llu/%llu FO=%llu/%llu "
+        "VI_PR=%llu/%llu (built/hits) failed=%llu in_flight=%llu resident=%zu live=%llu peak=%llu evicted=%llu "
+        "resident_by_subset=%llu/%llu/%llu/%llu/%llu evicted_by_subset=%llu/%llu/%llu/%llu/%llu (VI/PR/FS/FO/VI_PR)\n",
+        kLayerName, static_cast<void*>(data.device),
+        static_cast<unsigned long long>(data.converted_pipeline_count.load(std::memory_order_relaxed)),
+        static_cast<unsigned long long>(stats[1].built), static_cast<unsigned long long>(stats[1].hits),
+        static_cast<unsigned long long>(stats[2].built), static_cast<unsigned long long>(stats[2].hits),
+        static_cast<unsigned long long>(stats[4].built), static_cast<unsigned long long>(stats[4].hits),
+        static_cast<unsigned long long>(stats[8].built), static_cast<unsigned long long>(stats[8].hits),
+        static_cast<unsigned long long>(stats[3].built), static_cast<unsigned long long>(stats[3].hits),
+        static_cast<unsigned long long>(stats[1].failures + stats[2].failures + stats[3].failures + stats[4].failures +
+                                        stats[8].failures),
+        static_cast<unsigned long long>(stats[1].in_flight + stats[2].in_flight + stats[3].in_flight + stats[4].in_flight +
+                                        stats[8].in_flight),
+        data.cache.ResidentCount(), static_cast<unsigned long long>(data.library_lifetime.live.load(std::memory_order_relaxed)),
+        static_cast<unsigned long long>(data.library_lifetime.peak.load(std::memory_order_relaxed)),
+        static_cast<unsigned long long>(stats[1].evicted + stats[2].evicted + stats[3].evicted + stats[4].evicted +
+                                        stats[8].evicted),
+        static_cast<unsigned long long>(stats[1].resident), static_cast<unsigned long long>(stats[2].resident),
+        static_cast<unsigned long long>(stats[4].resident), static_cast<unsigned long long>(stats[8].resident),
+        static_cast<unsigned long long>(stats[3].resident), static_cast<unsigned long long>(stats[1].evicted),
+        static_cast<unsigned long long>(stats[2].evicted), static_cast<unsigned long long>(stats[4].evicted),
+        static_cast<unsigned long long>(stats[8].evicted), static_cast<unsigned long long>(stats[3].evicted));
+}
+
+void LibraryCache::DestroyAll(DeviceData&) {
+    std::unordered_map<std::string, Entry> released;
+    {
+        std::unique_lock<std::mutex> lock(mutex_);
+        released.swap(entries_);
+        lru_.clear();
+        for (auto& stats : stats_) stats.resident = 0;
     }
-    entries_.clear();
 }
 
 // Conversion: eligibility, promotion, and library building
@@ -1000,7 +1090,7 @@ VkPipeline CreateLibraryPipeline(DeviceData& device_data, const LibBuildCtx& ctx
                        *ctx.ci, flags2);
 
     // Cached libraries outlive application pipeline allocators and use the default allocator,
-    // matching LibraryCache::DestroyAll. The final executable uses the application's allocator.
+    // matching LibraryHandle destruction. The final executable uses the application's allocator.
     VkPipeline pipeline = VK_NULL_HANDLE;
     VkResult result =
         device_data.vtable.CreateGraphicsPipelines(device_data.device, ctx.pipeline_cache, 1, &lib, nullptr, &pipeline);
@@ -1112,35 +1202,37 @@ VkPipeline ConvertOnePipeline(DeviceData& device_data, const VkGraphicsPipelineC
     bool built = false;
     // Mesh pipelines do not consume vertex input or input assembly state. A standalone vertex-input
     // library would still require those states, so omit that subset entirely (VUID flags-08898).
-    VkPipeline vertex_input = VK_NULL_HANDLE;
+    LibraryCache::Handle vertex_input;
     if (!uses_mesh_shader && !ctx.combine_vertex_input) {
-        vertex_input = device_data.cache.GetOrBuild(MakeVertexInputKey(ctx), device_data, &ctx, BuildVertexInputLibrary, &built);
-        if (vertex_input == VK_NULL_HANDLE) return VK_NULL_HANDLE;
+        vertex_input = device_data.cache.GetOrBuild(MakeVertexInputKey(ctx), device_data, &ctx, BuildVertexInputLibrary, &built,
+                                                    GplSubset::kVertexInput);
+        if (!vertex_input) return VK_NULL_HANDLE;
     }
 
-    VkPipeline pre_raster =
-        device_data.cache.GetOrBuild(MakePreRasterKey(ctx, device_data), device_data, &ctx, BuildPreRasterLibrary, &built);
-    if (pre_raster == VK_NULL_HANDLE) return VK_NULL_HANDLE;
+    auto pre_raster =
+        device_data.cache.GetOrBuild(MakePreRasterKey(ctx, device_data), device_data, &ctx, BuildPreRasterLibrary, &built,
+                                     ctx.combine_vertex_input ? GplSubset::kVertexInputAndPreRaster : GplSubset::kPreRaster);
+    if (!pre_raster) return VK_NULL_HANDLE;
     if (built) device_data.expensive_library_count.fetch_add(1, std::memory_order_relaxed);
 
-    VkPipeline fragment_shader = VK_NULL_HANDLE;
-    VkPipeline fragment_output = VK_NULL_HANDLE;
+    LibraryCache::Handle fragment_shader;
+    LibraryCache::Handle fragment_output;
     if (rasterization) {
         fragment_shader = device_data.cache.GetOrBuild(MakeFragmentShaderKey(ctx, device_data), device_data, &ctx,
-                                                       BuildFragmentShaderLibrary, &built);
-        if (fragment_shader == VK_NULL_HANDLE) return VK_NULL_HANDLE;
+                                                       BuildFragmentShaderLibrary, &built, GplSubset::kFragmentShader);
+        if (!fragment_shader) return VK_NULL_HANDLE;
         if (built) device_data.expensive_library_count.fetch_add(1, std::memory_order_relaxed);
 
         fragment_output = device_data.cache.GetOrBuild(MakeFragmentOutputKey(ctx, device_data), device_data, &ctx,
-                                                       BuildFragmentOutputLibrary, &built);
-        if (fragment_output == VK_NULL_HANDLE) return VK_NULL_HANDLE;
+                                                       BuildFragmentOutputLibrary, &built, GplSubset::kFragmentOutput);
+        if (!fragment_output) return VK_NULL_HANDLE;
     }
 
-    VkPipeline libraries[4] = {pre_raster};
+    VkPipeline libraries[4] = {pre_raster->pipeline};
     uint32_t library_count = 1;
-    if (vertex_input) libraries[library_count++] = vertex_input;
-    if (fragment_shader) libraries[library_count++] = fragment_shader;
-    if (fragment_output) libraries[library_count++] = fragment_output;
+    if (vertex_input) libraries[library_count++] = vertex_input->pipeline;
+    if (fragment_shader) libraries[library_count++] = fragment_shader->pipeline;
+    if (fragment_output) libraries[library_count++] = fragment_output->pipeline;
     VkPipelineLibraryCreateInfoKHR link{VK_STRUCTURE_TYPE_PIPELINE_LIBRARY_CREATE_INFO_KHR, nullptr, library_count, libraries};
     link.pNext = ctx.link_extensions.head;
 
@@ -1176,6 +1268,12 @@ VkPipeline ConvertOnePipeline(DeviceData& device_data, const VkGraphicsPipelineC
         }
     }
 
+    {
+        std::unique_lock<std::mutex> lock(device_data.pipeline_libraries_mutex);
+        device_data.pipeline_libraries.emplace(
+            executable, std::array<LibraryCache::Handle, 4>{std::move(vertex_input), std::move(pre_raster),
+                                                            std::move(fragment_shader), std::move(fragment_output)});
+    }
     device_data.converted_pipeline_count.fetch_add(1, std::memory_order_relaxed);
     return executable;
 }
@@ -1235,6 +1333,7 @@ static VKAPI_ATTR VkResult VKAPI_CALL CreateGraphicsPipelines(VkDevice device, V
         }
         LayerDebug("[%s] CreateGraphicsPipelines pso %u/%u: %s\n", kLayerName, i + 1, createInfoCount,
                    converted != VK_NULL_HANDLE ? "converted" : blocker);
+        LogLibraryStats(*device_data);
 
         if (converted != VK_NULL_HANDLE) {
             pPipelines[i] = converted;
@@ -1299,11 +1398,23 @@ static VKAPI_ATTR void VKAPI_CALL DestroyPipeline(VkDevice device, VkPipeline pi
     DeviceData* device_data = GetDeviceData(device);
     ASSERT(device_data != nullptr);
 
+    // Remove before downstream destruction permits handle reuse, but keep libraries alive until
+    // destruction finishes. They remain required even after a linked executable was created.
+    std::array<LibraryCache::Handle, 4> libraries;
+    {
+        std::unique_lock<std::mutex> lock(device_data->pipeline_libraries_mutex);
+        auto it = device_data->pipeline_libraries.find(pipeline);
+        if (it != device_data->pipeline_libraries.end()) {
+            libraries = std::move(it->second);
+            device_data->pipeline_libraries.erase(it);
+        }
+    }
+
     if (device_data->record_slot != VK_NULL_HANDLE && pipeline != VK_NULL_HANDLE) {
         uint64_t raw = 0;
         device_data->vtable.GetPrivateData(device, VK_OBJECT_TYPE_PIPELINE, CastToUint64(pipeline), device_data->record_slot, &raw);
         if (auto* record = CastFromUint64<PipelineRecord*>(raw)) {
-            delete record;  // the GPL libraries themselves are owned by the cache, not the record
+            delete record;
         }
     }
     device_data->vtable.DestroyPipeline(device, pipeline, pAllocator);
@@ -1765,6 +1876,7 @@ static VKAPI_ATTR void VKAPI_CALL DestroyDevice(VkDevice device, const VkAllocat
     PFN_vkDestroyDevice destroy_device = device_data->vtable.DestroyDevice;
 
     if (device_data->tier != Tier::kPassthrough) {
+        LogLibraryStats(*device_data, true);
         LayerMessage("[%s] device %p summary: converted=%llu expensive_libraries=%llu\n", kLayerName, static_cast<void*>(device),
                      static_cast<unsigned long long>(device_data->converted_pipeline_count.load()),
                      static_cast<unsigned long long>(device_data->expensive_library_count.load()));

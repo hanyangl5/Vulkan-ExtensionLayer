@@ -23,10 +23,13 @@
 
 #pragma once
 
+#include <array>
 #include <atomic>
 #include <condition_variable>
 #include <cstdint>
 #include <cstring>
+#include <list>
+#include <memory>
 #include <mutex>
 #include <string>
 #include <unordered_map>
@@ -197,19 +200,55 @@ class KeyBuilder {
 //
 // Concurrent create calls that need the same library block on a condition variable rather than
 // building it twice. A build failure wakes the waiters so they fall back instead of hanging. The
-// cache owns successful library handles until device destruction; failed builds can be retried.
+// cache owns a bounded LRU of successful libraries; linked executables keep their own references.
+// Failed builds can be retried.
 
 struct DeviceData;
 
+struct LibraryCacheStats {
+    uint64_t built = 0;
+    uint64_t hits = 0;
+    uint64_t failures = 0;
+    uint64_t in_flight = 0;
+    uint64_t evicted = 0;
+    uint64_t resident = 0;
+};
+
+struct LibraryLifetimeStats {
+    std::atomic<uint64_t> live{0};
+    std::atomic<uint64_t> peak{0};
+};
+
+struct LibraryHandle {
+    VkPipeline pipeline;
+    VkDevice device;
+    PFN_vkDestroyPipeline destroy;
+    LibraryLifetimeStats& lifetime;
+
+    LibraryHandle(VkPipeline pipeline, DeviceData& device_data);
+    ~LibraryHandle();
+    LibraryHandle(const LibraryHandle&) = delete;
+    LibraryHandle& operator=(const LibraryHandle&) = delete;
+};
+
 class LibraryCache {
   public:
+    using Handle = std::shared_ptr<LibraryHandle>;
+    static constexpr size_t kDefaultCapacity = 16384;
+    explicit LibraryCache(size_t capacity = kDefaultCapacity) : capacity_(capacity) {}
+
     // Builder returns a library handle, or VK_NULL_HANDLE on failure.
     using Builder = VkPipeline (*)(DeviceData& device_data, const void* context);
 
-    // Returns the cached or freshly built library, or VK_NULL_HANDLE if the build failed.
+    // Returns a shared reference to the cached or freshly built library, or an empty handle on failure.
     // was_built_out distinguishes a fresh build from a cache hit for conversion statistics.
-    VkPipeline GetOrBuild(const std::string& key, DeviceData& device_data, const void* context, Builder builder,
-                          bool* was_built_out);
+    Handle GetOrBuild(const std::string& key, DeviceData& device_data, const void* context, Builder builder, bool* was_built_out,
+                      GplSubset subset);
+
+    // Indexed by GPL subset flags, including combined VI/PR libraries. A snapshot is taken under
+    // the cache lock; successful lookups after waiting count as hits, failed builds do not.
+    std::array<LibraryCacheStats, 16> GetStats();
+    size_t ResidentCount();
 
     void DestroyAll(DeviceData& device_data);
 
@@ -217,12 +256,17 @@ class LibraryCache {
     enum class State { kBuilding, kReady };
     struct Entry {
         State state = State::kBuilding;
-        VkPipeline handle = VK_NULL_HANDLE;
+        Handle handle;
+        GplSubset subset = GplSubset::kUnknown;
+        std::list<std::string>::iterator lru;
     };
 
     std::mutex mutex_;
     std::condition_variable cv_;
     std::unordered_map<std::string, Entry> entries_;
+    std::array<LibraryCacheStats, 16> stats_{};
+    std::list<std::string> lru_;
+    const size_t capacity_;
 };
 
 // Exact content interning. Unknown definitions receive a unique lifetime identity instead.
@@ -250,6 +294,8 @@ struct InstanceData {
 };
 
 struct DeviceData {
+    explicit DeviceData(size_t library_capacity = LibraryCache::kDefaultCapacity) : cache(library_capacity) {}
+
     LayerDispatchDevice vtable;
     VkDevice device = VK_NULL_HANDLE;
     LayerCapabilities caps;
@@ -258,7 +304,11 @@ struct DeviceData {
     // Record storage for dynamization. Without private data, pure-GPL conversion remains available.
     VkPrivateDataSlot record_slot = VK_NULL_HANDLE;
 
+    // Lifetime counters precede all owners so they also outlive implicit member destruction.
+    LibraryLifetimeStats library_lifetime;
     LibraryCache cache;
+    std::mutex pipeline_libraries_mutex;
+    std::unordered_map<VkPipeline, std::array<LibraryCache::Handle, 4>> pipeline_libraries;
 
     // Render-pass metadata is live-object state; content identities survive object destruction.
     std::mutex render_pass_mutex;
