@@ -214,7 +214,7 @@ uint64_t Align(uint64_t value, uint32_t alignment) { return CheckedAdd(value, al
 
 class FramePlanner {
   public:
-    explicit FramePlanner(const Module &module) : m(module) {
+    explicit FramePlanner(const Module &module, ContinuationFrameOptions options) : m(module), options(options) {
         for (const auto &i : m.instructions) {
             if (i.result) definitions[i.result] = &i;
             if (i.op == spv::OpVariable && i.words.at(3) == spv::StorageClassPrivate) private_storage.insert(i.result);
@@ -227,7 +227,7 @@ class FramePlanner {
 
     FunctionFrame Plan(const FunctionContinuations &analysis) {
         FunctionFrame frame{analysis.function, 0, 1, {}, {}};
-        if (!analysis.can_suspend) return frame;
+        if (!analysis.can_suspend && !options.persistent_function_storage) return frame;
         RejectPrivateStorage(analysis.function);
         const auto &function = m.functions.at(analysis.function);
         // A pointer can be consumed by a suspending helper without being live
@@ -254,7 +254,8 @@ class FramePlanner {
                 if (!visiting.insert(value).second) throw std::runtime_error("Cyclic continuation rematerialization");
                 const auto &i = Definition(value);
                 const auto &type = Definition(i.type);
-                if (!IsReference(type.op)) {
+                if (!IsReference(type.op) ||
+                    (options.acceleration_structure_addresses && type.op == spv::OpTypeAccelerationStructureKHR)) {
                     AddSlot(frame, value, i.type, false);
                     suspension.saved_values.push_back(value);
                 } else if (i.op == spv::OpVariable) {
@@ -305,6 +306,7 @@ class FramePlanner {
 
   private:
     const Module &m;
+    ContinuationFrameOptions options;
     std::map<uint32_t, const Instruction *> definitions;
     std::map<uint32_t, ContinuationTypeLayout> layouts;
     IDs local_values, laying_out, private_storage;
@@ -361,7 +363,9 @@ class FramePlanner {
         if (!laying_out.insert(id).second) throw std::runtime_error("Recursive continuation frame type");
         const auto &type = Definition(id);
         ContinuationTypeLayout result{id, 0, 1, 0, {}};
-        if (type.op == spv::OpTypeBool) {
+        if (type.op == spv::OpTypeAccelerationStructureKHR && options.acceleration_structure_addresses) {
+            result.size = result.alignment = 8;
+        } else if (type.op == spv::OpTypeBool) {
             result.size = result.alignment = 4;
         } else if (type.op == spv::OpTypeInt || type.op == spv::OpTypeFloat) {
             const auto width = type.words.at(2);
@@ -449,11 +453,12 @@ ContinuationAnalysis AnalyzeContinuations(const std::vector<uint32_t> &spirv, co
 }
 
 ContinuationFrames PlanContinuationFrames(const std::vector<uint32_t> &spirv, const std::string &entry, uint32_t execution_model,
-                                          const std::vector<uint32_t> &additional_value_types) {
+                                          const std::vector<uint32_t> &additional_value_types, ContinuationFrameOptions options) {
     ContinuationFrames result;
     result.analysis = AnalyzeContinuations(spirv, entry, execution_model);
     auto module = ParseModule(spirv);
-    FramePlanner planner(module);
+    result.options = options;
+    FramePlanner planner(module, options);
     for (const auto &function : result.analysis.functions) result.functions.push_back(planner.Plan(function));
     planner.IncludeValueTypes(additional_value_types);
     result.types = planner.Types();

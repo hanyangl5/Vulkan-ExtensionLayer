@@ -75,4 +75,9 @@ target_link_libraries(vel_rt_state_compiler_tests PRIVATE vel_rt_compiler Vulkan
 add_test(NAME ray_tracing_fallback_typed_source_cfg COMMAND vel_rt_state_compiler_tests)
 set_tests_properties(ray_tracing_fallback_typed_source_cfg PROPERTIES SKIP_RETURN_CODE 77)
 
+add_executable(vel_rt_request_tests rt_request_tests.cpp)
+target_link_libraries(vel_rt_request_tests PRIVATE vel_rt_compiler Vulkan::Vulkan)
+add_test(NAME ray_tracing_fallback_typed_rt_requests COMMAND vel_rt_request_tests)
+set_tests_properties(ray_tracing_fallback_typed_rt_requests PROPERTIES SKIP_RETURN_CODE 77)
+
 add_test(NAME ray_tracing_fallback_pinned_sources COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/upstream/verify.py")

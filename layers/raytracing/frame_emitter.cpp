@@ -26,7 +26,8 @@ class Emitter {
             throw std::runtime_error("Invalid continuation frame emitter ID prefix");
         for (size_t p = 5; p < input.size(); p += input[p] >> 16) {
             auto op = static_cast<spv::Op>(input[p] & 0xffff);
-            if ((op >= spv::OpTypeVoid && op <= spv::OpTypeForwardPointer) || op == spv::OpConstant) {
+            if ((op >= spv::OpTypeVoid && op <= spv::OpTypeForwardPointer) || op == spv::OpTypeAccelerationStructureKHR ||
+                op == spv::OpConstant) {
                 uint32_t id = op == spv::OpConstant ? input.at(p + 2) : input.at(p + 1);
                 definitions.emplace(id, Definition{op, {input.begin() + p, input.begin() + p + (input[p] >> 16)}});
             }
@@ -46,6 +47,7 @@ class Emitter {
         output.void_type = ID("void");
         output.memory = ID("memory");
         output.word_pointer_type = ID("word_ptr");
+        output.word_pair_type = ID("pair");
         caps.insert("Shader");
         types << ID("void") << " = OpTypeVoid\n"
               << ID("bool") << " = OpTypeBool\n"
@@ -137,7 +139,9 @@ class Emitter {
         if (known != type_symbols.end()) return known->second;
         const auto &d = definitions.at(id);
         std::string name = ID("t" + std::to_string(id));
-        if (d.op == spv::OpTypeBool) {
+        if (d.op == spv::OpTypeAccelerationStructureKHR && output.plan.options.acceleration_structure_addresses) {
+            name = Unsigned(64);
+        } else if (d.op == spv::OpTypeBool) {
             name = ID("bool");
         } else if (d.op == spv::OpTypeInt || d.op == spv::OpTypeFloat) {
             uint32_t width = d.words.at(2);
@@ -231,10 +235,12 @@ class Emitter {
         Op("OpLabel");
         auto op = definitions.at(type).op;
         std::string result;
-        if (op == spv::OpTypeBool || op == spv::OpTypeInt || op == spv::OpTypeFloat) {
+        if (op == spv::OpTypeBool || op == spv::OpTypeInt || op == spv::OpTypeFloat || op == spv::OpTypeAccelerationStructureKHR) {
             auto ptr = Pointer(base, offset);
             auto word = Op("OpLoad " + ID("u32") + " " + ptr);
-            uint32_t width = op == spv::OpTypeBool ? 32 : definitions.at(type).words.at(2);
+            uint32_t width = op == spv::OpTypeBool                       ? 32
+                             : op == spv::OpTypeAccelerationStructureKHR ? 64
+                                                                         : definitions.at(type).words.at(2);
             if (op == spv::OpTypeBool) {
                 result = Op("OpINotEqual " + ID("bool") + " " + word + " " + Constant(0));
             } else if (width == 64) {
@@ -268,9 +274,11 @@ class Emitter {
         auto value = Op("OpFunctionParameter " + Type(type));
         Op("OpLabel");
         auto op = definitions.at(type).op;
-        if (op == spv::OpTypeBool || op == spv::OpTypeInt || op == spv::OpTypeFloat) {
+        if (op == spv::OpTypeBool || op == spv::OpTypeInt || op == spv::OpTypeFloat || op == spv::OpTypeAccelerationStructureKHR) {
             auto ptr = Pointer(base, offset);
-            uint32_t width = op == spv::OpTypeBool ? 32 : definitions.at(type).words.at(2);
+            uint32_t width = op == spv::OpTypeBool                       ? 32
+                             : op == spv::OpTypeAccelerationStructureKHR ? 64
+                                                                         : definitions.at(type).words.at(2);
             if (width == 64) {
                 auto pair = Op("OpBitcast " + ID("pair") + " " + value);
                 auto lo = Op("OpCompositeExtract " + ID("u32") + " " + pair + " 0");
@@ -364,9 +372,9 @@ class Emitter {
 
 ContinuationFrameCodecs EmitContinuationFrameCodecs(const std::vector<uint32_t> &spirv, const std::string &entry,
                                                     uint32_t execution_model, uint32_t descriptor_set, uint32_t binding,
-                                                    const std::string &prefix,
-                                                    const std::vector<uint32_t> &additional_value_types) {
-    auto plan = PlanContinuationFrames(spirv, entry, execution_model, additional_value_types);
+                                                    const std::string &prefix, const std::vector<uint32_t> &additional_value_types,
+                                                    ContinuationFrameOptions options) {
+    auto plan = PlanContinuationFrames(spirv, entry, execution_model, additional_value_types, options);
     return Emitter(spirv, std::move(plan), prefix).Emit(descriptor_set, binding);
 }
 }  // namespace vel::rt

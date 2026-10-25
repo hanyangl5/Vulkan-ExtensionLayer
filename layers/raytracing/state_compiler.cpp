@@ -113,7 +113,21 @@ class Compiler {
             if (i.op == spv::OpFunctionEnd) inside = false;
         }
         if (functions != 1 || blocks.empty()) Unsupported("reachable helper could not be inlined");
+        for (const auto &[id, d] : definitions) {
+            if (d->op == spv::OpTypeInt && d->words.at(2) == 32 && d->words.at(3) == 0) {
+                NeedType(id);
+                break;
+            }
+        }
         for (const auto &i : parsed.instructions) {
+            if (i.op == spv::OpEntryPoint) {
+                // Selected-entry invocation interfaces are semantic state even
+                // when no source instruction reads them (notably attributes).
+                for (auto id : i.uses) {
+                    const auto &d = Def(id);
+                    if (d.op == spv::OpVariable && IsInvocationStorage(d.words.at(3))) NeedGlobal(id);
+                }
+            }
             if (i.op == spv::OpMemoryModel &&
                 (i.words.at(1) != spv::AddressingModelLogical || i.words.at(2) != spv::MemoryModelGLSL450))
                 Unsupported("source memory model requires explicit frame/scheduler support; only Logical GLSL450 is implemented");
@@ -135,8 +149,11 @@ class Compiler {
                 for (auto id : i.uses)
                     if (Def(id).op != spv::OpFunction) NeedGlobal(id);
             }
-            if (i.op == spv::OpDecorate && i.words.at(2) == spv::DecorationVolatile && Def(i.words.at(1)).in_function)
-                Unsupported("volatile Function storage requires volatile frame codecs");
+            if (i.op == spv::OpDecorate && i.words.at(2) == spv::DecorationVolatile) {
+                const auto &target = Def(i.words.at(1));
+                if (target.in_function || (target.op == spv::OpVariable && IsInvocationStorage(target.words.at(3))))
+                    Unsupported("volatile persistent storage requires volatile frame codecs");
+            }
         }
         std::map<uint32_t, uint32_t> resource_sets, resource_bindings;
         for (const auto &i : parsed.instructions) {
@@ -150,14 +167,46 @@ class Compiler {
                 Unsupported("frame descriptor binding collides with a live source resource");
         }
         std::vector<uint32_t> types(value_types.begin(), value_types.end());
-        const auto preview = PlanContinuationFrames(output.source, this->entry, model, types);
+        ContinuationFrameOptions options{true, true};
+        const auto preview = PlanContinuationFrames(output.source, this->entry, model, types, options);
+        uint64_t persistent_size = 0;
         for (const auto &f : preview.functions) {
             if (f.function != preview.analysis.entry) continue;
-            const auto bounds = PlanTypedContinuationFrameBounds(f.size);
-            output.frame_stride_words = bounds.stride_words;
-            output.max_invocations = bounds.max_invocations;
+            persistent_size = f.size;
         }
-        code = EmitContinuationFrameCodecs(output.source, this->entry, model, set, binding, "sc_cf_", types);
+        PlanTypedContinuationFrameBounds(persistent_size);
+        for (auto id : globals) {
+            const auto &variable = Def(id);
+            if (variable.op != spv::OpVariable) continue;
+            if (IsInvocationStorage(variable.words.at(3))) {
+                if (variable.words.size() > 4)
+                    Unsupported("invocation variable initializers require explicit stage initialization");
+                auto pointee = Def(variable.type).words.at(3);
+                auto layout =
+                    std::find_if(preview.types.begin(), preview.types.end(), [&](const auto &v) { return v.type == pointee; });
+                if (layout == preview.types.end()) Unsupported("invocation storage has no concrete typed layout");
+                persistent_size = (persistent_size + layout->alignment - 1) & ~uint64_t(layout->alignment - 1);
+                uint32_t location = UINT32_MAX;
+                for (const auto &decoration : parsed.instructions)
+                    if (decoration.op == spv::OpDecorate && decoration.words.at(1) == id &&
+                        decoration.words.at(2) == spv::DecorationLocation)
+                        location = decoration.words.at(3);
+                output.invocation_variables.push_back(
+                    {id, pointee, variable.words.at(3), location, persistent_size, layout->size, layout->alignment});
+                if (layout->size > UINT32_MAX || persistent_size > UINT32_MAX - layout->size)
+                    Unsupported("invocation storage exceeds 32-bit byte indexing");
+                persistent_size += layout->size;
+            } else if (variable.words.at(3) == spv::StorageClassUniformConstant && IsASDescriptor(Def(variable.type).words.at(3))) {
+                if (!resource_sets.count(id) || !resource_bindings.count(id)) Unsupported("AS descriptor is missing set/binding");
+                output.acceleration_structure_descriptors.push_back({id, resource_sets.at(id), resource_bindings.at(id)});
+            }
+        }
+        const auto bounds = PlanTypedContinuationFrameBounds(persistent_size);
+        output.frame_stride_words = bounds.stride_words;
+        output.max_invocations = bounds.max_invocations;
+        output.control_word = static_cast<uint32_t>((persistent_size + 3) / 4);
+        for (const auto &variable : output.invocation_variables) invocation_variables[variable.variable] = &variable;
+        code = EmitContinuationFrameCodecs(output.source, this->entry, model, set, binding, "sc_cf_", types, options);
         // Reuse the component's existing word pointer declaration rather than
         // emit an illegal duplicate non-aggregate SPIR-V pointer type.
         pointer_types[std::to_string(spv::StorageClassStorageBuffer) + " " + code.word_type] = code.word_pointer_type;
@@ -166,10 +215,9 @@ class Compiler {
         for (const auto &f : code.plan.functions) {
             if (f.function == code.plan.analysis.entry) frame = &f;
         }
-        if (!frame || frame->suspensions.empty()) Unsupported("entry must contain a supported suspension");
+        if (!frame) Unsupported("entry frame missing");
         for (const auto &slot : frame->slots) slots[slot.value] = &slot;
         for (const auto &site : code.suspensions) sites[site.word_offset] = &site;
-        output.control_word = static_cast<uint32_t>((frame->size + 3) / 4);
         for (const auto &[id, c] : codecs) {
             const auto &d = Def(id);
             if (d.op == spv::OpTypeInt && d.words.at(2) == 32 && d.words.at(3) == 0) word_codec = &c;
@@ -220,14 +268,29 @@ class Compiler {
     std::set<uint32_t> globals, needed_types, value_types;
     std::map<uint32_t, ContinuationTypeCodec> codecs;
     std::map<uint32_t, const ContinuationFrameSlot *> slots;
+    std::map<uint32_t, const TypedInvocationVariable *> invocation_variables;
     std::map<uint32_t, const ContinuationSuspensionCodec *> sites;
     std::map<uint32_t, uint32_t> first_state;
     std::map<uint32_t, std::string> cloned_types;
     std::map<std::string, std::string> pointer_types;
+    std::map<uint32_t, std::string> descriptor_types;
     std::map<uint32_t, std::string> constants;
     std::vector<std::string> interfaces;
     std::ostringstream source_caps, imports, extensions, execution_modes, annotations, declarations, functions;
     std::string gid, gid_type, group_count, pc_pointer;
+    static bool IsInvocationStorage(uint32_t storage) {
+        return storage == spv::StorageClassRayPayloadKHR || storage == spv::StorageClassIncomingRayPayloadKHR ||
+               storage == spv::StorageClassCallableDataKHR || storage == spv::StorageClassIncomingCallableDataKHR ||
+               storage == spv::StorageClassHitAttributeKHR;
+    }
+    static bool IsPersistentStorage(uint32_t storage) {
+        return storage == spv::StorageClassFunction || IsInvocationStorage(storage);
+    }
+    bool IsASDescriptor(uint32_t type) const {
+        const auto &d = Def(type);
+        if (d.op == spv::OpTypeAccelerationStructureKHR) return true;
+        return (d.op == spv::OpTypeArray || d.op == spv::OpTypeRuntimeArray) && IsASDescriptor(d.words.at(2));
+    }
 
     const Instruction &Def(uint32_t id) const {
         const auto found = definitions.find(id);
@@ -252,7 +315,9 @@ class Compiler {
     }
     bool Layoutable(uint32_t id) const {
         const auto &d = Def(id);
-        if (d.op == spv::OpTypeBool || d.op == spv::OpTypeInt || d.op == spv::OpTypeFloat) return true;
+        if (d.op == spv::OpTypeBool || d.op == spv::OpTypeInt || d.op == spv::OpTypeFloat ||
+            d.op == spv::OpTypeAccelerationStructureKHR)
+            return true;
         if (d.op == spv::OpTypeVector || d.op == spv::OpTypeMatrix || d.op == spv::OpTypeArray) return Layoutable(d.words.at(2));
         if (d.op == spv::OpTypeStruct) {
             for (size_t n = 2; n < d.words.size(); ++n)
@@ -267,7 +332,7 @@ class Compiler {
         if (Layoutable(id)) value_types.insert(id);
         for (auto child : d.uses) {
             const auto &v = Def(child);
-            if (v.op >= spv::OpTypeVoid && v.op <= spv::OpTypeForwardPointer)
+            if ((v.op >= spv::OpTypeVoid && v.op <= spv::OpTypeForwardPointer) || v.op == spv::OpTypeAccelerationStructureKHR)
                 NeedType(child);
             else
                 NeedGlobal(child);
@@ -280,6 +345,7 @@ class Compiler {
         for (auto child : d.uses) NeedGlobal(child);
     }
     std::string PointerType(uint32_t storage, const std::string &pointee) {
+        if (IsInvocationStorage(storage)) storage = spv::StorageClassFunction;
         auto key = std::to_string(storage) + " " + pointee;
         auto found = pointer_types.find(key);
         if (found != pointer_types.end()) return found->second;
@@ -301,7 +367,11 @@ class Compiler {
         if (codec != codecs.end()) return codec->second.spirv_type;
         auto found = cloned_types.find(id);
         if (found != cloned_types.end()) return found->second;
-        if (d.op == spv::OpTypePointer) return PointerType(d.words.at(2), Type(d.words.at(3)));
+        if (d.op == spv::OpTypePointer) {
+            if (d.words.at(2) == spv::StorageClassUniformConstant && IsASDescriptor(d.words.at(3)))
+                return PointerType(spv::StorageClassStorageBuffer, DescriptorType(d.words.at(3)));
+            return PointerType(d.words.at(2), Type(d.words.at(3)));
+        }
         if (d.op != spv::OpTypeStruct && d.op != spv::OpTypeRuntimeArray)
             Unsupported("opaque or unsupported source type " + std::to_string(id));
         for (auto child : d.uses) Type(child);
@@ -310,9 +380,46 @@ class Compiler {
         cloned_types[id] = name;
         return name;
     }
+    void EnsureCapability(const std::string &capability) {
+        auto line = "OpCapability " + capability + "\n";
+        if (source_caps.str().find(line) == std::string::npos && code.capabilities.find(line) == std::string::npos)
+            source_caps << line;
+    }
+    std::string DescriptorType(uint32_t type) {
+        auto known = descriptor_types.find(type);
+        if (known != descriptor_types.end()) return known->second;
+        const auto &d = Def(type);
+        auto result = "%sc_descriptor" + std::to_string(type);
+        if (d.op == spv::OpTypeAccelerationStructureKHR) {
+            declarations << result << " = OpTypeStruct " << Type(type) << "\n";
+            annotations << "OpDecorate " << result << " Block\nOpMemberDecorate " << result << " 0 Offset 0\n";
+        } else if (d.op == spv::OpTypeArray || d.op == spv::OpTypeRuntimeArray) {
+            auto element = DescriptorType(d.words.at(2));
+            if (d.op == spv::OpTypeArray) {
+                const auto &length = Def(d.words.at(3));
+                if (length.op != spv::OpConstant) Unsupported("AS descriptor array requires specialization first");
+                uint64_t count = length.words.at(3);
+                if (length.words.size() > 4) count |= uint64_t(length.words.at(4)) << 32;
+                if (!count || count > UINT32_MAX) Unsupported("AS descriptor array length exceeds uint32");
+                auto size = Constant(static_cast<uint32_t>(count));
+                declarations << result << " = OpTypeArray " << element << " " << size << "\n";
+            } else
+                declarations << result << " = OpTypeRuntimeArray " << element << "\n";
+            EnsureCapability("StorageBufferArrayDynamicIndexing");
+            if (std::any_of(parsed.instructions.begin(), parsed.instructions.end(),
+                            [](const auto &i) { return i.op == spv::OpDecorate && i.words.at(2) == spv::DecorationNonUniform; })) {
+                EnsureCapability("ShaderNonUniform");
+                EnsureCapability("StorageBufferArrayNonUniformIndexing");
+            }
+        } else
+            Unsupported("unsupported AS descriptor pointee");
+        descriptor_types[type] = result;
+        return result;
+    }
     std::string Global(uint32_t id) {
         const auto &d = Def(id);
-        if (d.op >= spv::OpTypeVoid && d.op <= spv::OpTypeForwardPointer) return Type(id);
+        if ((d.op >= spv::OpTypeVoid && d.op <= spv::OpTypeForwardPointer) || d.op == spv::OpTypeAccelerationStructureKHR)
+            return Type(id);
         return SourceID(id);
     }
     void EmitGlobals() {
@@ -349,6 +456,12 @@ class Compiler {
             else if (i.op >= spv::OpSpecConstantTrue && i.op <= spv::OpSpecConstantOp)
                 Unsupported("specialization must run before state lowering");
             else if (i.op == spv::OpVariable) {
+                if (IsInvocationStorage(i.words.at(3))) continue;
+                if (i.words.at(3) == spv::StorageClassUniformConstant && IsASDescriptor(Def(i.type).words.at(3))) {
+                    declarations << SourceID(i.result) << " = OpVariable " << Type(i.type) << " StorageBuffer\n";
+                    interfaces.push_back(SourceID(i.result));
+                    continue;
+                }
                 if (i.words.at(3) != spv::StorageClassInput && i.words.at(3) != spv::StorageClassPushConstant &&
                     i.words.at(3) != spv::StorageClassStorageBuffer)
                     Unsupported("module variable storage requires invocation backing");
@@ -360,6 +473,7 @@ class Compiler {
             if (i.op != spv::OpDecorate && i.op != spv::OpMemberDecorate) continue;
             auto target = i.words.at(1);
             if (!globals.count(target) && !needed_types.count(target)) continue;
+            if (invocation_variables.count(target)) continue;
             if (i.op == spv::OpDecorate && i.words.at(2) == spv::DecorationBuiltIn) {
                 auto builtin = i.words.at(3);
                 if (builtin == spv::BuiltInLaunchIdKHR) {
@@ -384,9 +498,7 @@ class Compiler {
             State current{&block, 0, block.body.size(), static_cast<uint32_t>(states.size()), nullptr};
             for (size_t n = 0; n < block.body.size(); ++n) {
                 auto op = block.body[n]->op;
-                if (op == spv::OpTraceRayKHR || op == spv::OpExecuteCallableKHR)
-                    Unsupported("TraceRay/Callable request invocation ABI is not implemented");
-                if (op != spv::OpReportIntersectionKHR) continue;
+                if (op != spv::OpReportIntersectionKHR && op != spv::OpTraceRayKHR && op != spv::OpExecuteCallableKHR) continue;
                 current.end = n + 1;
                 states.push_back(current);
                 current = {&block, n + 1, block.body.size(), static_cast<uint32_t>(states.size()), block.body[n]};
@@ -407,6 +519,8 @@ class Compiler {
     void Save(uint32_t id, const std::string &value) { functions << "OpStore " << Register(id) << " " << value << "\n"; }
     uint32_t Storage(uint32_t pointer) const { return Def(Def(pointer).type).words.at(2); }
     std::string Offset(uint32_t pointer) {
+        auto invocation = invocation_variables.find(pointer);
+        if (invocation != invocation_variables.end()) return Constant(static_cast<uint32_t>(invocation->second->offset));
         auto slot = slots.find(pointer);
         if (slot != slots.end() && slot->second->local_storage) return Constant(static_cast<uint32_t>(slot->second->offset));
         const auto &d = Def(pointer);
@@ -446,7 +560,7 @@ class Compiler {
     }
     std::string RealPointer(uint32_t id) {
         const auto &d = Def(id);
-        if (Storage(id) == spv::StorageClassFunction) Unsupported("Function pointer used outside typed load/store");
+        if (IsPersistentStorage(Storage(id))) Unsupported("persistent pointer used outside typed load/store");
         if (!d.in_function && d.op == spv::OpVariable) return Global(id);
         if (d.op == spv::OpCopyObject) {
             auto source = RealPointer(d.words.at(3));
@@ -508,27 +622,85 @@ class Compiler {
             auto id = site.saved_values[n];
             Save(id, Op("OpCompositeExtract " + Type(Def(id).type) + " " + restored + " " + std::to_string(n)));
         }
-        auto result = LoadWord(3);
-        result = Op("OpINotEqual " + code.bool_type + " " + result + " " + Constant(0));
-        Save(i.result, result);
+        if (i.op == spv::OpReportIntersectionKHR) {
+            auto result = LoadWord(3);
+            result = Op("OpINotEqual " + code.bool_type + " " + result + " " + Constant(0));
+            Save(i.result, result);
+        }
         StoreWord(1, Constant(0));
         StoreWord(2, Constant(0));
+    }
+    void DataReference(uint32_t variable) {
+        const auto found = invocation_variables.find(variable);
+        if (found == invocation_variables.end() || Def(variable).op != spv::OpVariable)
+            Unsupported("RT request data operand must be an invocation OpVariable");
+        const auto &data = *found->second;
+        StoreWord(20, Constant(static_cast<uint32_t>(data.offset)));
+        StoreWord(21, Constant(static_cast<uint32_t>(data.size)));
+        StoreWord(22, Constant(data.location));
+        StoreWord(23, Constant(data.storage_class));
+        StoreWord(24, Constant(data.type));
+        StoreWord(25, Constant(data.variable));
+    }
+    void FloatArgument(uint32_t word, uint32_t value) {
+        const auto &type = Def(Def(value).type);
+        if (type.op != spv::OpTypeFloat || type.words.at(2) != 32) Unsupported("RT float argument must be float32");
+        auto number = Value(value);
+        StoreWord(word, Op("OpBitcast " + code.word_type + " " + number));
+    }
+    void VectorArgument(uint32_t word, uint32_t value) {
+        const auto &vector = Def(Def(value).type);
+        if (vector.op != spv::OpTypeVector || vector.words.at(3) != 3) Unsupported("RT vector argument must have three components");
+        const auto &scalar = Def(vector.words.at(2));
+        if (scalar.op != spv::OpTypeFloat || scalar.words.at(2) != 32) Unsupported("RT vector argument must be float32");
+        auto number = Value(value);
+        for (uint32_t n = 0; n < 3; ++n) {
+            auto component = Op("OpCompositeExtract " + Type(vector.words.at(2)) + " " + number + " " + std::to_string(n));
+            StoreWord(word + n, Op("OpBitcast " + code.word_type + " " + component));
+        }
+    }
+    std::string IntegerArgument(uint32_t value) {
+        const auto &type = Def(Def(value).type);
+        if (type.op != spv::OpTypeInt || type.words.at(2) != 32) Unsupported("RT integer argument must be 32-bit");
+        auto result = Value(value);
+        if (Type(Def(value).type) != code.word_type) result = Op("OpBitcast " + code.word_type + " " + result);
+        return result;
     }
     void Suspend(const Instruction &i, uint32_t resume_state) {
         const auto &site = *sites.at(i.offset);
         std::string spill = "OpFunctionCall " + code.void_type + " " + site.spill + " %sc_base";
         for (auto value : site.saved_values) spill += " " + Value(value);
         Op(spill);
-        auto distance = Value(i.words.at(3));
-        if (Def(Def(i.words.at(3)).type).op != spv::OpTypeFloat || Def(Def(i.words.at(3)).type).words.at(2) != 32)
-            Unsupported("ReportIntersection distance must be float32");
-        auto bits = Op("OpBitcast " + code.word_type + " " + distance);
-        StoreWord(4, bits);
-        StoreWord(5, Value(i.words.at(4)));
+        for (uint32_t word = 20; word <= 25; ++word) StoreWord(word, Constant(0));
+        uint32_t kind = 0;
+        if (i.op == spv::OpReportIntersectionKHR) {
+            kind = 2;
+            FloatArgument(4, i.words.at(3));
+            StoreWord(5, IntegerArgument(i.words.at(4)));
+            for (const auto &data : output.invocation_variables)
+                if (data.storage_class == spv::StorageClassHitAttributeKHR) DataReference(data.variable);
+        } else if (i.op == spv::OpTraceRayKHR) {
+            kind = 1;
+            auto address = Value(i.words.at(1));
+            auto pair = Op("OpBitcast " + code.word_pair_type + " " + address);
+            StoreWord(4, Op("OpCompositeExtract " + code.word_type + " " + pair + " 0"));
+            StoreWord(5, Op("OpCompositeExtract " + code.word_type + " " + pair + " 1"));
+            for (uint32_t n = 2; n <= 6; ++n) StoreWord(n + 5, IntegerArgument(i.words.at(n)));
+            VectorArgument(12, i.words.at(7));
+            FloatArgument(15, i.words.at(8));
+            VectorArgument(16, i.words.at(9));
+            FloatArgument(19, i.words.at(10));
+            DataReference(i.words.at(11));
+        } else if (i.op == spv::OpExecuteCallableKHR) {
+            kind = 3;
+            StoreWord(4, IntegerArgument(i.words.at(1)));
+            DataReference(i.words.at(2));
+        } else
+            Unsupported("unknown suspension request");
         StoreWord(6, Constant(i.offset));
         StoreWord(0, Constant(resume_state));
         StoreWord(2, Constant(0));
-        StoreWord(1, Constant(2));
+        StoreWord(1, Constant(kind));
         functions << "OpReturn\n";
     }
     void Generic(const Instruction &i) {
@@ -536,6 +708,29 @@ class Compiler {
             Unsupported("unsupported source operation Op" + std::string(spvOpcodeString(i.op)) + " at word " +
                         std::to_string(i.offset));
         auto result = Fresh();
+        if (i.op == spv::OpLoad && Def(i.type).op == spv::OpTypeAccelerationStructureKHR &&
+            Storage(i.words.at(3)) == spv::StorageClassUniformConstant) {
+            auto pointer = RealPointer(i.words.at(3));
+            auto member_type = PointerType(spv::StorageClassStorageBuffer, Type(i.type));
+            auto member = Op("OpAccessChain " + member_type + " " + pointer + " " + Constant(0));
+            for (const auto &decoration : parsed.instructions) {
+                if (decoration.op == spv::OpDecorate && decoration.words.at(2) == spv::DecorationNonUniform &&
+                    (decoration.words.at(1) == i.result || decoration.words.at(1) == i.words.at(3))) {
+                    annotations << "OpDecorate " << member << " NonUniform\n";
+                    break;
+                }
+            }
+            auto text = Rewrite(i.text, [&](uint32_t id) {
+                if (id == i.result) return result;
+                if (id == i.type) return Type(id);
+                if (id == i.words.at(3)) return member;
+                return Value(id);
+            });
+            functions << text << "\n";
+            DecorateResult(i.result, result);
+            Save(i.result, result);
+            return;
+        }
         std::map<uint32_t, std::string> loaded;
         for (auto id : i.uses)
             if (!loaded.count(id)) loaded[id] = Value(id);
@@ -544,6 +739,11 @@ class Compiler {
             if (id == i.type) return Type(id);
             return loaded.at(id);
         });
+        if (i.op == spv::OpConvertUToAccelerationStructureKHR) {
+            auto name = text.find("OpConvertUToAccelerationStructureKHR");
+            if (name == std::string::npos) Unsupported("missing AS conversion opcode");
+            text.replace(name, std::string("OpConvertUToAccelerationStructureKHR").size(), "OpBitcast");
+        }
         functions << text << "\n";
         DecorateResult(i.result, result);
         Save(i.result, result);
@@ -593,16 +793,16 @@ class Compiler {
             if (i.op == spv::OpAccessChain || i.op == spv::OpInBoundsAccessChain ||
                 (i.op == spv::OpCopyObject && IsPointer(i.type)))
                 continue;
-            if (i.op == spv::OpReportIntersectionKHR) {
+            if (i.op == spv::OpReportIntersectionKHR || i.op == spv::OpTraceRayKHR || i.op == spv::OpExecuteCallableKHR) {
                 Suspend(i, state.number + 1);
                 return;
             }
-            if (i.op == spv::OpLoad && Storage(i.words.at(3)) == spv::StorageClassFunction) {
+            if (i.op == spv::OpLoad && IsPersistentStorage(Storage(i.words.at(3)))) {
                 if (i.words.size() != 4) Unsupported("persistent local load memory operands");
                 auto address = Offset(i.words.at(3));
                 Save(i.result, Op("OpFunctionCall " + Type(i.type) + " " + codecs.at(i.type).load + " %sc_base " + address));
             } else if (i.op == spv::OpStore) {
-                if (Storage(i.words.at(1)) == spv::StorageClassFunction) {
+                if (IsPersistentStorage(Storage(i.words.at(1)))) {
                     if (i.words.size() != 3) Unsupported("persistent local store memory operands");
                     auto type = Def(Def(i.words.at(1)).type).words.at(3);
                     auto address = Offset(i.words.at(1));
@@ -746,8 +946,9 @@ class Compiler {
 }  // namespace
 
 TypedContinuationFrameBounds PlanTypedContinuationFrameBounds(uint64_t payload_bytes) {
-    if (payload_bytes > UINT32_MAX - 28u) Unsupported("state frame/control exceeds 32-bit byte indexing");
-    uint64_t stride = (payload_bytes + 3) / 4 + 7;
+    if (payload_bytes > UINT32_MAX - kTypedContinuationControlWords * 4u)
+        Unsupported("state frame/control exceeds 32-bit byte indexing");
+    uint64_t stride = (payload_bytes + 3) / 4 + kTypedContinuationControlWords;
     if (stride * 4 > UINT32_MAX) Unsupported("state frame/control exceeds 32-bit byte indexing");
     auto words = static_cast<uint32_t>(stride);
     return {words, UINT32_MAX / words};
@@ -761,10 +962,19 @@ TypedContinuationProgram CompileTypedContinuationSteps(const std::vector<uint32_
     // semantics and removes the need to pretend helper returns are RT returns.
     const auto selected_entry = AnalyzeContinuations(source, entry, execution_model).entry;
     std::vector<uint32_t> selected(source.begin(), source.begin() + 5);
+    bool has_uint32 = false;
+    for (size_t p = 5; p < source.size(); p += source[p] >> 16)
+        if ((source[p] & 0xffff) == spv::OpTypeInt && source[p + 2] == 32 && source[p + 3] == 0) has_uint32 = true;
+    bool inserted_control_type = has_uint32;
     for (size_t p = 5; p < source.size(); p += source[p] >> 16) {
         auto op = static_cast<spv::Op>(source[p] & 0xffff);
         if (op == spv::OpEntryPoint && source.at(p + 2) != selected_entry) continue;
         if ((op == spv::OpExecutionMode || op == spv::OpExecutionModeId) && source.at(p + 1) != selected_entry) continue;
+        if (op == spv::OpFunction && !inserted_control_type) {
+            auto id = selected[3]++;
+            selected.insert(selected.end(), {(4u << 16) | spv::OpTypeInt, id, 32, 0});
+            inserted_control_type = true;
+        }
         selected.insert(selected.end(), source.begin() + p, source.begin() + p + (source[p] >> 16));
     }
     spvtools::Optimizer optimizer(SPV_ENV_VULKAN_1_3);

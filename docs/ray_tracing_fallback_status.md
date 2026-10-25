@@ -34,6 +34,7 @@ service or imply that an external scheduler is running.
 - [x] Generate and execute real source CFG ReportIntersection continuations.
 - [x] Resolve aligned opaque AS values for legal 16-byte buffer suballocations, including GENERIC aliases/offsets.
 - [x] Expand actual RQ CTS to 46 cases with validation and matching native controls.
+- [x] Emit actual source TraceRay/Callable requests and execute typed cross-stage payload/callable/attribute backing.
 - [ ] M0: complete all capability, no-native-RT, resource ABI, and continuation proofs.
 - [ ] M1: integrate Mesa builders, GPU BVH4 encoding/refit, and shared AS objects.
 - [ ] M2: complete Ray Query lowering and state semantics.
@@ -48,7 +49,7 @@ Component checkmarks do not complete M0/M1/M2 or the full goal.
 | Component | Implemented and tested | Remaining boundary |
 | --- | --- | --- |
 | [Portable BVH4 components](../layers/common/rt_fallback/README.md) | Checked reference/CPU adapter; generic BDA hierarchy encoder; direct default Mesa GPU IR adaptation/record emission with compact active leaves, full flags and explicit TLAS relocation; actual LBVH build-to-encode in one command buffer | Four-child GPU collapse, broader builder variants/large construction IDs, numerical qualification, RTP/object integration, refit |
-| Typed continuation frames | Checked 64-bit planning; emitted typed scalar/aggregate codecs and per-suspension SSA spill/restore; executed typed codecs and real source block/switch/Phi continuations with persistent locals and delayed ReportIntersection return | Production TraceRay/Callable compilation, argument/return and invocation-storage ABI, pointer parameter/Phi provenance, specialization, descriptor snapshots and production integration |
+| Typed continuation frames | Checked 64-bit planning; typed codecs and suspension-live SSA spill/restore; real source block/switch/Phi/TraceRay/Callable/Report continuations; persistent locals and typed payload/callable/attribute backing across compiled stages | Production scheduling/traversal/SBT/builtins, pointer parameter/Phi provenance, specialization, descriptor/layout budgets and full production integration |
 | RQ host translation | Consume AS/RQ device requirements; translate resource/synchronization masks; lifetime-owned AS address cells with allocator/flush/failure handling and enabled-queue-family sharing; private SSBO indexing/variable-pointer prerequisites | Complete emulation capability/limit reporting on no-RT ICDs, deferred operations, buffer-requirement query paths, full-layout descriptor transport and shared-layer object model |
 | RQ compiler compatibility | Actual per-query AS roots from scalar/array descriptors and integer conversions; helper/value/Phi flow; direct/grouped NonUniform propagation; preserve application workgroup/specialization metadata and remove native RT declarations | Full resource-limit transparency, complete opcode/stage coverage and unified RTP traversal |
 | RTP API compatibility | Preserve registry-known device pNext structures including Vulkan 1.4; inject storage16 prerequisites without duplicate aggregates; accept empty dynamic-state lists; generate absolute multi-config-aware manifests | Typed compiler/runtime, arbitrary payloads, complete pipeline options/mandatory API and shared backend integration |
@@ -244,12 +245,29 @@ prevent premature continuation; frame/dispatch overflow and actual descriptor
 capacity guards prevent aliasing or OOB. Source literal strings, FP controls
 and copied-resource-pointer NonUniform decorations are preserved.
 
-The full RTP repository regression passes **13/13**, with the analysis/frame/
-source-CFG subset **3/3 under validation**. Production pipeline integration,
-TraceRay/Callable and complete invocation/payload/attribute ABI remain pending.
-Unsupported provenance/memory operations, specialization, execution semantics
-and source memory models fail explicitly. This ReportIntersection component does
-not resolve the legacy RTP CTS failures or complete M0/M3.
+That source-CFG checkpoint passed **13/13**, with analysis/frame/source-CFG
+**3/3 under validation**. The next typed request component now also lowers
+TraceRay/ExecuteCallable and retains selected-entry payload, incoming payload,
+callable, incoming callable and hit-attribute variables in typed persistent
+module backing. Requests capture every AS/flags/mask/SBT/ray argument and a
+typed frame reference. AS values are explicit opaque 64-bit values, preserved
+across suspension independently of later descriptor updates. Conversion from
+uint64/uvec2, descriptor arrays/nonuniform indexing, signed32 Trace operands and
+16/64-bit local access-chain indices have dedicated regressions.
+
+Actual compiled RayGeneration, ClosestHit and Callable sources execute 23
+TraceRay plus 23 Callable requests; the test transfers typed backing between
+synchronized compiled stages and checks late callee writes through caller
+aliases while retaining pre-trace SSA snapshots. Separate tests execute
+Intersection Report/attribute backing and a non-suspending incoming callable
+without a source uint32 type. This component does not generate production
+traversal, shader selection, SBT decoding or builtin-state scheduling, and its
+descriptor remap still needs production layout/resource integration. Unsupported
+provenance/memory operations, specialization and source memory models fail
+explicitly. It does not resolve legacy RTP CTS failures or complete M0/M3.
+The final standalone RTP suite passes **14/14**, and analysis/frame/source/request
+checks pass **4/4 with validation**. Logs/hashes and the exact scope are retained
+in the [current report](rt_cts_aligned_as_2026-10-26.md#typed-rtp-request-component).
 
 The observed AS alignment gap is now fixed in the RQ production path. A sparse
 seven-level resolver separates 256-aligned public AS values from 4-aligned
@@ -288,10 +306,11 @@ Run M0 proof work in parallel with shared-backend construction:
    path can be added ahead of the proven constant-space parent-walk path.
    Address-cell transport still consumes an SSBO per AS descriptor
    and an allocation per AS; it does not prove full application resource budgets.
-3. Extend the actual typed ReportIntersection CFG compiler to TraceRay/Callable,
-   complete invocation ABI and production scheduling/pipeline creation. Address
-   invocation-private storage, pointer parameters/Phi
-   provenance, specialization and argument/return ABI before claiming the full
+3. Integrate the actual typed TraceRay/Callable/Report compiler and persistent
+   invocation backing with production pipeline creation, shader/SBT selection,
+   builtins and traversal scheduling. Address invocation-private storage,
+   pointer parameters/Phi provenance, specialization and full argument/return
+   ABI before claiming the full
    typed-continuation M0 stress proof or resolving the RTP payload CTS failures.
 4. Adopt the shared builder, BVH4 traversal and one AS object model in RTP; RQ
    production integration is now tested. Implement four-child GPU collapse/refit

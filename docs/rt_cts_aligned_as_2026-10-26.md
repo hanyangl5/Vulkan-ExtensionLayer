@@ -95,6 +95,38 @@ All three raw logs are retained and distinguished in the JSON.
 - POSIX mutex initialization failures now return an error and unwind without
   destroying an uninitialized mutex. These POSIX branches were not run here.
 
+## Typed RTP request component
+
+The actual source-CFG compiler now emits TraceRay, ExecuteCallable and
+ReportIntersection requests with all source arguments and typed frame references.
+Persistent module backing retains payload/incoming payload, callable/incoming
+callable and hit attributes independently of saved SSA values. The opt-in AS
+frame policy stores exact opaque 64-bit AS values rather than reloading a changed
+descriptor on resume; physical traversal still requires registry resolution.
+
+The new GPU test compiles real RayGeneration, ClosestHit and Callable sources
+and executes 23 TraceRay plus 23 Callable requests through nested helpers. A host
+test scheduler transfers typed backing between synchronized GPU dispatches.
+Boolean/vec3/double/packed-u16-array payloads at distinct nonzero incoming/outgoing
+locations receive callee writes through persistent aliases, while saved pre-call
+SSA snapshots remain unchanged. Every request field is checked. Separate GPU
+cases cover uint64/uvec2 AS conversion, signed32 Trace integer operands,
+Intersection Report/hit-attribute backing and a non-suspending incoming callable
+whose source has no uint32 type. Compile regressions cover descriptor arrays,
+NonUniform, unused incoming interfaces and 16/64-bit access-chain indices.
+
+The standalone RTP repository suite passes **14/14**; analysis, frame execution,
+source CFG and RT requests pass **4/4 with Khronos validation**. The corresponding
+build/test/validation logs and source files are recorded in the evidence JSON.
+Independent review found two issues during development, uvec2 AS conversion and
+signed Trace operand transport; both were fixed and have executed regressions.
+
+This is a compiler/request component. Production pipeline creation, shader/SBT
+selection, builtins, traversal and scheduler integration remain unfinished.
+AS descriptor remap metadata still needs production feature/layout/resource
+integration. The external CTS results above validate production RQ; they do not
+establish production RTP support or erase its retained 3/3 pass/fail result.
+
 ## Reproduce
 
 Build the standalone RQ layer as described in its README. From the repository:

@@ -79,10 +79,20 @@ struct FunctionFrame {
     std::vector<ContinuationFrameSlot> slots;
     std::vector<SuspensionFrame> suspensions;
 };
+struct ContinuationFrameOptions {
+    // Explicit backend ABI: AS values are the uint64 software values held in
+    // layer-owned descriptor cells. Registry resolution is required before
+    // physical BVH access; these are not arbitrary native opaque-handle bytes.
+    bool acceleration_structure_addresses = false;
+    // A source-CFG state compiler also needs local backing for a shader that
+    // returns without suspending (for example a closest-hit/callable callee).
+    bool persistent_function_storage = false;
+};
 struct ContinuationFrames {
     ContinuationAnalysis analysis;
     std::vector<ContinuationTypeLayout> types;
     std::vector<FunctionFrame> functions;
+    ContinuationFrameOptions options;
 };
 // Plan only; does not emit or execute continuations. Logical pointers and opaque
 // values are never byte-spilled. Preserve their provenance through supported
@@ -91,8 +101,11 @@ struct ContinuationFrames {
 // lengths, and reachable mutable module-Private storage) explicitly. Shader
 // invocation/control/argument/return backing is a separate unimplemented ABI;
 // these metadata alone are not an executable continuation frame implementation.
+// The opt-in software-AS-value policy serializes uint64 values, never native
+// opaque object bytes. Other opaque/reference values retain the default rules.
 // Additional value types request the same checked scalar-packed layouts for
 // transient source values needed by emission, without allocating frame slots.
 ContinuationFrames PlanContinuationFrames(const std::vector<uint32_t> &spirv, const std::string &entry, uint32_t execution_model,
-                                          const std::vector<uint32_t> &additional_value_types = {});
+                                          const std::vector<uint32_t> &additional_value_types = {},
+                                          ContinuationFrameOptions options = {});
 }  // namespace vel::rt

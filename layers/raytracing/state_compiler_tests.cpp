@@ -202,9 +202,10 @@ void Replace(std::string &source, const std::string &before, const std::string &
     source.replace(offset, before.size(), after);
 }
 void BoundariesAndSourcePreservation() {
-    auto bounds = PlanTypedContinuationFrameBounds(UINT32_MAX - 31u);
+    constexpr uint32_t tail = kTypedContinuationControlWords * 4u + 3u;
+    auto bounds = PlanTypedContinuationFrameBounds(UINT32_MAX - tail);
     Require(bounds.stride_words == UINT32_MAX / 4 && bounds.max_invocations == 4, "Near-4GiB frame arithmetic changed");
-    for (auto size : {uint64_t(UINT32_MAX) - 30, uint64_t(UINT32_MAX), UINT64_MAX}) {
+    for (auto size : {uint64_t(UINT32_MAX) - tail + 1, uint64_t(UINT32_MAX), UINT64_MAX}) {
         bool rejected = false;
         try {
             PlanTypedContinuationFrameBounds(size);

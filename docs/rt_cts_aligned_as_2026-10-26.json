@@ -2342,5 +2342,44 @@
     "Selected CTS on native-RT RTX3080 only; no conformance claim.",
     "Production RTP remains legacy with previous 3pass3fail matrix; new compiler component is not integrated.",
     "Full descriptor/allocation budgets, mandatory Copy/update/serialization and physical no-RT/POSIX qualification remain incomplete."
-  ]
+  ],
+  "typed_rt_request_component": {
+    "source_base_commit": "e846d81",
+    "scope": "Actual source-CFG TraceRay/Callable/Report requests and typed invocation backing; not production RTP pipeline integration",
+    "standalone_ctest": {
+      "pass": 14,
+      "fail": 0,
+      "skip": 0
+    },
+    "validation_subset": {
+      "pass": 4,
+      "fail": 0,
+      "skip": 0
+    },
+    "logs": [
+      {
+        "path": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-emitter\\final-typed-requests-build.log",
+        "sha256": "c21ccd84f616cb20e0b36e783bead0ea7a567a7a849bfb8755c2a142899cbda6"
+      },
+      {
+        "path": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-emitter\\final-typed-requests-ctest.log",
+        "sha256": "b9de6278781a354800ce1624fd6fc5ca3fe924dd0f47e96d7c5e009076e75cee"
+      },
+      {
+        "path": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-emitter\\final-typed-requests-validation.log",
+        "sha256": "59aecfaeee2aa2ac2b2f025d85fa0fff2ac2ec8435364a5f4e228266fcaa1543"
+      }
+    ],
+    "executed_oracles": [
+      "23TraceRay+23Callable requests through nested helpers and compiled callee stages",
+      "Typed late callee writes through aliases; pre-call SSA values retained",
+      "uint64/uvec2 AS conversion, signed32 Trace operands, 16/64-bit access-chain indices",
+      "Intersection Report/hit-attribute backing; synchronous callable with no sourceuint32"
+    ],
+    "production_limits": [
+      "Pipeline creation, traversal, shader/SBT selection, builtins and scheduler not wired",
+      "AS value must be resolved; descriptor remap needs feature/layout/resource integration",
+      "External CTS in this report exercises RQ; previous production RTP3pass3fail remains authoritative"
+    ]
+  }
 }
