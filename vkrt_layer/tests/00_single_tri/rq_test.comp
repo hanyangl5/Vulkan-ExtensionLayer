@@ -1,0 +1,119 @@
+/* SPDX-License-Identifier: MIT
+ *
+ * rq_test.comp - V0 differential test shader.
+ *
+ * Exercises exactly the surface the validation samples use:
+ *   - rayQueryEXT + rayQueryInitializeEXT
+ *   - rayQueryProceedEXT in a loop
+ *   - candidate inspect + rayQueryConfirmIntersectionEXT (non-opaque)
+ *   - committed queries for Type / PrimitiveIndex / Barycentrics / T
+ *   - a TerminateOnFirstHit shadow ray
+ *
+ * The layer rewrites all of this into calls on the software traversal.
+ */
+
+#version 460
+#extension GL_EXT_ray_query : require
+
+layout(local_size_x = 1, local_size_y = 1, local_size_z = 1) in;
+
+layout(set = 0, binding = 0) uniform accelerationStructureEXT tlas;
+
+layout(push_constant) uniform Push {
+   vec3  origin;
+   float tmin;
+   vec3  direction;
+   float tmax;
+   uint  flags;
+   uint  mask;
+} pc;
+
+layout(set = 0, binding = 1, std430) buffer Out {
+   uint  hit_type;        /* 0 = none, 1 = triangle                 */
+   uint  primitive_index; /* ORIGINAL triangle index                */
+   vec2  barycentrics;
+   float t;
+   uint  hit_kind;
+   uint  proceeds;        /* how many times Proceed returned true   */
+   uint  shadow_hit;      /* 1 if the shadow ray found anything     */
+   uint  front_face;
+   uint geometry_index;
+   uint instance_index;
+   uint instance_custom_index;
+   uint getter_errors;
+} outb;
+
+void
+main()
+{
+   /* Proof-of-life: if this does not show up in the readback the shader
+    * never wrote to `outb` at all (wrong binding, dropped dispatch, ...). */
+   outb.hit_kind = 0xA5A5A5A5u;
+   outb.proceeds = 0;
+   outb.getter_errors = 0;
+   /* --- closest hit, with the candidate/confirm alpha-test loop ---- */
+   rayQueryEXT q;
+   rayQueryInitializeEXT(q, tlas,
+                         pc.flags, pc.mask,
+                         pc.origin, pc.tmin, pc.direction, pc.tmax);
+
+   uint n = 0u;
+   while (rayQueryProceedEXT(q)) {
+      n++;
+      if (rayQueryGetIntersectionTypeEXT(q, false) ==
+          gl_RayQueryCandidateIntersectionTriangleEXT) {
+         rayQueryConfirmIntersectionEXT(q);
+      } else {
+         vec3 o = rayQueryGetIntersectionObjectRayOriginEXT(q, false);
+         vec3 d = rayQueryGetIntersectionObjectRayDirectionEXT(q, false);
+         if (d.z != 0.0) rayQueryGenerateIntersectionEXT(q, -o.z / d.z);
+      }
+   }
+
+   outb.proceeds = n;
+   uint committed_type = rayQueryGetIntersectionTypeEXT(q, true);
+   if (committed_type != gl_RayQueryCommittedIntersectionNoneEXT) {
+      outb.hit_type        = committed_type;
+      outb.primitive_index = uint(rayQueryGetIntersectionPrimitiveIndexEXT(q, true));
+      outb.barycentrics    = committed_type == 1u ? rayQueryGetIntersectionBarycentricsEXT(q, true) : vec2(0);
+      outb.t               = rayQueryGetIntersectionTEXT(q, true);
+      outb.front_face      = committed_type == 1u && rayQueryGetIntersectionFrontFaceEXT(q, true) ? 1u : 0u;
+      outb.hit_kind        = committed_type == 1u ? (outb.front_face != 0 ? 0xFEu : 0xFFu) : 0u;
+      outb.geometry_index = rayQueryGetIntersectionGeometryIndexEXT(q, true);
+      outb.instance_index = rayQueryGetIntersectionInstanceIdEXT(q, true);
+      outb.instance_custom_index = rayQueryGetIntersectionInstanceCustomIndexEXT(q, true);
+      vec3 obj_o = rayQueryGetIntersectionObjectRayOriginEXT(q, true);
+      vec3 obj_d = rayQueryGetIntersectionObjectRayDirectionEXT(q, true);
+      mat4x3 otw = rayQueryGetIntersectionObjectToWorldEXT(q, true);
+      mat4x3 wto = rayQueryGetIntersectionWorldToObjectEXT(q, true);
+      if (length(otw * vec4(obj_o, 1) - pc.origin) > 1e-4 ||
+          length(otw * vec4(obj_d, 0) - pc.direction) > 1e-4 ||
+          length(wto * vec4(pc.origin, 1) - obj_o) > 1e-4 ||
+          length(wto * vec4(pc.direction, 0) - obj_d) > 1e-4)
+         outb.getter_errors |= 1u;
+   } else {
+      outb.hit_type        = 0u;
+      outb.primitive_index = 0xFFFFFFFFu;
+      outb.barycentrics    = vec2(0.0);
+      outb.t               = -1.0;
+      outb.hit_kind        = 0u;
+      outb.front_face      = 0u;
+   }
+
+   /* --- shadow ray: any-hit semantics ----------------------------- */
+   rayQueryEXT s;
+   rayQueryInitializeEXT(s, tlas,
+                         gl_RayFlagsTerminateOnFirstHitEXT | gl_RayFlagsOpaqueEXT,
+                         pc.mask,
+                         pc.origin, pc.tmin, pc.direction, pc.tmax);
+   while (rayQueryProceedEXT(s)) {
+      if (rayQueryGetIntersectionTypeEXT(s, false) == gl_RayQueryCandidateIntersectionAABBEXT) {
+         vec3 o = rayQueryGetIntersectionObjectRayOriginEXT(s, false);
+         vec3 d = rayQueryGetIntersectionObjectRayDirectionEXT(s, false);
+         if (d.z != 0.0) rayQueryGenerateIntersectionEXT(s, -o.z / d.z);
+      }
+   }
+   outb.shadow_hit =
+      (rayQueryGetIntersectionTypeEXT(s, true) !=
+       gl_RayQueryCommittedIntersectionNoneEXT) ? 1u : 0u;
+}

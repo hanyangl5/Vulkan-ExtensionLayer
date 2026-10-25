@@ -1,0 +1,41 @@
+# SPDX-License-Identifier: MIT
+name: Software Ray Query fallback
+
+on:
+  push:
+    paths:
+      - 'vkrt_layer/**'
+      - 'CMakeLists.txt'
+      - 'README.md'
+      - '.github/workflows/rayquery-fallback.yml'
+  pull_request:
+    paths:
+      - 'vkrt_layer/**'
+      - 'CMakeLists.txt'
+      - 'README.md'
+      - '.github/workflows/rayquery-fallback.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  standalone-offline:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Install standalone build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential cmake ninja-build python3 libvulkan-dev \
+            spirv-tools spirv-headers glslc
+      - name: Configure
+        run: >-
+          cmake -S vkrt_layer/layer -B build-rq -G Ninja
+          -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON
+      - name: Build layer, tests and validated SPIR-V
+        run: cmake --build build-rq --parallel 2
+      - name: Run offline tests
+        run: ctest --test-dir build-rq -L offline --output-on-failure

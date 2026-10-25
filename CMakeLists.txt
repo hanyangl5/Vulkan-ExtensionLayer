@@ -101,6 +101,12 @@ if(BUILD_RAY_TRACING_FALLBACK)
 endif()
 
 option(BUILD_TESTS "Build tests")
+option(BUILD_RAY_QUERY_FALLBACK "Build the experimental software Ray Query layer" OFF)
+if(BUILD_RAY_QUERY_FALLBACK)
+    enable_testing()
+    add_subdirectory(vkrt_layer/layer)
+endif()
+
 if(BUILD_TESTS)
     enable_testing()
     add_subdirectory(tests)
