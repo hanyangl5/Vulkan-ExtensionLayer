@@ -449,21 +449,6 @@ vkrt_CreateDescriptorPool(VkDevice device,
 /* Buffer usage augmentation (doc section 8)                           */
 /* ================================================================== */
 
-static VKAPI_ATTR VkResult VKAPI_CALL
-vkrt_CreateBuffer(VkDevice device, const VkBufferCreateInfo *pCreateInfo,
-                  const VkAllocationCallbacks *pAllocator, VkBuffer *pBuffer)
-{
-   struct vkrt_device_data *data = VKRT_FIND(struct vkrt_device_data, device);
-   if (!data)
-      return VK_ERROR_INITIALIZATION_FAILED;
-
-   VkBufferCreateInfo local_ci = *pCreateInfo;
-   local_ci.usage |= VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
-                     VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
-   return data->vtable.CreateBuffer(device, &local_ci, pAllocator, pBuffer);
-}
-
-
 /* ================================================================== */
 /* Acceleration structure virtualisation (doc section 7)               */
 /* ================================================================== */

@@ -3,7 +3,7 @@
 
 # Software RT Fallback: Implementation Status
 
-Checkpoint: 2026-10-25 (UTC). The [implementation goal](ray_tracing_fallback_goal.md)
+Checkpoint: 2026-10-26 (Asia/Hong_Kong). The [implementation goal](ray_tracing_fallback_goal.md)
 is in progress. **The complete AS/RQ/RTP fallback is not implemented.**
 The [review](ray_tracing_fallback_review.md) records the pre-change `f18c40d3`
 baseline; goal alignment was committed as `82251ec3`.
@@ -19,6 +19,10 @@ service or imply that an external scheduler is running.
   and structural regression tests.
 - [x] Fix base RQ opcode 6021 lowering and candidate/committed SBT-offset lookup.
 - [x] Fix procedural AABB opacity precedence and add an executed helper regression.
+- [x] Add a validated Mesa scalar-IR CPU adapter retaining IDs/flags/instance relocation.
+- [x] Execute the shared BVH4 hierarchy encoder component on Vulkan compute.
+- [x] Add checked typed continuation frame/provenance planning and stress fixtures.
+- [x] Remove native AS/RT bits from RQ buffer/barrier/queue-submit translation.
 - [ ] M0: complete all capability, no-native-RT, resource ABI, and continuation proofs.
 - [ ] M1: integrate Mesa builders, GPU BVH4 encoding/refit, and shared AS objects.
 - [ ] M2: complete Ray Query lowering and state semantics.
@@ -32,7 +36,9 @@ Component checkmarks do not complete M0/M1/M2 or the full goal.
 
 | Component | Implemented and tested | Remaining boundary |
 | --- | --- | --- |
-| [Portable BVH4 reference](../layers/common/rt_fallback/README.md) | C/C++ wire-layout checks, tagged indices, checked 64-bit layout planning, iterative binary-to-BVH4 reference encoding, parent links, malformed-input rejection | Mesa adapter, GPU encoder, runtime traversal integration, record/image emission, refit |
+| [Portable BVH4 components](../layers/common/rt_fallback/README.md) | Checked reference planner/encoder; Mesa default scalar-IR CPU adapter with sparse/empty/singleton graphs, full geometry flags, original IDs, explicit BLAS relocation and affine inverses; BDA compute hierarchy/parent encoder with chunked dispatch | GPU Mesa adaptation and record emission, four-child GPU collapse, runtime traversal integration, image emission, refit |
+| Typed continuation frames | Checked 64-bit scalar/aggregate layout; persistent function-local backing; dependency-ordered alias/opaque rematerialization and hidden index capture; explicit rejection of unsupported provenance/layout | State emission, argument/return and invocation-storage ABI, pointer parameter/Phi provenance, specialization, descriptor snapshots and integrated runtime |
+| RQ host translation | Strip AS storage/build-input and SBT buffer usages, including Flags2 overrides; remove native AS/RT stage/access bits in legacy/sync2 barriers and wait/signal submit scopes; preserve unrelated fields and caller chains | Discovery/device feature/extension stripping, event/timestamp/render-pass and buffer-requirement query paths, full-layout descriptor transport and shared-layer object model |
 | Base RQ SBT offset | Lower opcode 6021; select candidate/committed instance; return only the low 24 offset bits; retain helper in the library | Existing single-AS/provenance architecture remains unchanged |
 | AABB opacity | Apply the existing ray-over-instance-over-geometry precedence before opacity culling and expose the correct candidate opacity | Does not complete all RQ traversal or no-native-RT layer behavior |
 
@@ -84,17 +90,95 @@ CI builds the shared BVH4 reference separately and runs the RQ offline and
 no-native-RT helper labels. Physical GPU qualification, the full no-RT device
 path, and full fallback/CTS completion remain open.
 
+## 2026-10-26 development evidence
+
+Development continues on `codex/ray-tracing-fallback`. A platform Goal is active
+for the full M0-M5 contract; this checkpoint does not complete any full milestone.
+
+- Windows x64, Clang 20.1.3, Ninja, Vulkan SDK 1.4.357.0; physical compute tests
+  ran on NVIDIA GeForce RTX 3080, driver 596.49. The shared GPU component enables
+  no RT extensions/features or fallback layer. This is not physical no-RT-device
+  qualification.
+- Shared BVH4 reference, Mesa adapter and GPU hierarchy checks pass **3/3**.
+  The same three pass with ASan/UBSan in RelWithDebInfo. GPU checks also pass
+  with Khronos validation enabled and zero reported errors. Generated SPIR-V
+  validates and contains only Shader, Int64 and PhysicalStorageBufferAddresses
+  capabilities. New CI coverage runs the optional GPU component on Lavapipe.
+- RQ offline checks pass **5/5**, the production traversal-helper compute test
+  **1/1**, the CPU AS fixture **1/1**, and software GPU BUILD checks **1/1**.
+  Downstream spies reject leaked native usages/stages/access masks and verify
+  unchanged caller arrays/pNext data and downstream failures. Restoring the old
+  synchronization implementation causes 34 spy assertions to fail.
+- Corrected the pre-existing rejected-build fixture to allocate the queried
+  required size minus one; the old fixed 256-byte size could be sufficient for
+  a singleton and therefore did not reliably test insufficient storage.
+- Typed continuation frame fixtures pass, including independent aggregate
+  offsets, arrays/matrices/bools, >4 GiB arithmetic and overflow, mutable aliases,
+  opaque AS/image/sampler provenance, hidden dynamic indices, ReportIntersection
+  result timing and stripped names. Unsupported pointer provenance, unresolved
+  specialized array lengths and reachable module Private storage fail explicitly.
+  These are planning tests, not executed transformed RT continuations.
+- Fixed a pre-existing GPU treelet partition discrepancy on the 4099-primitive
+  RTX 3080 fixture by preventing multiply/add contraction for the internal cost.
+  The independent CPU DP oracle is unchanged; generated SPIR-V marks both cost
+  operations NoContraction, and builder/continuation checks pass. Failure
+  diagnostics now report the scene size, node and both child pairs.
+- Fixed Windows source-provenance checks with path-specific `-text` attributes
+  for imported D3D12/DXC references. All 188 stored blobs already matched the
+  manifest; checkout CRLF conversion was the cause. Exact reference bytes,
+  manifest and strict verifier are unchanged. Verification also passes for a
+  fresh export with `core.autocrlf=true`, while a deliberate CRLF mutation fails.
+- Final RTP standalone regression passes **10/10**, covering u16/u32/nonindexed
+  and empty scenes, the existing continuation runtime, builder/refit/copies,
+  metadata/TLAS, typed frame planning and fixed-source provenance. This retains
+  existing prototype behavior; it does not demonstrate the unimplemented full
+  typed RTP compiler or mandatory API coverage.
+
+Reproduce shared component checks on this Windows toolchain:
+
+```powershell
+cmake -S layers/common/rt_fallback -B build-rt-bvh4 -G Ninja `
+  -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ `
+  -DCMAKE_BUILD_TYPE=Debug -DVEL_RT_BVH4_GPU_TESTS=ON
+cmake --build build-rt-bvh4 --parallel 4
+$env:VEL_RT_BVH4_VALIDATION='1'
+ctest --test-dir build-rt-bvh4 --output-on-failure
+
+# Release CRT avoids Debug-CRT/ASan startup incompatibility in this installation.
+# The LLVM ASan runtime DLL must be discoverable when running instrumented EXEs.
+$env:PATH='C:\Program Files\LLVM\lib\clang\20\lib\windows;' + $env:PATH
+cmake -S layers/common/rt_fallback -B build-rt-bvh4-sanitize-release -G Ninja `
+  -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ `
+  -DCMAKE_BUILD_TYPE=RelWithDebInfo -DVEL_RT_BVH4_SANITIZERS=ON `
+  -DVEL_RT_BVH4_GPU_TESTS=ON
+cmake --build build-rt-bvh4-sanitize-release --parallel 4
+ctest --test-dir build-rt-bvh4-sanitize-release --output-on-failure
+```
+
+The current RTP test build uses ignored, build-local copies of this SDK's CMake
+package configs with their incorrect installed prefixes repaired; SDK files are
+unchanged. Its standalone continuation check is
+`ctest --test-dir build-rt-frames -R continuation_analysis --output-on-failure`.
+The portable CPU and RQ builds do not require that workaround.
+
 ## Next work
 
 Run M0 proof work in parallel with shared-backend construction:
 
 1. Establish one capability/device/object translation path for genuinely no-RT
-   drivers, including stripping unsupported usages/stages/access flags.
+   drivers. Buffer, barrier and queue-submit masks are now translated, but device
+   extension/feature stripping, events/timestamps, render-pass dependencies and
+   buffer-requirement/external-buffer queries still need interception and tests.
 2. Replace the single-AS shortcut with value-preserving AS descriptor/BDA lowering,
    including arrays, dynamic indexing, and helper/control-flow passage.
-3. Prove resource transport at full application limits and typed continuation
-   frames with alias/opaque-value/ReportIntersection/callable stress shaders.
-4. Implement the Mesa IR adapter and GPU BVH4 encoder, then migrate both RQ/RTP
-   consumers to the shared runtime. Wire PLOC/HPLOC only with complete host contracts.
+3. Prove resource transport at full application limits and extend typed frame
+   planning into emitted/executed continuations. Address invocation-private
+   storage, pointer parameters/Phi provenance, specialization and argument/return
+   ABI before claiming the typed-continuation M0 stress proof.
+4. Connect Mesa GPU output directly to the shared GPU encoder, populate leaf
+   records, implement four-child collapse/refit, then migrate both RQ/RTP consumers
+   to the shared runtime. The CPU Mesa adapter and generic GPU hierarchy encoder
+   are tested components, not completion of M1. Wire PLOC/HPLOC only with complete
+   host contracts and remove construction-time 32-bit byte limits.
 
 Follow the goal's [iteration and stop policy](ray_tracing_fallback_goal.md#iteration-and-stop-policy).

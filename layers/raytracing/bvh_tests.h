@@ -338,9 +338,12 @@ static void CheckBVHBuilder(Harness &t) {
                 }
                 for (uint32_t node = 0; node < count - 1; ++node) {
                     uint32_t l = word(0, 16 + node * 8 + 3), r = word(0, 16 + node * 8 + 7);
-                    Require(std::min(l, r) == std::min(nodes[node].left, nodes[node].right) &&
-                                std::max(l, r) == std::max(nodes[node].left, nodes[node].right),
-                            "GPU treelet topology differs from independent CPU partition DP");
+                    if (std::min(l, r) != std::min(nodes[node].left, nodes[node].right) ||
+                        std::max(l, r) != std::max(nodes[node].left, nodes[node].right))
+                        throw std::runtime_error(
+                            "GPU treelet topology differs from independent CPU partition DP: count=" + std::to_string(count) +
+                            " node=" + std::to_string(node) + " GPU=(" + std::to_string(l) + "," + std::to_string(r) + ") CPU=(" +
+                            std::to_string(nodes[node].left) + "," + std::to_string(nodes[node].right) + ")");
                 }
             }
         }

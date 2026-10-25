@@ -120,8 +120,13 @@ static void rejected_builds(const struct built_as *as)
       .commandPool = g_pool, .level = VK_COMMAND_BUFFER_LEVEL_PRIMARY, .commandBufferCount = 1};
    CHECK(vkAllocateCommandBuffers(g_dev, &alloc, &cmd));
    VkAccelerationStructureKHR small;
+   /* A singleton's queried output can be exactly 256 bytes. Use the actual
+    * successful build's queried size to guarantee this object is too small. */
    VkAccelerationStructureCreateInfoKHR ci = {.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_CREATE_INFO_KHR,
-      .buffer = as->output.buf, .offset = 256, .size = 256, .type = as->info.type};
+                                              .buffer = as->output.buf,
+                                              .offset = 256,
+                                              .size = as->size - 1,
+                                              .type = as->info.type};
    CHECK(pCreateAS(g_dev, &ci, NULL, &small));
    for (uint32_t i = 0; i < 2; ++i) {
       VkCommandBufferBeginInfo begin = {.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};

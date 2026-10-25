@@ -100,6 +100,8 @@ struct vkrt_shader_module_data {
 extern struct vkrt_global vkrt_global;
 
 /* vkrt_translate.c: host-side translations, also exercised without an ICD. */
+VKAPI_ATTR VkResult VKAPI_CALL vkrt_CreateBuffer(VkDevice device, const VkBufferCreateInfo *info,
+                                                 const VkAllocationCallbacks *allocator, VkBuffer *buffer);
 VKAPI_ATTR void VKAPI_CALL vkrt_UpdateDescriptorSets(VkDevice device,
    uint32_t writeCount, const VkWriteDescriptorSet *writes,
    uint32_t copyCount, const VkCopyDescriptorSet *copies);

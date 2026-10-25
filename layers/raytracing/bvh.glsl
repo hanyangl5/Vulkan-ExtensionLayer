@@ -358,7 +358,10 @@ void findPartitions(uint tid) {
                 part=(part-delta)&mask;
             } while(part!=0u);
             float leafCost=optimalCost[mask]*float(size);
-            float internalCost=1.2*optimalCost[mask]+lowest;
+            // A fused multiply-add rounds differently and changes subsequent
+            // near-tied partition choices. Retain separate FP32 operations so
+            // the topology matches the independent scalar partition oracle.
+            precise float internalCost=1.2*optimalCost[mask]+lowest;
             optimalCost[mask]=min(leafCost,internalCost);
             optimalPartition[mask]=best|(leafCost<internalCost?128u:0u);
         }

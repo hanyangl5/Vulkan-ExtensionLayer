@@ -156,7 +156,7 @@ Encoded Encode(const std::vector<BuildNode>& tree, uint32_t root) {
             if (selected == frontier.size()) break;
             uint32_t expanded = frontier[selected];
             frontier[selected] = tree[expanded].left;
-            frontier.insert(frontier.begin() + selected + 1, tree[expanded].right);
+            frontier.insert(frontier.begin() + std::ptrdiff_t(selected) + 1, tree[expanded].right);
         }
         VelRtBvh4Node node{};
         node.parent_id = out.nodes[output].parent_id;

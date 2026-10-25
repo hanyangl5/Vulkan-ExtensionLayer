@@ -1,19 +1,21 @@
 /* SPDX-License-Identifier: MIT
- * Extend AS dependencies to the compute/storage accesses of the builder.
- * Original scopes are retained for other application operations.
+ * Translate virtual AS/RT dependencies to the compute/storage accesses of the
+ * builder and traversal. Unrelated application scopes are retained.
  */
 #include "vkrt_layer.h"
 
 static VkPipelineStageFlags2 stages(VkPipelineStageFlags2 mask)
 {
-   return mask | ((mask & VK_PIPELINE_STAGE_2_ACCELERATION_STRUCTURE_BUILD_BIT_KHR) ?
-      VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT : 0);
+    const VkPipelineStageFlags2 virtual_stages = VK_PIPELINE_STAGE_2_ACCELERATION_STRUCTURE_BUILD_BIT_KHR |
+                                                 VK_PIPELINE_STAGE_2_RAY_TRACING_SHADER_BIT_KHR |
+                                                 VK_PIPELINE_STAGE_2_ACCELERATION_STRUCTURE_COPY_BIT_KHR;
+    return (mask & ~virtual_stages) | ((mask & virtual_stages) ? VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT : 0);
 }
 static VkAccessFlags2 accesses(VkAccessFlags2 mask)
 {
    if (mask & VK_ACCESS_2_ACCELERATION_STRUCTURE_READ_BIT_KHR) mask |= VK_ACCESS_2_SHADER_READ_BIT;
    if (mask & VK_ACCESS_2_ACCELERATION_STRUCTURE_WRITE_BIT_KHR) mask |= VK_ACCESS_2_SHADER_WRITE_BIT;
-   return mask;
+   return mask & ~(VK_ACCESS_2_ACCELERATION_STRUCTURE_READ_BIT_KHR | VK_ACCESS_2_ACCELERATION_STRUCTURE_WRITE_BIT_KHR);
 }
 static void *copy_array(const void *src, size_t count, size_t size)
 {

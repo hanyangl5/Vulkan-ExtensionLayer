@@ -19,7 +19,15 @@ jobs:
       - name: Install build and software Vulkan dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y ninja-build libvulkan-dev mesa-vulkan-drivers vulkan-validationlayers glslang-dev glslang-tools spirv-tools libspirv-cross-c-shared-dev
+          sudo apt-get install -y ninja-build libvulkan-dev mesa-vulkan-drivers vulkan-validationlayers glslang-dev glslang-tools glslc spirv-tools libspirv-cross-c-shared-dev
+      - name: Test shared BVH4 GPU encoding without native RT
+        run: |
+          export VK_ICD_FILENAMES="$(find /usr/share/vulkan/icd.d -name 'lvp_icd*.json' -print -quit)"
+          test -n "$VK_ICD_FILENAMES"
+          export VEL_RT_BVH4_VALIDATION=1
+          cmake -S layers/common/rt_fallback -B build-bvh4 -DVEL_RT_BVH4_GPU_TESTS=ON
+          cmake --build build-bvh4 --parallel
+          ctest --test-dir build-bvh4 --output-on-failure
       - name: Configure
         run: cmake -S layers/raytracing -B build-rt -G Ninja -DCMAKE_BUILD_TYPE=Debug
       - name: Build

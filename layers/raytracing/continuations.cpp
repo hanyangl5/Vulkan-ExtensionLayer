@@ -6,6 +6,8 @@
 #include <spirv_cross/spirv.hpp>
 #include <algorithm>
 #include <cstring>
+#include <functional>
+#include <limits>
 #include <map>
 #include <set>
 #include <stdexcept>
@@ -185,6 +187,217 @@ FunctionContinuations AnalyzeFunction(const Module &m, Function &function) {
               [](const Suspension &a, const Suspension &b) { return a.word_offset < b.word_offset; });
     return result;
 }
+
+Module ParseModule(const std::vector<uint32_t> &spirv) {
+    std::string error;
+    Module m;
+    auto context = spvContextCreate(SPV_ENV_VULKAN_1_3);
+    spv_diagnostic diagnostic = nullptr;
+    auto status = spvBinaryParse(context, &m, spirv.data(), spirv.size(), nullptr, ParseInstruction, &diagnostic);
+    if (status != SPV_SUCCESS && diagnostic) error = diagnostic->error;
+    spvDiagnosticDestroy(diagnostic);
+    spvContextDestroy(context);
+    if (status != SPV_SUCCESS) throw std::runtime_error("Cannot parse continuation input: " + error);
+    BuildFunctions(m);
+    return m;
+}
+
+uint64_t CheckedAdd(uint64_t a, uint64_t b) {
+    if (b > std::numeric_limits<uint64_t>::max() - a) throw std::runtime_error("Continuation frame size overflow");
+    return a + b;
+}
+uint64_t CheckedMultiply(uint64_t a, uint64_t b) {
+    if (b && a > std::numeric_limits<uint64_t>::max() / b) throw std::runtime_error("Continuation frame size overflow");
+    return a * b;
+}
+uint64_t Align(uint64_t value, uint32_t alignment) { return CheckedAdd(value, alignment - 1) & ~uint64_t(alignment - 1); }
+
+class FramePlanner {
+  public:
+    explicit FramePlanner(const Module &module) : m(module) {
+        for (const auto &i : m.instructions) {
+            if (i.result) definitions[i.result] = &i;
+            if (i.op == spv::OpVariable && i.words.at(3) == spv::StorageClassPrivate) private_storage.insert(i.result);
+        }
+        for (const auto &[id, f] : m.functions) {
+            (void)id;
+            local_values.insert(f.local_values.begin(), f.local_values.end());
+        }
+    }
+
+    FunctionFrame Plan(const FunctionContinuations &analysis) {
+        FunctionFrame frame{analysis.function, 0, 1, {}, {}};
+        if (!analysis.can_suspend) return frame;
+        RejectPrivateStorage(analysis.function);
+        const auto &function = m.functions.at(analysis.function);
+        // A pointer can be consumed by a suspending helper without being live
+        // after the call. SSA liveness alone therefore cannot select variables
+        // whose pointees must survive. Conservatively relocate every Function
+        // variable for the whole invocation, maintaining one backing slot for
+        // all aliases and preserving writes performed before/after suspension.
+        for (auto value : function.local_values) {
+            const auto &i = Definition(value);
+            if (i.op == spv::OpVariable) {
+                const auto &pointer = Definition(i.type);
+                AddSlot(frame, value, pointer.words.at(3), true);
+            }
+        }
+        for (const auto &site : analysis.suspensions) {
+            SuspensionFrame suspension{site.word_offset, {}, {}};
+            IDs prepared, visiting;
+            for (const auto &slot : frame.slots) {
+                if (slot.local_storage) suspension.saved_values.push_back(slot.value);
+            }
+            std::function<void(uint32_t)> preserve = [&](uint32_t value) {
+                if (!local_values.count(value) || prepared.count(value)) return;
+                if (!function.local_values.count(value)) throw std::runtime_error("Cross-function continuation value");
+                if (!visiting.insert(value).second) throw std::runtime_error("Cyclic continuation rematerialization");
+                const auto &i = Definition(value);
+                const auto &type = Definition(i.type);
+                if (!IsReference(type.op)) {
+                    AddSlot(frame, value, i.type, false);
+                    suspension.saved_values.push_back(value);
+                } else if (i.op == spv::OpVariable) {
+                    // The persistent backing slot already provides this root.
+                } else {
+                    bool supported = i.op == spv::OpCopyObject;
+                    if (type.op == spv::OpTypePointer) {
+                        supported |= i.op == spv::OpAccessChain || i.op == spv::OpInBoundsAccessChain;
+                    } else {
+                        supported |= i.op == spv::OpSampledImage || i.op == spv::OpImage;
+                        if (i.op == spv::OpLoad) {
+                            const auto &source_type = Definition(Definition(i.words.at(3)).type);
+                            supported =
+                                source_type.op == spv::OpTypePointer && source_type.words.at(2) == spv::StorageClassUniformConstant;
+                        }
+                    }
+                    if (!supported) {
+                        throw std::runtime_error("Unsupported continuation pointer/opaque provenance for ID " +
+                                                 std::to_string(value) + " at word " + std::to_string(i.offset));
+                    }
+                    for (auto dependency : i.uses) preserve(dependency);
+                    suspension.rematerializations.push_back({value, i.type, i.offset, i.uses});
+                }
+                visiting.erase(value);
+                prepared.insert(value);
+            };
+            for (auto value : site.live_values) preserve(value);
+            std::sort(suspension.saved_values.begin(), suspension.saved_values.end());
+            suspension.saved_values.erase(std::unique(suspension.saved_values.begin(), suspension.saved_values.end()),
+                                          suspension.saved_values.end());
+            frame.suspensions.push_back(std::move(suspension));
+        }
+        frame.size = Align(frame.size, frame.alignment);
+        return frame;
+    }
+
+    std::vector<ContinuationTypeLayout> Types() const {
+        std::vector<ContinuationTypeLayout> result;
+        for (const auto &[id, layout] : layouts) {
+            (void)id;
+            result.push_back(layout);
+        }
+        return result;
+    }
+
+  private:
+    const Module &m;
+    std::map<uint32_t, const Instruction *> definitions;
+    std::map<uint32_t, ContinuationTypeLayout> layouts;
+    IDs local_values, laying_out, private_storage;
+
+    void RejectPrivateStorage(uint32_t function) const {
+        // Private variables are module-scope IDs but per-shader-invocation
+        // mutable storage. They may be read only after a suspension (possibly
+        // in a nonsuspending helper), so they never appear in local SSA
+        // liveness. Reject their reachable use until invocation backing is
+        // defined, rather than silently treating their storage as a constant.
+        IDs visited;
+        std::vector<uint32_t> pending{function};
+        while (!pending.empty()) {
+            auto id = pending.back();
+            pending.pop_back();
+            if (!visited.insert(id).second) continue;
+            const auto &f = m.functions.at(id);
+            for (const auto &block : f.blocks) {
+                for (auto index : block.instructions) {
+                    for (auto use : m.instructions[index].uses) {
+                        if (private_storage.count(use))
+                            throw std::runtime_error("Continuation module Private storage requires invocation backing for ID " +
+                                                     std::to_string(use));
+                    }
+                }
+            }
+            pending.insert(pending.end(), f.callees.begin(), f.callees.end());
+        }
+    }
+
+    const Instruction &Definition(uint32_t value) const { return *definitions.at(value); }
+    static bool IsReference(spv::Op op) {
+        return op == spv::OpTypePointer || op == spv::OpTypeImage || op == spv::OpTypeSampler || op == spv::OpTypeSampledImage ||
+               op == spv::OpTypeAccelerationStructureKHR;
+    }
+    uint64_t ArrayLength(uint32_t id) const {
+        const auto &constant = Definition(id);
+        const auto &type = Definition(constant.type);
+        // Specialization must run before concrete layout. A default value does
+        // not define the frame size for all legal specializations.
+        if (constant.op != spv::OpConstant || type.op != spv::OpTypeInt)
+            throw std::runtime_error("Continuation array length requires specialization first");
+        auto width = type.words.at(2);
+        if (width != 32 && width != 64) throw std::runtime_error("Unsupported continuation array length width");
+        uint64_t length = constant.words.at(3);
+        if (width == 64) length |= uint64_t(constant.words.at(4)) << 32;
+        if (!length || (type.words.at(3) && (length & (uint64_t(1) << (width - 1)))))
+            throw std::runtime_error("Invalid continuation array length");
+        return length;
+    }
+    ContinuationTypeLayout Layout(uint32_t id) {
+        auto known = layouts.find(id);
+        if (known != layouts.end()) return known->second;
+        if (!laying_out.insert(id).second) throw std::runtime_error("Recursive continuation frame type");
+        const auto &type = Definition(id);
+        ContinuationTypeLayout result{id, 0, 1, 0, {}};
+        if (type.op == spv::OpTypeBool) {
+            result.size = result.alignment = 4;
+        } else if (type.op == spv::OpTypeInt || type.op == spv::OpTypeFloat) {
+            const auto width = type.words.at(2);
+            if (width != 8 && width != 16 && width != 32 && width != 64)
+                throw std::runtime_error("Unsupported continuation scalar width");
+            result.size = result.alignment = width / 8;
+        } else if (type.op == spv::OpTypeVector || type.op == spv::OpTypeMatrix || type.op == spv::OpTypeArray) {
+            auto element = Layout(type.words.at(2));
+            uint64_t count = type.op == spv::OpTypeArray ? ArrayLength(type.words.at(3)) : type.words.at(3);
+            result.alignment = element.alignment;
+            result.element_stride = Align(element.size, element.alignment);
+            result.size = CheckedMultiply(result.element_stride, count);
+        } else if (type.op == spv::OpTypeStruct) {
+            for (size_t n = 2; n < type.words.size(); ++n) {
+                auto member = Layout(type.words[n]);
+                result.alignment = std::max(result.alignment, member.alignment);
+                result.size = Align(result.size, member.alignment);
+                result.member_offsets.push_back(result.size);
+                result.size = CheckedAdd(result.size, member.size);
+            }
+            result.size = Align(result.size, result.alignment);
+        } else {
+            throw std::runtime_error("Unsupported continuation frame type ID " + std::to_string(id));
+        }
+        laying_out.erase(id);
+        layouts[id] = result;
+        return result;
+    }
+    void AddSlot(FunctionFrame &frame, uint32_t value, uint32_t type, bool storage) {
+        for (const auto &slot : frame.slots) {
+            if (slot.value == value) return;
+        }
+        auto layout = Layout(type);
+        auto offset = Align(frame.size, layout.alignment);
+        frame.slots.push_back({value, type, offset, layout.size, layout.alignment, storage});
+        frame.size = CheckedAdd(offset, layout.size);
+        frame.alignment = std::max(frame.alignment, layout.alignment);
+    }
+};
 }  // namespace
 
 ContinuationAnalysis AnalyzeContinuations(const std::vector<uint32_t> &spirv, const std::string &entry, uint32_t execution_model) {
@@ -194,14 +407,7 @@ ContinuationAnalysis AnalyzeContinuations(const std::vector<uint32_t> &spirv, co
         error += std::to_string(where.index) + ": " + message + "\n";
     });
     if (!validator.Validate(spirv)) throw std::runtime_error("Invalid continuation input: " + error);
-    Module m;
-    auto context = spvContextCreate(SPV_ENV_VULKAN_1_3);
-    spv_diagnostic diagnostic = nullptr;
-    auto status = spvBinaryParse(context, &m, spirv.data(), spirv.size(), nullptr, ParseInstruction, &diagnostic);
-    if (status != SPV_SUCCESS && diagnostic) error = diagnostic->error;
-    spvDiagnosticDestroy(diagnostic);
-    spvContextDestroy(context);
-    if (status != SPV_SUCCESS) throw std::runtime_error("Cannot parse continuation input: " + error);
+    auto m = ParseModule(spirv);
     uint32_t entry_id = 0;
     for (const auto &i : m.instructions) {
         if (i.op == spv::OpEntryPoint && i.words.at(1) == execution_model) {
@@ -210,7 +416,6 @@ ContinuationAnalysis AnalyzeContinuations(const std::vector<uint32_t> &spirv, co
         }
     }
     if (!entry_id) throw std::runtime_error("Continuation entry point not found: " + entry);
-    BuildFunctions(m);
     IDs reachable{entry_id};
     std::vector<uint32_t> work{entry_id};
     while (!work.empty()) {
@@ -237,6 +442,16 @@ ContinuationAnalysis AnalyzeContinuations(const std::vector<uint32_t> &spirv, co
     } while (changed);
     ContinuationAnalysis result{entry_id, {}};
     for (auto id : reachable) result.functions.push_back(AnalyzeFunction(m, m.functions.at(id)));
+    return result;
+}
+
+ContinuationFrames PlanContinuationFrames(const std::vector<uint32_t> &spirv, const std::string &entry, uint32_t execution_model) {
+    ContinuationFrames result;
+    result.analysis = AnalyzeContinuations(spirv, entry, execution_model);
+    auto module = ParseModule(spirv);
+    FramePlanner planner(module);
+    for (const auto &function : result.analysis.functions) result.functions.push_back(planner.Plan(function));
+    result.types = planner.Types();
     return result;
 }
 }  // namespace vel::rt
