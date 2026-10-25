@@ -3,7 +3,9 @@
 
 # Compute ray tracing pipeline fallback
 
-The implementation target is now the **complete D3D12 fallback port**, not the executable prototype below. See [the port contract and actual gaps](ray_tracing_fallback_port.md). The complete port is not finished.
+The active target is [complete mandatory Vulkan AS/RQ/RTP fallback](ray_tracing_fallback_goal.md), using Mesa construction, a shared portable BVH4 runtime, and typed SPIR-V continuation lowering. See the [baseline feasibility review](ray_tracing_fallback_review.md). The complete fallback is not finished.
+
+This page records the executable RTP prototype and its limitations at baseline `f18c40d3`. Its D3D-derived builder and direct-call shader path are migration sources, not the final selected architecture. The [D3D12 port record](ray_tracing_fallback_port.md) preserves historical source and component-test evidence.
 
 `VK_LAYER_HANYANG_ray_tracing_fallback` is an executable prototype of a Vulkan ray tracing pipeline implemented using compute shaders. It accepts ordinary raygen, miss and closest-hit SPIR-V modules, software-builds BLAS/TLAS, reads shader binding tables and translates `vkCmdTraceRaysKHR` into a compute dispatch. No hardware ray tracing instructions are used by the generated compute program.
 
@@ -97,6 +99,8 @@ These tests compare every pixel's hit/miss result with an independent CPU triang
 For a validation layer below the fallback, install `vulkan-validationlayers`, include its manifest directory in `VK_LAYER_PATH`, and run `vel_rt_tests` with `VEL_RT_TEST_VALIDATION=1`. That checks the lowered native calls; it does not establish complete conformance of the emulated extension surface.
 
 ## Remaining complete-port work
+
+The [active goal and milestones](ray_tracing_fallback_goal.md#milestones-and-exit-criteria) supersede this earlier D3D-port work list, particularly the exact builder/scratch reproduction requirement below.
 
 1. Generate typed continuation state functions and stack frames for arbitrary payloads and nested TraceRay; integrate the tested runtime instead of direct-call GLSL rewriting.
 2. Implement resumable any-hit/procedural traversal, IgnoreIntersection/TerminateRay and intersection shaders.

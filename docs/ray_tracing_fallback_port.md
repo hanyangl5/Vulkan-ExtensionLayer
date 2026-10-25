@@ -1,12 +1,18 @@
 <!-- Copyright 2026 The Khronos Group Inc. -->
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 
-# Complete D3D12 fallback port: contract and current gaps
+# D3D12 fallback reference: provenance and historical port record
 
-The target is the behavior and implementation of Microsoft's D3D12RaytracingFallback,
-including its separate DXC continuation compiler. A restricted executable sample
-is not an acceptable substitute. **The complete port is not implemented yet.**
-The existing layer is a development harness, not the finished fallback.
+The active contract is the [software RT implementation goal](ray_tracing_fallback_goal.md).
+The selected AS route is now Mesa build algorithms to portable BVH4, shared by RQ
+and RTP. This supersedes the earlier exact D3D12 builder reproduction requirement.
+Microsoft's D3D12RaytracingFallback and its separate DXC continuation compiler remain
+architectural, behavioral, and source-provenance references. A restricted executable
+sample is not an acceptable substitute for the full Vulkan goal.
+
+The component and gap descriptions below record baseline `f18c40d3`; they are not
+claims that the selected replacement backend is implemented. **The complete fallback
+is not implemented yet.**
 
 ## Source baseline
 
@@ -32,10 +38,11 @@ The source files that define the target are:
 | Copy and queries | `GpuBvh2Copy.cpp`, `GetBVHCompactedSize.hlsl` | Equivalent copy/postbuild-size behavior, correct Vulkan query and object lifetime |
 | Host API | Device/state-object/command-list classes | Vulkan loader dispatch, object/descriptor/SBT mapping, features/properties, command-buffer state and synchronization |
 
-Changing bitonic to radix sort, replacing LBVH/treelets with the prototype's
-input-order tree, or unrolling TraceRay to a chosen fixed depth would change the
-implementation target. Necessary API/IR/addressing differences must be documented
-and verified, not silently used to discard upstream features.
+The source table records the previous D3D12 fidelity target. The active Mesa build
+decision intentionally replaces its construction algorithms while retaining full
+behavioral/API requirements. Necessary API/IR/addressing differences must be
+documented and verified. Unrolling TraceRay to a chosen fixed depth or silently
+discarding shader features remains unacceptable.
 
 ## Implemented port components
 
@@ -149,6 +156,10 @@ Document intentional bug fixes and Vulkan-only additions separately; do not
 silently reproduce an upstream bug that violates an advertised Vulkan guarantee.
 
 ## Acceptance
+
+The current acceptance contract is the [active goal's verification surface](ray_tracing_fallback_goal.md#verification-surface).
+The paragraph below records the earlier source-exact port acceptance target; its
+builder-specific requirement is superseded by the reviewed Mesa/BVH4 route.
 
 Completion requires all target rows above to execute through the layer, original
 behavioral tests ported to Vulkan and passing, shader/stack/traversal differential

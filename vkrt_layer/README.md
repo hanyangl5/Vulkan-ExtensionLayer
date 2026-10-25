@@ -1,5 +1,7 @@
 # Software Ray Query layer
 
+The active project target is [complete software AS/RQ/RTP fallback](../docs/ray_tracing_fallback_goal.md), with a shared Mesa-build/portable-BVH4 backend. This page describes the existing RQ prototype; the shared backend and complete capability virtualization are not implemented yet. See the [baseline audit](../docs/ray_tracing_fallback_review.md).
+
 `VK_LAYER_VKRT_SOFTWARE_RAY_QUERY` replaces acceleration-structure builds and supported `VK_KHR_ray_query` shader instructions with a GPU LBVH builder and software traversal. Applications continue to use the Vulkan AS and Ray Query APIs. The layer rewrites AS descriptors to storage buffers and lowers Ray Query instructions to functions inside the application's shader module.
 
 This is a bootstrap implementation, not a complete Vulkan RT implementation. It still relies on the underlying driver exposing the native RT extensions and accepting the application's RT feature requests. Running on a device without native RT requires additional capability and device-creation virtualization that is not implemented here.

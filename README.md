@@ -24,7 +24,9 @@ NOTE: Not all layers are supported on every platform, please read the documentat
 | [VK_LAYER_HANYANG_ray_tracing_fallback](docs/ray_tracing_fallback_layer.md) | Executable compute-based KHR RT pipeline subset; not a conformant implementation of the complete extensions | [@hanyangl5](https://github.com/hanyangl5) |
 | [VK_LAYER_VKRT_SOFTWARE_RAY_QUERY](vkrt_layer/README.md) | GPU-built BVHIR and SPIR-V software Ray Query lowering; bootstrap implementation requiring native RT capability exposure | [@hanyangl5](https://github.com/hanyangl5) |
 
-The ray tracing fallback is opt-in and can be built independently from `layers/raytracing`. The target is a [complete D3D12RaytracingFallback port](docs/ray_tracing_fallback_port.md), including its DXC continuation compiler and original GPU build algorithms. That port is unfinished; the executable layer remains a restricted development prototype. See the port contract for implemented components and remaining work.
+The active [software RT implementation goal](docs/ray_tracing_fallback_goal.md) is complete mandatory Vulkan AS, Ray Query, and RT Pipeline functionality on qualifying devices without native RT. The selected route is Mesa build algorithms and build IR, a portable BVH4 runtime shared by RQ/RTP, and typed SPIR-V continuation lowering. See the [baseline audit and feasibility review](docs/ray_tracing_fallback_review.md).
+
+Both executable layers remain restricted development prototypes. The [D3D12 port record](docs/ray_tracing_fallback_port.md) retains source provenance and historical implementation evidence; its earlier exact D3D12 AS-builder target is superseded by the Mesa/BVH4 decision. Default builds remain opt-in.
 
 ## Information for Developing or Contributing:
 
