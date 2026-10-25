@@ -17,6 +17,13 @@ If you find a problem with one of the layers, please file an Issue and tag the P
 
 NOTE: Not all layers are supported on every platform, please read the documentation for the layer for details.
 
+## Planned work
+
+The following work is a design proposal and is not an implemented layer:
+
+- Software opacity micromaps on native ray tracing: [goals and specification](docs/opacity_micromap_layer.md),
+  [implementation plan and acceptance matrix](docs/opacity_micromap_plan.md).
+
 ## Information for Developing or Contributing:
 
 Please see the [CONTRIBUTING.md](CONTRIBUTING.md) file in this repository for more details.
