@@ -311,6 +311,16 @@ run_ray(VkAccelerationStructureKHR tlas, const float origin[3],
         const float dir[3], float tmin, float tmax,
         uint32_t flags, uint32_t mask, struct out_block *out)
 {
+    /* This fixture uploads private AS bytes instead of recording a legal
+     * Vulkan build. Publish its root address explicitly before shader use. */
+    PFN_vkGetAccelerationStructureDeviceAddressKHR get_address =
+        (PFN_vkGetAccelerationStructureDeviceAddressKHR)vkGetDeviceProcAddr(g_dev, "vkGetAccelerationStructureDeviceAddressKHR");
+    VkAccelerationStructureDeviceAddressInfoKHR address_info = {
+        .sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_DEVICE_ADDRESS_INFO_KHR, .accelerationStructure = tlas};
+    if (!get_address || !get_address(g_dev, &address_info)) {
+        fprintf(stderr, "fixture AS address is unavailable\n");
+        exit(1);
+    }
    memset(out, 0, sizeof(*out));
    out->primitive_index = 0xFFFFFFFFu;
    out->t = -1.0f;

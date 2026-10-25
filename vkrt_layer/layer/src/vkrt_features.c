@@ -36,6 +36,8 @@ static bool augmented_feature(VkStructureType type) {
         case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SCALAR_BLOCK_LAYOUT_FEATURES:
         case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_MEMORY_MODEL_FEATURES:
         case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_BUFFER_DEVICE_ADDRESS_FEATURES:
+        case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_INDEXING_FEATURES:
+        case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VARIABLE_POINTERS_FEATURES:
             return true;
         default:
             return false;
@@ -77,13 +79,26 @@ VkResult vkrt_create_device_with_features(struct vkrt_instance_data *inst,
                                                     .pNext = &int8};
     VkPhysicalDevice16BitStorageFeatures storage16 = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_16BIT_STORAGE_FEATURES,
                                                       .pNext = &storage8};
-    VkPhysicalDeviceFeatures2 supported = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2, .pNext = &storage16};
+    VkPhysicalDeviceDescriptorIndexingFeatures descriptor = {
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_INDEXING_FEATURES, .pNext = &storage16};
+    VkPhysicalDeviceVariablePointersFeatures pointers = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VARIABLE_POINTERS_FEATURES,
+                                                         .pNext = &descriptor};
+    VkPhysicalDeviceFeatures2 supported = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2, .pNext = &pointers};
     if (!inst->vtable.GetPhysicalDeviceFeatures2 || !inst->vtable.GetPhysicalDeviceProperties) return VK_ERROR_FEATURE_NOT_PRESENT;
     inst->vtable.GetPhysicalDeviceFeatures2(physical, &supported);
     if (!supported.features.shaderInt64 || !supported.features.shaderInt16 || !storage16.storageBuffer16BitAccess ||
         !storage8.storageBuffer8BitAccess || !int8.shaderInt8 || !scalar.scalarBlockLayout || !bda.bufferDeviceAddress ||
         !memory.vulkanMemoryModel || !memory.vulkanMemoryModelDeviceScope) {
         VKRT_LOG_ERR("GPU BVH requires BDA, scalar layout, int8/16/64, buffer8/16 and Vulkan device-scope memory model");
+        return VK_ERROR_FEATURE_NOT_PRESENT;
+    }
+    /* Base AS/RQ permits dynamically uniform and NonUniform-decorated AS
+     * descriptor-array indexes. Lowering changes their descriptor type to
+     * SSBO. Descriptor-pointer helper arguments additionally need variable
+     * storage-buffer pointers after that change of storage class. */
+    if (uses_virtual_rt && (!supported.features.shaderStorageBufferArrayDynamicIndexing ||
+                            !descriptor.shaderStorageBufferArrayNonUniformIndexing || !pointers.variablePointersStorageBuffer)) {
+        VKRT_LOG_ERR("AS value lowering requires storage-buffer dynamic/nonuniform indexing and variable pointers");
         return VK_ERROR_FEATURE_NOT_PRESENT;
     }
 
@@ -115,6 +130,8 @@ VkResult vkrt_create_device_with_features(struct vkrt_instance_data *inst,
    VkPhysicalDeviceFeatures *features = &core;
    bool has_features2 = false;
    bool has16 = false, has8 = false, has_int8 = false, has_scalar = false, has_memory = false, has_bda = false;
+   bool has_descriptor = false;
+   bool has_pointers = false;
    for (VkBaseOutStructure *p = head; p != (VkBaseOutStructure *)borrowed; p = p->pNext) {
        switch (p->sType) {
            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2:
@@ -123,15 +140,28 @@ VkResult vkrt_create_device_with_features(struct vkrt_instance_data *inst,
                break;
            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_FEATURES:
                ((VkPhysicalDeviceVulkan11Features *)p)->storageBuffer16BitAccess = VK_TRUE;
+               if (uses_virtual_rt) ((VkPhysicalDeviceVulkan11Features *)p)->variablePointersStorageBuffer = VK_TRUE;
                has16 = true;
+               has_pointers = true;
                break;
            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES: {
                VkPhysicalDeviceVulkan12Features *f = (void *)p;
                f->storageBuffer8BitAccess = f->shaderInt8 = f->scalarBlockLayout = VK_TRUE;
                f->vulkanMemoryModel = f->vulkanMemoryModelDeviceScope = f->bufferDeviceAddress = VK_TRUE;
+               if (uses_virtual_rt) f->shaderStorageBufferArrayNonUniformIndexing = VK_TRUE;
                has8 = has_int8 = has_scalar = has_memory = has_bda = true;
+               has_descriptor = true;
                break;
            }
+           case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_INDEXING_FEATURES:
+               if (uses_virtual_rt)
+                   ((VkPhysicalDeviceDescriptorIndexingFeatures *)p)->shaderStorageBufferArrayNonUniformIndexing = VK_TRUE;
+               has_descriptor = true;
+               break;
+           case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VARIABLE_POINTERS_FEATURES:
+               if (uses_virtual_rt) ((VkPhysicalDeviceVariablePointersFeatures *)p)->variablePointersStorageBuffer = VK_TRUE;
+               has_pointers = true;
+               break;
            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_16BIT_STORAGE_FEATURES:
                ((VkPhysicalDevice16BitStorageFeatures *)p)->storageBuffer16BitAccess = VK_TRUE;
                has16 = true;
@@ -162,6 +192,7 @@ VkResult vkrt_create_device_with_features(struct vkrt_instance_data *inst,
        }
    }
    features->shaderInt64 = features->shaderInt16 = VK_TRUE;
+   if (uses_virtual_rt) features->shaderStorageBufferArrayDynamicIndexing = VK_TRUE;
    /* Query results must not accidentally enable unrelated optional features. */
    storage16 = (VkPhysicalDevice16BitStorageFeatures){.sType = storage16.sType, .storageBuffer16BitAccess = VK_TRUE};
    storage8 = (VkPhysicalDevice8BitStorageFeatures){.sType = storage8.sType, .storageBuffer8BitAccess = VK_TRUE};
@@ -169,6 +200,9 @@ VkResult vkrt_create_device_with_features(struct vkrt_instance_data *inst,
    scalar = (VkPhysicalDeviceScalarBlockLayoutFeatures){.sType = scalar.sType, .scalarBlockLayout = VK_TRUE};
    memory = (VkPhysicalDeviceVulkanMemoryModelFeatures){.sType = memory.sType, .vulkanMemoryModel = VK_TRUE, .vulkanMemoryModelDeviceScope = VK_TRUE};
    bda = (VkPhysicalDeviceBufferDeviceAddressFeatures){.sType = bda.sType, .bufferDeviceAddress = VK_TRUE};
+   descriptor = (VkPhysicalDeviceDescriptorIndexingFeatures){.sType = descriptor.sType,
+                                                             .shaderStorageBufferArrayNonUniformIndexing = VK_TRUE};
+   pointers = (VkPhysicalDeviceVariablePointersFeatures){.sType = pointers.sType, .variablePointersStorageBuffer = VK_TRUE};
    VkDeviceCreateInfo local = *ci;
    local.pNext = head;
    local.pEnabledFeatures = has_features2 ? NULL : &core;
@@ -179,17 +213,21 @@ VkResult vkrt_create_device_with_features(struct vkrt_instance_data *inst,
    PREPEND(scalar, has_scalar);
    PREPEND(memory, has_memory);
    PREPEND(bda, has_bda);
+   PREPEND(descriptor, has_descriptor || !uses_virtual_rt);
+   PREPEND(pointers, has_pointers || !uses_virtual_rt);
 #undef PREPEND
    /* Extension aliases also cover applications that requested Vulkan 1.0/1.1. */
-   const char *required[] = {VK_KHR_16BIT_STORAGE_EXTENSION_NAME, VK_KHR_8BIT_STORAGE_EXTENSION_NAME,
-      VK_KHR_SHADER_FLOAT16_INT8_EXTENSION_NAME, VK_EXT_SCALAR_BLOCK_LAYOUT_EXTENSION_NAME,
-      VK_KHR_VULKAN_MEMORY_MODEL_EXTENSION_NAME, VK_KHR_BUFFER_DEVICE_ADDRESS_EXTENSION_NAME};
-   if (ci->enabledExtensionCount > UINT32_MAX - VKRT_ARRAY_SIZE(required) ||
-       (uint64_t)ci->enabledExtensionCount + VKRT_ARRAY_SIZE(required) > SIZE_MAX / sizeof(const char *)) {
+   const char *required[] = {VK_KHR_16BIT_STORAGE_EXTENSION_NAME,       VK_KHR_8BIT_STORAGE_EXTENSION_NAME,
+                             VK_KHR_SHADER_FLOAT16_INT8_EXTENSION_NAME, VK_EXT_SCALAR_BLOCK_LAYOUT_EXTENSION_NAME,
+                             VK_KHR_VULKAN_MEMORY_MODEL_EXTENSION_NAME, VK_KHR_BUFFER_DEVICE_ADDRESS_EXTENSION_NAME,
+                             VK_KHR_VARIABLE_POINTERS_EXTENSION_NAME,   VK_EXT_DESCRIPTOR_INDEXING_EXTENSION_NAME};
+   size_t required_count = VKRT_ARRAY_SIZE(required) - (uses_virtual_rt ? 0 : 2);
+   if (ci->enabledExtensionCount > UINT32_MAX - required_count ||
+       (uint64_t)ci->enabledExtensionCount + required_count > SIZE_MAX / sizeof(const char *)) {
        result = VK_ERROR_OUT_OF_HOST_MEMORY;
        goto done;
    }
-   const char **extensions = malloc(((size_t)ci->enabledExtensionCount + VKRT_ARRAY_SIZE(required)) * sizeof(*extensions));
+   const char **extensions = malloc(((size_t)ci->enabledExtensionCount + required_count) * sizeof(*extensions));
    if (!extensions) { result = VK_ERROR_OUT_OF_HOST_MEMORY; goto done; }
    local.enabledExtensionCount = 0;
    for (uint32_t i = 0; i < ci->enabledExtensionCount; ++i) {
@@ -201,15 +239,14 @@ VkResult vkrt_create_device_with_features(struct vkrt_instance_data *inst,
    }
    VkPhysicalDeviceProperties properties;
    inst->vtable.GetPhysicalDeviceProperties(physical, &properties);
-   for (size_t i = 0; i < VKRT_ARRAY_SIZE(required); ++i) {
-      /* Do not require extension aliases when the application uses core
-       * features: implementations may expose core 1.2 without those names. */
-      uint32_t promoted = i == 0 ? VK_API_VERSION_1_1 : VK_API_VERSION_1_2;
-      if (inst->api_version >= promoted && properties.apiVersion >= promoted) continue;
-      bool found = false;
-      for (uint32_t j = 0; j < local.enabledExtensionCount; ++j)
-         found |= strcmp(extensions[j], required[i]) == 0;
-      if (!found) extensions[local.enabledExtensionCount++] = required[i];
+   for (size_t i = 0; i < required_count; ++i) {
+       /* Do not require extension aliases when the application uses core
+        * features: implementations may expose core 1.2 without those names. */
+       uint32_t promoted = i == 0 || i == 6 ? VK_API_VERSION_1_1 : VK_API_VERSION_1_2;
+       if (inst->api_version >= promoted && properties.apiVersion >= promoted) continue;
+       bool found = false;
+       for (uint32_t j = 0; j < local.enabledExtensionCount; ++j) found |= strcmp(extensions[j], required[i]) == 0;
+       if (!found) extensions[local.enabledExtensionCount++] = required[i];
    }
    local.ppEnabledExtensionNames = extensions;
    result = create(physical, &local, alloc, device);

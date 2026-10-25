@@ -128,12 +128,6 @@ void vkrt_cmd_build_as(struct vkrt_device_data *dev, VkCommandBuffer cmd, uint32
       VkResult result = bvh_ir_record_build(info, ranges[i], address, scratch, 0,
                                             vkrt_build_emit, &context);
       if (result != VK_SUCCESS) { cb->record_result = result; break; }
-      as->geometry_count = info->geometryCount;
-      as->primitive_count = info->type == VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR ? l.leaf_count : 0;
-      as->instance_count = info->type == VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR ? l.leaf_count : 0;
-      as->node_address = address + l.nodes;
-      as->leaf_address = address + VKRT_HEADER_SIZE;
-      ++as->build_generation;
    }
    /* No descriptors or graphics state are touched by the BDA-only passes. */
    if (cb->bound_compute_pipeline)

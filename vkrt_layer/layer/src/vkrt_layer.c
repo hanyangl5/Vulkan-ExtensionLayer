@@ -18,7 +18,7 @@
 
 #include "vkrt_layer.h"
 
-struct vkrt_global vkrt_global;
+struct vkrt_global vkrt_global = VKRT_GLOBAL_INITIALIZER;
 
 /* ================================================================== */
 /* Chain info helpers                                                  */
@@ -136,6 +136,14 @@ vkrt_DestroyInstance(VkInstance instance,
 /* Device                                                              */
 /* ================================================================== */
 
+static void vkrt_free_device_data(struct vkrt_device_data *data) {
+    vkrt_device_queue_families_finish(data);
+#ifndef _WIN32
+    pthread_mutex_destroy(&data->command_buffers_lock);
+#endif
+    free(data);
+}
+
 static VKAPI_ATTR VkResult VKAPI_CALL
 vkrt_CreateDevice(VkPhysicalDevice physicalDevice,
                   const VkDeviceCreateInfo *pCreateInfo,
@@ -189,6 +197,7 @@ vkrt_CreateDevice(VkPhysicalDevice physicalDevice,
          (PFN_vkDestroyDevice)fpGetDeviceProcAddr(*pDevice, "vkDestroyDevice");
       if (fpDestroyDevice)
          fpDestroyDevice(*pDevice, pAllocator);
+      *pDevice = VK_NULL_HANDLE;
       return VK_ERROR_OUT_OF_HOST_MEMORY;
    }
 
@@ -197,12 +206,20 @@ vkrt_CreateDevice(VkPhysicalDevice physicalDevice,
    data->physical_device  = physicalDevice;
    data->instance_data    = inst_data;
    vkrt_mutex_init(&data->command_buffers_lock);
+   result = vkrt_device_queue_families_init(data, pCreateInfo, pAllocator);
+   if (result != VK_SUCCESS) {
+       data->vtable.DestroyDevice(*pDevice, pAllocator);
+       *pDevice = VK_NULL_HANDLE;
+       vkrt_free_device_data(data);
+       return result;
+   }
    result = vkrt_build_init(data);
    if (result != VK_SUCCESS) {
       VKRT_LOG_ERR("GPU BVH pipeline initialization failed: %d", result);
       vkrt_build_finish(data);
       data->vtable.DestroyDevice(*pDevice, pAllocator);
-      free(data);
+      *pDevice = VK_NULL_HANDLE;
+      vkrt_free_device_data(data);
       return result;
    }
 
@@ -244,7 +261,7 @@ vkrt_DestroyDevice(VkDevice device, const VkAllocationCallbacks *pAllocator)
       } else ++i;
    }
    vkrt_mutex_unlock(&vkrt_global.objects_lock);
-   free(data);
+   vkrt_free_device_data(data);
 }
 
 /* ================================================================== */
@@ -459,7 +476,7 @@ vkrt_CreateAccelerationStructureKHR(
    struct vkrt_device_data *data = VKRT_FIND(struct vkrt_device_data, device);
    if (!data)
       return VK_ERROR_INITIALIZATION_FAILED;
-   return vkrt_create_virtual_as(data, pCreateInfo, pAccelerationStructure);
+   return vkrt_create_virtual_as(data, pCreateInfo, pAllocator, pAccelerationStructure);
 }
 
 static VKAPI_ATTR void VKAPI_CALL

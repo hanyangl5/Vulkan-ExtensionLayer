@@ -134,21 +134,8 @@ struct sw_hit {
    uint  instance_node;
 };
 
-/* The TLAS is reached through the bound storage buffer, not through an
- * address. Only the TLAS -> BLAS hop needs a device address, and that one
- * comes out of the instance node (vk_ir_instance_node.base_ptr) -- i.e.
- * out of the BVH data itself, so nothing has to be delivered from the
- * host. This is what lets the layer drop its per-AS "address cell".
- *
- * The set/binding below is a placeholder: the SPIR-V rewrite moves this
- * variable's DescriptorSet/Binding decorations onto the app's original
- * acceleration-structure binding, so the numbering the app chose is
- * preserved exactly (design doc section 8). */
-layout(set = 0, binding = 0, std430) readonly buffer VkrtTlas {
-   uint words[];
-} vkrt_tlas;
-
 struct sw_ray_query_state {
+   uint64_t as_address; /* Actual AS value, independent for every query. */
    sw_ray  ray;
    float   tmin;
    float   tclosest;      /* starts at tMax, shrinks on commit */
@@ -208,41 +195,17 @@ sw_ir_type(uint id)
    return id & 3u;
 }
 
-/* ---- TLAS: indexed directly through the bound storage buffer ---- */
-
-uint
-tlas_u32(uint word)
-{
-   return vkrt_tlas.words[word];
-}
-
-float
-tlas_f32(uint word)
-{
-   return uintBitsToFloat(vkrt_tlas.words[word]);
-}
-
-uint64_t
-tlas_u64(uint word)
-{
-   uint lo = tlas_u32(word);
-   uint hi = tlas_u32(word + 1u);
-   return uint64_t(lo) | (uint64_t(hi) << 32);
-}
-
-/* ---- BLAS: reached through a device address ----------------------
- * The address is vk_ir_instance_node.base_ptr, read from the TLAS data,
- * so it needs no host-side plumbing. */
+/* Both levels use the AS value retained by the query. */
 uint
 blas_u32(uint64_t base, uint word)
 {
-   return DEREF(INDEX(uint32_t, base, word));
+   return DEREF(REF(uint32_t)(base + uint64_t(word) * 4ul));
 }
 
 float
 blas_f32(uint64_t base, uint word)
 {
-   return uintBitsToFloat(DEREF(INDEX(uint32_t, base, word)));
+   return uintBitsToFloat(DEREF(REF(uint32_t)(base + uint64_t(word) * 4ul)));
 }
 
 uint64_t
@@ -301,16 +264,17 @@ uint sw_blas_root(uint64_t base)
    return BVH_IR_ROOT_ID(capacity, sw_leaf_stride(type), blas_u32(base, 8u));
 }
 
-uint sw_tlas_root()
+uint sw_tlas_root(uint64_t base)
 {
-   if (tlas_u32(BVH_IR_MAGIC_OFFSET / 4u) != BVH_IR_MAGIC ||
-       tlas_u32(BVH_IR_VERSION_OFFSET / 4u) != BVH_IR_VERSION ||
-       tlas_u32(BVH_IR_BUILD_FLAGS_OFFSET / 4u) != BVH_IR_SUPPORTED_INPUT_FLAGS ||
-       tlas_u32(6u) == 0u || tlas_u32(8u) == 0u)
+   if (base == 0ul) return SW_HANDLE_INVALID;
+   if (blas_u32(base, BVH_IR_MAGIC_OFFSET / 4u) != BVH_IR_MAGIC ||
+       blas_u32(base, BVH_IR_VERSION_OFFSET / 4u) != BVH_IR_VERSION ||
+       blas_u32(base, BVH_IR_BUILD_FLAGS_OFFSET / 4u) != BVH_IR_SUPPORTED_INPUT_FLAGS ||
+       blas_u32(base, 6u) == 0u || blas_u32(base, 8u) == 0u)
       return SW_HANDLE_INVALID;
-   uint capacity = tlas_u32(BVH_IR_LEAF_CAPACITY_OFFSET / 4u);
-   uint type = tlas_u32(BVH_IR_GEOMETRY_TYPE_OFFSET / 4u);
-   return BVH_IR_ROOT_ID(capacity, sw_leaf_stride(type), tlas_u32(8u));
+   uint capacity = blas_u32(base, BVH_IR_LEAF_CAPACITY_OFFSET / 4u);
+   uint type = blas_u32(base, BVH_IR_GEOMETRY_TYPE_OFFSET / 4u);
+   return BVH_IR_ROOT_ID(capacity, sw_leaf_stride(type), blas_u32(base, 8u));
 }
 
 /* ------------------------------------------------------------------ */
@@ -633,19 +597,19 @@ sw_test_aabb_leaf(inout sw_ray_query_state q,
 /* Build the world-to-object ray for a TLAS instance node.
  * `node_word` is the node's offset in bytes divided by 4. */
 bool
-sw_make_object_ray(uint node_word, sw_ray world, out sw_ray obj)
+sw_make_object_ray(uint64_t base, uint node_word, sw_ray world, out sw_ray obj)
 {
    /* vk_ir_instance_node layout after base.aabb (24):
     *   u64 base_ptr (8) @24, u32 custom_instance_and_mask @32,
     *   u32 sbt_offset_and_flags @36, mat3x4 otw_matrix (48) @40.
     * The matrix starts at word 10 of the node. */
    uint m = node_word + 10u;
-   float m0 = tlas_f32(m + 0u),  m1 = tlas_f32(m + 1u);
-   float m2 = tlas_f32(m + 2u),  m3 = tlas_f32(m + 3u);
-   float m4 = tlas_f32(m + 4u),  m5 = tlas_f32(m + 5u);
-   float m6 = tlas_f32(m + 6u),  m7 = tlas_f32(m + 7u);
-   float m8 = tlas_f32(m + 8u),  m9 = tlas_f32(m + 9u);
-   float m10 = tlas_f32(m + 10u), m11 = tlas_f32(m + 11u);
+   float m0 = blas_f32(base, m + 0u),  m1 = blas_f32(base, m + 1u);
+   float m2 = blas_f32(base, m + 2u),  m3 = blas_f32(base, m + 3u);
+   float m4 = blas_f32(base, m + 4u),  m5 = blas_f32(base, m + 5u);
+   float m6 = blas_f32(base, m + 6u),  m7 = blas_f32(base, m + 7u);
+   float m8 = blas_f32(base, m + 8u),  m9 = blas_f32(base, m + 9u);
+   float m10 = blas_f32(base, m + 10u), m11 = blas_f32(base, m + 11u);
 
    /* Invert the 3x3 in place. */
    float A =  (m5 * m10 - m6 * m9);
@@ -688,10 +652,10 @@ sw_bottom_traversal(inout sw_ray_query_state q, uint instance_node_off)
     * a local of that type would carry explicit layout. It lives in the
     * TLAS buffer, so these are TLAS reads. */
    uint iword = instance_node_off / 4u;
-   uint custom_and_mask = tlas_u32(iword + 8u);   /* after aabb(24)+base_ptr(8) */
-   uint sbt_and_flags_r = tlas_u32(iword + 9u);
-   uint instance_id_r   = tlas_u32(iword + 22u);  /* after 48-byte matrix */
-   uint root_flags_r    = tlas_u32(iword + 23u);
+   uint custom_and_mask = blas_u32(q.as_address, iword + 8u);   /* after aabb(24)+base_ptr(8) */
+   uint sbt_and_flags_r = blas_u32(q.as_address, iword + 9u);
+   uint instance_id_r   = blas_u32(q.as_address, iword + 22u);  /* after 48-byte matrix */
+   uint root_flags_r    = blas_u32(q.as_address, iword + 23u);
 
    /* Visibility mask is the top byte of custom_instance_and_mask. */
    uint inst_mask = (custom_and_mask >> 24) & 0xFFu;
@@ -699,7 +663,7 @@ sw_bottom_traversal(inout sw_ray_query_state q, uint instance_node_off)
       return false;
 
    sw_ray obj_ray;
-   if (!sw_make_object_ray(iword, q.ray, obj_ray))
+   if (!sw_make_object_ray(q.as_address, iword, q.ray, obj_ray))
       return false;
 
    uint instance_id           = instance_id_r;
@@ -710,7 +674,7 @@ sw_bottom_traversal(inout sw_ray_query_state q, uint instance_node_off)
    /* base_ptr is the u64 at byte 24 (word 6) of the instance node. This
     * is a real VkDeviceAddress written in by the AS build, so it is what
     * hops us into the separate BLAS buffer. */
-   uint64_t blas_base = tlas_u64(iword + 6u);
+   uint64_t blas_base = blas_u64(q.as_address, iword + 6u);
    uint blas_root = sw_blas_root(blas_base);
 
    if (!q.resume) {
@@ -830,7 +794,7 @@ sw_ray_query_proceed(inout sw_ray_query_state q)
 
    if (!q.resume && !continuing_tlas) {
       q.stack_size = 0u;
-      q.stack[q.stack_size++] = sw_tlas_root();
+      q.stack[q.stack_size++] = sw_tlas_root(q.as_address);
    }
 
    q.intersection_type = SW_CAND_NONE;
@@ -850,8 +814,8 @@ sw_ray_query_proceed(inout sw_ray_query_state q)
       if (!resuming_leaf) {
          /* bounds come from nbase directly in sw_ray_box_test */
          if (!sw_ray_box_test(q.ray,
-                             vec3(tlas_f32(nword + 0u), tlas_f32(nword + 1u), tlas_f32(nword + 2u)),
-                             vec3(tlas_f32(nword + 3u), tlas_f32(nword + 4u), tlas_f32(nword + 5u)),
+                             vec3(blas_f32(q.as_address, nword + 0u), blas_f32(q.as_address, nword + 1u), blas_f32(q.as_address, nword + 2u)),
+                             vec3(blas_f32(q.as_address, nword + 3u), blas_f32(q.as_address, nword + 4u), blas_f32(q.as_address, nword + 5u)),
                              q.tmin, q.tclosest)) {
             q.stack_size--;
             q.resume = false;
@@ -864,8 +828,8 @@ sw_ray_query_proceed(inout sw_ray_query_state q)
           * materialise a vk_ir_box_node local. */
          q.stack_size--;
          if (q.stack_size + 2 <= SW_RT_STACK_SIZE) {
-            q.stack[q.stack_size++] = tlas_u32(nword + 7u);
-            q.stack[q.stack_size++] = tlas_u32(nword + 6u);
+            q.stack[q.stack_size++] = blas_u32(q.as_address, nword + 7u);
+            q.stack[q.stack_size++] = blas_u32(q.as_address, nword + 6u);
          }
          q.resume = false;
          continue;
@@ -1008,7 +972,7 @@ sw_get_intersection_instance_sbt_offset(inout sw_ray_query_state q)
    uint node = q.want_committed != 0u ? q.committed.instance_node : q.candidate.instance_node;
    /* vk_ir_instance_node.sbt_offset_and_flags is at byte 36. The upper
     * eight bits contain instance flags, not the SBT record offset. */
-   return tlas_u32(node / 4u + 9u) & 0x00FFFFFFu;
+   return blas_u32(q.as_address, node / 4u + 9u) & 0x00FFFFFFu;
 }
 
 bool
@@ -1045,24 +1009,24 @@ vec3 sw_get_object_ray_origin(inout sw_ray_query_state q)
 {
    uint node = q.want_committed != 0u ? q.committed.instance_node : q.candidate.instance_node;
    sw_ray obj;
-   sw_make_object_ray(node / 4u, q.ray, obj);
+   sw_make_object_ray(q.as_address, node / 4u, q.ray, obj);
    return obj.origin;
 }
 vec3 sw_get_object_ray_direction(inout sw_ray_query_state q)
 {
    uint node = q.want_committed != 0u ? q.committed.instance_node : q.candidate.instance_node;
    sw_ray obj;
-   sw_make_object_ray(node / 4u, q.ray, obj);
+   sw_make_object_ray(q.as_address, node / 4u, q.ray, obj);
    return obj.direction;
 }
 mat4x3 sw_get_object_to_world(inout sw_ray_query_state q)
 {
    uint node = q.want_committed != 0u ? q.committed.instance_node : q.candidate.instance_node;
    uint w = node / 4u + 10u;
-   return mat4x3(vec3(tlas_f32(w), tlas_f32(w+4u), tlas_f32(w+8u)),
-      vec3(tlas_f32(w+1u), tlas_f32(w+5u), tlas_f32(w+9u)),
-      vec3(tlas_f32(w+2u), tlas_f32(w+6u), tlas_f32(w+10u)),
-      vec3(tlas_f32(w+3u), tlas_f32(w+7u), tlas_f32(w+11u)));
+   return mat4x3(vec3(blas_f32(q.as_address, w), blas_f32(q.as_address, w+4u), blas_f32(q.as_address, w+8u)),
+      vec3(blas_f32(q.as_address, w+1u), blas_f32(q.as_address, w+5u), blas_f32(q.as_address, w+9u)),
+      vec3(blas_f32(q.as_address, w+2u), blas_f32(q.as_address, w+6u), blas_f32(q.as_address, w+10u)),
+      vec3(blas_f32(q.as_address, w+3u), blas_f32(q.as_address, w+7u), blas_f32(q.as_address, w+11u)));
 }
 mat4x3 sw_get_world_to_object(inout sw_ray_query_state q)
 {

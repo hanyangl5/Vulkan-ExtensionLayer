@@ -23,6 +23,7 @@ static const VkBaseInStructure *opaque_suffix;
 static const char *expected_extensions[16];
 static uint32_t expected_extension_count;
 static VkResult downstream_result;
+static bool expect_private_dynamic_indexing;
 
 static const VkBaseInStructure *find_original(VkStructureType type) {
     for (const VkBaseInStructure *p = original->pNext; p; p = p->pNext)
@@ -37,6 +38,7 @@ static VKAPI_ATTR void VKAPI_CALL mock_features(VkPhysicalDevice p, VkPhysicalDe
     ++queries;
     features->features.shaderInt64 = missing_capability != 1;
     features->features.shaderInt16 = missing_capability != 2;
+    features->features.shaderStorageBufferArrayDynamicIndexing = missing_capability != 10;
     features->features.geometryShader = VK_TRUE;
     features->features.robustBufferAccess = VK_TRUE;
     unsigned seen = 0;
@@ -82,12 +84,26 @@ static VKAPI_ATTR void VKAPI_CALL mock_features(VkPhysicalDevice p, VkPhysicalDe
                 ++seen;
                 break;
             }
+            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_INDEXING_FEATURES: {
+                VkPhysicalDeviceDescriptorIndexingFeatures *f = (void *)next;
+                f->shaderStorageBufferArrayNonUniformIndexing = missing_capability != 11;
+                f->runtimeDescriptorArray = f->shaderSampledImageArrayNonUniformIndexing = VK_TRUE;
+                ++seen;
+                break;
+            }
+            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VARIABLE_POINTERS_FEATURES: {
+                VkPhysicalDeviceVariablePointersFeatures *f = (void *)next;
+                f->variablePointersStorageBuffer = missing_capability != 12;
+                f->variablePointers = VK_TRUE;
+                ++seen;
+                break;
+            }
             default:
                 REQUIRE(false);
                 break;
         }
     }
-    REQUIRE(seen == 6);
+    REQUIRE(seen == 8);
 }
 
 static VKAPI_ATTR void VKAPI_CALL mock_properties(VkPhysicalDevice p, VkPhysicalDeviceProperties *properties) {
@@ -98,6 +114,7 @@ static VKAPI_ATTR void VKAPI_CALL mock_properties(VkPhysicalDevice p, VkPhysical
 
 static void check_core(VkPhysicalDeviceFeatures actual, VkPhysicalDeviceFeatures expected) {
     expected.shaderInt64 = expected.shaderInt16 = VK_TRUE;
+    if (expect_private_dynamic_indexing) expected.shaderStorageBufferArrayDynamicIndexing = VK_TRUE;
     REQUIRE(!memcmp(&actual, &expected, sizeof(expected)));
 }
 
@@ -121,6 +138,10 @@ static size_t bool_payload_size(VkStructureType type) {
                 bufferDeviceAddressMultiDevice);
         PAYLOAD(VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_MEMORY_MODEL_FEATURES, VkPhysicalDeviceVulkanMemoryModelFeatures,
                 vulkanMemoryModelAvailabilityVisibilityChains);
+        PAYLOAD(VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_INDEXING_FEATURES, VkPhysicalDeviceDescriptorIndexingFeatures,
+                runtimeDescriptorArray);
+        PAYLOAD(VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VARIABLE_POINTERS_FEATURES, VkPhysicalDeviceVariablePointersFeatures,
+                variablePointers);
         default:
             REQUIRE(false);
             return 0;
@@ -153,6 +174,8 @@ static VKAPI_ATTR VkResult VKAPI_CALL mock_create(VkPhysicalDevice p, const VkDe
         if (i < expected_extension_count) REQUIRE(!strcmp(name, expected_extensions[i]));
     }
     unsigned core2 = 0, storage16 = 0, storage8 = 0, int8 = 0, scalar = 0, memory = 0, bda = 0;
+    unsigned descriptor = 0;
+    unsigned pointers = 0;
     for (const VkBaseInStructure *next = info->pNext; next; next = next->pNext) {
         switch (next->sType) {
             case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2: {
@@ -164,19 +187,33 @@ static VKAPI_ATTR VkResult VKAPI_CALL mock_create(VkPhysicalDevice p, const VkDe
                 break;
             }
             case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_FEATURES:
-                EXPECT_NODE(VkPhysicalDeviceVulkan11Features, next, expected.storageBuffer16BitAccess = VK_TRUE);
+                EXPECT_NODE(VkPhysicalDeviceVulkan11Features, next, expected.storageBuffer16BitAccess = VK_TRUE;
+                            if (expect_private_dynamic_indexing) expected.variablePointersStorageBuffer = VK_TRUE);
                 ++storage16;
+                ++pointers;
                 break;
             case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES:
                 EXPECT_NODE(
                     VkPhysicalDeviceVulkan12Features, next,
                     expected.storageBuffer8BitAccess = expected.shaderInt8 = expected.scalarBlockLayout = VK_TRUE;
-                    expected.vulkanMemoryModel = expected.vulkanMemoryModelDeviceScope = expected.bufferDeviceAddress = VK_TRUE);
+                    expected.vulkanMemoryModel = expected.vulkanMemoryModelDeviceScope = expected.bufferDeviceAddress = VK_TRUE;
+                    if (expect_private_dynamic_indexing) expected.shaderStorageBufferArrayNonUniformIndexing = VK_TRUE);
                 ++storage8;
                 ++int8;
                 ++scalar;
                 ++memory;
                 ++bda;
+                ++descriptor;
+                break;
+            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_INDEXING_FEATURES:
+                EXPECT_NODE(VkPhysicalDeviceDescriptorIndexingFeatures, next,
+                            if (expect_private_dynamic_indexing) expected.shaderStorageBufferArrayNonUniformIndexing = VK_TRUE);
+                ++descriptor;
+                break;
+            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VARIABLE_POINTERS_FEATURES:
+                EXPECT_NODE(VkPhysicalDeviceVariablePointersFeatures, next,
+                            if (expect_private_dynamic_indexing) expected.variablePointersStorageBuffer = VK_TRUE);
+                ++pointers;
                 break;
             case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_16BIT_STORAGE_FEATURES:
                 EXPECT_NODE(VkPhysicalDevice16BitStorageFeatures, next, expected.storageBuffer16BitAccess = VK_TRUE);
@@ -222,6 +259,8 @@ static VKAPI_ATTR VkResult VKAPI_CALL mock_create(VkPhysicalDevice p, const VkDe
         check_core(*info->pEnabledFeatures,
                    original->pEnabledFeatures ? *original->pEnabledFeatures : (VkPhysicalDeviceFeatures){0});
     REQUIRE(core2 <= 1 && storage16 == 1 && storage8 == 1 && int8 == 1 && scalar == 1 && memory == 1 && bda == 1);
+    REQUIRE(descriptor <= 1 && (!expect_private_dynamic_indexing || descriptor == 1));
+    REQUIRE(pointers <= 1 && (!expect_private_dynamic_indexing || pointers == 1));
     if (downstream_result == VK_SUCCESS) *device = created_device;
     return downstream_result;
 }
@@ -251,10 +290,12 @@ static void defaults(void) {
     opaque_suffix = NULL;
     missing_capability = 0;
     downstream_result = VK_SUCCESS;
+    expect_private_dynamic_indexing = false;
 }
 
 static void virtual_requests(void) {
     defaults();
+    expect_private_dynamic_indexing = true;
     VkLayerDeviceLink link = {0};
     VkLayerDeviceCreateInfo loader = {
         .sType = VK_STRUCTURE_TYPE_LOADER_DEVICE_CREATE_INFO, .function = VK_LAYER_LINK_INFO, .u.pLayerInfo = &link};
@@ -319,6 +360,7 @@ static void virtual_requests(void) {
 
 static void aggregate_and_individual_features(void) {
     defaults();
+    expect_private_dynamic_indexing = true;
     VkPhysicalDeviceVulkan12Features v12 = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES,
                                             .timelineSemaphore = VK_TRUE,
                                             .shaderFloat16 = VK_TRUE,
@@ -354,6 +396,7 @@ static void aggregate_and_individual_features(void) {
     VkPhysicalDevice16BitStorageFeatures storage16 = {
         .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_16BIT_STORAGE_FEATURES, .pNext = &storage8, .storageInputOutput16 = VK_TRUE};
     core.pNext = &storage16;
+    expect_private_dynamic_indexing = false;
     REQUIRE(call(&basic) == VK_SUCCESS);
     REQUIRE(!bda.bufferDeviceAddress && bda.bufferDeviceAddressCaptureReplay);
     REQUIRE(!memory.vulkanMemoryModel && memory.vulkanMemoryModelAvailabilityVisibilityChains);
@@ -398,15 +441,119 @@ static void versions_and_opaque_chains(void) {
     VkPhysicalDeviceRayQueryFeaturesKHR query = {
         .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_QUERY_FEATURES_KHR, .pNext = &suffix, .rayQuery = VK_TRUE};
     basic.pNext = &query;
+    expect_private_dynamic_indexing = true;
     REQUIRE(call(&basic) == VK_SUCCESS);
     REQUIRE(query.pNext == &suffix && suffix.payload[0] == 0x123456789abcdef0ull);
     basic.pNext = &suffix;
+    expect_private_dynamic_indexing = false;
     REQUIRE(call(&basic) == VK_SUCCESS);
     suffix.pNext = &query;
     query.pNext = NULL;
     unsigned before = creates;
     REQUIRE(call(&basic) == VK_ERROR_EXTENSION_NOT_PRESENT && creates == before);
     REQUIRE(suffix.pNext == &query && query.pNext == NULL);
+}
+
+static void descriptor_array_feature(void) {
+    defaults();
+    VkPhysicalDeviceFeatures core = {.samplerAnisotropy = VK_TRUE};
+    basic.pEnabledFeatures = &core;
+    /* A non-RT request neither requires nor privately enables this feature. */
+    missing_capability = 10;
+    REQUIRE(call(&basic) == VK_SUCCESS);
+    REQUIRE(!core.shaderStorageBufferArrayDynamicIndexing);
+
+    const char *extension = VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME;
+    basic.enabledExtensionCount = 1;
+    basic.ppEnabledExtensionNames = &extension;
+    expect_private_dynamic_indexing = true;
+    unsigned before = creates;
+    REQUIRE(call(&basic) == VK_ERROR_FEATURE_NOT_PRESENT && creates == before);
+    REQUIRE(!core.shaderStorageBufferArrayDynamicIndexing);
+
+    /* Legacy core features and Features2 both receive a private cloned bit. */
+    missing_capability = 0;
+    REQUIRE(call(&basic) == VK_SUCCESS);
+    REQUIRE(!core.shaderStorageBufferArrayDynamicIndexing);
+    VkPhysicalDeviceFeatures2 core2 = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2, .features = core};
+    basic.pNext = &core2;
+    basic.pEnabledFeatures = NULL;
+    REQUIRE(call(&basic) == VK_SUCCESS);
+    REQUIRE(!core2.features.shaderStorageBufferArrayDynamicIndexing);
+
+    /* A base ray-query feature is sufficient to trigger the same requirement,
+     * even when the caller did not repeat the extension name in this fixture. */
+    VkPhysicalDeviceRayQueryFeaturesKHR query = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_QUERY_FEATURES_KHR,
+                                                 .rayQuery = VK_TRUE};
+    core2.pNext = &query;
+    basic.enabledExtensionCount = 0;
+    missing_capability = 10;
+    before = creates;
+    REQUIRE(call(&basic) == VK_ERROR_FEATURE_NOT_PRESENT && creates == before);
+    REQUIRE(!core2.features.shaderStorageBufferArrayDynamicIndexing && query.rayQuery);
+
+    missing_capability = 11;
+    REQUIRE(call(&basic) == VK_ERROR_FEATURE_NOT_PRESENT && creates == before);
+    REQUIRE(!core2.features.shaderStorageBufferArrayDynamicIndexing && query.rayQuery);
+    missing_capability = 12;
+    REQUIRE(call(&basic) == VK_ERROR_FEATURE_NOT_PRESENT && creates == before);
+    REQUIRE(!core2.features.shaderStorageBufferArrayDynamicIndexing && query.rayQuery);
+
+    /* Edit an existing individual descriptor-indexing struct without enabling
+     * its unrelated options from the query or mutating the caller's payload. */
+    missing_capability = 0;
+    VkPhysicalDeviceDescriptorIndexingFeatures descriptor = {
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_INDEXING_FEATURES,
+        .pNext = &query,
+        .descriptorBindingPartiallyBound = VK_TRUE};
+    core2.pNext = &descriptor;
+    VkPhysicalDeviceDescriptorIndexingFeatures saved_descriptor = descriptor;
+    REQUIRE(call(&basic) == VK_SUCCESS);
+    REQUIRE(!memcmp(&descriptor, &saved_descriptor, sizeof(descriptor)));
+    REQUIRE(core2.pNext == &descriptor && !core2.features.shaderStorageBufferArrayDynamicIndexing);
+    VkPhysicalDeviceVariablePointersFeatures pointers = {
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VARIABLE_POINTERS_FEATURES, .pNext = &descriptor, .variablePointers = VK_TRUE};
+    core2.pNext = &pointers;
+    VkPhysicalDeviceVariablePointersFeatures saved_pointers = pointers;
+    REQUIRE(call(&basic) == VK_SUCCESS);
+    REQUIRE(!memcmp(&pointers, &saved_pointers, sizeof(pointers)));
+
+    /* Both the application and physical-device version participate in alias
+     * promotion. A private descriptor-indexing feature needs its EXT name
+     * below core 1.2, including when that alias was already requested. */
+    const char *required[] = {VK_KHR_16BIT_STORAGE_EXTENSION_NAME,       VK_KHR_8BIT_STORAGE_EXTENSION_NAME,
+                              VK_KHR_SHADER_FLOAT16_INT8_EXTENSION_NAME, VK_EXT_SCALAR_BLOCK_LAYOUT_EXTENSION_NAME,
+                              VK_KHR_VULKAN_MEMORY_MODEL_EXTENSION_NAME, VK_KHR_BUFFER_DEVICE_ADDRESS_EXTENSION_NAME,
+                              VK_KHR_VARIABLE_POINTERS_EXTENSION_NAME,   VK_EXT_DESCRIPTOR_INDEXING_EXTENSION_NAME};
+    for (uint32_t application_version = 0; application_version < 3; ++application_version) {
+        for (uint32_t device_version = 0; device_version < 3; ++device_version) {
+            instance.api_version = VK_MAKE_VERSION(1, application_version, 0);
+            driver_api = VK_MAKE_VERSION(1, device_version, 0);
+            expected_extension_count = 0;
+            for (unsigned i = 0; i < VKRT_ARRAY_SIZE(required); ++i)
+                if (application_version < (i == 0 || i == 6 ? 1u : 2u) || device_version < (i == 0 || i == 6 ? 1u : 2u))
+                    expected_extensions[expected_extension_count++] = required[i];
+            REQUIRE(call(&basic) == VK_SUCCESS);
+        }
+    }
+    instance.api_version = VK_API_VERSION_1_1;
+    driver_api = VK_API_VERSION_1_2;
+    const char *descriptor_alias = VK_EXT_DESCRIPTOR_INDEXING_EXTENSION_NAME;
+    basic.ppEnabledExtensionNames = &descriptor_alias;
+    basic.enabledExtensionCount = 1;
+    expected_extensions[0] = descriptor_alias;
+    expected_extension_count = 1;
+    for (unsigned i = 1; i < 6; ++i) expected_extensions[expected_extension_count++] = required[i];
+    REQUIRE(call(&basic) == VK_SUCCESS);
+
+    instance.api_version = VK_API_VERSION_1_0;
+    const char *pointers_alias = VK_KHR_VARIABLE_POINTERS_EXTENSION_NAME;
+    basic.ppEnabledExtensionNames = &pointers_alias;
+    expected_extensions[0] = pointers_alias;
+    expected_extension_count = 1;
+    for (unsigned i = 0; i < VKRT_ARRAY_SIZE(required); ++i)
+        if (i != 6) expected_extensions[expected_extension_count++] = required[i];
+    REQUIRE(call(&basic) == VK_SUCCESS);
 }
 
 static void rejection(void) {
@@ -477,6 +624,7 @@ int main(void) {
     virtual_requests();
     aggregate_and_individual_features();
     versions_and_opaque_chains();
+    descriptor_array_feature();
     rejection();
     printf("No-native-RT device creation boundary: %s (%u failures, %u creates, %u capability queries)\n",
            failures ? "FAIL" : "PASS", failures, creates, queries);

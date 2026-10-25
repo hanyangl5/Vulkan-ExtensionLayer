@@ -228,19 +228,62 @@ static inline void vkrt_mutex_unlock(vkrt_mutex_t *m) { pthread_mutex_unlock(m);
 struct vkrt_global {
    struct vkrt_map  objects;
    vkrt_mutex_t     objects_lock;
-   bool             initialised;
+#if defined(_WIN32)
+   INIT_ONCE initialization_once;
+#else
+   pthread_once_t initialization_once;
+#endif
 };
 
+/* The once state belongs to the registry, not to each translation unit that
+ * includes these helpers. In particular, pthread_once_t must have its platform
+ * initializer rather than relying on an all-zero representation. */
+#if defined(_WIN32)
+#define VKRT_GLOBAL_INITIALIZER {.initialization_once = INIT_ONCE_STATIC_INIT}
+#else
+#define VKRT_GLOBAL_INITIALIZER {.initialization_once = PTHREAD_ONCE_INIT}
+#endif
+
 extern struct vkrt_global vkrt_global;
+
+#if defined(_WIN32)
+static inline BOOL CALLBACK vkrt_global_initialize(PINIT_ONCE once, PVOID parameter, PVOID *context) {
+    (void)once;
+    (void)parameter;
+    (void)context;
+    vkrt_map_init(&vkrt_global.objects);
+    vkrt_mutex_init(&vkrt_global.objects_lock);
+    return TRUE;
+}
+#else
+static inline void vkrt_global_initialize(void) {
+    /* Map initialization does not allocate. A mutex initialization failure
+     * cannot be reported by the void registry API; never publish a registry
+     * whose lock is unusable. No live registry is destroyed or reinitialized. */
+    vkrt_map_init(&vkrt_global.objects);
+    int error = pthread_mutex_init(&vkrt_global.objects_lock, NULL);
+    if (error) {
+        VKRT_LOG_ERR("object registry mutex initialization failed: %d", error);
+        abort();
+    }
+}
+#endif
 
 static inline void
 vkrt_global_ensure(void)
 {
-   if (!vkrt_global.initialised) {
-      vkrt_map_init(&vkrt_global.objects);
-      vkrt_mutex_init(&vkrt_global.objects_lock);
-      vkrt_global.initialised  = true;
-   }
+#if defined(_WIN32)
+    if (!InitOnceExecuteOnce(&vkrt_global.initialization_once, vkrt_global_initialize, NULL, NULL)) {
+        VKRT_LOG_ERR("object registry initialization failed: %lu", (unsigned long)GetLastError());
+        abort();
+    }
+#else
+    int error = pthread_once(&vkrt_global.initialization_once, vkrt_global_initialize);
+    if (error) {
+        VKRT_LOG_ERR("object registry initialization failed: %d", error);
+        abort();
+    }
+#endif
 }
 
 static inline void

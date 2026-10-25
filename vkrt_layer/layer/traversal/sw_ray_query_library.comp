@@ -36,6 +36,7 @@ main()
 {
    if (kKeepAlive != 0) {
       sw_ray_query_state q;
+      q.as_address   = 0ul;
       q.ray_flags    = 0u;
       q.cull_mask    = 0u;
       q.ray.origin   = vec3(0.0);

@@ -144,7 +144,7 @@ def snapshot_layer(source_dir, output_dir, mode):
     }
 
 
-def run_environment(mode, snapshot):
+def run_environment(mode, snapshot, validation_dir=None):
     env = os.environ.copy()
     removed = {key: env.pop(key) for key in LAYER_ENV if key in env}
     overrides = {"VK_LOADER_LAYERS_DISABLE": "~implicit~"}
@@ -152,6 +152,9 @@ def run_environment(mode, snapshot):
         overrides.update(VK_INSTANCE_LAYERS=LAYERS[mode], VK_LAYER_PATH=str(snapshot))
         if mode == "ray-query":
             overrides["ENABLE_VKRT_SOFTWARE_RAY_QUERY"] = "1"
+    if validation_dir:
+        overrides["VK_LAYER_PATH"] = os.pathsep.join(
+            [str(path) for path in (snapshot, validation_dir) if path is not None])
     env.update(overrides)
     # Keep reproducibility-relevant driver/loader inputs without dumping API
     # keys, credentials or unrelated inherited process environment variables.
@@ -225,7 +228,20 @@ def execute(args):
     snapshot, layer = (None, None)
     if args.mode != "native":
         snapshot, layer = snapshot_layer(args.layer_dir.resolve(strict=True), output, args.mode)
-    env, env_record = run_environment(args.mode, snapshot)
+    validation = None
+    validation_dir = args.validation_layer_dir.resolve(strict=True) if args.validation_layer_dir else None
+    if validation_dir:
+        manifest_path = validation_dir / "VkLayer_khronos_validation.json"
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        if manifest.get("layer", {}).get("name") != "VK_LAYER_KHRONOS_validation":
+            raise ValueError(f"expected Khronos validation manifest in {validation_dir}")
+        library = Path(manifest["layer"]["library_path"])
+        if not library.is_absolute():
+            library = validation_dir / library
+        validation = {"manifest": str(manifest_path), "manifest_sha256": sha256(manifest_path),
+                      "library": str(library.resolve(strict=True)), "library_sha256": sha256(library),
+                      "scope": "original SDK installation, hashed but not copied"}
+    env, env_record = run_environment(args.mode, snapshot, validation_dir)
     device_info = None
     if args.device_info_file:
         device_source = args.device_info_file.resolve(strict=True)
@@ -248,6 +264,7 @@ def execute(args):
         "case_list_sha256": sha256(args.cases),
         "selected_cases": cases,
         "layer": layer,
+        "validation": validation,
         "layer_revision_declared": args.layer_revision,
         "device_info": device_info,
         "environment": env_record,
@@ -267,6 +284,8 @@ def execute(args):
                    "--deqp-shadercache=disable", "--deqp-watchdog=enable", "--deqp-crashhandler=enable",
                    f"--deqp-watchdog-total-time-limit={watchdog}",
                    f"--deqp-watchdog-interval-time-limit={min(30, watchdog)}", f"--deqp-log-filename={qpa}"]
+        if validation_dir:
+            command += ["--deqp-vk-validation=enable", "--deqp-vk-print-validation-errors"]
         print(f"[{ordinal}/{len(cases)}] {args.mode}: {case}", flush=True)
         start = time.monotonic()
         timed_out, launch_error, exit_code = False, None, None
@@ -318,6 +337,8 @@ def main():
     parser.add_argument("--cts-revision", help="declared CTS source revision; binary SHA and QPA release are recorded separately")
     parser.add_argument("--layer-revision", help="unvalidated revision/build label for the snapshotted fallback library")
     parser.add_argument("--device-info-file", type=Path, help="snapshot a user-supplied device report beside the logs")
+    parser.add_argument("--validation-layer-dir", type=Path,
+                        help="enable CTS Vulkan validation using this SDK Khronos validation manifest directory")
     args = parser.parse_args()
     if not math.isfinite(args.timeout) or args.timeout <= 0:
         parser.error("--timeout must be positive and finite")

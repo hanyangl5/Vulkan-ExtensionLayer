@@ -20,16 +20,13 @@ struct vkrt_virtual_as {
    VkDeviceSize                   offset;
    VkDeviceSize                   size;
    VkDeviceAddress                header_address; /* &vk_ir_header        */
-   VkDeviceAddress                node_address;
-   VkDeviceAddress                leaf_address;
-
-   uint32_t                       build_generation;
-
-   /* Build inputs, captured at vkCmdBuildAccelerationStructuresKHR time
-    * so the compute builder can read them by device address. */
-   uint32_t                       geometry_count;
-   uint32_t                       primitive_count;
-   uint32_t                       instance_count;
+   VkBuffer address_cell_buffer;
+   VkDeviceMemory address_cell_memory;
+   void *address_cell_mapping;
+   bool address_cell_coherent;
+   vkrt_mutex_t address_lock;
+   bool has_allocator;
+   VkAllocationCallbacks allocator;
 };
 
 /* ------------------------------------------------------------------ */
@@ -47,6 +44,12 @@ struct vkrt_device_data {
    VkDevice                    device;
    VkPhysicalDevice            physical_device;
    struct vkrt_instance_data  *instance_data;
+   /* Immutable enabled queue families. Hidden AS cells are shared across
+    * every family the application can use, without exposed ownership state. */
+   uint32_t queue_family_count;
+   uint32_t *queue_families;
+   bool queue_families_have_allocator;
+   VkAllocationCallbacks queue_families_allocator;
 
    /* Original application request, before emulated names are stripped. This
     * is not evidence that a native RT feature was enabled downstream. */
@@ -115,9 +118,11 @@ VkResult vkrt_rewrite_shader_module(struct vkrt_device_data *dev,
                                     bool *uses_ray_tracing_pipeline);
 
 /* vkrt_virtual_as.c */
-VkResult vkrt_create_virtual_as(struct vkrt_device_data *dev,
-                                const VkAccelerationStructureCreateInfoKHR *ci,
-                                VkAccelerationStructureKHR *out_as);
+VkResult vkrt_device_queue_families_init(struct vkrt_device_data *dev, const VkDeviceCreateInfo *ci,
+                                         const VkAllocationCallbacks *allocator);
+void vkrt_device_queue_families_finish(struct vkrt_device_data *dev);
+VkResult vkrt_create_virtual_as(struct vkrt_device_data *dev, const VkAccelerationStructureCreateInfoKHR *ci,
+                                const VkAllocationCallbacks *allocator, VkAccelerationStructureKHR *out_as);
 void     vkrt_destroy_virtual_as(struct vkrt_device_data *dev,
                                  VkAccelerationStructureKHR as);
 void     vkrt_as_build_sizes(struct vkrt_device_data *dev,

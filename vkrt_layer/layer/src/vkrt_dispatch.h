@@ -108,6 +108,9 @@ struct vkrt_device_dispatch {
    PFN_vkGetBufferDeviceAddress             GetBufferDeviceAddress;
    PFN_vkGetBufferMemoryRequirements        GetBufferMemoryRequirements;
    PFN_vkBindBufferMemory                   BindBufferMemory;
+   PFN_vkMapMemory MapMemory;
+   PFN_vkUnmapMemory UnmapMemory;
+   PFN_vkFlushMappedMemoryRanges FlushMappedMemoryRanges;
 
    /* Acceleration structure (virtualised in bootstrap mode these are
     * forwarded to the ICD only for object bookkeeping; the actual build
@@ -177,6 +180,9 @@ vkrt_device_dispatch_load(struct vkrt_device_dispatch *t,
    if (!t->QueueSubmit2) t->QueueSubmit2 = (PFN_vkQueueSubmit2)gdpa(device, "vkQueueSubmit2KHR");
    VKRT_LOAD_D(CreateBuffer);
    VKRT_LOAD_D(AllocateMemory);
+   VKRT_LOAD_D(MapMemory);
+   VKRT_LOAD_D(UnmapMemory);
+   VKRT_LOAD_D(FlushMappedMemoryRanges);
    VKRT_LOAD_D(CreatePipelineLayout);
    VKRT_LOAD_D(CreateShaderModule);
    VKRT_LOAD_D(UpdateDescriptorSets);

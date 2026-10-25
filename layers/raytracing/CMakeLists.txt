@@ -27,7 +27,7 @@ configure_file(continuation_runtime.h.in continuation_runtime.h @ONLY)
 set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/bvh.glsl")
 file(READ "${CMAKE_CURRENT_SOURCE_DIR}/bvh.glsl" BVH_SHADER_SOURCE)
 configure_file(bvh_shader.h.in bvh_shader.h @ONLY)
-add_library(vel_rt_compiler STATIC compiler.cpp continuations.cpp bvh.cpp)
+add_library(vel_rt_compiler STATIC compiler.cpp continuations.cpp frame_emitter.cpp bvh.cpp)
 target_link_libraries(vel_rt_compiler PUBLIC spirv-cross-glsl spirv-cross-core glslang::glslang glslang::SPIRV
     glslang::glslang-default-resource-limits SPIRV-Tools-opt SPIRV-Tools-link SPIRV-Tools-static)
 target_include_directories(vel_rt_compiler PUBLIC . ${CMAKE_CURRENT_BINARY_DIR} ${Vulkan_INCLUDE_DIRS})
@@ -64,5 +64,10 @@ set_tests_properties(ray_tracing_fallback_device_features PROPERTIES WORKING_DIR
 add_executable(vel_rt_continuation_tests continuation_tests.cpp)
 target_link_libraries(vel_rt_continuation_tests PRIVATE vel_rt_compiler)
 add_test(NAME ray_tracing_fallback_continuation_analysis COMMAND vel_rt_continuation_tests)
+
+add_executable(vel_rt_frame_emitter_tests frame_emitter_tests.cpp)
+target_link_libraries(vel_rt_frame_emitter_tests PRIVATE vel_rt_compiler Vulkan::Vulkan)
+add_test(NAME ray_tracing_fallback_typed_frame_execution COMMAND vel_rt_frame_emitter_tests)
+set_tests_properties(ray_tracing_fallback_typed_frame_execution PROPERTIES SKIP_RETURN_CODE 77)
 
 add_test(NAME ray_tracing_fallback_pinned_sources COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/upstream/verify.py")

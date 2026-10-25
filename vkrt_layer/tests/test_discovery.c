@@ -3,7 +3,7 @@
  */
 #include "vkrt_layer.h"
 
-struct vkrt_global vkrt_global;
+struct vkrt_global vkrt_global = VKRT_GLOBAL_INITIALIZER;
 #define HANDLE(type, value) ((type)(uintptr_t)(value))
 #define REQUIRE(x)                                               \
     do {                                                         \

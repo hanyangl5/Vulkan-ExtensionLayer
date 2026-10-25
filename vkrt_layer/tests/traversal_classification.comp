@@ -9,13 +9,14 @@
 layout(local_size_x = 1) in;
 layout(set = 0, binding = 1, std430) buffer Results { uvec4 values[]; } result;
 layout(set = 0, binding = 2, std430) readonly buffer Cases { uvec4 values[]; } input_cases;
-layout(push_constant, scalar) uniform Push { uint64_t nodes; } pc;
+layout(push_constant, scalar) uniform Push { uint64_t nodes; uint64_t tlas; } pc;
 
 void main()
 {
    uint index = gl_GlobalInvocationID.x;
    uvec4 test_case = input_cases.values[index];
    sw_ray_query_state q;
+   q.as_address = pc.tlas;
    q.ray_flags = test_case.y;
    q.current_instance = 0u;
    q.candidate.opaque = false;
