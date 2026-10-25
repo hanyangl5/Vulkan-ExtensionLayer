@@ -309,8 +309,41 @@ target_link_libraries(test_gpu_build PRIVATE vkrt_cpu_bvh ${Vulkan_LIBRARIES})
 set_target_properties(test_gpu_build PROPERTIES C_STANDARD 11)
 add_dependencies(test_gpu_build vkrt_test_rq_spv)
 
+set(VKRT_TEST_GETTER_SPV ${CMAKE_CURRENT_BINARY_DIR}/rq_sbt_offset.spv)
+add_custom_command(
+   OUTPUT ${VKRT_TEST_GETTER_SPV}
+   COMMAND ${VKRT_GLSLC} -fshader-stage=compute --target-env=vulkan1.2
+      ${CMAKE_CURRENT_SOURCE_DIR}/../tests/rq_sbt_offset.comp -o ${VKRT_TEST_GETTER_SPV}
+   COMMAND ${VKRT_SPIRV_VAL} --target-env vulkan1.2 ${VKRT_TEST_GETTER_SPV}
+   DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/../tests/rq_sbt_offset.comp
+   COMMENT "Compiling baseline ray-query SBT-offset getter fixture"
+   VERBATIM
+)
+add_custom_target(vkrt_test_getter_spv DEPENDS ${VKRT_TEST_GETTER_SPV})
+add_dependencies(test_spirv_lower vkrt_traversal_spv vkrt_test_rq_spv vkrt_test_getter_spv)
+
 include(CTest)
 if(BUILD_TESTING)
+   set(VKRT_CLASSIFICATION_SPV ${CMAKE_CURRENT_BINARY_DIR}/traversal_classification.spv)
+   add_custom_command(
+      OUTPUT ${VKRT_CLASSIFICATION_SPV}
+      COMMAND ${VKRT_GLSLC} -fshader-stage=compute --target-env=vulkan1.2
+         -I ${CMAKE_CURRENT_SOURCE_DIR}/bvh -I ${CMAKE_CURRENT_SOURCE_DIR}/traversal
+         ${CMAKE_CURRENT_SOURCE_DIR}/../tests/traversal_classification.comp -o ${VKRT_CLASSIFICATION_SPV}
+      COMMAND ${VKRT_SPIRV_VAL} --target-env vulkan1.2 --scalar-block-layout ${VKRT_CLASSIFICATION_SPV}
+      DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/../tests/traversal_classification.comp
+         ${CMAKE_CURRENT_SOURCE_DIR}/traversal/sw_ray_query.glsl
+         ${CMAKE_CURRENT_SOURCE_DIR}/bvh/vk_bvh_defines.h
+         ${CMAKE_CURRENT_SOURCE_DIR}/bvh/bvh_ir_contract.h
+      COMMENT "Compiling production traversal helper semantics test"
+      VERBATIM
+   )
+   add_custom_target(vkrt_classification_spv DEPENDS ${VKRT_CLASSIFICATION_SPV})
+   add_executable(test_traversal_classification ../tests/test_traversal_classification.c)
+   target_include_directories(test_traversal_classification PRIVATE ${Vulkan_INCLUDE_DIRS})
+   target_link_libraries(test_traversal_classification PRIVATE ${Vulkan_LIBRARIES})
+   set_target_properties(test_traversal_classification PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED ON)
+   add_dependencies(test_traversal_classification vkrt_classification_spv)
    add_executable(test_host_translation ../tests/test_host_translation.c src/vkrt_translate.c)
    target_include_directories(test_host_translation PRIVATE src ${CMAKE_CURRENT_BINARY_DIR} ${Vulkan_INCLUDE_DIRS})
    set_target_properties(test_host_translation PROPERTIES C_STANDARD 11)
@@ -328,6 +361,13 @@ if(BUILD_TESTING)
    set_tests_properties(vkrt.host_translation vkrt.spirv_ids PROPERTIES LABELS "offline")
    add_test(NAME vkrt.spirv_lower COMMAND test_spirv_lower
       ${VKRT_TEST_RQ_SPV} ${VKRT_TRAVERSAL_SPV} ${CMAKE_CURRENT_BINARY_DIR}/ctest_lowered.spv)
+   add_test(NAME vkrt.spirv_lower.sbt_offset COMMAND test_spirv_lower
+      ${VKRT_TEST_GETTER_SPV} ${VKRT_TRAVERSAL_SPV} ${CMAKE_CURRENT_BINARY_DIR}/ctest_sbt_offset_lowered.spv
+      --require-sbt-offset)
+   set_tests_properties(vkrt.spirv_lower.sbt_offset PROPERTIES LABELS "offline")
+   add_test(NAME vkrt.traversal_classification COMMAND test_traversal_classification ${VKRT_CLASSIFICATION_SPV})
+   set_tests_properties(vkrt.traversal_classification PROPERTIES
+      ENVIRONMENT "VK_INSTANCE_LAYERS=" LABELS "gpu;software_compute;no_native_rt" TIMEOUT 120)
    add_test(NAME vkrt.cpu_fixture COMMAND test_single_tri)
    add_test(NAME vkrt.gpu_build.software COMMAND test_gpu_build)
    add_test(NAME vkrt.gpu_build.native COMMAND test_gpu_build)

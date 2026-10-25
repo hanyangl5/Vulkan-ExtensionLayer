@@ -45,74 +45,74 @@ namespace {
 
 /* SPIR-V opcodes we touch. */
 enum : uint16_t {
-   SpvOpNop                        = 0,
-   SpvOpName                       = 5,
-   SpvOpMemberName                 = 6,
-   SpvOpExtInstImport              = 11,
-   SpvOpExtInst                    = 12,
-   SpvOpMemoryModel                = 14,
-   SpvOpEntryPoint                 = 15,
-   SpvOpExecutionMode              = 16,
-   SpvOpCapability                 = 17,
-   SpvOpTypeVoid                   = 19,
-   SpvOpTypeBool                   = 20,
-   SpvOpTypeInt                    = 21,
-   SpvOpTypeFloat                  = 22,
-   SpvOpTypeVector                 = 23,
-   SpvOpTypeMatrix                 = 24,
-   SpvOpTypeArray                  = 28,
-   SpvOpTypeRuntimeArray           = 29,
-   SpvOpTypePointer                = 32,
-   SpvOpTypeFunction               = 33,
-   SpvOpConstant                   = 43,
-   SpvOpConstantTrue               = 41,
-   SpvOpConstantFalse              = 42,
-   SpvOpFunction                   = 54,
-   SpvOpFunctionEnd                = 56,
-   SpvOpFunctionCall               = 57,
-   SpvOpFunctionParameter          = 55,
-   SpvOpVariable                   = 59,
-   SpvOpLoad                       = 61,
-   SpvOpStore                      = 62,
-   SpvOpAccessChain                = 65,
-   SpvOpDecorate                    = 71,
-   SpvOpMemberDecorate              = 72,
-   SpvOpTypeStruct                  = 30,
-   SpvOpBitcast                     = 124,
-   SpvOpConvertPtrToU               = 117,
-   SpvOpUndef                       = 1,
+    SpvOpNop = 0,
+    SpvOpName = 5,
+    SpvOpMemberName = 6,
+    SpvOpExtInstImport = 11,
+    SpvOpExtInst = 12,
+    SpvOpMemoryModel = 14,
+    SpvOpEntryPoint = 15,
+    SpvOpExecutionMode = 16,
+    SpvOpCapability = 17,
+    SpvOpTypeVoid = 19,
+    SpvOpTypeBool = 20,
+    SpvOpTypeInt = 21,
+    SpvOpTypeFloat = 22,
+    SpvOpTypeVector = 23,
+    SpvOpTypeMatrix = 24,
+    SpvOpTypeArray = 28,
+    SpvOpTypeRuntimeArray = 29,
+    SpvOpTypePointer = 32,
+    SpvOpTypeFunction = 33,
+    SpvOpConstant = 43,
+    SpvOpConstantTrue = 41,
+    SpvOpConstantFalse = 42,
+    SpvOpFunction = 54,
+    SpvOpFunctionEnd = 56,
+    SpvOpFunctionCall = 57,
+    SpvOpFunctionParameter = 55,
+    SpvOpVariable = 59,
+    SpvOpLoad = 61,
+    SpvOpStore = 62,
+    SpvOpAccessChain = 65,
+    SpvOpDecorate = 71,
+    SpvOpMemberDecorate = 72,
+    SpvOpTypeStruct = 30,
+    SpvOpBitcast = 124,
+    SpvOpConvertPtrToU = 117,
+    SpvOpUndef = 1,
 
-   SpvOpTypeRayQueryKHR             = 4472,
-   SpvOpRayQueryInitializeKHR       = 4473,
-   SpvOpRayQueryTerminateKHR        = 4474,
-   SpvOpRayQueryGenerateIntersectionKHR = 4475,
-   SpvOpRayQueryConfirmIntersectionKHR  = 4476,
-   SpvOpRayQueryProceedKHR          = 4477,
-   SpvOpRayQueryGetIntersectionTypeKHR  = 4479,
-   /* VK_KHR_ray_tracing_maintenance1 -- these are in the 6000 block, NOT
-    * the 4480s. Getting this wrong silently leaves them unrewritten. */
-   SpvOpRayQueryGetRayTMinKHR        = 6016,
-   SpvOpRayQueryGetRayFlagsKHR       = 6017,
-   SpvOpRayQueryGetIntersectionTKHR = 6018,
-   SpvOpRayQueryGetIntersectionInstanceCustomIndexKHR = 6019,
-   SpvOpRayQueryGetIntersectionInstanceIdKHR = 6020,
-   SpvOpRayQueryGetIntersectionInstanceShaderBindingTableRecordOffsetKHR = 6021,
-   SpvOpRayQueryGetIntersectionGeometryIndexKHR = 6022,
-   SpvOpRayQueryGetIntersectionPrimitiveIndexKHR = 6023,
-   SpvOpRayQueryGetIntersectionBarycentricsKHR = 6024,
-   SpvOpRayQueryGetIntersectionFrontFaceKHR = 6025,
-   SpvOpRayQueryGetIntersectionCandidateAABBOpaqueKHR = 6026,
-   SpvOpRayQueryGetIntersectionObjectRayDirectionKHR = 6027,
-   SpvOpRayQueryGetIntersectionObjectRayOriginKHR = 6028,
-   SpvOpRayQueryGetWorldRayDirectionKHR = 6029,
-   SpvOpRayQueryGetWorldRayOriginKHR  = 6030,
-   SpvOpRayQueryGetIntersectionObjectToWorldKHR = 6031,
-   SpvOpRayQueryGetIntersectionWorldToObjectKHR = 6032,
-   SpvOpRayQueryGetIntersectionTriangleVertexPositionsKHR = 5340,
-   SpvOpRayQueryGetClusterIdNV       = 5345,
+    SpvOpTypeRayQueryKHR = 4472,
+    SpvOpRayQueryInitializeKHR = 4473,
+    SpvOpRayQueryTerminateKHR = 4474,
+    SpvOpRayQueryGenerateIntersectionKHR = 4475,
+    SpvOpRayQueryConfirmIntersectionKHR = 4476,
+    SpvOpRayQueryProceedKHR = 4477,
+    SpvOpRayQueryGetIntersectionTypeKHR = 4479,
+    /* Core SPV_KHR_ray_query accessors are in the 6000 block, NOT
+     * the 4480s. Getting this wrong silently leaves them unrewritten. */
+    SpvOpRayQueryGetRayTMinKHR = 6016,
+    SpvOpRayQueryGetRayFlagsKHR = 6017,
+    SpvOpRayQueryGetIntersectionTKHR = 6018,
+    SpvOpRayQueryGetIntersectionInstanceCustomIndexKHR = 6019,
+    SpvOpRayQueryGetIntersectionInstanceIdKHR = 6020,
+    SpvOpRayQueryGetIntersectionInstanceShaderBindingTableRecordOffsetKHR = 6021,
+    SpvOpRayQueryGetIntersectionGeometryIndexKHR = 6022,
+    SpvOpRayQueryGetIntersectionPrimitiveIndexKHR = 6023,
+    SpvOpRayQueryGetIntersectionBarycentricsKHR = 6024,
+    SpvOpRayQueryGetIntersectionFrontFaceKHR = 6025,
+    SpvOpRayQueryGetIntersectionCandidateAABBOpaqueKHR = 6026,
+    SpvOpRayQueryGetIntersectionObjectRayDirectionKHR = 6027,
+    SpvOpRayQueryGetIntersectionObjectRayOriginKHR = 6028,
+    SpvOpRayQueryGetWorldRayDirectionKHR = 6029,
+    SpvOpRayQueryGetWorldRayOriginKHR = 6030,
+    SpvOpRayQueryGetIntersectionObjectToWorldKHR = 6031,
+    SpvOpRayQueryGetIntersectionWorldToObjectKHR = 6032,
+    SpvOpRayQueryGetIntersectionTriangleVertexPositionsKHR = 5340,
+    SpvOpRayQueryGetClusterIdNV = 5345,
 
-   SpvOpTypeAccelerationStructureKHR = 5341,
-   SpvOpConvertUToAccelerationStructureKHR = 4447,
+    SpvOpTypeAccelerationStructureKHR = 5341,
+    SpvOpConvertUToAccelerationStructureKHR = 4447,
 };
 
 /* Decoration / storage-class / enum values. */
@@ -1034,28 +1034,29 @@ struct RqOp {
 };
 
 const RqOp kRqOps[] = {
-   {SpvOpRayQueryInitializeKHR,       "sw_ray_query_initialize",          false},
-   {SpvOpRayQueryProceedKHR,          "sw_ray_query_proceed",             true},
-   {SpvOpRayQueryTerminateKHR,        "sw_ray_query_terminate",           false},
-   {SpvOpRayQueryConfirmIntersectionKHR, "sw_ray_query_confirm",          false},
-   {SpvOpRayQueryGenerateIntersectionKHR, "sw_ray_query_generate_intersection", false},
-   {SpvOpRayQueryGetIntersectionTypeKHR, "sw_get_intersection_type",      true},
-   {SpvOpRayQueryGetIntersectionTKHR, "sw_get_intersection_t",            true},
-   {SpvOpRayQueryGetIntersectionBarycentricsKHR, "sw_get_intersection_barycentrics", true},
-   {SpvOpRayQueryGetIntersectionPrimitiveIndexKHR, "sw_get_intersection_primitive_index", true},
-   {SpvOpRayQueryGetIntersectionGeometryIndexKHR, "sw_get_intersection_geometry_index", true},
-   {SpvOpRayQueryGetIntersectionInstanceIdKHR, "sw_get_intersection_instance_id", true},
-   {SpvOpRayQueryGetIntersectionInstanceCustomIndexKHR, "sw_get_intersection_instance_custom_index", true},
-   {SpvOpRayQueryGetIntersectionFrontFaceKHR, "sw_get_intersection_front_face", true},
-   {SpvOpRayQueryGetIntersectionCandidateAABBOpaqueKHR, "sw_get_intersection_candidate_aabb_opaque", true},
-   {SpvOpRayQueryGetWorldRayOriginKHR, "sw_get_world_ray_origin",         true},
-   {SpvOpRayQueryGetIntersectionObjectRayOriginKHR, "sw_get_object_ray_origin", true},
-   {SpvOpRayQueryGetIntersectionObjectRayDirectionKHR, "sw_get_object_ray_direction", true},
-   {SpvOpRayQueryGetIntersectionObjectToWorldKHR, "sw_get_object_to_world", true},
-   {SpvOpRayQueryGetIntersectionWorldToObjectKHR, "sw_get_world_to_object", true},
-   {SpvOpRayQueryGetWorldRayDirectionKHR, "sw_get_world_ray_direction",   true},
-   {SpvOpRayQueryGetRayTMinKHR,       "sw_get_ray_tmin",                  true},
-   {SpvOpRayQueryGetRayFlagsKHR,      "sw_get_ray_flags",                 true},
+    {SpvOpRayQueryInitializeKHR, "sw_ray_query_initialize", false},
+    {SpvOpRayQueryProceedKHR, "sw_ray_query_proceed", true},
+    {SpvOpRayQueryTerminateKHR, "sw_ray_query_terminate", false},
+    {SpvOpRayQueryConfirmIntersectionKHR, "sw_ray_query_confirm", false},
+    {SpvOpRayQueryGenerateIntersectionKHR, "sw_ray_query_generate_intersection", false},
+    {SpvOpRayQueryGetIntersectionTypeKHR, "sw_get_intersection_type", true},
+    {SpvOpRayQueryGetIntersectionTKHR, "sw_get_intersection_t", true},
+    {SpvOpRayQueryGetIntersectionBarycentricsKHR, "sw_get_intersection_barycentrics", true},
+    {SpvOpRayQueryGetIntersectionPrimitiveIndexKHR, "sw_get_intersection_primitive_index", true},
+    {SpvOpRayQueryGetIntersectionGeometryIndexKHR, "sw_get_intersection_geometry_index", true},
+    {SpvOpRayQueryGetIntersectionInstanceIdKHR, "sw_get_intersection_instance_id", true},
+    {SpvOpRayQueryGetIntersectionInstanceCustomIndexKHR, "sw_get_intersection_instance_custom_index", true},
+    {SpvOpRayQueryGetIntersectionInstanceShaderBindingTableRecordOffsetKHR, "sw_get_intersection_instance_sbt_offset", true},
+    {SpvOpRayQueryGetIntersectionFrontFaceKHR, "sw_get_intersection_front_face", true},
+    {SpvOpRayQueryGetIntersectionCandidateAABBOpaqueKHR, "sw_get_intersection_candidate_aabb_opaque", true},
+    {SpvOpRayQueryGetWorldRayOriginKHR, "sw_get_world_ray_origin", true},
+    {SpvOpRayQueryGetIntersectionObjectRayOriginKHR, "sw_get_object_ray_origin", true},
+    {SpvOpRayQueryGetIntersectionObjectRayDirectionKHR, "sw_get_object_ray_direction", true},
+    {SpvOpRayQueryGetIntersectionObjectToWorldKHR, "sw_get_object_to_world", true},
+    {SpvOpRayQueryGetIntersectionWorldToObjectKHR, "sw_get_world_to_object", true},
+    {SpvOpRayQueryGetWorldRayDirectionKHR, "sw_get_world_ray_direction", true},
+    {SpvOpRayQueryGetRayTMinKHR, "sw_get_ray_tmin", true},
+    {SpvOpRayQueryGetRayFlagsKHR, "sw_get_ray_flags", true},
 };
 
 struct IdGen {
@@ -1806,22 +1807,19 @@ vkrt_spirv_lower(const uint32_t *user_words, size_t user_word_count,
                        merged[i + 2],
                        val_ty.count(merged[i + 2]) ? val_ty[merged[i + 2]] : u32_ty,
                        val_ty.count(merged[i + 2]) ? val_ty[merged[i + 2]] : u32_ty);
-         } else if (len >= 5 && (op == SpvOpRayQueryGetIntersectionTypeKHR ||
-                                 op == SpvOpRayQueryGetIntersectionTKHR ||
-                                 op == SpvOpRayQueryGetIntersectionBarycentricsKHR ||
-                                 op == SpvOpRayQueryGetIntersectionPrimitiveIndexKHR ||
-                                 op == SpvOpRayQueryGetIntersectionGeometryIndexKHR ||
-                                 op == SpvOpRayQueryGetIntersectionInstanceIdKHR ||
-                                 op == SpvOpRayQueryGetIntersectionInstanceCustomIndexKHR ||
-                                 op == SpvOpRayQueryGetIntersectionObjectRayOriginKHR ||
-                                 op == SpvOpRayQueryGetIntersectionObjectRayDirectionKHR ||
-                                 op == SpvOpRayQueryGetIntersectionObjectToWorldKHR ||
-                                 op == SpvOpRayQueryGetIntersectionWorldToObjectKHR ||
-                                 op == SpvOpRayQueryGetIntersectionFrontFaceKHR)) {
-            /* OpX %rty %res %rq %committed  ->  store committed into q */
-            emit_store(&out, merged[i + 3], {m_of("want_committed")},
-                       merged[i + 4],
-                       val_ty.count(merged[i + 4]) ? val_ty[merged[i + 4]] : bool_ty, u32_ty);
+         } else if (len >= 5 &&
+                    (op == SpvOpRayQueryGetIntersectionTypeKHR || op == SpvOpRayQueryGetIntersectionTKHR ||
+                     op == SpvOpRayQueryGetIntersectionBarycentricsKHR || op == SpvOpRayQueryGetIntersectionPrimitiveIndexKHR ||
+                     op == SpvOpRayQueryGetIntersectionGeometryIndexKHR || op == SpvOpRayQueryGetIntersectionInstanceIdKHR ||
+                     op == SpvOpRayQueryGetIntersectionInstanceCustomIndexKHR ||
+                     op == SpvOpRayQueryGetIntersectionInstanceShaderBindingTableRecordOffsetKHR ||
+                     op == SpvOpRayQueryGetIntersectionObjectRayOriginKHR ||
+                     op == SpvOpRayQueryGetIntersectionObjectRayDirectionKHR ||
+                     op == SpvOpRayQueryGetIntersectionObjectToWorldKHR || op == SpvOpRayQueryGetIntersectionWorldToObjectKHR ||
+                     op == SpvOpRayQueryGetIntersectionFrontFaceKHR)) {
+             /* OpX %rty %res %rq %committed  ->  store committed into q */
+             emit_store(&out, merged[i + 3], {m_of("want_committed")}, merged[i + 4],
+                        val_ty.count(merged[i + 4]) ? val_ty[merged[i + 4]] : bool_ty, u32_ty);
          }
 
          if (returns) {
@@ -1832,6 +1830,10 @@ vkrt_spirv_lower(const uint32_t *user_words, size_t user_word_count,
             }
             uint32_t rty = merged[i + 1];
             uint32_t res = merged[i + 2];
+            /* SPIR-V permits either signedness for this 32-bit result;
+             * the GLSL helper has the unsigned return type. */
+            uint32_t call_type = op == SpvOpRayQueryGetIntersectionInstanceShaderBindingTableRecordOffsetKHR ? val_ty.at(fn) : rty;
+            uint32_t call_result = call_type == rty ? res : ids.fresh();
             uint32_t q_orig = merged[i + 3];
             uint32_t q_arg = q_orig;
             if (cur_fn && fn_temp_base.count(cur_fn)) {
@@ -1839,10 +1841,16 @@ vkrt_spirv_lower(const uint32_t *user_words, size_t user_word_count,
                emit_call_q(&out, q_arg, q_orig);
             }
             out.push_back(SPV_WORD0(SpvOpFunctionCall, 5));
-            out.push_back(rty);
-            out.push_back(res);
+            out.push_back(call_type);
+            out.push_back(call_result);
             out.push_back(fn);
             out.push_back(q_arg);   /* %rq */
+            if (call_type != rty) {
+                out.push_back(SPV_WORD0(SpvOpBitcast, 4));
+                out.push_back(rty);
+                out.push_back(res);
+                out.push_back(call_result);
+            }
             if (q_arg != q_orig)
                emit_call_q_back(&out, q_arg, q_orig);
          } else {

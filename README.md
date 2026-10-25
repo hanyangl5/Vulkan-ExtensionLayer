@@ -28,6 +28,8 @@ The active [software RT implementation goal](docs/ray_tracing_fallback_goal.md) 
 
 Both executable layers remain restricted development prototypes. The [D3D12 port record](docs/ray_tracing_fallback_port.md) retains source provenance and historical implementation evidence; its earlier exact D3D12 AS-builder target is superseded by the Mesa/BVH4 decision. Default builds remain opt-in.
 
+Track completed components, test evidence, and next work in the [implementation status](docs/ray_tracing_fallback_status.md).
+
 ## Information for Developing or Contributing:
 
 The software Ray Query layer is independently buildable from `vkrt_layer/layer`, or opt-in with `-DBUILD_RAY_QUERY_FALLBACK=ON` in a configured VEL build. It is a separate implementation from the RT pipeline layer, with its own acceleration-structure format. Enable only one of these experimental RT layers at a time. See [its build instructions and limitations](vkrt_layer/README.md).

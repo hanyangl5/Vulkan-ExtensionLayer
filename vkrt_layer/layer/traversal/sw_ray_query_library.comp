@@ -57,6 +57,7 @@ main()
       int   g    = sw_get_intersection_geometry_index(q);
       int   i    = sw_get_intersection_instance_id(q);
       int   c    = sw_get_intersection_instance_custom_index(q);
+      uint  sbt  = sw_get_intersection_instance_sbt_offset(q);
       bool  f    = sw_get_intersection_front_face(q);
       bool  a    = sw_get_intersection_candidate_aabb_opaque(q);
       uint  k    = sw_get_intersection_hit_kind(q);
@@ -71,7 +72,7 @@ main()
 
       /* Fold the results so nothing is optimised away. */
       q.stack_size += uint(t) + uint(d) + uint(b.x) + uint(p) + uint(g) +
-                      uint(i) + uint(c) + uint(f) + uint(a) + uint(k) +
+                      uint(i) + uint(c) + uint(sbt) + uint(f) + uint(a) + uint(k) +
                       uint(o.x) + uint(dir.x) + uint(tmin) + uint(fl);
       q.stack_size += uint(obj_o.x + obj_d.x + otw[0].x + wto[0].x);
    }

@@ -596,7 +596,9 @@ sw_test_aabb_leaf(inout sw_ray_query_state q,
    uint prim_id  = blas_u32(base, 6u);
    uint geo_flg  = blas_u32(base, 7u);
 
-   bool opaque = (geo_flg & SW_TRI_OPAQUE) != 0u;
+   /* Procedural geometry uses the same ray > instance > geometry opacity
+    * precedence as triangles, including CandidateAABBOpaque and culling. */
+   bool opaque = sw_triangle_is_opaque(geo_flg, flags);
    uint flag = opaque ? SW_RAY_FLAG_CULL_OPAQUE : SW_RAY_FLAG_CULL_NO_OPAQUE;
    if ((q.ray_flags & flag) != 0u) {
       q.next_prim = 1u;
@@ -998,6 +1000,15 @@ sw_get_intersection_instance_custom_index(inout sw_ray_query_state q)
 {
    return int((q.want_committed != 0u) ? q.committed.instance_custom_index
                              : q.candidate.instance_custom_index);
+}
+
+uint
+sw_get_intersection_instance_sbt_offset(inout sw_ray_query_state q)
+{
+   uint node = q.want_committed != 0u ? q.committed.instance_node : q.candidate.instance_node;
+   /* vk_ir_instance_node.sbt_offset_and_flags is at byte 36. The upper
+    * eight bits contain instance flags, not the SBT record offset. */
+   return tlas_u32(node / 4u + 9u) & 0x00FFFFFFu;
 }
 
 bool

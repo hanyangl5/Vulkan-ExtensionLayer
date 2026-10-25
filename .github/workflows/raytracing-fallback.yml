@@ -3,14 +3,19 @@
 name: Ray tracing fallback
 on:
   push:
-    paths: ['layers/raytracing/**', 'docs/ray_tracing_fallback*.md', '.github/workflows/raytracing-fallback.yml']
+    paths: ['layers/raytracing/**', 'layers/common/rt_fallback/**', 'docs/ray_tracing_fallback*.md', '.github/workflows/raytracing-fallback.yml']
   pull_request:
-    paths: ['layers/raytracing/**', 'docs/ray_tracing_fallback*.md', '.github/workflows/raytracing-fallback.yml']
+    paths: ['layers/raytracing/**', 'layers/common/rt_fallback/**', 'docs/ray_tracing_fallback*.md', '.github/workflows/raytracing-fallback.yml']
 jobs:
   software-vulkan:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
+      - name: Test portable BVH4 reference
+        run: |
+          cmake -S layers/common/rt_fallback -B build-bvh4 -DCMAKE_BUILD_TYPE=Debug -DVEL_RT_BVH4_SANITIZERS=ON
+          cmake --build build-bvh4 --parallel
+          ctest --test-dir build-bvh4 --output-on-failure
       - name: Install build and software Vulkan dependencies
         run: |
           sudo apt-get update

@@ -6,6 +6,7 @@
 **Project status:** active development; the complete fallback is not implemented.
 This is the current implementation contract, reviewed on 2026-10-25 against
 baseline `f18c40d316688066834d1334b2c666d1d60b9351`.
+Track component results and remaining work in the [implementation status](ray_tracing_fallback_status.md).
 
 ## Outcome
 

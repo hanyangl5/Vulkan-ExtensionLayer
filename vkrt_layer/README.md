@@ -56,7 +56,7 @@ $env:VK_INSTANCE_LAYERS='VK_LAYER_VKRT_SOFTWARE_RAY_QUERY'
 
 Disable other RT fallback layers before running. The GPU tests currently require native RT capability exposure and the software backend's real prerequisites: BDA, scalar block layout, shader int8/int16/int64, buffer 8/16-bit access, and the Vulkan memory model with device scope.
 
-CTest defines seven tests: four offline tests and three GPU tests. The `cpu_fixture` test uploads a CPU-built fixture but still executes a shader on the GPU. The native GPU test disables this layer; the software GPU tests enable it through their CTest environment.
+CTest defines nine tests: five offline tests and four GPU tests. The `cpu_fixture` test uploads a CPU-built fixture but still executes a shader on the GPU. The native GPU test disables this layer; the software AS tests enable it through their CTest environment. The additional `no_native_rt` test runs production traversal helpers on ordinary compute without enabling native RT or the fallback layer; it validates those helpers, not a complete no-RT AS/layer path.
 
 ```sh
 # All tests, including software and native GPU execution:
@@ -64,6 +64,9 @@ ctest --test-dir build/vkrt_layer --output-on-failure
 
 # Host/IR/SPIR-V checks only:
 ctest --test-dir build/vkrt_layer -L offline --output-on-failure
+
+# Production opacity/SBT helpers on a compute device, with no native RT enabled:
+ctest --test-dir build/vkrt_layer -L no_native_rt --output-on-failure
 ```
 
 On Windows, `vkrt_layer\run-tests.bat` configures and builds the standalone layer and runs CTest. It stops and returns a nonzero exit code if a step fails. An optional external Vulkan-Samples executable and asset working directory can be supplied:
@@ -78,11 +81,11 @@ The optional sample launches `sample ray_queries` after the tests. It is interac
 ## Implemented path and limits
 
 - GPU BUILD of triangle/AABB BLAS and instance TLAS into the shared BVHIR v2 container, including instance transforms, masks, and geometry/primitive/instance IDs.
-- Resumable software candidate/committed traversal, triangle confirmation, generated AABB intersections, and the getters currently mapped by `vkrt_spirv_lower.cpp`.
+- Resumable software candidate/committed traversal, triangle confirmation, generated AABB intersections, and the getters currently mapped by `vkrt_spirv_lower.cpp`, including the base instance SBT-offset getter with candidate/committed selection.
 - AS descriptor/layout/pool translation and compute build-state restoration; AS dependencies are extended for Barrier/Barrier2 and Submit/Submit2.
 - The shader lowering currently binds one TLAS storage-buffer binding and discards the AS value passed to `RayQueryInitialize`. Multiple AS bindings, shader-side AS descriptor arrays/indexing, and arbitrary AS value provenance are not supported.
 - RT pipeline shaders, SBT dispatch, UPDATE/refit, AS copy/compaction/serialization, indirect builds, micromaps, and motion geometry are not implemented. PLOC/HPLOC sources are not active runtime backends.
-- AABB opacity handling does not yet apply all ray/instance overrides. Some unsupported commands only log an error; unsupported host AS paths and event-based AS synchronization are not fully intercepted. Do not treat an unimplemented API as a supported no-op.
+- AABB opacity applies ray/instance/geometry precedence through the shared opacity helper. Some unsupported commands only log an error; unsupported host AS paths and event-based AS synchronization are not fully intercepted. Do not treat an unimplemented API as a supported no-op.
 - Builds require a compute-capable queue outside a render pass. Node-address and dispatch limits constrain build size. Multi-queue ownership and cross-vendor execution have not been comprehensively validated.
 
 See [STATUS.md](STATUS.md) for the original test records and known issues, [IR_CONTRACT_V2.md](IR_CONTRACT_V2.md) for the current data layout, and [the original design](rayquery_software_rt_layer_design.md) for the implementation milestones. Historical test results are retained as evidence for their original revisions; importing the patch into VEL is not a new GPU validation result.
