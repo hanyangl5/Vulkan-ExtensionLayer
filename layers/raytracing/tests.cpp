@@ -68,9 +68,16 @@ struct Harness {
         Require(f != nullptr, n);
         return reinterpret_cast<F>(f);
     }
-    void Init() {
+    void Init(bool extended_features = false) {
         VkApplicationInfo app{VK_STRUCTURE_TYPE_APPLICATION_INFO};
         app.apiVersion = VK_API_VERSION_1_3;
+#ifdef VK_VERSION_1_4
+        if (extended_features) {
+            uint32_t loaderVersion = 0;
+            Check(vkEnumerateInstanceVersion(&loaderVersion));
+            if (loaderVersion >= VK_API_VERSION_1_4) app.apiVersion = VK_API_VERSION_1_4;
+        }
+#endif
         const char *layers[] = {"VK_LAYER_HANYANG_ray_tracing_fallback", "VK_LAYER_KHRONOS_validation"};
         VkInstanceCreateInfo ic{VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO};
         ic.pApplicationInfo = &app;
@@ -109,7 +116,35 @@ struct Harness {
         dc.pQueueCreateInfos = &qi;
         dc.enabledExtensionCount = 3;
         dc.ppEnabledExtensionNames = extensions;
+        VkPhysicalDevice16BitStorageFeatures storage16{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_16BIT_STORAGE_FEATURES, &v13};
+        storage16.storageBuffer16BitAccess = VK_TRUE;
+        VkPhysicalDeviceShaderDrawParametersFeatures draw{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_DRAW_PARAMETERS_FEATURES,
+                                                          &storage16};
+        if (extended_features) dc.pNext = &draw;
+#ifdef VK_VERSION_1_4
+        VkPhysicalDeviceVulkan14Features v14{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_4_FEATURES};
+        VkPhysicalDeviceProperties properties;
+        vkGetPhysicalDeviceProperties(physical, &properties);
+        if (extended_features && app.apiVersion >= VK_API_VERSION_1_4 && properties.apiVersion >= VK_API_VERSION_1_4) {
+            v14.pNext = &draw;
+            dc.pNext = &v14;
+        }
+        auto saved14 = v14;
+#endif
+        auto saved16 = storage16;
+        auto savedDraw = draw;
+        auto saved13 = v13;
+        auto savedAs = as;
+        auto savedRt = rt;
+        auto savedDevice = dc;
         Check(vkCreateDevice(physical, &dc, nullptr, &device));
+        Require(!std::memcmp(&dc, &savedDevice, sizeof(dc)) && !std::memcmp(&storage16, &saved16, sizeof(storage16)) &&
+                    !std::memcmp(&draw, &savedDraw, sizeof(draw)) && !std::memcmp(&v13, &saved13, sizeof(v13)) &&
+                    !std::memcmp(&as, &savedAs, sizeof(as)) && !std::memcmp(&rt, &savedRt, sizeof(rt)),
+                "Device feature translation modified caller-owned structures");
+#ifdef VK_VERSION_1_4
+        Require(!std::memcmp(&v14, &saved14, sizeof(v14)), "Device translation modified Vulkan 1.4 feature storage");
+#endif
         vkGetDeviceQueue(device, family, 0, &queue);
         vkGetPhysicalDeviceMemoryProperties(physical, &memory);
         VkCommandPoolCreateInfo pc{VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO};
@@ -326,7 +361,11 @@ int main(int argc, char **argv) {
         Require(rejected, "Unsupported stage was accepted");
         std::puts("Compiler and rejection checks passed");
         Harness t;
-        t.Init();
+        t.Init(variant == "device_features");
+        if (variant == "device_features") {
+            std::puts("Device feature chain: unrelated individual/core feature structs retained and caller storage unchanged");
+            return 0;
+        }
         if (variant == "tlas") {
             CheckTLASBuilder(t);
             return 0;
@@ -498,12 +537,25 @@ int main(int argc, char **argv) {
                 "Unsupported recursion accepted");
         Require(rejectedPipeline == VK_NULL_HANDLE, "Rejected pipeline leaked a handle");
         pci.maxPipelineRayRecursionDepth = 1;
+        VkPipelineDynamicStateCreateInfo dynamic{VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO};
+        VkDynamicState stackState = VK_DYNAMIC_STATE_RAY_TRACING_PIPELINE_STACK_SIZE_KHR;
+        dynamic.dynamicStateCount = 1;
+        dynamic.pDynamicStates = &stackState;
+        pci.pDynamicState = &dynamic;
+        Require(CreateRayTracingPipelinesKHR(t.device, VK_NULL_HANDLE, VK_NULL_HANDLE, 1, &pci, nullptr, &rejectedPipeline) ==
+                        VK_ERROR_FEATURE_NOT_PRESENT &&
+                    rejectedPipeline == VK_NULL_HANDLE,
+                "Unimplemented dynamic stack state was silently ignored");
+        dynamic.dynamicStateCount = 0;
+        dynamic.pDynamicStates = nullptr;
+        auto savedDynamic = dynamic;
         VkDeferredOperationKHR deferred;
         Check(CreateDeferredOperationKHR(t.device, nullptr, &deferred));
         VkPipeline pipeline;
         Require(CreateRayTracingPipelinesKHR(t.device, deferred, VK_NULL_HANDLE, 1, &pci, nullptr, &pipeline) ==
                     VK_OPERATION_NOT_DEFERRED_KHR,
                 "Synchronous deferred operation returned wrong status");
+        Require(!std::memcmp(&dynamic, &savedDynamic, sizeof(dynamic)), "Empty dynamic-state structure was modified");
         Require(GetDeferredOperationMaxConcurrencyKHR(t.device, deferred) == 0, "Unexpected deferred concurrency");
         Check(GetDeferredOperationResultKHR(t.device, deferred));
         Check(DeferredOperationJoinKHR(t.device, deferred));

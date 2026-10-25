@@ -14,9 +14,9 @@ endif()
 set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
    "${VKRT_VULKAN_REGISTRY}"
    "${VKRT_VULKAN_CORE_INCLUDE_DIR}/vulkan/vulkan_core.h"
-   "${CMAKE_CURRENT_SOURCE_DIR}/generate_pnext_sizes.py")
+   "${CMAKE_CURRENT_LIST_DIR}/generate_pnext_sizes.py")
 execute_process(
-   COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/generate_pnext_sizes.py"
+   COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_LIST_DIR}/generate_pnext_sizes.py"
            "${VKRT_VULKAN_REGISTRY}"
            "${VKRT_VULKAN_CORE_INCLUDE_DIR}/vulkan/vulkan_core.h"
            "${CMAKE_CURRENT_BINARY_DIR}/vkrt_pnext_sizes.h"

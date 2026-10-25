@@ -74,8 +74,34 @@ This first GPU component retains binary arity in the BVH4 node format; it does
 not yet perform the reference encoder's four-child collapse. It populates
 hierarchy/header/parents only, leaving leaf records for a separate producer.
 CPU conversion of Mesa IR followed by GPU encoding is a component test, not the
-final GPU-only construction path. Direct GPU Mesa adaptation, record emission,
-encode/refit integration and both consumers remain open.
+final GPU-only construction path.
+
+`bvh4_mesa_encode.comp` now provides a direct GPU path from the current default
+Mesa scalar IR v2 envelope. Its host contract is `bvh4_mesa_gpu.h`. The host plans
+capacity-sized output/scratch from input capacity and geometry type; active
+counts and topology remain on GPU. Three barrier-separated dispatches initialize
+maps/header, assign unique parents and compact referenced leaves, then emit
+hierarchy and triangle/AABB/instance records. Geometry side tables preserve full
+flags and explicit per-instance runtime BLAS addresses prevent IR-address reuse.
+Node/record/parent accesses use 64-bit offsets. A nonzero GPU status invalidates
+the entire output; downstream consumers must gate on that status.
+
+The additional `portable_bvh4_mesa_gpu_build` test runs the imported init, leaf,
+Morton sort, LBVH and bounds kernels followed by this encoder in one command
+buffer. Source IR starts poisoned; no CPU count/topology readback or adapted CPU
+tree is used. Eight triangle/AABB scenes cover 0, 1, 321 and 1025 inputs, multiple
+geometries/full flags and inactive NaN slots. Separate fixtures cover sparse,
+empty/singleton/deep graphs, TLAS relocation/inverse transforms and rejection
+status paths. These tests need the actual imported builder's additional integer,
+storage and memory-model prerequisites; the generic encoder test keeps its
+smaller compute feature predicate.
+
+This direct path still retains binary arity and Mesa's existing 32-bit
+construction IDs. Active bounds must be finite; its scaled FP32 inverse needs
+further qualification for ill-conditioned legal transforms. It checks encoded
+root/child bounds but does not claim the CPU adapter's complete header-validation
+contract. Four-child collapse, refit, production encode integration and both
+runtime consumers remain open.
 
 Build and run independently:
 

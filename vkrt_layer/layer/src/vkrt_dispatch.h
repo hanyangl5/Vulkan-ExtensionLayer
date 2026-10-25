@@ -19,6 +19,7 @@ struct vkrt_instance_dispatch {
    PFN_vkGetInstanceProcAddr               GetInstanceProcAddr;
    PFN_vkDestroyInstance                   DestroyInstance;
    PFN_vkEnumeratePhysicalDevices          EnumeratePhysicalDevices;
+   PFN_vkEnumerateDeviceExtensionProperties EnumerateDeviceExtensionProperties;
    PFN_vkGetPhysicalDeviceProperties       GetPhysicalDeviceProperties;
    PFN_vkGetPhysicalDeviceProperties2      GetPhysicalDeviceProperties2;
    PFN_vkGetPhysicalDeviceFeatures2        GetPhysicalDeviceFeatures2;
@@ -48,6 +49,8 @@ struct vkrt_device_dispatch {
    PFN_vkCreateDescriptorPool              CreateDescriptorPool;
    PFN_vkCreateGraphicsPipelines            CreateGraphicsPipelines;
    PFN_vkCreateComputePipelines             CreateComputePipelines;
+   PFN_vkCreateRenderPass CreateRenderPass;
+   PFN_vkCreateRenderPass2 CreateRenderPass2;
 
    /* Command buffer */
    PFN_vkAllocateCommandBuffers             AllocateCommandBuffers;
@@ -62,6 +65,14 @@ struct vkrt_device_dispatch {
    PFN_vkCmdPushConstants                   CmdPushConstants;
    PFN_vkCmdPipelineBarrier                 CmdPipelineBarrier;
    PFN_vkCmdPipelineBarrier2                CmdPipelineBarrier2;
+   PFN_vkCmdSetEvent CmdSetEvent;
+   PFN_vkCmdResetEvent CmdResetEvent;
+   PFN_vkCmdWaitEvents CmdWaitEvents;
+   PFN_vkCmdSetEvent2 CmdSetEvent2;
+   PFN_vkCmdResetEvent2 CmdResetEvent2;
+   PFN_vkCmdWaitEvents2 CmdWaitEvents2;
+   PFN_vkCmdWriteTimestamp CmdWriteTimestamp;
+   PFN_vkCmdWriteTimestamp2 CmdWriteTimestamp2;
    PFN_vkCmdBindVertexBuffers               CmdBindVertexBuffers;
    PFN_vkCmdBindIndexBuffer                 CmdBindIndexBuffer;
    PFN_vkCmdSetViewport                     CmdSetViewport;
@@ -132,6 +143,7 @@ vkrt_instance_dispatch_load(struct vkrt_instance_dispatch *t,
    VKRT_LOAD_I(GetInstanceProcAddr);
    VKRT_LOAD_I(DestroyInstance);
    VKRT_LOAD_I(EnumeratePhysicalDevices);
+   VKRT_LOAD_I(EnumerateDeviceExtensionProperties);
    VKRT_LOAD_I(GetPhysicalDeviceProperties);
    VKRT_LOAD_I(GetPhysicalDeviceProperties2);
    VKRT_LOAD_I(GetPhysicalDeviceFeatures2);
@@ -172,6 +184,9 @@ vkrt_device_dispatch_load(struct vkrt_device_dispatch *t,
    VKRT_LOAD_D(CreateDescriptorPool);
    VKRT_LOAD_D(CreateGraphicsPipelines);
    VKRT_LOAD_D(CreateComputePipelines);
+   VKRT_LOAD_D(CreateRenderPass);
+   VKRT_LOAD_D(CreateRenderPass2);
+   if (!t->CreateRenderPass2) t->CreateRenderPass2 = (PFN_vkCreateRenderPass2)gdpa(device, "vkCreateRenderPass2KHR");
    VKRT_LOAD_D(AllocateCommandBuffers);
    VKRT_LOAD_D(FreeCommandBuffers);
    VKRT_LOAD_D(ResetCommandBuffer);
@@ -185,6 +200,18 @@ vkrt_device_dispatch_load(struct vkrt_device_dispatch *t,
    VKRT_LOAD_D(CmdPipelineBarrier);
    VKRT_LOAD_D(CmdPipelineBarrier2);
    if (!t->CmdPipelineBarrier2) t->CmdPipelineBarrier2 = (PFN_vkCmdPipelineBarrier2)gdpa(device, "vkCmdPipelineBarrier2KHR");
+   VKRT_LOAD_D(CmdSetEvent);
+   VKRT_LOAD_D(CmdResetEvent);
+   VKRT_LOAD_D(CmdWaitEvents);
+   VKRT_LOAD_D(CmdSetEvent2);
+   VKRT_LOAD_D(CmdResetEvent2);
+   VKRT_LOAD_D(CmdWaitEvents2);
+   VKRT_LOAD_D(CmdWriteTimestamp);
+   VKRT_LOAD_D(CmdWriteTimestamp2);
+   if (!t->CmdSetEvent2) t->CmdSetEvent2 = (PFN_vkCmdSetEvent2)gdpa(device, "vkCmdSetEvent2KHR");
+   if (!t->CmdResetEvent2) t->CmdResetEvent2 = (PFN_vkCmdResetEvent2)gdpa(device, "vkCmdResetEvent2KHR");
+   if (!t->CmdWaitEvents2) t->CmdWaitEvents2 = (PFN_vkCmdWaitEvents2)gdpa(device, "vkCmdWaitEvents2KHR");
+   if (!t->CmdWriteTimestamp2) t->CmdWriteTimestamp2 = (PFN_vkCmdWriteTimestamp2)gdpa(device, "vkCmdWriteTimestamp2KHR");
    VKRT_LOAD_D(CmdBindVertexBuffers);
    VKRT_LOAD_D(CmdBindIndexBuffer);
    VKRT_LOAD_D(CmdSetViewport);

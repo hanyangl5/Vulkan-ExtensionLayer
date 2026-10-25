@@ -219,6 +219,22 @@ GPU producers and both consumers adopt it.
 
 ## Verification surface
 
+### External CTS delivery evidence
+
+Delivery must include attempts to run the applicable Vulkan ray-tracing CTS from
+the user's `D:\Codes\VK-GL-CTS` checkout, rather than relying only on tests
+authored in this repository. Run feasible AS, Ray Query and RT Pipeline subsets
+through the actual layer, and expand coverage as implementation progresses.
+Running the entire CTS or obtaining an all-pass result is not a prerequisite for
+reporting delivery progress. Record the CTS source
+revision, executable/build configuration, selected case lists, device/driver,
+layer/ICD configuration, exact commands and raw logs, with passed/failed/skipped/
+crashed/not-run counts and reasons. Native-driver control results must remain
+distinct from fallback results; an unsupported skip is not a fallback pass.
+Use failures to choose implementation work and retain reproducible evidence.
+This supplements, and does not relax, the complete mandatory functionality goal
+or the final M5 qualification requirements.
+
 - **No-native-RT execution:** test on an ICD/capture boundary that rejects native
   AS/RQ/RTP features and operations, even when a developer GPU has hardware RT.
   Inspect every downstream call and generated SPIR-V. Also qualify a physical

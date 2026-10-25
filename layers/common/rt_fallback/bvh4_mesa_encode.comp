@@ -1,0 +1,216 @@
+// Copyright 2026 The Khronos Group Inc.
+// SPDX-License-Identifier: Apache-2.0
+#version 460
+#extension GL_EXT_buffer_reference : require
+#extension GL_EXT_scalar_block_layout : require
+#extension GL_EXT_shader_explicit_arithmetic_types_int64 : require
+
+layout(local_size_x = 64) in;
+layout(constant_id = 0) const uint phase = 0;
+layout(buffer_reference, scalar, buffer_reference_align = 4) buffer Word { uint value; };
+layout(push_constant, scalar) uniform Args {
+    uint64_t source, source_size, output_as, mapping;
+    uint64_t geometry_flags, runtime_blas, status, first;
+    uint capacity, geometry_type, geometry_count, reserved;
+} args;
+const uint INVALID = 0xffffffffu;
+const uint RESERVED = 0xfffffffeu;
+const uint OFFSET_MASK = 0xfffffffcu;
+uint read32(uint64_t address) { return Word(address).value; }
+uint64_t read64(uint64_t address) { return uint64_t(read32(address)) | (uint64_t(read32(address + 4)) << 32); }
+void write32(uint64_t address, uint value) { Word(address).value = value; }
+void write64(uint64_t address, uint64_t value) { write32(address, uint(value)); write32(address + 4, uint(value >> 32)); }
+void fail(uint bits) { atomicOr(Word(args.status).value, bits); }
+uint source32(uint offset) { return read32(args.source + uint64_t(offset)); }
+uint active_count() { return source32(24); }
+uint internal_count() { return source32(32); }
+uint stride() { return args.geometry_type == 0 ? 68 : args.geometry_type == 1 ? 32 : 96; }
+uint leaf_kind() { return args.geometry_type == 0 ? 1 : args.geometry_type == 1 ? 2 : 3; }
+uint source_leaf_kind() { return args.geometry_type == 0 ? 0 : args.geometry_type == 1 ? 3 : 2; }
+uint64_t box_base() { return uint64_t(args.capacity) * uint64_t(stride()); }
+uint64_t source_node(uint id) { return args.source + 128 + uint64_t(id & OFFSET_MASK); }
+uint64_t box_address(uint index) { return args.source + 128 + box_base() + uint64_t(index) * uint64_t(40); }
+uint64_t map_address(uint index) { return args.mapping + uint64_t(index) * uint64_t(4); }
+uint64_t parent_map_address(uint index) { return args.mapping + (uint64_t(args.capacity) + uint64_t(index)) * uint64_t(4); }
+uint64_t output_region(uint offset) { return args.output_as + read64(args.output_as + uint64_t(offset)); }
+uint64_t output_node(uint index) { return output_region(48) + uint64_t(index) * uint64_t(128); }
+uint64_t output_leaf(uint index) {
+    return output_region(56 + args.geometry_type * 8) + uint64_t(index) * uint64_t(args.geometry_type == 2 ? 128 : 48);
+}
+vec3 read_vec(uint64_t address) {
+    return vec3(uintBitsToFloat(read32(address)), uintBitsToFloat(read32(address + 4)), uintBitsToFloat(read32(address + 8)));
+}
+bool finite_vec(vec3 value) { return !any(isnan(value)) && !any(isinf(value)); }
+bool valid_box(uint64_t address) {
+    vec3 lo = read_vec(address), hi = read_vec(address + 12);
+    return finite_vec(lo) && finite_vec(hi) && all(lessThanEqual(lo, hi));
+}
+bool contains_box(uint64_t parent, uint64_t child) {
+    return all(lessThanEqual(read_vec(parent), read_vec(child))) &&
+           all(greaterThanEqual(read_vec(parent + 12), read_vec(child + 12)));
+}
+bool valid_reference(uint id, uint parent_index) {
+    uint64_t offset = uint64_t(id & OFFSET_MASK);
+    if (id == INVALID) return false;
+    if ((id & 3) == 1) {
+        return offset >= box_base() && (offset - box_base()) % uint64_t(40) == uint64_t(0) &&
+               (offset - box_base()) / uint64_t(40) < uint64_t(parent_index);
+    }
+    return (id & 3) == source_leaf_kind() && offset < box_base() && offset % uint64_t(stride()) == uint64_t(0);
+}
+uint output_id(uint source_id) {
+    if ((source_id & 3) == 1) return uint((uint64_t(source_id & OFFSET_MASK) - box_base()) / uint64_t(40));
+    uint source_slot = (source_id & OFFSET_MASK) / stride();
+    return (leaf_kind() << 30) | read32(map_address(source_slot));
+}
+void emit_leaf(uint source_id, uint parent) {
+    uint source_slot = (source_id & OFFSET_MASK) / stride();
+    uint index = read32(map_address(source_slot));
+    uint64_t src = source_node(source_id), dst = output_leaf(index);
+    if (!valid_box(src)) { fail(8); return; }
+    write32(output_region(80) + uint64_t(index) * uint64_t(4), parent);
+    if (args.geometry_type < 2) {
+        uint packed = read32(src + (args.geometry_type == 0 ? 64 : 28));
+        uint geometry = packed & 0x7fffffffu;
+        if (args.geometry_flags == uint64_t(0) || geometry >= args.geometry_count) { fail(16); return; }
+        uint flags = read32(args.geometry_flags + uint64_t(geometry) * uint64_t(4));
+        if ((flags & ~3u) != 0 || ((flags & 1) != 0) != ((packed & 0x80000000u) != 0)) { fail(16); return; }
+        uint components = args.geometry_type == 0 ? 9 : 6;
+        uint source_offset = args.geometry_type == 0 ? 24 : 0;
+        for (uint component = 0; component < components; ++component) {
+            uint value = read32(src + source_offset + component * 4);
+            float v = uintBitsToFloat(value);
+            if (isnan(v) || isinf(v)) { fail(8); return; }
+            if (args.geometry_type == 0 && (v < read_vec(src)[component % 3] || v > read_vec(src + 12)[component % 3])) {
+                fail(8); return;
+            }
+            write32(dst + component * 4, value);
+        }
+        uint fields = args.geometry_type == 0 ? 36 : 24;
+        write32(dst + fields, read32(src + (args.geometry_type == 0 ? 60 : 24)));
+        write32(dst + fields + 4, geometry);
+        write32(dst + fields + 8, flags);
+        if (args.geometry_type == 1) for (uint field = 36; field < 48; field += 4) write32(dst + field, 0);
+        return;
+    }
+    if (args.runtime_blas == uint64_t(0) || read64(src + 24) == uint64_t(0) || (read32(src + 32) >> 24) == 0) {
+        fail(32); return;
+    }
+    uint64_t blas = read64(args.runtime_blas + uint64_t(source_slot) * uint64_t(8));
+    if (blas == uint64_t(0) || (blas & uint64_t(127)) != uint64_t(0)) { fail(32); return; }
+    write64(dst, blas);
+    write32(dst + 8, read32(src + 32));
+    write32(dst + 12, read32(src + 36));
+    vec3 rows[3];
+    vec3 translation;
+    for (uint row = 0; row < 3; ++row) {
+        rows[row] = read_vec(src + 40 + row * 16);
+        translation[row] = uintBitsToFloat(read32(src + 52 + row * 16));
+        if (!finite_vec(rows[row]) || isnan(translation[row]) || isinf(translation[row])) { fail(64); return; }
+        for (uint column = 0; column < 4; ++column) write32(dst + 16 + row * 16 + column * 4, read32(src + 40 + row * 16 + column * 4));
+    }
+    mat3 matrix = transpose(mat3(rows[0], rows[1], rows[2]));
+    float scale = max(max(max(abs(rows[0].x), abs(rows[0].y)), abs(rows[0].z)),
+                      max(max(max(abs(rows[1].x), abs(rows[1].y)), abs(rows[1].z)), max(max(abs(rows[2].x), abs(rows[2].y)), abs(rows[2].z))));
+    if (scale == 0) { fail(64); return; }
+    matrix /= scale;
+    if (determinant(matrix) == 0) { fail(64); return; }
+    mat3 inverted = inverse(matrix) / scale;
+    for (uint row = 0; row < 3; ++row) {
+        vec3 inverse_row = vec3(inverted[0][row], inverted[1][row], inverted[2][row]);
+        float inverse_translation = -dot(inverse_row, translation);
+        if (!finite_vec(inverse_row) || isnan(inverse_translation) || isinf(inverse_translation)) { fail(64); return; }
+        for (uint column = 0; column < 3; ++column) write32(dst + 64 + row * 16 + column * 4, floatBitsToUint(inverse_row[column]));
+        write32(dst + 76 + row * 16, floatBitsToUint(inverse_translation));
+    }
+    write32(dst + 112, read32(src + 88));
+    for (uint field = 116; field < 128; field += 4) write32(dst + field, 0);
+}
+void main() {
+    uint64_t index64 = args.first + uint64_t(gl_GlobalInvocationID.x);
+    if (index64 >= uint64_t(max(args.capacity, 1))) return;
+    uint index = uint(index64);
+    uint maximum_internals = max(args.capacity, 2) - 1;
+    if (phase == 0) {
+        if (index < args.capacity) {
+            write32(map_address(index), INVALID);
+            write32(output_region(80) + index64 * uint64_t(4), INVALID);
+        }
+        if (index < maximum_internals) write32(parent_map_address(index), INVALID);
+        if (index != 0) return;
+        write32(args.output_as + 16, INVALID);
+        write32(args.output_as + 20, 0);
+        write32(args.output_as + 24, 0);
+        write32(args.output_as + 28, 0);
+        write32(args.output_as + 32, 0);
+        for (uint field = 96; field < 120; field += 4) write32(args.output_as + field, 0);
+        if (args.source_size < uint64_t(128) || args.geometry_type > 2) { fail(1); return; }
+        uint live = active_count(), internals = internal_count();
+        uint64_t root_end = box_base() + uint64_t(internals) * uint64_t(40);
+        if (source32(108) != 0x58424856u || source32(112) != 2 || source32(116) != args.capacity ||
+            source32(120) != args.geometry_type || source32(124) != 0 || live > args.capacity ||
+            internals != max(live, 2) - 1 || source32(36) != 1 || source32(40) != 1 ||
+            root_end > uint64_t(0xfffffffcu) + uint64_t(40) || uint64_t(128) + root_end > args.source_size) {
+            fail(1); return;
+        }
+        if (live > 1) write32(args.output_as + 20, internals);
+        return;
+    }
+    // Other invocations can publish an error in this same dispatch. Reading
+    // status must also be atomic rather than racing an atomicOr writer.
+    if (atomicAdd(Word(args.status).value, 0) != 0) return;
+    if (index >= internal_count()) return;
+    uint live = active_count();
+    uint64_t box = box_address(index);
+    uint children[2] = uint[2](read32(box + 24), read32(box + 28));
+    if (phase == 1) {
+        for (uint child = 0; child < 2; ++child) {
+            uint id = children[child];
+            if (live < 2 && (live == 0 || child == 1)) {
+                if (id != INVALID) fail(2);
+                continue;
+            }
+            if (!valid_reference(id, index)) { fail(2); continue; }
+            uint64_t address;
+            if ((id & 3) == 1) address = parent_map_address(uint((uint64_t(id & OFFSET_MASK) - box_base()) / uint64_t(40)));
+            else address = map_address((id & OFFSET_MASK) / stride());
+            if (atomicCompSwap(Word(address).value, INVALID, RESERVED) != INVALID) { fail(4); continue; }
+            if ((id & 3) == 1) atomicExchange(Word(address).value, index);
+            else atomicExchange(Word(address).value, atomicAdd(Word(args.output_as + 24 + args.geometry_type * 4).value, 1));
+        }
+        return;
+    }
+    uint mapped_leaves = read32(args.output_as + 24 + args.geometry_type * 4);
+    if (mapped_leaves != live || (index + 1 < internal_count() && read32(parent_map_address(index)) == INVALID)) {
+        fail(128); return;
+    }
+    if (live == 0) {
+        if (read_vec(box) != vec3(uintBitsToFloat(0x7f800000u)) || read_vec(box + 12) != vec3(uintBitsToFloat(0xff800000u))) fail(8);
+        return;
+    }
+    if (!valid_box(box)) { fail(8); return; }
+    if (index + 1 == internal_count()) {
+        write32(args.output_as + 16, live == 1 ? output_id(children[0]) : index);
+        for (uint field = 0; field < 24; field += 4) write32(args.output_as + 96 + field, read32(box + field));
+    }
+    uint64_t dst = output_node(index);
+    for (uint child = 0; child < (live == 1 ? 1u : 2u); ++child) {
+        uint id = children[child];
+        uint64_t src = source_node(id);
+        if (!valid_box(src) || !contains_box(box, src)) { fail(8); return; }
+        if ((id & 3) != 1) emit_leaf(id, live == 1 ? INVALID : index);
+        if (live == 1) continue;
+        for (uint axis = 0; axis < 3; ++axis) {
+            write32(dst + child * 12 + axis * 4, read32(src + axis * 4));
+            write32(dst + 48 + child * 12 + axis * 4, read32(src + 12 + axis * 4));
+        }
+        write32(dst + 96 + child * 4, output_id(id));
+    }
+    if (live == 1) return;
+    for (uint field = 24; field < 48; field += 4) write32(dst + field, 0);
+    for (uint field = 72; field < 96; field += 4) write32(dst + field, 0);
+    write32(dst + 104, INVALID); write32(dst + 108, INVALID);
+    write32(dst + 112, 2);
+    write32(dst + 116, read32(parent_map_address(index)));
+    write32(dst + 120, 0); write32(dst + 124, 0);
+}

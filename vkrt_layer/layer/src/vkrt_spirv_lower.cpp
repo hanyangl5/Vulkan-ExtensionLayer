@@ -60,8 +60,12 @@ enum : uint16_t {
     SpvOpTypeFloat = 22,
     SpvOpTypeVector = 23,
     SpvOpTypeMatrix = 24,
+    SpvOpTypeImage = 25,
+    SpvOpTypeSampler = 26,
+    SpvOpTypeSampledImage = 27,
     SpvOpTypeArray = 28,
     SpvOpTypeRuntimeArray = 29,
+    SpvOpTypeOpaque = 31,
     SpvOpTypePointer = 32,
     SpvOpTypeFunction = 33,
     SpvOpConstant = 43,
@@ -802,24 +806,20 @@ normalize_layout(std::vector<uint32_t> *w)
                op == 73 || op == 74 || op == 75)       /* DecorationGroup / GroupDecorate / GroupMemberDecorate */
          dst = &ann;
       else if (/* types */
-               op == SpvOpTypeVoid || op == SpvOpTypeBool ||
-               op == SpvOpTypeInt || op == SpvOpTypeFloat ||
-               op == SpvOpTypeVector || op == SpvOpTypeMatrix ||
-               op == SpvOpTypeArray || op == SpvOpTypeRuntimeArray ||
-               op == SpvOpTypeStruct || op == SpvOpTypePointer ||
-               op == 39 || /* OpTypeForwardPointer */
-               op == SpvOpTypeFunction ||
-               op == SpvOpTypeRayQueryKHR ||
-               op == SpvOpTypeAccelerationStructureKHR ||
+               op == SpvOpTypeVoid || op == SpvOpTypeBool || op == SpvOpTypeInt || op == SpvOpTypeFloat || op == SpvOpTypeVector ||
+               op == SpvOpTypeMatrix || op == SpvOpTypeImage || op == SpvOpTypeSampler || op == SpvOpTypeSampledImage ||
+               op == SpvOpTypeOpaque || op == SpvOpTypeArray || op == SpvOpTypeRuntimeArray || op == SpvOpTypeStruct ||
+               op == SpvOpTypePointer || op == 39 || /* OpTypeForwardPointer */
+               op == SpvOpTypeFunction || op == SpvOpTypeRayQueryKHR || op == SpvOpTypeAccelerationStructureKHR ||
                /* constants and spec constants */
-               op == SpvOpUndef ||                     /* 1  */
-               op == SpvOpConstantTrue ||              /* 41 */
-               op == SpvOpConstantFalse ||             /* 42 */
-               op == SpvOpConstant ||                  /* 43 */
-               op == 44 || op == 45 || op == 46 ||     /* ConstantComposite / ConstantSampler / ConstantNull */
-               op == 48 || op == 49 || op == 50 ||     /* SpecConstantTrue / False / SpecConstant */
-               op == 51 || op == 52)                   /* SpecConstantComposite / SpecConstantOp */
-         dst = &ty;
+               op == SpvOpUndef ||                 /* 1  */
+               op == SpvOpConstantTrue ||          /* 41 */
+               op == SpvOpConstantFalse ||         /* 42 */
+               op == SpvOpConstant ||              /* 43 */
+               op == 44 || op == 45 || op == 46 || /* ConstantComposite / ConstantSampler / ConstantNull */
+               op == 48 || op == 49 || op == 50 || /* SpecConstantTrue / False / SpecConstant */
+               op == 51 || op == 52)               /* SpecConstantComposite / SpecConstantOp */
+          dst = &ty;
       else
          dst = &fn;
 
@@ -1506,33 +1506,35 @@ vkrt_spirv_lower(const uint32_t *user_words, size_t user_word_count,
       outv->push_back(v2);
    };
 
-   auto emit_store = [&](std::vector<uint32_t> *outv, uint32_t qvar,
-                         const std::vector<uint32_t> &chain,
-                         uint32_t val, uint32_t val_ty, uint32_t want_ty) {
-      uint32_t coerced = emit_convert(outv, val, val_ty, want_ty);
-      uint32_t ptr_ty = get_ptr_type(&merged, &ti, &ids,
-                                     SpvStorageClassPrivate, want_ty);
-      uint32_t gep = ids.fresh();
-      outv->push_back(SPV_WORD0(SpvOpAccessChain, 4 + (uint32_t)chain.size()));
-      outv->push_back(ptr_ty);
-      outv->push_back(gep);
-      outv->push_back(qvar);
-      for (uint32_t idx : chain)
-         /* OpAccessChain indices are constant IDS, not literals. */
-         outv->push_back(get_const_u32(&merged, &ti, &ids, u32_ty, idx));
-      outv->push_back(SPV_WORD0(SpvOpStore, 3));
-      outv->push_back(gep);
-      outv->push_back(coerced);
-   };
-
-   /* Type of a value, from its defining instruction's result-type word. */
+   /* A query may be a Private global or Function storage passed through a
+    * helper. Preserve its actual pointer storage class when addressing fields. */
    std::unordered_map<uint32_t, uint32_t> val_ty;
    for_each(merged, [&](size_t i, uint32_t op, uint32_t len) {
-      if (spv_result_id_index(op) == 2 && len >= 3)
-         val_ty[merged[i + 2]] = merged[i + 1];
+       if (spv_result_id_index(op) == 2 && len >= 3) val_ty[merged[i + 2]] = merged[i + 1];
    });
-
-
+   std::string rewrite_error;
+   auto emit_store = [&](std::vector<uint32_t> *outv, uint32_t qvar, const std::vector<uint32_t> &chain, uint32_t val,
+                         uint32_t source_ty, uint32_t want_ty) {
+       uint32_t coerced = emit_convert(outv, val, source_ty, want_ty);
+       auto value = val_ty.find(qvar);
+       auto pointer = value == val_ty.end() ? ti.pointers.end() : ti.pointers.find(value->second);
+       if (pointer == ti.pointers.end() ||
+           (pointer->second.first != SpvStorageClassPrivate && pointer->second.first != SpvStorageClassFunction)) {
+           rewrite_error = "ray-query operand has no Private/Function pointer type";
+           return;
+       }
+       uint32_t ptr_ty = get_ptr_type(&merged, &ti, &ids, pointer->second.first, want_ty);
+       uint32_t gep = ids.fresh();
+       outv->push_back(SPV_WORD0(SpvOpAccessChain, 4 + (uint32_t)chain.size()));
+       outv->push_back(ptr_ty);
+       outv->push_back(gep);
+       outv->push_back(qvar);
+       for (uint32_t idx : chain) /* OpAccessChain indices are constant IDS, not literals. */
+           outv->push_back(get_const_u32(&merged, &ti, &ids, u32_ty, idx));
+       outv->push_back(SPV_WORD0(SpvOpStore, 3));
+       outv->push_back(gep);
+       outv->push_back(coerced);
+   };
 
    /* Pointer to a Private uint64, used when writing q.as. Private is
     * per-invocation in Vulkan. */
@@ -1910,6 +1912,7 @@ vkrt_spirv_lower(const uint32_t *user_words, size_t user_word_count,
       i += len;
    }
 
+   if (!rewrite_error.empty()) return fail(rewrite_error.c_str());
    /* (OpTypeRayQueryKHR ids were remapped before the main pass.) */
 
    /* Hand vkrt_tlas the (set, binding) the app used for its

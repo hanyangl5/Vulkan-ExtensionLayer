@@ -23,6 +23,9 @@ service or imply that an external scheduler is running.
 - [x] Execute the shared BVH4 hierarchy encoder component on Vulkan compute.
 - [x] Add checked typed continuation frame/provenance planning and stress fixtures.
 - [x] Remove native AS/RT bits from RQ buffer/barrier/queue-submit translation.
+- [x] Encode actual Mesa GPU builder output into shared BVH4 in one command buffer.
+- [x] Add tested device stripping/discovery masks and event/timestamp/render-pass translation.
+- [x] Run an external Vulkan RT CTS smoke matrix with separate native controls and retained failures.
 - [ ] M0: complete all capability, no-native-RT, resource ABI, and continuation proofs.
 - [ ] M1: integrate Mesa builders, GPU BVH4 encoding/refit, and shared AS objects.
 - [ ] M2: complete Ray Query lowering and state semantics.
@@ -36,9 +39,11 @@ Component checkmarks do not complete M0/M1/M2 or the full goal.
 
 | Component | Implemented and tested | Remaining boundary |
 | --- | --- | --- |
-| [Portable BVH4 components](../layers/common/rt_fallback/README.md) | Checked reference planner/encoder; Mesa default scalar-IR CPU adapter with sparse/empty/singleton graphs, full geometry flags, original IDs, explicit BLAS relocation and affine inverses; BDA compute hierarchy/parent encoder with chunked dispatch | GPU Mesa adaptation and record emission, four-child GPU collapse, runtime traversal integration, image emission, refit |
+| [Portable BVH4 components](../layers/common/rt_fallback/README.md) | Checked reference/CPU adapter; generic BDA hierarchy encoder; direct default Mesa GPU IR adaptation/record emission with compact active leaves, full flags and explicit TLAS relocation; actual LBVH build-to-encode in one command buffer | Four-child GPU collapse, broader builder variants/large construction IDs, numerical qualification, runtime traversal integration, refit |
 | Typed continuation frames | Checked 64-bit scalar/aggregate layout; persistent function-local backing; dependency-ordered alias/opaque rematerialization and hidden index capture; explicit rejection of unsupported provenance/layout | State emission, argument/return and invocation-storage ABI, pointer parameter/Phi provenance, specialization, descriptor snapshots and integrated runtime |
-| RQ host translation | Strip AS storage/build-input and SBT buffer usages, including Flags2 overrides; remove native AS/RT stage/access bits in legacy/sync2 barriers and wait/signal submit scopes; preserve unrelated fields and caller chains | Discovery/device feature/extension stripping, event/timestamp/render-pass and buffer-requirement query paths, full-layout descriptor transport and shared-layer object model |
+| RQ host translation | Strip AS/RQ names and feature structures at device creation; mask incompatible optional/native RT discovery; preserve unrelated chains; translate buffer, barrier, submit, event, timestamp and render-pass masks | Complete emulation capability/limit reporting on no-RT ICDs, deferred operations, buffer-requirement query paths, full-layout descriptor transport and shared-layer object model |
+| RQ compiler compatibility | Preserve Function query pointer storage through wrappers; retain image/sampler types in declaration order; fixed-point function/pointer type deduplication without merging distinct aggregate layouts | Actual AS value/provenance preservation, dynamic AS descriptor arrays, shared BVH4 traversal, full opcode/stage coverage |
+| RTP API compatibility | Preserve registry-known device pNext structures including Vulkan 1.4; inject storage16 prerequisites without duplicate aggregates; accept empty dynamic-state lists; generate absolute multi-config-aware manifests | Typed compiler/runtime, arbitrary payloads, complete pipeline options/mandatory API and shared backend integration |
 | Base RQ SBT offset | Lower opcode 6021; select candidate/committed instance; return only the low 24 offset bits; retain helper in the library | Existing single-AS/provenance architecture remains unchanged |
 | AABB opacity | Apply the existing ray-over-instance-over-geometry precedence before opacity culling and expose the correct candidate opacity | Does not complete all RQ traversal or no-native-RT layer behavior |
 
@@ -90,7 +95,7 @@ CI builds the shared BVH4 reference separately and runs the RQ offline and
 no-native-RT helper labels. Physical GPU qualification, the full no-RT device
 path, and full fallback/CTS completion remain open.
 
-## 2026-10-26 development evidence
+## First 2026-10-26 checkpoint (68b75c2)
 
 Development continues on `codex/ray-tracing-fallback`. A platform Goal is active
 for the full M0-M5 contract; this checkpoint does not complete any full milestone.
@@ -161,24 +166,75 @@ unchanged. Its standalone continuation check is
 `ctest --test-dir build-rt-frames -R continuation_analysis --output-on-failure`.
 The portable CPU and RQ builds do not require that workaround.
 
+## Current development and external CTS evidence
+
+The user explicitly requires feasible external Vulkan RT CTS execution from
+`D:\Codes\VK-GL-CTS`, with truthful failures/skips and retained evidence. This is
+now part of the [goal verification contract](ray_tracing_fallback_goal.md#external-cts-delivery-evidence).
+The [CTS report](rt_cts_results_2026-10-26.md),
+[case inventory](rt_cts_smoke_cases.txt), and
+[per-case evidence](rt_cts_results_2026-10-26.json) record the first 20 selected
+cases, exact source/binary revisions, hashes, commands and raw-log paths.
+
+Native controls pass 20/20. The latest RQ batch reports **12 pass, 1 fail,
+1 pre-case crash** out of 14; the identical frozen DLL passes three isolated
+rechecks of that empty-TLAS case. Its startup crash remains unexplained and is
+not overwritten by retries. The AS dynamic-indexing case fails lowering. RTP
+reports **3 pass, 3 fail** out of 6; the remaining cases expose the legacy
+location-zero vec4 payload restriction. No selected case is counted as a
+NotSupported pass. These are prototype-backend results on a native-RT physical
+GPU, not full CTS or no-RT qualification.
+
+CTS drove fixes for image declarations, Function-storage queries/helper passage,
+function-type deduplication, conservative RT discovery, Vulkan 1.4 device pNext
+preservation, empty dynamic-state lists, and Windows absolute manifest paths.
+Earlier runner relative-path loading failures are preserved as harness errors,
+separate from the final matrix. Repository compile regressions retain the
+image/wrapper and distinct aggregate-layout cases in ordinary CI.
+
+Shared BVH4 checks now pass **4/4**, including a direct GPU Mesa-IR encoder with
+triangle/AABB/instance record emission, full flags, explicit BLAS relocation and
+GPU error status. Eight actual imported LBVH triangle/AABB scenes feed this
+encoder in the same command buffer without CPU count/topology readback. The
+same four component checks pass with ASan/UBSan and Khronos validation. Binary
+arity, 32-bit construction IDs, numerical qualification, refit and production
+consumer integration remain open.
+
+RQ offline checks pass **7/7** and the no-native-RT label **3/3** (two mock host
+boundaries plus the production traversal-helper compute test). Device stripping
+and discovery consistency tests reject the old helper in mutation testing;
+bypassing expanded event/timestamp/render-pass translation fails 72 assertions.
+The RTP repository regression passes **11/11**, including the device-feature
+chain and manifest loading from the repository root. Component test success
+does not override the external CTS failures above.
+
 ## Next work
 
 Run M0 proof work in parallel with shared-backend construction:
 
-1. Establish one capability/device/object translation path for genuinely no-RT
-   drivers. Buffer, barrier and queue-submit masks are now translated, but device
-   extension/feature stripping, events/timestamps, render-pass dependencies and
-   buffer-requirement/external-buffer queries still need interception and tests.
+1. Complete one capability/device/object translation path for genuinely no-RT
+   drivers. Device stripping and buffer/barrier/submit/event/timestamp/render-pass
+   masks are now tested; truthful no-RT base discovery/limits, deferred operations
+   and buffer-requirement/external-buffer queries remain open.
 2. Replace the single-AS shortcut with value-preserving AS descriptor/BDA lowering,
-   including arrays, dynamic indexing, and helper/control-flow passage.
+   including arrays, dynamic indexing, and helper/control-flow passage. The real
+   CTS dynamic-indexing case now supplies a reproducible failing acceptance test.
 3. Prove resource transport at full application limits and extend typed frame
    planning into emitted/executed continuations. Address invocation-private
    storage, pointer parameters/Phi provenance, specialization and argument/return
    ABI before claiming the typed-continuation M0 stress proof.
-4. Connect Mesa GPU output directly to the shared GPU encoder, populate leaf
-   records, implement four-child collapse/refit, then migrate both RQ/RTP consumers
-   to the shared runtime. The CPU Mesa adapter and generic GPU hierarchy encoder
-   are tested components, not completion of M1. Wire PLOC/HPLOC only with complete
-   host contracts and remove construction-time 32-bit byte limits.
+4. Integrate the now-tested direct Mesa GPU encoder into layer-owned AS objects
+   and both consumers, implement four-child collapse/refit, and qualify numerical
+   cases and large construction IDs. Same-command-buffer builder/encoder tests
+   do not complete production M1 integration. Wire PLOC/HPLOC only with complete
+   host contracts.
+5. Expand the [external CTS matrix](rt_cts_results_2026-10-26.md) beyond its initial
+   20 cases. Resolve dynamic-AS indexing and RTP payload failures, and investigate
+   the single pre-case startup crash retained in the latest RQ batch (three
+   same-DLL targeted rechecks pass). Do not erase failures or count skips as passes.
+6. Replace the RQ global registry's unsynchronized first-use boolean initialization
+   with a thread-safe once mechanism and exercise concurrent first calls. This
+   independent M4 threading defect was found during the crash audit; there is no
+   evidence tying it to the observed startup crash.
 
 Follow the goal's [iteration and stop policy](ray_tracing_fallback_goal.md#iteration-and-stop-policy).

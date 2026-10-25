@@ -47,48 +47,74 @@ bool remap_id_uses(std::vector<uint32_t> *words,
    return true;
 }
 
-bool dedupe_types(std::vector<uint32_t> *words, std::string *error)
-{
-   if (words->size() < 5) {
-      if (error) *error = "truncated SPIR-V header during type deduplication";
-      return false;
-   }
-   std::unordered_map<std::string, uint32_t> seen;
-   std::unordered_map<uint32_t, uint32_t> substitutions;
-   std::unordered_set<size_t> dropped;
-   for (size_t i = 5; i < words->size();) {
-      uint32_t length = (*words)[i] >> 16;
-      auto op = static_cast<spv::Op>((*words)[i] & 0xffff);
-      if (!length || length > words->size() - i) {
-         if (error) *error = "malformed SPIR-V instruction during type deduplication";
-         return false;
-      }
-      /* These types have their result ID at word 1. Forward-pointer
-       * declarations have no result ID and must not be deduplicated this way. */
-      bool type = op == spv::OpTypeVoid || op == spv::OpTypeBool || op == spv::OpTypeInt ||
-         op == spv::OpTypeFloat || op == spv::OpTypeVector || op == spv::OpTypeMatrix ||
-         op == spv::OpTypeArray || op == spv::OpTypeRuntimeArray || op == spv::OpTypePointer;
-      if (type && length >= 2) {
-         std::string signature = std::to_string((*words)[i]) + ":";
-         for (uint32_t k = 2; k < length; ++k) signature += std::to_string((*words)[i + k]) + ",";
-         uint32_t id = (*words)[i + 1];
-         auto found = seen.emplace(signature, id);
-         if (!found.second && found.first->second != id) {
-            substitutions[id] = found.first->second;
-            dropped.insert(i);
-         }
-      }
-      i += length;
-   }
-   if (dropped.empty()) return true;
-   if (!remap_id_uses(words, substitutions, error)) return false;
-   std::vector<uint32_t> out(words->begin(), words->begin() + 5);
-   for (size_t i = 5; i < words->size();) {
-      uint32_t length = (*words)[i] >> 16;
-      if (!dropped.count(i)) out.insert(out.end(), words->begin() + i, words->begin() + i + length);
-      i += length;
-   }
-   words->swap(out);
-   return true;
+static bool dedupe_types_once(std::vector<uint32_t> *words, std::string *error) {
+    if (words->size() < 5) {
+        if (error) *error = "truncated SPIR-V header during type deduplication";
+        return false;
+    }
+    std::unordered_map<std::string, uint32_t> seen;
+    std::unordered_map<uint32_t, uint32_t> substitutions;
+    std::unordered_set<size_t> dropped;
+    std::unordered_set<uint32_t> decorated;
+    for (size_t i = 5; i < words->size();) {
+        const uint32_t length = (*words)[i] >> 16;
+        if (!length || length > words->size() - i) break;
+        const auto op = static_cast<spv::Op>((*words)[i] & 0xffff);
+        if ((op == spv::OpDecorate || op == spv::OpDecorateId || op == spv::OpDecorateString) && length >= 3)
+            decorated.insert((*words)[i + 1]);
+        if (op == spv::OpGroupDecorate)
+            for (uint32_t k = 2; k < length; ++k) decorated.insert((*words)[i + k]);
+        i += length;
+    }
+    for (size_t i = 5; i < words->size();) {
+        uint32_t length = (*words)[i] >> 16;
+        auto op = static_cast<spv::Op>((*words)[i] & 0xffff);
+        if (!length || length > words->size() - i) {
+            if (error) *error = "malformed SPIR-V instruction during type deduplication";
+            return false;
+        }
+        /* These types have their result ID at word 1. Forward-pointer
+         * declarations have no result ID and must not be deduplicated this way. */
+        bool type = op == spv::OpTypeVoid || op == spv::OpTypeBool || op == spv::OpTypeInt || op == spv::OpTypeFloat ||
+                    op == spv::OpTypeVector || op == spv::OpTypeMatrix || op == spv::OpTypePointer || op == spv::OpTypeFunction;
+        // Arrays are aggregate types: equal element/length operands do not imply
+        // equal layout (ArrayStride can differ). Likewise, do not merge decorated
+        // pointer/scalar types by instruction bytes alone.
+        if (type && length >= 2 && !decorated.count((*words)[i + 1])) {
+            std::string signature = std::to_string((*words)[i]) + ":";
+            for (uint32_t k = 2; k < length; ++k) signature += std::to_string((*words)[i + k]) + ",";
+            uint32_t id = (*words)[i + 1];
+            auto found = seen.emplace(signature, id);
+            if (!found.second && found.first->second != id) {
+                substitutions[id] = found.first->second;
+                dropped.insert(i);
+            }
+        }
+        i += length;
+    }
+    if (dropped.empty()) return true;
+    if (!remap_id_uses(words, substitutions, error)) return false;
+    std::vector<uint32_t> out(words->begin(), words->begin() + 5);
+    for (size_t i = 5; i < words->size();) {
+        uint32_t length = (*words)[i] >> 16;
+        if (!dropped.count(i)) out.insert(out.end(), words->begin() + i, words->begin() + i + length);
+        i += length;
+    }
+    words->swap(out);
+    return true;
+}
+
+bool dedupe_types(std::vector<uint32_t> *words, std::string *error) {
+    // A pointer merge can make function signatures identical only after its
+    // ID uses have been remapped. Iterate to a fixed point, always deleting at
+    // least one declaration per changing iteration. Keep failure atomic.
+    auto candidate = *words;
+    size_t previous;
+    do {
+        previous = candidate.size();
+        if (!dedupe_types_once(&candidate, error)) return false;
+    } while (candidate.size() < previous);
+    words->swap(candidate);
+    return true;
 }
 }

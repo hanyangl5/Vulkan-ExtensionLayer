@@ -177,6 +177,76 @@ static bool check_signed_sbt_variant(const std::vector<uint32_t> &user, const st
     return result == 0;
 }
 
+/* The external CTS flow/image and query-wrapper cases exposed two independent
+ * lowering defects. Retain a small validated compile regression for CI; the
+ * real CTS executions remain the execution/behavior evidence. */
+static bool check_function_query_image(const std::vector<uint32_t> &lib) {
+    const char *source = R"spv(
+OpCapability Shader
+OpCapability RayQueryKHR
+OpExtension "SPV_KHR_ray_query"
+OpMemoryModel Logical GLSL450
+OpEntryPoint GLCompute %main "main" %scene %target
+OpExecutionMode %main LocalSize 1 1 1
+OpDecorate %scene DescriptorSet 0
+OpDecorate %scene Binding 0
+OpDecorate %target DescriptorSet 0
+OpDecorate %target Binding 1
+%void = OpTypeVoid
+%uint = OpTypeInt 32 0
+%float = OpTypeFloat 32
+%v3 = OpTypeVector %float 3
+%v3u = OpTypeVector %uint 3
+%v4u = OpTypeVector %uint 4
+%zero = OpConstant %uint 0
+%mask = OpConstant %uint 255
+%f0 = OpConstant %float 0
+%f1 = OpConstant %float 1
+%origin = OpConstantComposite %v3 %f0 %f0 %f0
+%direction = OpConstantComposite %v3 %f0 %f0 %f1
+%coord = OpConstantComposite %v3u %zero %zero %zero
+%texel = OpConstantComposite %v4u %zero %zero %zero %zero
+%as = OpTypeAccelerationStructureKHR
+%asptr = OpTypePointer UniformConstant %as
+%scene = OpVariable %asptr UniformConstant
+%image = OpTypeImage %uint 3D 0 0 0 2 R32ui
+%imageptr = OpTypePointer UniformConstant %image
+%target = OpVariable %imageptr UniformConstant
+%query = OpTypeRayQueryKHR
+%queryptr = OpTypePointer Function %query
+%fn = OpTypeFunction %void
+%helperfn = OpTypeFunction %void %queryptr
+%helper = OpFunction %void None %helperfn
+%arg = OpFunctionParameter %queryptr
+%helperentry = OpLabel
+%handle = OpLoad %as %scene
+OpRayQueryInitializeKHR %arg %handle %zero %mask %origin %f0 %direction %f1
+OpReturn
+OpFunctionEnd
+%main = OpFunction %void None %fn
+%entry = OpLabel
+%q = OpVariable %queryptr Function
+%called = OpFunctionCall %void %helper %q
+%destination = OpLoad %image %target
+OpImageWrite %destination %coord %texel
+OpReturn
+OpFunctionEnd
+)spv";
+    spvtools::SpirvTools tools(SPV_ENV_VULKAN_1_2);
+    std::vector<uint32_t> words;
+    if (!tools.Assemble(source, &words) || !tools.Validate(words)) {
+        std::fprintf(stderr, "FAIL: Function-query/storage-image regression fixture invalid\n");
+        return false;
+    }
+    uint32_t *out = nullptr;
+    size_t count = 0;
+    char error[1024];
+    const int result = vkrt_spirv_lower(words.data(), words.size(), lib.data(), lib.size(), &out, &count, error, sizeof(error));
+    vkrt_spirv_lower_free(out);
+    if (result) std::fprintf(stderr, "FAIL: Function-query/storage-image lowering: %s\n", error);
+    return result == 0;
+}
+
 int
 main(int argc, char **argv)
 {
@@ -203,6 +273,7 @@ main(int argc, char **argv)
                before.op_function_call);
 
    int failures = 0;
+   if (!check_function_query_image(lib)) failures++;
    if (argc == 5 && before.op_sbt_offset != 2) {
        std::printf("FAIL: getter fixture must contain both SBT-offset selectors (found %d)\n", before.op_sbt_offset);
        failures++;

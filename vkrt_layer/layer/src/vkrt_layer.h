@@ -48,10 +48,9 @@ struct vkrt_device_data {
    VkPhysicalDevice            physical_device;
    struct vkrt_instance_data  *instance_data;
 
-   /* True when the underlying ICD exposes VK_KHR_ray_query. In bootstrap
-    * mode we use it as an oracle; in virtual-extension mode this is false
-    * and the layer supplies the whole feature. */
-   bool                        icd_has_ray_query;
+   /* Original application request, before emulated names are stripped. This
+    * is not evidence that a native RT feature was enabled downstream. */
+   bool app_requested_ray_query;
    VkPipelineLayout            build_pipeline_layout;
    VkPipeline                  build_pipelines[5];
    uint32_t                    max_build_dispatch_x;
@@ -144,5 +143,8 @@ void vkrt_cmd_build_as(struct vkrt_device_data *dev,
 
 /* vkrt_sync.c */
 PFN_vkVoidFunction vkrt_sync_proc(const char *name);
+/* vkrt_discovery.c: mask incompatible native RT options without exposing new
+ * base support before the complete capability/implementation gate passes. */
+PFN_vkVoidFunction vkrt_discovery_proc(const char *name);
 
 #endif /* VKRT_LAYER_H */

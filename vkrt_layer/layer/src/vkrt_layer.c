@@ -10,11 +10,10 @@
  *   - shader-module interception (detect + fail-fast on RT-pipeline ops)
  *   - acceleration-structure API virtualisation
  *
- * Deployment: bootstrap mode. The ICD keeps its real VK_KHR_ray_query;
- * this layer sits above it and replaces the AS build and ray-query
- * traversal with the software path so results can be diffed against the
- * native implementation (the oracle). Virtual-extension mode (strip the
- * extension names, advertise our own) is milestone M6.
+ * Prototype deployment: AS/RQ names and features are consumed by the layer
+ * during device creation. Discovery does not add base support on a no-RT ICD
+ * until the complete capability/implementation proof is available. Native
+ * control runs are separate processes without this layer.
  */
 
 #include "vkrt_layer.h"
@@ -207,15 +206,13 @@ vkrt_CreateDevice(VkPhysicalDevice physicalDevice,
       return result;
    }
 
-   /* Bootstrap mode: record whether the ICD actually has ray query so the
-    * oracle comparison knows what it is diffing against. */
-   data->icd_has_ray_query = false;
+   data->app_requested_ray_query = false;
    if (pCreateInfo->ppEnabledExtensionNames) {
       for (uint32_t i = 0; i < pCreateInfo->enabledExtensionCount; i++) {
          if (strcmp(pCreateInfo->ppEnabledExtensionNames[i],
                     VK_KHR_RAY_QUERY_EXTENSION_NAME) == 0) {
-            data->icd_has_ray_query = true;
-            break;
+             data->app_requested_ray_query = true;
+             break;
          }
       }
    }
@@ -224,8 +221,7 @@ vkrt_CreateDevice(VkPhysicalDevice physicalDevice,
    /* Physical devices map to the instance data so CreateDevice can find it;
     * now also key the physical device to our device data for the AS calls
     * that take VkPhysicalDevice. Keep both. */
-   VKRT_LOG_DBG("CreateDevice ok (%p) icd_has_ray_query=%d", (void *)*pDevice,
-                (int)data->icd_has_ray_query);
+   VKRT_LOG_DBG("CreateDevice ok (%p) app_requested_ray_query=%d", (void *)*pDevice, (int)data->app_requested_ray_query);
    return VK_SUCCESS;
 }
 
@@ -687,6 +683,9 @@ vkrt_GetInstanceProcAddr(VkInstance instance, const char *pName)
    void *dptr = vkrt_find_device_fn(pName);
    if (dptr)
       return (PFN_vkVoidFunction)dptr;
+
+   PFN_vkVoidFunction discovery = vkrt_discovery_proc(pName);
+   if (discovery) return discovery;
 
    if (instance == VK_NULL_HANDLE)
       return NULL;

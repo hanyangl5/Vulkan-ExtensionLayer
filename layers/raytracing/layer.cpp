@@ -238,6 +238,15 @@ T *Find(void *chain, VkStructureType type) {
         if (p->sType == type) return reinterpret_cast<T *>(p);
     return nullptr;
 }
+size_t ChainSize(VkStructureType type) {
+    switch (type) {
+#include "vkrt_pnext_sizes.h"
+        case VK_STRUCTURE_TYPE_LOADER_DEVICE_CREATE_INFO:
+            return sizeof(VkLayerDeviceCreateInfo);
+        default:
+            return 0;
+    }
+}
 }  // namespace
 
 VEL_EXPORT VkResult VKAPI_CALL vkCreateInstance(const VkInstanceCreateInfo *ci, const VkAllocationCallbacks *alloc,
@@ -390,34 +399,17 @@ VEL_EXPORT VkResult VKAPI_CALL vkCreateDevice(VkPhysicalDevice p, const VkDevice
         // Copy known feature nodes, never unlink or overwrite the caller's feature
         // chain.
         for (auto node = static_cast<const VkBaseInStructure *>(ci.pNext); node; node = node->pNext) {
-            size_t size = 0;
+            size_t size = ChainSize(node->sType);
             switch (node->sType) {
                 case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_FEATURES_KHR:
                 case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_FEATURES_KHR:
                     continue;
-                case VK_STRUCTURE_TYPE_LOADER_DEVICE_CREATE_INFO:
-                    size = sizeof(VkLayerDeviceCreateInfo);
-                    break;
-                case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2:
-                    size = sizeof(VkPhysicalDeviceFeatures2);
-                    break;
-                case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_FEATURES:
-                    size = sizeof(VkPhysicalDeviceVulkan11Features);
-                    break;
-                case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES:
-                    size = sizeof(VkPhysicalDeviceVulkan12Features);
-                    break;
-                case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES:
-                    size = sizeof(VkPhysicalDeviceVulkan13Features);
-                    break;
-                case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_BUFFER_DEVICE_ADDRESS_FEATURES:
-                    size = sizeof(VkPhysicalDeviceBufferDeviceAddressFeatures);
-                    break;
-                case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SYNCHRONIZATION_2_FEATURES:
-                    size = sizeof(VkPhysicalDeviceSynchronization2Features);
-                    break;
                 default:
-                    return VK_ERROR_FEATURE_NOT_PRESENT;
+                    if (!size) {
+                        std::fprintf(stderr, "VEL RT device: unknown device-create chain sType=%u\n", unsigned(node->sType));
+                        return VK_ERROR_FEATURE_NOT_PRESENT;
+                    }
+                    break;
             }
             copies.emplace_back((size + 7) / 8);
             std::memcpy(copies.back().data(), node, size);
@@ -450,13 +442,18 @@ VEL_EXPORT VkResult VKAPI_CALL vkCreateDevice(VkPhysicalDevice p, const VkDevice
             bda.pNext = head;
             ci.pNext = &bda;
         }
-        VkPhysicalDeviceVulkan11Features v11{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_FEATURES};
+        VkPhysicalDevice16BitStorageFeatures storage16{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_16BIT_STORAGE_FEATURES};
         if (auto v = Find<VkPhysicalDeviceVulkan11Features>(head, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_FEATURES))
             v->storageBuffer16BitAccess = VK_TRUE;
+        else if (auto v =
+                     Find<VkPhysicalDevice16BitStorageFeatures>(head, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_16BIT_STORAGE_FEATURES))
+            v->storageBuffer16BitAccess = VK_TRUE;
         else {
-            v11.storageBuffer16BitAccess = VK_TRUE;
-            v11.pNext = const_cast<void *>(ci.pNext);
-            ci.pNext = &v11;
+            // An individual prerequisite does not conflict with any other
+            // Vulkan 1.1 feature structs already present in the application.
+            storage16.storageBuffer16BitAccess = VK_TRUE;
+            storage16.pNext = const_cast<void *>(ci.pNext);
+            ci.pNext = &storage16;
         }
         auto result = create(p, &ci, alloc, out);
         if (result != VK_SUCCESS) return result;
@@ -668,9 +665,21 @@ VEL_EXPORT VkResult VKAPI_CALL vkCreateRayTracingPipelinesKHR(VkDevice h, VkDefe
         const auto &ci = infos[k];
         auto p = std::make_unique<Pipeline>();
         try {
+            // An explicitly empty dynamic-state list has the same semantics as
+            // a null pointer. CTS uses this form for ordinary static pipelines.
+            const bool hasDynamicState =
+                ci.pDynamicState && (ci.pDynamicState->dynamicStateCount || ci.pDynamicState->pNext || ci.pDynamicState->flags);
             if (ci.maxPipelineRayRecursionDepth != 1 || ci.pNext || ci.flags || ci.pLibraryInfo || ci.pLibraryInterface ||
-                ci.pDynamicState)
-                throw std::runtime_error("Unsupported RT pipeline options");
+                hasDynamicState)
+                throw std::runtime_error(
+                    "Unsupported RT pipeline options: recursion=" + std::to_string(ci.maxPipelineRayRecursionDepth) +
+                    " flags=" + std::to_string(ci.flags) +
+                    " pNextSType=" + std::to_string(ci.pNext ? static_cast<const VkBaseInStructure *>(ci.pNext)->sType : 0) +
+                    " libraries=" + std::to_string(ci.pLibraryInfo ? ci.pLibraryInfo->libraryCount : 0) +
+                    " libraryInfo=" + std::to_string(ci.pLibraryInfo != nullptr) +
+                    " libraryInterface=" + std::to_string(ci.pLibraryInterface != nullptr) +
+                    " dynamicInfo=" + std::to_string(ci.pDynamicState != nullptr) +
+                    " dynamicStates=" + std::to_string(ci.pDynamicState ? ci.pDynamicState->dynamicStateCount : 0));
             auto original = d.layouts.at(ci.layout);
             std::vector<vel::rt::Stage> stages;
             for (uint32_t j = 0; j < ci.stageCount; j++) {

@@ -45,6 +45,7 @@ add_library(${VKRT_LAYER_NAME} SHARED
    src/vkrt_virtual_as.c
    src/vkrt_build.c
    src/vkrt_features.c
+   src/vkrt_discovery.c
    src/vkrt_translate.c
    src/vkrt_commands.c
    src/vkrt_sync.c
@@ -347,6 +348,16 @@ if(BUILD_TESTING)
    add_executable(test_host_translation ../tests/test_host_translation.c src/vkrt_translate.c src/vkrt_sync.c)
    target_include_directories(test_host_translation PRIVATE src ${CMAKE_CURRENT_BINARY_DIR} ${Vulkan_INCLUDE_DIRS})
    set_target_properties(test_host_translation PROPERTIES C_STANDARD 11)
+   add_executable(test_device_features ../tests/test_device_features.c src/vkrt_features.c)
+   target_include_directories(test_device_features PRIVATE src ${CMAKE_CURRENT_BINARY_DIR} ${Vulkan_INCLUDE_DIRS})
+   set_target_properties(test_device_features PROPERTIES C_STANDARD 11)
+   add_test(NAME vkrt.device_features COMMAND test_device_features)
+   set_tests_properties(vkrt.device_features PROPERTIES LABELS "offline;no_native_rt")
+   add_executable(test_discovery ../tests/test_discovery.c src/vkrt_discovery.c)
+   target_include_directories(test_discovery PRIVATE src ${CMAKE_CURRENT_BINARY_DIR} ${Vulkan_INCLUDE_DIRS})
+   set_target_properties(test_discovery PROPERTIES C_STANDARD 11)
+   add_test(NAME vkrt.discovery COMMAND test_discovery)
+   set_tests_properties(vkrt.discovery PROPERTIES LABELS "offline;no_native_rt")
    add_executable(test_spirv_ids ../tests/test_spirv_ids.cpp src/vkrt_spirv_ids.cpp)
    target_include_directories(test_spirv_ids PRIVATE src ${Vulkan_INCLUDE_DIRS} ${VKRT_SPIRV_HEADERS_INCLUDE_DIR})
    target_link_libraries(test_spirv_ids PRIVATE ${VKRT_SPIRV_LIBRARIES})

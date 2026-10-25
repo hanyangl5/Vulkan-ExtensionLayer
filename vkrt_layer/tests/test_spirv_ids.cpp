@@ -53,6 +53,50 @@ OpReturn
 OpFunctionEnd
 )";
 
+static void distinct_array_layouts(spvtools::SpirvTools &tools) {
+    const char *fixture = R"spv(
+OpCapability Shader
+OpMemoryModel Logical GLSL450
+OpEntryPoint GLCompute %main "main" %a %b
+OpExecutionMode %main LocalSize 1 1 1
+OpDecorate %array16 ArrayStride 16
+OpDecorate %array32 ArrayStride 32
+OpDecorate %block16 Block
+OpDecorate %block32 Block
+OpMemberDecorate %block16 0 Offset 0
+OpMemberDecorate %block32 0 Offset 0
+OpDecorate %a DescriptorSet 0
+OpDecorate %a Binding 0
+OpDecorate %b DescriptorSet 0
+OpDecorate %b Binding 1
+%void = OpTypeVoid
+%uint = OpTypeInt 32 0
+%two = OpConstant %uint 2
+%array16 = OpTypeArray %uint %two
+%array32 = OpTypeArray %uint %two
+%block16 = OpTypeStruct %array16
+%block32 = OpTypeStruct %array32
+%pointer16 = OpTypePointer StorageBuffer %block16
+%pointer32 = OpTypePointer StorageBuffer %block32
+%a = OpVariable %pointer16 StorageBuffer
+%b = OpVariable %pointer32 StorageBuffer
+%fn = OpTypeFunction %void
+%main = OpFunction %void None %fn
+%entry = OpLabel
+OpReturn
+OpFunctionEnd
+)spv";
+    std::vector<uint32_t> words;
+    REQUIRE(tools.Assemble(fixture, &words) && tools.Validate(words));
+    std::string error;
+    REQUIRE(vkrt_spv::dedupe_types(&words, &error));
+    REQUIRE(tools.Validate(words));
+    unsigned arrays = 0;
+    for (size_t i = 5; i < words.size(); i += words[i] >> 16)
+        if ((words[i] & 0xffff) == static_cast<uint32_t>(spv::OpTypeArray)) ++arrays;
+    REQUIRE(arrays == 2);
+}
+
 int main()
 {
    spvtools::SpirvTools tools(SPV_ENV_VULKAN_1_2);
@@ -107,6 +151,7 @@ int main()
    std::vector<uint32_t> truncated(4, 0);
    REQUIRE(!vkrt_spv::dedupe_types(&truncated, &error));
    REQUIRE(truncated == std::vector<uint32_t>(4, 0));
+   distinct_array_layouts(tools);
    std::printf("SPIR-V operand remapping: %s (%u failures)\n", failures ? "FAIL" : "PASS", failures);
    return failures ? 1 : 0;
 }
