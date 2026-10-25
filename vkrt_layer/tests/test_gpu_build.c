@@ -1,8 +1,8 @@
-#include "../layer/bvh/bvh_ir_contract.h"
 /* SPDX-License-Identifier: MIT
  * The same public AS-build + ray-query API is tested with VKRT and the native
  * ICD. No BVH bytes are uploaded by the CPU in this fixture.
  */
+#include "bvh4_abi.h"
 #define VKRT_TEST_FIXTURE_ONLY
 #include <stdbool.h>
 #include "00_single_tri/main.c"
@@ -156,40 +156,127 @@ static void validate_tree(const struct built_as *as, uint32_t expected_leaves)
          fprintf(stderr, "AS/scratch bounds guard corrupted\n"); ++g_fail; break;
       }
    }
-   const uint32_t *words = (const void *)(bytes + 256);
-   expect_u("active leaf count", words[6], expected_leaves);
-   uint32_t *stack = malloc((expected_leaves * 2 + 4) * sizeof(uint32_t));
-   uint8_t *visited = calloc((size_t)as->size / 4, 1);
-   uint32_t top = 0, leaves = 0;
-   expect_u("Mesa byte 80", words[20], 0);
-   expect_u("common magic", words[BVH_IR_MAGIC_OFFSET / 4], BVH_IR_MAGIC);
-   expect_u("common version", words[BVH_IR_VERSION_OFFSET / 4], BVH_IR_VERSION);
-   uint32_t geometry_type = words[BVH_IR_GEOMETRY_TYPE_OFFSET / 4];
-   uint32_t stride = geometry_type == 0 ? 68 : geometry_type == 1 ? 32 : 96;
-   stack[top++] = BVH_IR_ROOT_ID(words[BVH_IR_LEAF_CAPACITY_OFFSET / 4], stride, words[8]);
+   bytes += 256;
+   VelRtBvh4Header h;
+   memcpy(&h, bytes, sizeof(h));
+   expect_u("shared magic", h.magic, VEL_RT_BVH4_MAGIC);
+   expect_u("shared version", h.version, VEL_RT_BVH4_ABI_VERSION);
+   expect_u("shared type", h.type, as->info.type);
+   expect_u("shared status flags", h.flags, 0);
+   uint64_t counts[] = {h.node_count, h.triangle_count, h.aabb_count, h.instance_count};
+   const uint64_t offsets[] = {h.node_offset, h.triangle_offset, h.aabb_offset, h.instance_offset, h.leaf_parent_offset};
+   const uint64_t strides[] = {sizeof(VelRtBvh4Node), sizeof(VelRtBvh4Triangle), sizeof(VelRtBvh4Aabb), sizeof(VelRtBvh4Instance),
+                               4};
+   uint64_t leaf_count = counts[1] + counts[2] + counts[3], total = counts[0] + leaf_count;
+   if (h.magic != VEL_RT_BVH4_MAGIC || h.version != VEL_RT_BVH4_ABI_VERSION || h.flags || h.total_size > as->size ||
+       h.total_size < sizeof(h) || total > as->size / 4) {
+       fprintf(stderr, "Invalid shared BVH4 header\n");
+       ++g_fail;
+       return;
+   }
+   for (unsigned i = 0; i < 5; ++i) {
+       uint64_t count = i < 4 ? counts[i] : leaf_count;
+       if (offsets[i] > h.total_size || count > (h.total_size - offsets[i]) / strides[i]) {
+           fprintf(stderr, "Invalid shared BVH4 region %u\n", i);
+           ++g_fail;
+           return;
+       }
+   }
+   expect_u("active leaf count", (uint32_t)leaf_count, expected_leaves);
+   struct visit {
+       uint32_t id, parent;
+       float bounds[6];
+   };
+   struct visit *stack = malloc((size_t)(total + 1) * sizeof(*stack));
+   uint8_t *visited = calloc((size_t)(total + 1), 1);
+   if (!stack || !visited) {
+       free(stack);
+       free(visited);
+       ++g_fail;
+       return;
+   }
+   uint64_t top = 0;
+   uint32_t leaves = 0, nodes = 0;
+   stack[top] = (struct visit){.id = h.root_id, .parent = VEL_RT_BVH4_INVALID_ID};
+   memcpy(stack[top].bounds, h.bounds_min, 12);
+   memcpy(stack[top++].bounds + 3, h.bounds_max, 12);
    while (top) {
-      uint32_t id = stack[--top], offset = BVH_IR_NODE_OFFSET + (id & ~3u), kind = id & 3u;
-      if (id == UINT32_MAX) continue;
-      if (offset < BVH_IR_NODE_OFFSET || offset + 32 > as->size || visited[offset / 4]) {
-         fprintf(stderr, "Invalid/cyclic node 0x%x\n", id); ++g_fail; break;
-      }
-      visited[offset / 4] = 1;
-      if (kind != 1) { ++leaves; continue; }
-      const uint32_t *node = words + offset / 4;
-      for (uint32_t j = 0; j < 2; ++j) {
-         uint32_t child = node[6 + j];
-         if (top >= expected_leaves * 2 + 4) { ++g_fail; goto finish; }
-         stack[top++] = child;
-         if (child == UINT32_MAX || BVH_IR_NODE_OFFSET + (child & ~3u) + 24 > as->size) continue;
-         const float *parent_bounds = (const void *)node;
-         const float *child_bounds = (const void *)(words + (BVH_IR_NODE_OFFSET + (child & ~3u)) / 4);
-         for (uint32_t axis = 0; axis < 3; ++axis)
-            if (parent_bounds[axis] > child_bounds[axis] + 1e-4f ||
-                parent_bounds[axis + 3] < child_bounds[axis + 3] - 1e-4f) ++g_fail;
-      }
+       struct visit current = stack[--top];
+       uint32_t id = current.id, index = id & VEL_RT_BVH4_INDEX_MASK, kind = id >> VEL_RT_BVH4_KIND_SHIFT;
+       if (id == VEL_RT_BVH4_INVALID_ID) continue;
+       uint64_t slot = index;
+       for (unsigned i = 0; i < kind; ++i) slot += counts[i];
+       if (index >= counts[kind] || slot >= total || visited[slot]) {
+           fprintf(stderr, "Invalid/cyclic shared node 0x%x\n", id);
+           ++g_fail;
+           break;
+       }
+       visited[slot] = 1;
+       if (kind == VEL_RT_BVH4_INTERNAL) {
+           const VelRtBvh4Node *node = (const void *)(bytes + h.node_offset + (uint64_t)index * sizeof(*node));
+           ++nodes;
+           expect_u("internal parent", node->parent_id, current.parent);
+           if (node->child_count < 2 || node->child_count > 4) {
+               ++g_fail;
+               break;
+           }
+           for (uint32_t j = 0; j < node->child_count; ++j) {
+               if (top >= total + 1 || node->child_id[j] == VEL_RT_BVH4_INVALID_ID) {
+                   ++g_fail;
+                   goto finish;
+               }
+               stack[top] = (struct visit){.id = node->child_id[j], .parent = id};
+               memcpy(stack[top].bounds, node->bounds_min[j], 12);
+               memcpy(stack[top].bounds + 3, node->bounds_max[j], 12);
+               for (unsigned axis = 0; axis < 3; ++axis)
+                   if (current.bounds[axis] > stack[top].bounds[axis] + 1e-4f ||
+                       current.bounds[axis + 3] < stack[top].bounds[axis + 3] - 1e-4f)
+                       ++g_fail;
+               ++top;
+           }
+       } else {
+           ++leaves;
+           uint32_t parent;
+           memcpy(&parent, bytes + h.leaf_parent_offset + (slot - counts[0]) * 4, 4);
+           expect_u("leaf parent", parent, current.parent);
+           if (kind == VEL_RT_BVH4_TRIANGLE || kind == VEL_RT_BVH4_AABB) {
+               uint64_t offset = offsets[kind] + (uint64_t)index * strides[kind];
+               uint32_t primitive, geometry, flags;
+               float bounds[6] = {INFINITY, INFINITY, INFINITY, -INFINITY, -INFINITY, -INFINITY};
+               if (kind == VEL_RT_BVH4_TRIANGLE) {
+                   const VelRtBvh4Triangle *leaf = (const void *)(bytes + offset);
+                   primitive = leaf->primitive_id;
+                   geometry = leaf->geometry_id;
+                   flags = leaf->geometry_flags;
+                   for (unsigned vertex = 0; vertex < 3; ++vertex)
+                       for (unsigned axis = 0; axis < 3; ++axis) {
+                           bounds[axis] = fminf(bounds[axis], leaf->vertices[vertex][axis]);
+                           bounds[axis + 3] = fmaxf(bounds[axis + 3], leaf->vertices[vertex][axis]);
+                       }
+               } else {
+                   const VelRtBvh4Aabb *leaf = (const void *)(bytes + offset);
+                   primitive = leaf->primitive_id;
+                   geometry = leaf->geometry_id;
+                   flags = leaf->geometry_flags;
+                   memcpy(bounds, leaf->bounds_min, 12);
+                   memcpy(bounds + 3, leaf->bounds_max, 12);
+               }
+               if (geometry >= as->info.geometryCount) {
+                   ++g_fail;
+                   goto finish;
+               }
+               const VkAccelerationStructureGeometryKHR *input =
+                   as->info.pGeometries ? &as->info.pGeometries[geometry] : as->info.ppGeometries[geometry];
+               expect_u("full geometry flags", flags, input->flags);
+               if (primitive >= as->ranges[geometry].primitiveCount) ++g_fail;
+               for (unsigned axis = 0; axis < 3; ++axis)
+                   if (current.bounds[axis] > bounds[axis] + 1e-4f || current.bounds[axis + 3] < bounds[axis + 3] - 1e-4f) ++g_fail;
+           }
+       }
    }
 finish:
    expect_u("reachable leaves", leaves, expected_leaves);
+   expect_u("reachable internal nodes", nodes, h.node_count);
    free(visited); free(stack);
 }
 
@@ -221,18 +308,23 @@ static void triangles_case(uint32_t n, bool inactive, bool indexed, bool two_geo
    VkAccelerationStructureGeometryKHR geoms[2];
    VkAccelerationStructureBuildRangeInfoKHR ranges[2];
    for (uint32_t i = 0; i < 2; ++i) {
-      geoms[i] = (VkAccelerationStructureGeometryKHR){.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR,
-         .geometryType = VK_GEOMETRY_TYPE_TRIANGLES_KHR,
-         .flags = n == 1 ? VK_GEOMETRY_OPAQUE_BIT_KHR : 0,
-         .geometry.triangles = {.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_TRIANGLES_DATA_KHR,
-            .vertexFormat = VK_FORMAT_R32G32B32_SFLOAT, .vertexData.deviceAddress = vertices.addr,
-            .vertexStride = 12, .maxVertex = count * 3,
-            .indexType = indexed ? VK_INDEX_TYPE_UINT16 : VK_INDEX_TYPE_NONE_KHR,
-            .indexData.deviceAddress = indices.addr, .transformData.deviceAddress = transformed ? transforms.addr : 0}};
-      uint32_t first = i ? split : 0;
-      ranges[i] = (VkAccelerationStructureBuildRangeInfoKHR){.primitiveCount = i ? n - split : split,
-         .primitiveOffset = indexed ? 4 + first * 6 : 12 + first * 36,
-         .firstVertex = indexed ? 1 : 0, .transformOffset = transformed ? 16 : 0};
+       geoms[i] = (VkAccelerationStructureGeometryKHR){
+           .sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR,
+           .geometryType = VK_GEOMETRY_TYPE_TRIANGLES_KHR,
+           .flags = VK_GEOMETRY_NO_DUPLICATE_ANY_HIT_INVOCATION_BIT_KHR | (n == 1 ? VK_GEOMETRY_OPAQUE_BIT_KHR : 0),
+           .geometry.triangles = {.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_TRIANGLES_DATA_KHR,
+                                  .vertexFormat = VK_FORMAT_R32G32B32_SFLOAT,
+                                  .vertexData.deviceAddress = vertices.addr,
+                                  .vertexStride = 12,
+                                  .maxVertex = count * 3,
+                                  .indexType = indexed ? VK_INDEX_TYPE_UINT16 : VK_INDEX_TYPE_NONE_KHR,
+                                  .indexData.deviceAddress = indices.addr,
+                                  .transformData.deviceAddress = transformed ? transforms.addr : 0}};
+       uint32_t first = i ? split : 0;
+       ranges[i] = (VkAccelerationStructureBuildRangeInfoKHR){.primitiveCount = i ? n - split : split,
+                                                              .primitiveOffset = indexed ? 4 + first * 6 : 12 + first * 36,
+                                                              .firstVertex = indexed ? 1 : 0,
+                                                              .transformOffset = transformed ? 16 : 0};
    }
    struct built_as blas, tlas;
    prepare_as(&blas, VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR, two_geometries ? 2 : 1, geoms, ranges, two_geometries);
@@ -311,10 +403,13 @@ static void aabb_instances_case(void)
       if (i == 2) box[0] = NAN;
       memcpy((uint8_t *)boxes.mapped + 8 + i * 32, box, sizeof(box));
    }
-   VkAccelerationStructureGeometryKHR box_geom = {.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR,
-      .geometryType = VK_GEOMETRY_TYPE_AABBS_KHR,
-      .geometry.aabbs = {.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_AABBS_DATA_KHR,
-         .data.deviceAddress = boxes.addr, .stride = 32}};
+   VkAccelerationStructureGeometryKHR box_geom = {
+       .sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR,
+       .geometryType = VK_GEOMETRY_TYPE_AABBS_KHR,
+       .flags = VK_GEOMETRY_NO_DUPLICATE_ANY_HIT_INVOCATION_BIT_KHR,
+       .geometry.aabbs = {.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_AABBS_DATA_KHR,
+                          .data.deviceAddress = boxes.addr,
+                          .stride = 32}};
    VkAccelerationStructureBuildRangeInfoKHR box_range = {.primitiveCount = 3, .primitiveOffset = 8};
    struct built_as blas, tlas;
    prepare_as(&blas, VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR, 1, &box_geom, &box_range, false);

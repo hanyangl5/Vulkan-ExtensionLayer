@@ -1,10 +1,10 @@
 /* SPDX-License-Identifier: MIT
  *
- * vkrt_cpu_bvh.c - CPU debug BVHIR builder (milestone M1).
+ * vkrt_cpu_bvh.c - test-only CPU construction inputs for shared BVH4.
  *
  * Recursive median-split BVH2. Deliberately simple and obviously
- * correct: this is the reference tree the software traversal is diffed
- * against, not a performance builder (that is M2's GPU LBVH).
+ * correct. Its temporary Mesa IR is consumed by the common adapter and
+ * reference encoder; only the shared BVH4 container is returned to fixtures.
  *
  * Primitive IDs: vk_ir_triangle_node.triangle_id is written with the
  * ORIGINAL triangle index, so the app-visible primitive id needs no
@@ -13,6 +13,15 @@
  */
 
 #include "vkrt_cpu_bvh.h"
+#include "../bvh/bvh_ir_contract.h"
+
+/* Mesa construction tags, never returned as runtime node IDs. */
+#define VKRT_CPU_HANDLE_INVALID UINT32_MAX
+#define VKRT_CPU_NODE_TRIANGLE 0u
+#define VKRT_CPU_NODE_INTERNAL 1u
+#define VKRT_CPU_NODE_INSTANCE 2u
+/* Consumes the temporary allocation, including on conversion failure. */
+int vkrt_cpu_encode_mesa_bvh4(struct vkrt_cpu_bvh *temporary, uint32_t geometry_id, uint32_t geometry_flags, int top_level);
 
 #include <math.h>
 #include <stdbool.h>
@@ -213,7 +222,7 @@ emit_triangle_leaf(struct build_buf *b, const struct tri_ref *t,
                  t->v[i][j]);
    /* triangle_id carries the ORIGINAL index -- see the file comment. */
    put_u32(b->data, off + 60u, t->original_index);
-   put_u32(b->data, off + 64u, (geometry_id & 0x00FFFFFFu) | geometry_flags);
+   put_u32(b->data, off + 64u, (geometry_id & 0x00FFFFFFu) | ((geometry_flags & VKRT_CPU_GEOMETRY_OPAQUE) ? 0x80000000u : 0));
 
    return (off - BVH_IR_NODE_OFFSET) | VKRT_CPU_NODE_TRIANGLE;
 }
@@ -371,7 +380,7 @@ vkrt_cpu_build_blas(const struct vkrt_cpu_geom *geom, struct vkrt_cpu_bvh *out)
    out->leaf_count = active;
    out->node_count = BVH_IR_INTERNAL_COUNT(active);
    free(tris); free(idx);
-   return 0;
+   return vkrt_cpu_encode_mesa_bvh4(out, geom->geometry_id, geom->geometry_flags, 0);
 fail:
    free(nodes.data); free(tris); free(idx);
    return -1;
@@ -449,7 +458,7 @@ vkrt_cpu_build_tlas(const struct vkrt_cpu_instance *instances,
    out->primitive_count = 0;
    out->node_count = BVH_IR_INTERNAL_COUNT(active);
    free(leaves);
-   return 0;
+   return vkrt_cpu_encode_mesa_bvh4(out, 0, 0, 1);
 }
 
 void

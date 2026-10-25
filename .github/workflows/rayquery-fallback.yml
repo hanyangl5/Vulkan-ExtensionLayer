@@ -5,12 +5,14 @@ on:
   push:
     paths:
       - 'vkrt_layer/**'
+      - 'layers/common/rt_fallback/**'
       - 'CMakeLists.txt'
       - 'README.md'
       - '.github/workflows/rayquery-fallback.yml'
   pull_request:
     paths:
       - 'vkrt_layer/**'
+      - 'layers/common/rt_fallback/**'
       - 'CMakeLists.txt'
       - 'README.md'
       - '.github/workflows/rayquery-fallback.yml'

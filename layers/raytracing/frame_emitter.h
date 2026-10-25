@@ -25,7 +25,7 @@ struct ContinuationFrameCodecs {
     // owns %<prefix>memory, a uint StorageBuffer runtime array at set/binding.
     // It contains no entry point, RT capability, source names, or source code.
     std::string capabilities, annotations, declarations, functions;
-    std::string word_type, bool_type, void_type, memory;
+    std::string word_type, bool_type, void_type, memory, word_pointer_type;
     std::vector<ContinuationTypeCodec> types;
     std::vector<ContinuationSuspensionCodec> suspensions;
 };
@@ -48,5 +48,6 @@ struct ContinuationFrameCodecs {
 // It is an executable backend component, not a complete RT shader compiler.
 ContinuationFrameCodecs EmitContinuationFrameCodecs(const std::vector<uint32_t> &spirv, const std::string &entry,
                                                     uint32_t execution_model, uint32_t descriptor_set, uint32_t binding,
-                                                    const std::string &prefix = "vel_cf_");
+                                                    const std::string &prefix = "vel_cf_",
+                                                    const std::vector<uint32_t> &additional_value_types = {});
 }  // namespace vel::rt

@@ -1,14 +1,14 @@
 # Software Ray Query layer
 
-The active project target is [complete software AS/RQ/RTP fallback](../docs/ray_tracing_fallback_goal.md), with a shared Mesa-build/portable-BVH4 backend. This page describes the existing RQ prototype; the shared backend and complete capability virtualization are not implemented yet. See the [baseline audit](../docs/ray_tracing_fallback_review.md).
+The active project target is [complete software AS/RQ/RTP fallback](../docs/ray_tracing_fallback_goal.md), with a shared Mesa-build/portable-BVH4 backend. This page describes the current RQ prototype. Its production builder and traversal now use the shared BVH4 ABI; unified RQ/RTP objects and complete capability virtualization remain unfinished. See the [baseline audit](../docs/ray_tracing_fallback_review.md).
 
 `VK_LAYER_VKRT_SOFTWARE_RAY_QUERY` replaces acceleration-structure builds and supported `VK_KHR_ray_query` shader instructions with a GPU LBVH builder and software traversal. Applications continue to use the Vulkan AS and Ray Query APIs. The layer rewrites AS descriptors to storage buffers and lowers Ray Query instructions to functions inside the application's shader module.
 
-This is a bootstrap implementation, not a complete Vulkan RT implementation. It still relies on the underlying driver exposing the native RT extensions and accepting the application's RT feature requests. Running on a device without native RT requires additional capability and device-creation virtualization that is not implemented here.
+This is a bootstrap implementation, not a complete Vulkan RT implementation. It consumes emulated AS/RQ device extensions/features before downstream device creation and translates supported resource/synchronization requirements. Base extension/feature discovery still relies on native RT exposure; complete no-RT discovery, limits and mandatory APIs are not implemented or qualified yet.
 
 ## Relationship to the RT pipeline fallback
 
-This layer and [`VK_LAYER_HANYANG_ray_tracing_fallback`](../docs/ray_tracing_fallback_layer.md) are separate experimental implementations. This directory implements inline Ray Query traversal; the other layer implements a compute-based RT pipeline path. They use different acceleration-structure formats and object tracking.
+This layer and [`VK_LAYER_HANYANG_ray_tracing_fallback`](../docs/ray_tracing_fallback_layer.md) are separate experimental implementations. This directory implements inline Ray Query traversal; the other layer implements a compute-based RT pipeline path. RQ uses the shared portable BVH4 runtime format; RTP still uses its earlier runtime representation and separate object tracking.
 
 **Enable only one of these two layers at a time. Their AS handles, device addresses, backing buffers, and serialized data are not interchangeable.** They cannot be stacked to combine their supported features.
 
@@ -54,9 +54,9 @@ $env:VK_INSTANCE_LAYERS='VK_LAYER_VKRT_SOFTWARE_RAY_QUERY'
 ./your-application.exe
 ```
 
-Disable other RT fallback layers before running. The GPU tests currently require native RT capability exposure and the software backend's real prerequisites: BDA, scalar block layout, shader int8/int16/int64, buffer 8/16-bit access, and the Vulkan memory model with device scope.
+Disable other RT fallback layers before running. The GPU tests currently require native RT capability exposure and the software backend's real prerequisites: BDA, scalar block layout, shader int8/int16/int64, buffer 8/16-bit access, the Vulkan memory model with device scope, SSBO dynamic/nonuniform indexing and variablePointersStorageBuffer.
 
-CTest defines nine tests: five offline tests and four GPU tests. The `cpu_fixture` test uploads a CPU-built fixture but still executes a shader on the GPU. The native GPU test disables this layer; the software AS tests enable it through their CTest environment. The additional `no_native_rt` test runs production traversal helpers on ordinary compute without enabling native RT or the fallback layer; it validates those helpers, not a complete no-RT AS/layer path.
+CTest currently defines eleven offline tests and four GPU tests. The `cpu_fixture` test uploads a CPU-built fixture but still executes a shader on the GPU. The native GPU test disables this layer; the software AS tests enable it through their CTest environment. The additional `no_native_rt` test runs production traversal helpers on ordinary compute without enabling native RT or the fallback layer; it validates those helpers, not a complete no-RT AS/layer path.
 
 ```sh
 # All tests, including software and native GPU execution:
@@ -80,15 +80,18 @@ The optional sample launches `sample ray_queries` after the tests. It is interac
 
 ## Implemented path and limits
 
-- GPU BUILD of triangle/AABB BLAS and instance TLAS into the shared BVHIR v2 container, including instance transforms, masks, and geometry/primitive/instance IDs.
+- GPU BUILD of triangle/AABB BLAS and instance TLAS through Mesa construction IR in application scratch, then direct GPU encoding to shared BVH4. Final AS storage contains only BVH4 header, nodes, leaves and parents; it preserves original IDs, full geometry flags, transforms and runtime BLAS addresses.
 - Resumable software candidate/committed traversal, triangle confirmation, generated AABB intersections, and the getters currently mapped by `vkrt_spirv_lower.cpp`, including the base instance SBT-offset getter with candidate/committed selection.
-- AS descriptor/layout/pool translation and compute build-state restoration; AS dependencies are extended for Barrier/Barrier2 and Submit/Submit2.
-- The shader lowering currently binds one TLAS storage-buffer binding and discards the AS value passed to `RayQueryInitialize`. Multiple AS bindings, shader-side AS descriptor arrays/indexing, and arbitrary AS value provenance are not supported.
+- AS descriptor/layout/pool translation and compute build-state restoration; dependencies translate barriers, submit, events, timestamps and render-pass masks.
+- Constant-space parent traversal visits all four child slots, preserves TLAS/BLAS cursors across candidate suspension, and has no fixed-stack overflow truncation. GPU regression covers depth140 and Confirm-driven pruning.
+- Value-preserving AS lowering reads lifetime-owned address cells, retains scalar/array selection and integer conversion, and stores a separate root in each query. Supported helper/Phi and NonUniform paths have compile/CTS evidence. Each cell still consumes an SSBO descriptor and an allocation; full layout/budget transparency is not proven.
 - RT pipeline shaders, SBT dispatch, UPDATE/refit, AS copy/compaction/serialization, indirect builds, micromaps, and motion geometry are not implemented. PLOC/HPLOC sources are not active runtime backends.
-- AABB opacity applies ray/instance/geometry precedence through the shared opacity helper. Some unsupported commands only log an error; unsupported host AS paths and event-based AS synchronization are not fully intercepted. Do not treat an unimplemented API as a supported no-op.
+- AABB opacity applies ray/instance/geometry precedence through the shared opacity helper. Some unsupported commands only log an error; unsupported host AS paths are not fully intercepted. Do not treat an unimplemented API as a supported no-op.
 - Builds require a compute-capable queue outside a render pass. Node-address and dispatch limits constrain build size. Multi-queue ownership and cross-vendor execution have not been comprehensively validated.
 
-See [STATUS.md](STATUS.md) for the original test records and known issues, [IR_CONTRACT_V2.md](IR_CONTRACT_V2.md) for the current data layout, and [the original design](rayquery_software_rt_layer_design.md) for the implementation milestones. Historical test results are retained as evidence for their original revisions; importing the patch into VEL is not a new GPU validation result.
+See [STATUS.md](STATUS.md) for the original test records and known issues, [IR_CONTRACT_V2.md](IR_CONTRACT_V2.md) for construction IR, [the shared ABI](../layers/common/rt_fallback/bvh4_abi.h) for runtime layout, and [the original design](rayquery_software_rt_layer_design.md) for the implementation milestones. Historical test results are retained as evidence for their original revisions; importing the patch into VEL is not a new GPU validation result.
+
+Actual external CTS on RTX3080 now exercises shared BVH4 with Khronos validation; see the [current checkpoint](../docs/rt_cts_bvh4_2026-10-26.md). This is a selected development matrix, not full conformance or physical no-RT qualification.
 
 ## Source provenance
 

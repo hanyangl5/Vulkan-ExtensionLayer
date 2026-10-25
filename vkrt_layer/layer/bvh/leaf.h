@@ -169,6 +169,19 @@ build_instance(inout vk_aabb bounds, VOID_REF src_ptr, VOID_REF dst_ptr, uint32_
    mat4 transform = mat4(instance.transform);
    DEREF(node).otw_matrix = mat3x4(transform);
 
+   vk_aabb blas_aabb;
+#ifdef VKRT_RUNTIME_BVH4
+   /* The construction IR is transient scratch. Application instance values
+    * always name the shared runtime BLAS, never retained Mesa IR. */
+   uint64_t blas = instance.accelerationStructureReference;
+   if (DEREF(REF(uint32_t)(blas)) != 0x344c4556u || DEREF(REF(uint32_t)(blas + 4)) != 1u ||
+       (DEREF(REF(uint32_t)(blas + 12)) & 0x80000000u) != 0u || DEREF(REF(uint32_t)(blas + 16)) == 0xffffffffu)
+       return false;
+   for (uint32_t k = 0; k < 3; ++k) {
+       blas_aabb.min[k] = uintBitsToFloat(DEREF(REF(uint32_t)(blas + 96 + k * 4)));
+       blas_aabb.max[k] = uintBitsToFloat(DEREF(REF(uint32_t)(blas + 108 + k * 4)));
+   }
+#else
    uint64_t blas_ir = args.blas_ir_addresses != 0 ?
       DEREF(INDEX(uint64_t, args.blas_ir_addresses, global_id)) : instance.accelerationStructureReference;
    REF(vk_ir_header) blas_header = REF(vk_ir_header)(blas_ir);
@@ -176,11 +189,11 @@ build_instance(inout vk_aabb bounds, VOID_REF src_ptr, VOID_REF dst_ptr, uint32_
     * reference itself already names the software BLAS IR, not a format fallback. */
    if (DEREF(blas_header).active_leaf_count == 0)
       return false;
-   vk_aabb blas_aabb;
    for (uint32_t k = 0; k < 3; ++k) {
       blas_aabb.min[k] = from_emulated_float(DEREF(blas_header).min_bounds[k]);
       blas_aabb.max[k] = from_emulated_float(DEREF(blas_header).max_bounds[k]);
    }
+#endif
    if (any(greaterThan(blas_aabb.min, blas_aabb.max)))
       return false;
 

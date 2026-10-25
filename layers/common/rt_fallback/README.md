@@ -5,9 +5,9 @@
 
 This directory defines an experimental layer-owned BVH4 wire ABI, CPU reference
 encoder/layout planner, Mesa scalar-IR adapter, and component GPU hierarchy
-encoder. Neither layer's production builder/traversal/compiler consumes the
-complete shared representation yet. These components make no extension-support
-claim.
+encoder. The RQ production builder and traverser now consume this representation;
+RTP integration and a unified AS object model remain unfinished. These components
+make no complete extension-support claim.
 
 Internal nodes contain four FP32 child bounds and tagged indices in 128 bytes.
 The design is BOX32-inspired, but no AMD address packing or hardware node ABI is
@@ -31,9 +31,10 @@ Empty and singleton roots need no internal nodes. Input bounds must be finite
 and ordered; inactive/exceptional build inputs must be resolved by the eventual
 builder adapter before this reference interface.
 
-Parent storage is a prerequisite for a future traversal-overflow strategy, not an
-implemented traverser. Serialization, refit/compaction, shared traversal, and
-production builder/consumer integration remain separate work.
+RQ production traversal now uses these parent links for constant-space
+resumable walks without fixed-stack truncation. It tests all four child slots,
+including a depth140/fourth-child regression. Serialization, refit/compaction,
+RTP consumption and unified layer-owned AS objects remain separate work.
 
 ## Mesa construction IR adapter
 
@@ -84,7 +85,12 @@ maps/header, assign unique parents and compact referenced leaves, then emit
 hierarchy and triangle/AABB/instance records. Geometry side tables preserve full
 flags and explicit per-instance runtime BLAS addresses prevent IR-address reuse.
 Node/record/parent accesses use 64-bit offsets. A nonzero GPU status invalidates
-the entire output; downstream consumers must gate on that status.
+the entire output and atomically sets FLAG_INVALID in its runtime header.
+Consumers reject that flag without retaining construction scratch. Production
+RQ prepares the header/flags on GPU, builds IR entirely in scratch, encodes final
+BVH4 therefrom, then discards IR as runtime state. An explicit IDENTITY_BLAS
+option declares that instance references already name runtime BLASes; it never
+detects a legacy format.
 
 The additional `portable_bvh4_mesa_gpu_build` test runs the imported init, leaf,
 Morton sort, LBVH and bounds kernels followed by this encoder in one command
@@ -100,8 +106,9 @@ This direct path still retains binary arity and Mesa's existing 32-bit
 construction IDs. Active bounds must be finite; its scaled FP32 inverse needs
 further qualification for ill-conditioned legal transforms. It checks encoded
 root/child bounds but does not claim the CPU adapter's complete header-validation
-contract. Four-child collapse, refit, production encode integration and both
-runtime consumers remain open.
+contract. Four-child GPU collapse, refit, RTP integration and unified objects
+remain open. Production RQ uses shared nodes/leaves/header/parent data only;
+its external CTS evidence is in the [current report](../../../docs/rt_cts_bvh4_2026-10-26.md).
 
 Build and run independently:
 

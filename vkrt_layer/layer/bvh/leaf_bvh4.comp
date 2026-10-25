@@ -1,0 +1,7 @@
+/* SPDX-License-Identifier: MIT */
+#version 460
+#include "vkrt_bvh_preamble.h"
+#include "vk_bvh_defines.h"
+#define VKRT_RUNTIME_BVH4
+#define VK_USED_BUILD_FLAGS VK_LEAF_BUILD_FLAGS
+#include "leaf.h"

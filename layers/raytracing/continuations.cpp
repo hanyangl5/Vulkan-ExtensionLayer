@@ -299,6 +299,9 @@ class FramePlanner {
         }
         return result;
     }
+    void IncludeValueTypes(const std::vector<uint32_t> &types) {
+        for (auto type : types) Layout(type);
+    }
 
   private:
     const Module &m;
@@ -445,12 +448,14 @@ ContinuationAnalysis AnalyzeContinuations(const std::vector<uint32_t> &spirv, co
     return result;
 }
 
-ContinuationFrames PlanContinuationFrames(const std::vector<uint32_t> &spirv, const std::string &entry, uint32_t execution_model) {
+ContinuationFrames PlanContinuationFrames(const std::vector<uint32_t> &spirv, const std::string &entry, uint32_t execution_model,
+                                          const std::vector<uint32_t> &additional_value_types) {
     ContinuationFrames result;
     result.analysis = AnalyzeContinuations(spirv, entry, execution_model);
     auto module = ParseModule(spirv);
     FramePlanner planner(module);
     for (const auto &function : result.analysis.functions) result.functions.push_back(planner.Plan(function));
+    planner.IncludeValueTypes(additional_value_types);
     result.types = planner.Types();
     return result;
 }

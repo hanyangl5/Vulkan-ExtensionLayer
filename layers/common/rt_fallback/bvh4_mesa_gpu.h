@@ -3,6 +3,7 @@
 #pragma once
 
 #include "bvh4_reference.h"
+#include "bvh4_mesa_gpu_abi.h"
 #include <cstddef>
 #include <stdexcept>
 
@@ -20,22 +21,21 @@ namespace vel::rt::bvh4 {
 // ceil(max(capacity,1)/64) workgroups of 64 invocations, chunked at multiples
 // of 64 invocations via first.
 // The output counts, root and records are produced entirely on GPU. A nonzero
-// status invalidates the output; consumers must gate on it before traversal.
+// status also atomically sets FLAG_INVALID in the runtime header, so consumers
+// can reject failed output without retaining a pointer to construction scratch.
 //
 // geometry_flags has geometry_count uint32_t entries with complete base flags.
 // For TLAS, runtime_blas has capacity uint64_t entries indexed by source instance
 // slot, explicitly translating each live instance to the shared runtime BLAS.
+// Alternatively, options=IDENTITY_BLAS and runtime_blas=0 explicitly declares
+// that source instance addresses already name final runtime BLASes.
 // The encoder never mistakes an old source-IR address for a runtime address.
-// It retains binary arity; four-child collapse and production integration remain
-// open. Mesa construction IDs remain 32-bit byte offsets; output math is 64-bit.
+// RQ production uses this encoder; RTP integration and four-child collapse
+// remain open. Mesa construction IDs are 32-bit byte offsets; output math is 64-bit.
 // Active bounds/vertices must be finite. Transform inversion currently uses
 // scaled FP32 arithmetic and rejects singular/unrepresentable results; numerical
 // qualification of ill-conditioned legal transforms remains a separate gate.
-struct MesaGpuEncodeArgs {
-    uint64_t source, source_size, output_as, mapping;
-    uint64_t geometry_flags, runtime_blas, status, first;
-    uint32_t capacity, geometry_type, geometry_count, reserved;
-};
+using MesaGpuEncodeArgs = VelRtMesaGpuEncodeArgs;
 static_assert(sizeof(MesaGpuEncodeArgs) == 80 && offsetof(MesaGpuEncodeArgs, capacity) == 64);
 
 enum MesaGpuEncodeError : uint32_t {

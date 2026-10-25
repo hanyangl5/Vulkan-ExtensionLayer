@@ -4,7 +4,7 @@
  * items 1-4).
  *
  * Runs rq_test.comp through the software ray-query layer against a
- * CPU-built BVHIR and diffs every committed result against
+ * CPU-built shared BVH4 and diffs every committed result against
  * vkrt_cpu_ref_intersect. Cases:
  *
  *   1. single triangle: miss / front hit / back hit
@@ -15,12 +15,12 @@
  * Enable the layer with
  *   set VK_INSTANCE_LAYERS=VK_LAYER_VKRT_SOFTWARE_RAY_QUERY
  *   set VK_LAYER_PATH=<build>/layers
- * or run with --no-layer to get the ICD's native ray query as the oracle.
  *
  * The AS objects are created through the normal VK_KHR_acceleration_structure
  * API so the layer's VirtualAS / descriptor rewrite / SPIR-V rewrite are all
- * exercised. The BVHIR itself is written by the CPU builder (M1) rather
- * than the GPU builder (M2), which does not exist yet.
+ * exercised. These private fixture bytes come from the shared CPU reference
+ * encoder. The separate GPU-build test exercises legal public AS builds and
+ * native-control comparisons.
  */
 
 #include <math.h>
@@ -590,6 +590,15 @@ main(int argc, char **argv)
    if (vkrt_cpu_build_tlas(&inst, 1, &tlas_bvh) != 0) {
       fprintf(stderr, "cpu TLAS build failed\n");
       return 1;
+   }
+   /* Pin the actual runtime format and full-width BLAS address before upload;
+    * the shader must follow this address, including nonzero upper bits. */
+   const VelRtBvh4Header *tlas_header = (const void *)tlas_bvh.data;
+   const VelRtBvh4Instance *tlas_instance = (const void *)(tlas_bvh.data + tlas_header->instance_offset);
+   if (tlas_header->magic != VEL_RT_BVH4_MAGIC || tlas_header->version != VEL_RT_BVH4_ABI_VERSION ||
+       tlas_header->instance_count != 1 || tlas_instance->blas_address != blas.addr) {
+       fprintf(stderr, "CPU fixture has an invalid shared BVH4 header or truncated BLAS address\n");
+       return 1;
    }
 
    printf("tlas buffer (%zu bytes)...\n", tlas_bvh.size);

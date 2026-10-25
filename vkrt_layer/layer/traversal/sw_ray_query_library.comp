@@ -72,9 +72,9 @@ main()
       uint  fl   = sw_get_ray_flags(q);
 
       /* Fold the results so nothing is optimised away. */
-      q.stack_size += uint(t) + uint(d) + uint(b.x) + uint(p) + uint(g) +
+      q.tlas_next += uint(t) + uint(d) + uint(b.x) + uint(p) + uint(g) +
                       uint(i) + uint(c) + uint(sbt) + uint(f) + uint(a) + uint(k) +
                       uint(o.x) + uint(dir.x) + uint(tmin) + uint(fl);
-      q.stack_size += uint(obj_o.x + obj_d.x + otw[0].x + wto[0].x);
+      q.tlas_next += uint(obj_o.x + obj_d.x + otw[0].x + wto[0].x);
    }
 }

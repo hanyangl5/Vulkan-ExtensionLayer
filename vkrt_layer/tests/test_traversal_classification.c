@@ -9,7 +9,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include "../layer/bvh/bvh_ir_contract.h"
+#include "bvh4_abi.h"
 
 #define CHECK(call)                                        \
     do {                                                   \
@@ -66,6 +66,99 @@ static void destroy_buffer(struct buffer b) {
     vkFreeMemory(device, b.memory, NULL);
 }
 
+/* Intentionally hand-shaped ABI fixtures pin traversal topology, including a
+ * depth that a balanced reference encoder would not normally produce. */
+static struct buffer runtime_buffer(uint32_t type, uint32_t nodes, uint32_t triangles, uint32_t instances) {
+    uint64_t triangle_offset = sizeof(VelRtBvh4Header) + (uint64_t)nodes * sizeof(VelRtBvh4Node);
+    uint64_t instance_offset = triangle_offset + (uint64_t)triangles * sizeof(VelRtBvh4Triangle);
+    uint64_t parents = instance_offset + (uint64_t)instances * sizeof(VelRtBvh4Instance);
+    uint64_t size = (parents + (triangles + instances) * 4 + 255) & ~UINT64_C(255);
+    struct buffer out = make_buffer(size);
+    VelRtBvh4Header *h = out.mapped;
+    *h = (VelRtBvh4Header){.magic = VEL_RT_BVH4_MAGIC,
+                           .version = VEL_RT_BVH4_ABI_VERSION,
+                           .type = type,
+                           .root_id = 0,
+                           .node_count = nodes,
+                           .triangle_count = triangles,
+                           .instance_count = instances,
+                           .node_offset = sizeof(*h),
+                           .triangle_offset = triangle_offset,
+                           .aabb_offset = instance_offset,
+                           .instance_offset = instance_offset,
+                           .leaf_parent_offset = parents,
+                           .total_size = size};
+    return out;
+}
+static void triangle_at(VelRtBvh4Triangle *leaf, float x, float z, uint32_t primitive) {
+    *leaf = (VelRtBvh4Triangle){.vertices = {{x - 1, -1, z}, {x + 1, -1, z}, {x, 1, z}}, .primitive_id = primitive};
+}
+static void child_bounds(VelRtBvh4Node *node, uint32_t slot, float xlo, float xhi, float z) {
+    const float lo[] = {xlo, -1, z}, hi[] = {xhi, 1, z};
+    memcpy(node->bounds_min[slot], lo, sizeof(lo));
+    memcpy(node->bounds_max[slot], hi, sizeof(hi));
+}
+static struct buffer instance_root(struct buffer blas) {
+    struct buffer out = runtime_buffer(0, 0, 0, 1);
+    VelRtBvh4Header *h = out.mapped, *source = blas.mapped;
+    h->root_id = VEL_RT_BVH4_INSTANCE << VEL_RT_BVH4_KIND_SHIFT;
+    memcpy(h->bounds_min, source->bounds_min, sizeof(h->bounds_min));
+    memcpy(h->bounds_max, source->bounds_max, sizeof(h->bounds_max));
+    VelRtBvh4Instance *instance = (void *)((uint8_t *)out.mapped + h->instance_offset);
+    instance->blas_address = blas.address;
+    instance->custom_index_mask = 0xff000000u;
+    for (unsigned axis = 0; axis < 3; ++axis)
+        instance->object_to_world[axis * 4 + axis] = instance->world_to_object[axis * 4 + axis] = 1;
+    *(uint32_t *)((uint8_t *)out.mapped + h->leaf_parent_offset) = VEL_RT_BVH4_INVALID_ID;
+    return out;
+}
+static struct buffer deep_blas(void) {
+    enum { DEPTH = 140, TRIANGLES = 3 * DEPTH + 1 };
+    struct buffer out = runtime_buffer(1, DEPTH, TRIANGLES, 0);
+    VelRtBvh4Header *h = out.mapped;
+    const float lo[] = {-1, -1, 0}, hi[] = {11, 1, 0};
+    memcpy(h->bounds_min, lo, sizeof(lo));
+    memcpy(h->bounds_max, hi, sizeof(hi));
+    VelRtBvh4Node *nodes = (void *)((uint8_t *)out.mapped + h->node_offset);
+    VelRtBvh4Triangle *triangles = (void *)((uint8_t *)out.mapped + h->triangle_offset);
+    uint32_t *parents = (void *)((uint8_t *)out.mapped + h->leaf_parent_offset);
+    for (uint32_t level = 0; level < DEPTH; ++level) {
+        nodes[level].child_count = 4;
+        nodes[level].parent_id = level ? level - 1 : VEL_RT_BVH4_INVALID_ID;
+        for (uint32_t slot = 0; slot < 3; ++slot) {
+            uint32_t leaf = 3 * level + slot;
+            nodes[level].child_id[slot] = (VEL_RT_BVH4_TRIANGLE << VEL_RT_BVH4_KIND_SHIFT) | leaf;
+            child_bounds(&nodes[level], slot, 9, 11, 0);
+            triangle_at(&triangles[leaf], 10, 0, 1000 + leaf);
+            parents[leaf] = level;
+        }
+        nodes[level].child_id[3] =
+            level + 1 < DEPTH ? level + 1 : (VEL_RT_BVH4_TRIANGLE << VEL_RT_BVH4_KIND_SHIFT) | (TRIANGLES - 1);
+        child_bounds(&nodes[level], 3, -1, level + 1 < DEPTH ? 11 : 1, 0);
+    }
+    triangle_at(&triangles[TRIANGLES - 1], 0, 0, 77);
+    parents[TRIANGLES - 1] = DEPTH - 1;
+    return out;
+}
+static struct buffer resume_blas(void) {
+    struct buffer out = runtime_buffer(1, 1, 4, 0);
+    VelRtBvh4Header *h = out.mapped;
+    const float lo[] = {-1, -1, 4}, hi[] = {1, 1, 9.5f}, heights[] = {8, 9, 4, 9.5f};
+    memcpy(h->bounds_min, lo, sizeof(lo));
+    memcpy(h->bounds_max, hi, sizeof(hi));
+    VelRtBvh4Node *node = (void *)((uint8_t *)out.mapped + h->node_offset);
+    VelRtBvh4Triangle *triangles = (void *)((uint8_t *)out.mapped + h->triangle_offset);
+    node->child_count = 4;
+    node->parent_id = VEL_RT_BVH4_INVALID_ID;
+    for (uint32_t slot = 0; slot < 4; ++slot) {
+        node->child_id[slot] = (VEL_RT_BVH4_TRIANGLE << VEL_RT_BVH4_KIND_SHIFT) | slot;
+        child_bounds(node, slot, -1, 1, heights[slot]);
+        triangle_at(&triangles[slot], 0, heights[slot], slot);
+        /* All four leaf parents are root ID0, already zero initialized. */
+    }
+    return out;
+}
+
 int main(int argc, char **argv) {
     if (argc != 2) {
         fprintf(stderr, "usage: %s <traversal_classification.spv>\n", argv[0]);
@@ -115,14 +208,59 @@ int main(int argc, char **argv) {
     VkQueue queue;
     vkGetDeviceQueue(device, family, 0, &queue);
 
-    enum { CASE_COUNT = 30 };
-    const uint32_t tlas_size = BVH_IR_NODE_OFFSET + 2 * BVH_IR_INSTANCE_SIZE;
-    struct buffer nodes = make_buffer(BVH_IR_NODE_OFFSET + 64), tlas = make_buffer(tlas_size);
+    enum { CASE_COUNT = 32 };
+    const uint32_t tlas_size = 768;
+    struct buffer nodes = make_buffer(512), tlas = make_buffer(tlas_size);
     struct buffer cases = make_buffer(CASE_COUNT * 16), output = make_buffer(CASE_COUNT * 16);
-    ((uint32_t *)nodes.mapped)[BVH_IR_NODE_OFFSET / 4 + 7] = 0;
-    ((uint32_t *)nodes.mapped)[BVH_IR_NODE_OFFSET / 4 + 15] = 0x80000000u; /* SW_TRI_OPAQUE */
-    ((uint32_t *)tlas.mapped)[BVH_IR_NODE_OFFSET / 4 + 9] = 0xab123456u;
-    ((uint32_t *)tlas.mapped)[(BVH_IR_NODE_OFFSET + BVH_IR_INSTANCE_SIZE) / 4 + 9] = 0xcd654321u;
+    VelRtBvh4Header *blas_header = nodes.mapped, *tlas_header = tlas.mapped;
+    *blas_header = (VelRtBvh4Header){.magic = VEL_RT_BVH4_MAGIC,
+                                     .version = VEL_RT_BVH4_ABI_VERSION,
+                                     .type = 1,
+                                     .root_id = 0,
+                                     .node_count = 1,
+                                     .aabb_count = 2,
+                                     .node_offset = 128,
+                                     .triangle_offset = 256,
+                                     .aabb_offset = 256,
+                                     .instance_offset = 352,
+                                     .leaf_parent_offset = 352,
+                                     .total_size = 512};
+    *tlas_header = (VelRtBvh4Header){.magic = VEL_RT_BVH4_MAGIC,
+                                     .version = VEL_RT_BVH4_ABI_VERSION,
+                                     .type = 0,
+                                     .root_id = 0,
+                                     .node_count = 1,
+                                     .instance_count = 2,
+                                     .node_offset = 128,
+                                     .triangle_offset = 256,
+                                     .aabb_offset = 256,
+                                     .instance_offset = 256,
+                                     .leaf_parent_offset = 512,
+                                     .total_size = tlas_size};
+    VelRtBvh4Node *blas_root = (void *)((uint8_t *)nodes.mapped + blas_header->node_offset);
+    VelRtBvh4Node *tlas_root = (void *)((uint8_t *)tlas.mapped + tlas_header->node_offset);
+    blas_root->child_count = tlas_root->child_count = 2;
+    blas_root->parent_id = tlas_root->parent_id = VEL_RT_BVH4_INVALID_ID;
+    VelRtBvh4Aabb *boxes = (void *)((uint8_t *)nodes.mapped + blas_header->aabb_offset);
+    VelRtBvh4Instance *instances = (void *)((uint8_t *)tlas.mapped + tlas_header->instance_offset);
+    for (uint32_t i = 0; i < 2; ++i) {
+        boxes[i].primitive_id = i;
+        boxes[i].geometry_flags = i; /* Original Vulkan OPAQUE bit is 1. */
+        instances[i].blas_address = nodes.address;
+        instances[i].custom_index_mask = 0xff000000u;
+        instances[i].sbt_offset_flags = i ? 0xcd654321u : 0xab123456u;
+        instances[i].instance_id = i;
+        blas_root->child_id[i] = (VEL_RT_BVH4_AABB << VEL_RT_BVH4_KIND_SHIFT) | i;
+        tlas_root->child_id[i] = (VEL_RT_BVH4_INSTANCE << VEL_RT_BVH4_KIND_SHIFT) | i;
+        for (uint32_t axis = 0; axis < 3; ++axis) {
+            blas_header->bounds_max[axis] = tlas_header->bounds_max[axis] = 1;
+            boxes[i].bounds_max[axis] = blas_root->bounds_max[i][axis] = tlas_root->bounds_max[i][axis] = 1;
+            instances[i].object_to_world[axis * 4 + axis] = instances[i].world_to_object[axis * 4 + axis] = 1;
+        }
+    }
+    for (uint32_t i = 2; i < 4; ++i) blas_root->child_id[i] = tlas_root->child_id[i] = VEL_RT_BVH4_INVALID_ID;
+    struct buffer deep = deep_blas(), deep_tlas = instance_root(deep);
+    struct buffer resume = resume_blas(), resume_tlas = instance_root(resume);
     const uint32_t ray_override[] = {0, 1, 2};
     const uint32_t instance_override[] = {0, 0x40000, 0x80000};
     const uint32_t cull[] = {0, 0x40, 0x80};
@@ -152,7 +290,7 @@ int main(int argc, char **argv) {
         .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO, .bindingCount = 3, .pBindings = bindings};
     VkDescriptorSetLayout set_layout;
     CHECK(vkCreateDescriptorSetLayout(device, &lci, NULL, &set_layout));
-    VkPushConstantRange push = {.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT, .size = 16};
+    VkPushConstantRange push = {.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT, .size = 32};
     VkPipelineLayoutCreateInfo pci = {.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
                                       .setLayoutCount = 1,
                                       .pSetLayouts = &set_layout,
@@ -218,7 +356,7 @@ int main(int argc, char **argv) {
     CHECK(vkBeginCommandBuffer(command, &begin));
     vkCmdBindPipeline(command, VK_PIPELINE_BIND_POINT_COMPUTE, pipeline);
     vkCmdBindDescriptorSets(command, VK_PIPELINE_BIND_POINT_COMPUTE, layout, 0, 1, &set, 0, NULL);
-    VkDeviceAddress addresses[2] = {nodes.address, tlas.address};
+    VkDeviceAddress addresses[4] = {nodes.address, tlas.address, deep_tlas.address, resume_tlas.address};
     vkCmdPushConstants(command, layout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(addresses), addresses);
     vkCmdDispatch(command, CASE_COUNT, 1, 1);
     VkMemoryBarrier barrier = {.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER,
@@ -231,13 +369,21 @@ int main(int argc, char **argv) {
     CHECK(vkQueueSubmit(queue, 1, &submit, VK_NULL_HANDLE));
     CHECK(vkQueueWaitIdle(queue));
     int failures = 0;
-    for (uint32_t i = 0; i < CASE_COUNT; ++i) {
+    for (uint32_t i = 0; i < 30; ++i) {
         uint32_t *row = (uint32_t *)output.mapped + i * 4;
         if (row[0] != expected[i][0] || row[1] != expected[i][1] || row[2] != 0x123456 || row[3] != 0x654321) {
             fprintf(stderr, "case %u: got %u/%u/%x/%x, expected %u/%u/123456/654321\n", i, row[0], row[1], row[2], row[3],
                     expected[i][0], expected[i][1]);
             ++failures;
         }
+    }
+    const uint32_t deep_expected[] = {1, 77, 0, 0}, resume_expected[] = {3, 11, 3, 0x3f000000};
+    const uint32_t *results = output.mapped;
+    if (memcmp(results + 30 * 4, deep_expected, sizeof(deep_expected)) ||
+        memcmp(results + 31 * 4, resume_expected, sizeof(resume_expected))) {
+        fprintf(stderr, "parent walk/resume got deep %u/%u/%u/%x, resume %u/%u/%u/%x\n", results[120], results[121], results[122],
+                results[123], results[124], results[125], results[126], results[127]);
+        ++failures;
     }
     vkDestroyCommandPool(device, command_pool, NULL);
     vkDestroyDescriptorPool(device, descriptor_pool, NULL);
@@ -249,9 +395,15 @@ int main(int argc, char **argv) {
     destroy_buffer(cases);
     destroy_buffer(tlas);
     destroy_buffer(nodes);
+    destroy_buffer(deep_tlas);
+    destroy_buffer(deep);
+    destroy_buffer(resume_tlas);
+    destroy_buffer(resume);
     vkDestroyDevice(device, NULL);
     vkDestroyInstance(instance, NULL);
-    printf("Traversal classification %s: 30 valid opacity/cull combinations and both SBT selectors (%d failures)\n",
-           failures ? "FAIL" : "PASS", failures);
+    printf(
+        "Traversal classification %s: 30 opacity/cull cases, SBT selectors, depth140/four-child walk, candidate resume (%d "
+        "failures)\n",
+        failures ? "FAIL" : "PASS", failures);
     return failures ? 1 : 0;
 }

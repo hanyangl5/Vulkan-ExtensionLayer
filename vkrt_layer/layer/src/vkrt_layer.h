@@ -55,7 +55,7 @@ struct vkrt_device_data {
     * is not evidence that a native RT feature was enabled downstream. */
    bool app_requested_ray_query;
    VkPipelineLayout            build_pipeline_layout;
-   VkPipeline                  build_pipelines[5];
+   VkPipeline build_pipelines[9];
    uint32_t                    max_build_dispatch_x;
    struct vkrt_cmd_buffer_data *command_buffers;
    vkrt_mutex_t                command_buffers_lock;

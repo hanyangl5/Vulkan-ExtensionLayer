@@ -91,5 +91,8 @@ struct ContinuationFrames {
 // lengths, and reachable mutable module-Private storage) explicitly. Shader
 // invocation/control/argument/return backing is a separate unimplemented ABI;
 // these metadata alone are not an executable continuation frame implementation.
-ContinuationFrames PlanContinuationFrames(const std::vector<uint32_t> &spirv, const std::string &entry, uint32_t execution_model);
+// Additional value types request the same checked scalar-packed layouts for
+// transient source values needed by emission, without allocating frame slots.
+ContinuationFrames PlanContinuationFrames(const std::vector<uint32_t> &spirv, const std::string &entry, uint32_t execution_model,
+                                          const std::vector<uint32_t> &additional_value_types = {});
 }  // namespace vel::rt

@@ -1,49 +1,18 @@
 /* SPDX-License-Identifier: MIT
- *
- * sw_ray_query.glsl - software ray-query traversal over Mesa BVHIR (vk_ir_*).
- *
- * Ported from the Arm Avalon DDK's rayquery_sw_implementation.h
- * (compiler/cmpbe/src/builtingen/), which is a same-invocation, resumable
- * software traversal exactly matching the model in
- * vkrt_layer/rayquery_software_rt_layer_design.md sections 1/3/11.
- *
- * What is kept verbatim from Avalon (format-independent):
- *   - the Woop / watertight ray-triangle test with the top-left fill rule
- *     (NOT Moller-Trumbore) and pre-division scaled-space t comparison
- *   - the candidate / committed state machine with suspend+resume:
- *       opaque hit            -> auto-commit, may kill the ray
- *       non-opaque tri / AABB -> candidate + suspend (Proceed returns true)
- *   - ray-flag handling and the opacity precedence chain
- *
- * What is replaced (Avalon is Mali BVH6 + quantized bounds):
- *   - RayBoxNode  -> vk_ir_box_node   (BVH2, full float AABBs)
- *   - RayTriangleData 128-byte batches -> vk_ir_triangle_node
- *   - ASHeader    -> vk_ir_header
- *   - all Arm vendor intrinsics dropped (pure ALU + buffer loads)
- *
- * Opacity micromaps are stubbed out (v1): a triangle's opacity comes from
- * its geometry flags alone.
+ * Software ray-query traversal over the shared, versioned VEL BVH4 ABI.
+ * The format-independent watertight triangle test and opacity/state-machine
+ * rules retain their Avalon provenance. No Mesa private runtime layout is used.
  */
 
 #ifndef SW_RAY_QUERY_GLSL
 #define SW_RAY_QUERY_GLSL
 
-/* Required by vk_bvh_defines.h's buffer_reference address arithmetic
- * (OFFSET / INDEX). Declared here so every consumer of this library
- * gets it; #extension is legal after #version in an include. */
 #extension GL_EXT_buffer_reference : require
 #extension GL_EXT_buffer_reference2 : require
 #extension GL_EXT_scalar_block_layout : require
 #extension GL_EXT_shader_explicit_arithmetic_types : require
 
-/* vk_bvh_defines.h switches on VULKAN to emit its GLSL buffer_reference
- * form rather than the C struct form. Guard so a caller that already
- * defined it does not trip glslc's "macro redefined" error. */
-#ifndef VULKAN
-#define VULKAN
-#define SW_RAY_QUERY_DEFINED_VULKAN
-#endif
-#include "vk_bvh_defines.h"
+#include "bvh4_abi.glsl"
 
 /* ------------------------------------------------------------------ */
 /* Ray flag bits (gl_RayFlags*EXT values from the SPIR-V ray-query spec) */
@@ -68,7 +37,7 @@
 #define SW_INSTANCE_FORCE_NO_OPAQUE              0x00080000u
 
 /* Per-triangle / per-geometry opacity bit (VK_GEOMETRY_OPAQUE). */
-#define SW_TRI_OPAQUE                            (1u << 31)
+#define SW_TRI_OPAQUE                            1u
 
 /* Intersection type values.
  *
@@ -102,15 +71,7 @@
 #define SW_UNKNOWN_TRANSPARENT                   2u
 #define SW_UNKNOWN_OPAQUE                        3u
 
-/* Stack depth. Avalon sized this for BVH6 depth 102; BVH2 is shallower
- * for the same leaf count but let us keep a comfortable margin. */
-/* Both TLAS siblings and the current BLAS share this stack. Each radix
- * tree uses a 32-bit Morton key plus a <29-bit index tie-breaker, so two
- * trees need up to 2 * (32 + 29) + 2 entries. */
-#define SW_RT_STACK_SIZE 128
-
-#include "bvh_ir_contract.h"
-#define SW_HANDLE_INVALID BVH_IR_INVALID_ID
+#define SW_HANDLE_INVALID VEL_RT_BVH4_INVALID_ID
 
 /* ------------------------------------------------------------------ */
 /* State (the in-shader rewrite of OpTypeRayQueryKHR)                  */
@@ -148,23 +109,13 @@ struct sw_ray_query_state {
    sw_hit  candidate;
    sw_hit  committed;
 
-   /* Suspend/resume. */
-   bool    resume;
-   uint    current_leaf;               /* packed handle of the leaf we are in */
-   uint    next_prim;                  /* index within that leaf to resume at */
-   /* A candidate can suspend in a BLAS leaf.  Keep its owning TLAS
-    * instance separately: the shared stack then contains BLAS handles,
-    * which must never be interpreted as TLAS nodes on resume. */
-   uint    current_instance;
-   bool    current_leaf_is_instance;   /* currently resuming a BLAS instance */
-
-   /* Depth-first walk stack of packed node handles. */
-   uint    stack[SW_RT_STACK_SIZE];
-   uint    stack_size;
-
-   /* BLAS-level walk shares the same array (Avalon's b_stack_level
-    * starts at t_stack_level). */
-   uint    blas_stack_base;
+   /* Constant-space depth-first parent walks. Each cursor is the next
+    * unconsumed node; TLAS siblings and BLAS candidates resume independently.
+    * Parent links replace a depth-limited stack, so no child is dropped. */
+   uint    tlas_next;
+   uint    blas_next;
+   uint    current_instance; /* Tagged BVH4 instance ID, also saved in hits. */
+   bool    blas_active;
 
    /* Extra call arguments.
     *
@@ -183,40 +134,18 @@ struct sw_ray_query_state {
 /* Small helpers                                                       */
 /* ------------------------------------------------------------------ */
 
-uint
-sw_ir_offset(uint id)
-{
-   return BVH_IR_NODE_OFFSET + (id & ~3u);
+/* All scalar loads use an explicitly 64-bit address calculation. */
+uint blas_u32(uint64_t base, uint word) {
+   return vel_rt_bvh4_u32(base, uint64_t(word) * 4ul);
+}
+float blas_f32(uint64_t base, uint word) {
+   return vel_rt_bvh4_f32(base, uint64_t(word) * 4ul);
+}
+uint64_t blas_u64(uint64_t base, uint word) {
+   return uint64_t(blas_u32(base, word)) | (uint64_t(blas_u32(base, word + 1u)) << 32);
 }
 
 uint
-sw_ir_type(uint id)
-{
-   return id & 3u;
-}
-
-/* Both levels use the AS value retained by the query. */
-uint
-blas_u32(uint64_t base, uint word)
-{
-   return DEREF(REF(uint32_t)(base + uint64_t(word) * 4ul));
-}
-
-float
-blas_f32(uint64_t base, uint word)
-{
-   return uintBitsToFloat(DEREF(REF(uint32_t)(base + uint64_t(word) * 4ul)));
-}
-
-uint64_t
-blas_u64(uint64_t base, uint word)
-{
-   uint lo = blas_u32(base, word);
-   uint hi = blas_u32(base, word + 1u);
-   return uint64_t(lo) | (uint64_t(hi) << 32);
-}
-
-uint32_t
 sw_max_dimension(vec3 v)
 {
    return (abs(v.x) > abs(v.y))
@@ -246,41 +175,6 @@ sw_lexicographic_compare(vec3 v0, vec3 v1)
    return a.x > b.x;
 }
 
-uint sw_leaf_stride(uint geometry_type)
-{
-   return geometry_type == 0u ? BVH_IR_TRIANGLE_SIZE :
-          geometry_type == 1u ? BVH_IR_AABB_SIZE : BVH_IR_INSTANCE_SIZE;
-}
-
-uint sw_blas_root(uint64_t base)
-{
-   if (blas_u32(base, BVH_IR_MAGIC_OFFSET / 4u) != BVH_IR_MAGIC ||
-       blas_u32(base, BVH_IR_VERSION_OFFSET / 4u) != BVH_IR_VERSION ||
-       blas_u32(base, BVH_IR_BUILD_FLAGS_OFFSET / 4u) != BVH_IR_SUPPORTED_INPUT_FLAGS ||
-       blas_u32(base, 6u) == 0u || blas_u32(base, 8u) == 0u)
-      return SW_HANDLE_INVALID;
-   uint capacity = blas_u32(base, BVH_IR_LEAF_CAPACITY_OFFSET / 4u);
-   uint type = blas_u32(base, BVH_IR_GEOMETRY_TYPE_OFFSET / 4u);
-   return BVH_IR_ROOT_ID(capacity, sw_leaf_stride(type), blas_u32(base, 8u));
-}
-
-uint sw_tlas_root(uint64_t base)
-{
-   if (base == 0ul) return SW_HANDLE_INVALID;
-   if (blas_u32(base, BVH_IR_MAGIC_OFFSET / 4u) != BVH_IR_MAGIC ||
-       blas_u32(base, BVH_IR_VERSION_OFFSET / 4u) != BVH_IR_VERSION ||
-       blas_u32(base, BVH_IR_BUILD_FLAGS_OFFSET / 4u) != BVH_IR_SUPPORTED_INPUT_FLAGS ||
-       blas_u32(base, 6u) == 0u || blas_u32(base, 8u) == 0u)
-      return SW_HANDLE_INVALID;
-   uint capacity = blas_u32(base, BVH_IR_LEAF_CAPACITY_OFFSET / 4u);
-   uint type = blas_u32(base, BVH_IR_GEOMETRY_TYPE_OFFSET / 4u);
-   return BVH_IR_ROOT_ID(capacity, sw_leaf_stride(type), blas_u32(base, 8u));
-}
-
-/* ------------------------------------------------------------------ */
-/* Ray / AABB  (slab test; bounds are full floats in vk_ir_*)           */
-/* ------------------------------------------------------------------ */
-
 bool
 sw_ray_box_test(sw_ray ray, vec3 bmin, vec3 bmax, float tmin, float tmax)
 {
@@ -297,6 +191,81 @@ sw_ray_box_test(sw_ray ray, vec3 bmin, vec3 bmax, float tmin, float tmax)
       }
    }
    return true;
+}
+
+/* Root identity and bounds are checked before following any runtime ID. */
+uint sw_bvh4_root(uint64_t base, uint type, sw_ray ray, float tmin, float tmax) {
+   if (base == 0ul || blas_u32(base, 0u) != VEL_RT_BVH4_MAGIC ||
+       blas_u32(base, 1u) != VEL_RT_BVH4_ABI_VERSION || blas_u32(base, 2u) != type ||
+       (blas_u32(base, 3u) & VEL_RT_BVH4_FLAG_INVALID) != 0u)
+      return SW_HANDLE_INVALID;
+   uint root = blas_u32(base, VEL_RT_BVH4_HEADER_ROOT / 4u);
+   if (root == SW_HANDLE_INVALID ||
+       !sw_ray_box_test(ray,
+          vec3(blas_f32(base, 24u), blas_f32(base, 25u), blas_f32(base, 26u)),
+          vec3(blas_f32(base, 27u), blas_f32(base, 28u), blas_f32(base, 29u)), tmin, tmax))
+      return SW_HANDLE_INVALID;
+   return root;
+}
+
+bool sw_bvh4_child_hit(uint64_t node, uint slot, sw_ray ray, float tmin, float tmax) {
+   uint word = slot * 3u;
+   return sw_ray_box_test(ray,
+      vec3(blas_f32(node, word), blas_f32(node, word + 1u), blas_f32(node, word + 2u)),
+      vec3(blas_f32(node, 12u + word), blas_f32(node, 13u + word), blas_f32(node, 14u + word)), tmin, tmax);
+}
+
+uint sw_bvh4_first(uint64_t base, uint id, sw_ray ray, float tmin, float tmax) {
+   uint64_t node = vel_rt_bvh4_node(base, id);
+   uint count = blas_u32(node, VEL_RT_BVH4_NODE_CHILD_COUNT / 4u);
+   if (count > 4u) return SW_HANDLE_INVALID;
+   for (uint slot = 0u; slot < count; ++slot) {
+      uint child = blas_u32(node, VEL_RT_BVH4_NODE_CHILDREN / 4u + slot);
+      if (child != SW_HANDLE_INVALID && sw_bvh4_child_hit(node, slot, ray, tmin, tmax)) return child;
+   }
+   return SW_HANDLE_INVALID;
+}
+
+/* After a completed subtree, test later siblings and ascend until one hits.
+ * In a valid tree every ascent reaches a distinct internal ancestor, so the
+ * node_count bound cannot truncate a valid walk at any depth. */
+uint sw_bvh4_after(uint64_t base, uint id, sw_ray ray, float tmin, float tmax) {
+   uint node_count = blas_u32(base, VEL_RT_BVH4_HEADER_NODE_COUNT / 4u);
+   for (uint ascents = 0u; ascents <= node_count; ++ascents) {
+      uint parent = vel_rt_bvh4_parent(base, id);
+      if (parent == SW_HANDLE_INVALID) return SW_HANDLE_INVALID;
+      if (vel_rt_bvh4_kind(parent) != VEL_RT_BVH4_INTERNAL || vel_rt_bvh4_index(parent) >= node_count)
+         return SW_HANDLE_INVALID;
+      uint64_t node = vel_rt_bvh4_node(base, parent);
+      uint count = blas_u32(node, VEL_RT_BVH4_NODE_CHILD_COUNT / 4u);
+      if (count > 4u) return SW_HANDLE_INVALID;
+      bool later = false;
+      for (uint slot = 0u; slot < count; ++slot) {
+         uint child = blas_u32(node, VEL_RT_BVH4_NODE_CHILDREN / 4u + slot);
+         if (later && child != SW_HANDLE_INVALID && sw_bvh4_child_hit(node, slot, ray, tmin, tmax)) return child;
+         if (child == id) later = true;
+      }
+      if (!later) return SW_HANDLE_INVALID;
+      id = parent;
+   }
+   return SW_HANDLE_INVALID;
+}
+
+/* A previous Proceed may have selected this node before Confirm shortened
+ * tclosest. Recheck the saved cursor's bounds using the current ray interval. */
+bool sw_bvh4_cursor_hit(uint64_t base, uint id, sw_ray ray, float tmin, float tmax) {
+   uint parent = vel_rt_bvh4_parent(base, id);
+   if (parent == SW_HANDLE_INVALID)
+      return sw_ray_box_test(ray,
+         vec3(blas_f32(base, 24u), blas_f32(base, 25u), blas_f32(base, 26u)),
+         vec3(blas_f32(base, 27u), blas_f32(base, 28u), blas_f32(base, 29u)), tmin, tmax);
+   uint64_t node = vel_rt_bvh4_node(base, parent);
+   uint count = blas_u32(node, VEL_RT_BVH4_NODE_CHILD_COUNT / 4u);
+   if (count > 4u) return false;
+   for (uint slot = 0u; slot < count; ++slot)
+      if (blas_u32(node, VEL_RT_BVH4_NODE_CHILDREN / 4u + slot) == id)
+         return sw_bvh4_child_hit(node, slot, ray, tmin, tmax);
+   return false;
 }
 
 /* ------------------------------------------------------------------ */
@@ -481,27 +450,20 @@ sw_test_triangle_leaf(inout sw_ray_query_state q,
                       sw_ray obj_ray,
                       uint64_t blas_base)
 {
-   /* vk_ir_triangle_node = { vk_ir_node base; float coords[3][3];
-    *                         uint triangle_id; uint geometry_id_and_flags }.
-    * Read member-by-member: a `vk_ir_triangle_node` local would carry
-    * ArrayStride (coords is an array) on a Function variable. */
-   VOID_REF base = OFFSET(blas_base, sw_ir_offset(leaf_handle));
-   /* coords[3][3] starts after vk_ir_node (6 floats). */
-   vec3 v0 = vec3(blas_f32(base, 6u),  blas_f32(base, 7u),  blas_f32(base, 8u));
-   vec3 v1 = vec3(blas_f32(base, 9u),  blas_f32(base, 10u), blas_f32(base, 11u));
-   vec3 v2 = vec3(blas_f32(base, 12u), blas_f32(base, 13u), blas_f32(base, 14u));
-   uint sorted_id  = blas_u32(base, 15u);
-   uint geo_flags  = blas_u32(base, 16u);
+   uint64_t base = vel_rt_bvh4_leaf(blas_base, leaf_handle);
+   vec3 v0 = vec3(blas_f32(base, 0u), blas_f32(base, 1u), blas_f32(base, 2u));
+   vec3 v1 = vec3(blas_f32(base, 3u), blas_f32(base, 4u), blas_f32(base, 5u));
+   vec3 v2 = vec3(blas_f32(base, 6u), blas_f32(base, 7u), blas_f32(base, 8u));
+   uint primitive_id = blas_u32(base, 9u);
+   uint geometry_id = blas_u32(base, 10u);
+   uint geometry_flags = blas_u32(base, 11u);
 
    float dist = 0.0;
    vec2  uv   = vec2(0.0);
    bool  opaque = false;
    bool  front  = true;
 
-   uint primitive_id = sorted_id;
-   uint geometry_id  = geo_flags & 0x00FFFFFFu;
-
-   if (!sw_ray_tri_test(v0, v1, v2, geo_flags,
+   if (!sw_ray_tri_test(v0, v1, v2, geometry_flags,
                         obj_ray, flags, q.tmin, q.tclosest,
                         dist, uv, opaque, front))
       return false;
@@ -512,7 +474,7 @@ sw_test_triangle_leaf(inout sw_ray_query_state q,
       q.intersection_type          = SW_CAND_TRIANGLE;
       q.committed_intersection_type = SW_COMM_TRIANGLE;
       q.committed.instance_id           = instance_id;
-      q.committed.instance_node         = sw_ir_offset(q.current_instance);
+      q.committed.instance_node         = q.current_instance;
       q.committed.instance_custom_index = instance_custom_index;
       q.committed.geometry_index        = geometry_id;
       q.committed.primitive_index       = primitive_id;
@@ -531,7 +493,7 @@ sw_test_triangle_leaf(inout sw_ray_query_state q,
       /* Candidate: suspend and let the app Confirm / reject. */
       q.intersection_type = SW_CAND_TRIANGLE;
       q.candidate.instance_id           = instance_id;
-      q.candidate.instance_node         = sw_ir_offset(q.current_instance);
+      q.candidate.instance_node         = q.current_instance;
       q.candidate.instance_custom_index = instance_custom_index;
       q.candidate.geometry_index        = geometry_id;
       q.candidate.primitive_index       = primitive_id;
@@ -539,8 +501,6 @@ sw_test_triangle_leaf(inout sw_ray_query_state q,
       q.candidate.distance              = dist;
       q.candidate.front_face            = front;
       q.candidate.opaque                = false;
-      q.next_prim = 1u; /* only one triangle per vk_ir_triangle_node */
-      q.resume    = true;
       return true;
    }
    return false;
@@ -554,306 +514,112 @@ sw_test_aabb_leaf(inout sw_ray_query_state q,
                   uint instance_custom_index,
                   uint64_t blas_base)
 {
-   /* vk_ir_aabb_node = { vk_ir_node base; uint primitive_id;
-    *                     uint geometry_id_and_flags }. */
-   VOID_REF base = OFFSET(blas_base, sw_ir_offset(leaf_handle));
-   uint prim_id  = blas_u32(base, 6u);
-   uint geo_flg  = blas_u32(base, 7u);
+   uint64_t base = vel_rt_bvh4_leaf(blas_base, leaf_handle);
+   uint prim_id = blas_u32(base, 6u);
+   uint geometry_id = blas_u32(base, 7u);
+   uint geometry_flags = blas_u32(base, 8u);
 
    /* Procedural geometry uses the same ray > instance > geometry opacity
     * precedence as triangles, including CandidateAABBOpaque and culling. */
-   bool opaque = sw_triangle_is_opaque(geo_flg, flags);
+   bool opaque = sw_triangle_is_opaque(geometry_flags, flags);
    uint flag = opaque ? SW_RAY_FLAG_CULL_OPAQUE : SW_RAY_FLAG_CULL_NO_OPAQUE;
    if ((q.ray_flags & flag) != 0u) {
-      q.next_prim = 1u;
       return false;
    }
 
    /* AABB candidates carry no t until the app calls GenerateIntersection. */
    q.intersection_type = SW_CAND_AABB;
    q.candidate.instance_id           = instance_id;
-   q.candidate.instance_node         = sw_ir_offset(q.current_instance);
+   q.candidate.instance_node         = q.current_instance;
    q.candidate.instance_custom_index = instance_custom_index;
-   q.candidate.geometry_index        = geo_flg & 0x00FFFFFFu;
+   q.candidate.geometry_index        = geometry_id;
    q.candidate.primitive_index       = prim_id;
    q.candidate.distance              = 0.0;
    q.candidate.opaque                = opaque;
-   q.next_prim = 1u;
-   q.resume    = true;
    return true;
 }
 
-/* ------------------------------------------------------------------ */
-/* Instance transform                                                  */
-/* ------------------------------------------------------------------ */
-
-/* World-to-object ray. t is invariant under an affine transform of the
- * ray, so t computed in object space is already the world t.
- *
- * The matrix is read scalar-by-scalar: a `float m[12]` local or
- * parameter would carry ArrayStride, which the validator rejects on
- * Function storage class.
- */
-/* Build the world-to-object ray for a TLAS instance node.
- * `node_word` is the node's offset in bytes divided by 4. */
-bool
-sw_make_object_ray(uint64_t base, uint node_word, sw_ray world, out sw_ray obj)
-{
-   /* vk_ir_instance_node layout after base.aabb (24):
-    *   u64 base_ptr (8) @24, u32 custom_instance_and_mask @32,
-    *   u32 sbt_offset_and_flags @36, mat3x4 otw_matrix (48) @40.
-    * The matrix starts at word 10 of the node. */
-   uint m = node_word + 10u;
-   float m0 = blas_f32(base, m + 0u),  m1 = blas_f32(base, m + 1u);
-   float m2 = blas_f32(base, m + 2u),  m3 = blas_f32(base, m + 3u);
-   float m4 = blas_f32(base, m + 4u),  m5 = blas_f32(base, m + 5u);
-   float m6 = blas_f32(base, m + 6u),  m7 = blas_f32(base, m + 7u);
-   float m8 = blas_f32(base, m + 8u),  m9 = blas_f32(base, m + 9u);
-   float m10 = blas_f32(base, m + 10u), m11 = blas_f32(base, m + 11u);
-
-   /* Invert the 3x3 in place. */
-   float A =  (m5 * m10 - m6 * m9);
-   float B = -(m4 * m10 - m6 * m8);
-   float C =  (m4 * m9  - m5 * m8);
-   float det = m0 * A + m1 * B + m2 * C;
-   if (det == 0.0)
-      return false;
-   float id = 1.0 / det;
-
-   float i0 = A * id,                 i1 = (m2 * m9 - m1 * m10) * id;
-   float i2 = (m1 * m6 - m2 * m5) * id;
-   float i3 = B * id,                 i4 = (m0 * m10 - m2 * m8) * id;
-   float i5 = (m2 * m4 - m0 * m6) * id;
-   float i6 = C * id,                 i7 = (m1 * m8 - m0 * m9) * id;
-   float i8 = (m0 * m5 - m1 * m4) * id;
-
-   vec3 o = world.origin - vec3(m3, m7, m11);
-   vec3 oo = vec3(i0 * o.x + i1 * o.y + i2 * o.z,
-                  i3 * o.x + i4 * o.y + i5 * o.z,
-                  i6 * o.x + i7 * o.y + i8 * o.z);
-   vec3 d = world.direction;
-   vec3 od = vec3(i0 * d.x + i1 * d.y + i2 * d.z,
-                  i3 * d.x + i4 * d.y + i5 * d.z,
-                  i6 * d.x + i7 * d.y + i8 * d.z);
-   obj = sw_setup_ray(oo, od);
+/* Instance matrices are original row-major 3x4 transforms. Both directions
+ * are carried by the ABI, avoiding an inverse in the traversal hot path. */
+bool sw_make_object_ray(uint64_t base, uint instance, sw_ray world, out sw_ray obj) {
+   uint64_t record = vel_rt_bvh4_leaf(base, instance);
+   uint m = VEL_RT_BVH4_INSTANCE_WTO / 4u;
+   vec3 x = vec3(blas_f32(record, m), blas_f32(record, m + 1u), blas_f32(record, m + 2u));
+   vec3 y = vec3(blas_f32(record, m + 4u), blas_f32(record, m + 5u), blas_f32(record, m + 6u));
+   vec3 z = vec3(blas_f32(record, m + 8u), blas_f32(record, m + 9u), blas_f32(record, m + 10u));
+   vec3 translation = vec3(blas_f32(record, m + 3u), blas_f32(record, m + 7u), blas_f32(record, m + 11u));
+   obj = sw_setup_ray(vec3(dot(x, world.origin), dot(y, world.origin), dot(z, world.origin)) + translation,
+                      vec3(dot(x, world.direction), dot(y, world.direction), dot(z, world.direction)));
    return true;
 }
 
-/* ------------------------------------------------------------------ */
-/* Bottom-level traversal (Avalon's bottom_traversal_sw)               */
-/* ------------------------------------------------------------------ */
-
-bool
-sw_bottom_traversal(inout sw_ray_query_state q, uint instance_node_off)
-{
-   /* The BLAS lives at its own base address (vk_ir_instance_node.base_ptr),
-    * not at q.as. Every handle below is an offset from THAT base. */
-   /* vk_ir_instance_node is read scalar-by-scalar; it holds a mat3x4 and
-    * a local of that type would carry explicit layout. It lives in the
-    * TLAS buffer, so these are TLAS reads. */
-   uint iword = instance_node_off / 4u;
-   uint custom_and_mask = blas_u32(q.as_address, iword + 8u);   /* after aabb(24)+base_ptr(8) */
-   uint sbt_and_flags_r = blas_u32(q.as_address, iword + 9u);
-   uint instance_id_r   = blas_u32(q.as_address, iword + 22u);  /* after 48-byte matrix */
-   uint root_flags_r    = blas_u32(q.as_address, iword + 23u);
-
-   /* Visibility mask is the top byte of custom_instance_and_mask. */
-   uint inst_mask = (custom_and_mask >> 24) & 0xFFu;
-   if ((inst_mask & q.cull_mask) == 0u)
-      return false;
-
-   sw_ray obj_ray;
-   if (!sw_make_object_ray(q.as_address, iword, q.ray, obj_ray))
-      return false;
-
-   uint instance_id           = instance_id_r;
-   uint instance_custom_index = custom_and_mask & 0x00FFFFFFu;
-   uint sbt_and_flags         = sbt_and_flags_r;
-   uint combined_flags        = q.ray_flags | ((sbt_and_flags >> 8) & 0x00FF0000u);
-
-   /* base_ptr is the u64 at byte 24 (word 6) of the instance node. This
-    * is a real VkDeviceAddress written in by the AS build, so it is what
-    * hops us into the separate BLAS buffer. */
-   uint64_t blas_base = blas_u64(q.as_address, iword + 6u);
-   uint blas_root = sw_blas_root(blas_base);
-
-   if (!q.resume) {
-      q.blas_stack_base = q.stack_size;
-      if (q.stack_size < SW_RT_STACK_SIZE)
-         q.stack[q.stack_size++] = blas_root;
-   }
-
-   while (q.stack_size > q.blas_stack_base) {
-      uint handle = q.stack[q.stack_size - 1];
-      if (handle == SW_HANDLE_INVALID) {
-         q.stack_size--;
+bool sw_bottom_traversal(inout sw_ray_query_state q) {
+   uint64_t instance = vel_rt_bvh4_leaf(q.as_address, q.current_instance);
+   uint custom_and_mask = blas_u32(instance, 2u);
+   if (((custom_and_mask >> 24) & q.cull_mask) == 0u) return false;
+   uint combined_flags = q.ray_flags | ((blas_u32(instance, 3u) >> 8) & 0x00ff0000u);
+   uint instance_id = blas_u32(instance, 28u);
+   uint custom_index = custom_and_mask & 0x00ffffffu;
+   uint64_t base = blas_u64(instance, 0u);
+   sw_ray ray;
+   sw_make_object_ray(q.as_address, q.current_instance, q.ray, ray);
+   while (q.blas_next != SW_HANDLE_INVALID) {
+      uint handle = q.blas_next;
+      if (!sw_bvh4_cursor_hit(base, handle, ray, q.tmin, q.tclosest)) {
+         q.blas_next = sw_bvh4_after(base, handle, ray, q.tmin, q.tclosest);
          continue;
       }
-
-      if (q.resume && handle == q.current_leaf) {
-         /* The application has consumed (and optionally confirmed) this
-          * candidate.  It was the only primitive in this IR leaf, so pop
-          * it before continuing with its siblings.  Re-testing it would
-          * return the identical candidate forever. */
-         q.resume = false;
-         q.stack_size--;
+      uint kind = vel_rt_bvh4_kind(handle);
+      if (kind == VEL_RT_BVH4_INTERNAL) {
+         uint child = sw_bvh4_first(base, handle, ray, q.tmin, q.tclosest);
+         q.blas_next = child == SW_HANDLE_INVALID ? sw_bvh4_after(base, handle, ray, q.tmin, q.tclosest) : child;
          continue;
       }
-      q.resume = false;
-
-      VOID_REF nbase = OFFSET(blas_base, sw_ir_offset(handle));
-      uint ntype = sw_ir_type(handle);
-      if ((ntype == vk_ir_node_triangle && (q.ray_flags & SW_RAY_FLAG_SKIP_TRIANGLES) != 0u) ||
-          (ntype == vk_ir_node_aabb && (q.ray_flags & SW_RAY_FLAG_SKIP_AABB) != 0u)) {
-         q.stack_size--;
-         continue;
-      }
-
-      /* Bounds test (skipped when resuming into the leaf). */
-      if (!q.resume) {
-         /* bounds come from nbase directly in sw_ray_box_test */
-         if (!sw_ray_box_test(obj_ray,
-                             vec3(blas_f32(nbase, 0u), blas_f32(nbase, 1u), blas_f32(nbase, 2u)),
-                             vec3(blas_f32(nbase, 3u), blas_f32(nbase, 4u), blas_f32(nbase, 5u)),
-                             q.tmin, q.tclosest)) {
-            q.stack_size--;
-            continue;
-         }
-      }
-
-      if (ntype == vk_ir_node_internal) {
-         /* Push both children; child0 is processed first. */
-         /* vk_ir_box_node = { vk_ir_node base; uint children[2];
-          *                    uint bvh_offset; uint flags }.
-          * children[] is an array, so a local of this type would carry
-          * ArrayStride on a Function variable -- read the two words. */
-         q.stack_size--; /* pop this node */
-         if (q.stack_size + 2 <= SW_RT_STACK_SIZE) {
-            q.stack[q.stack_size++] = blas_u32(nbase, 7u);
-            q.stack[q.stack_size++] = blas_u32(nbase, 6u);
-         }
-         continue;
-      }
-
-      /* Leaf. */
-      q.current_leaf = handle;
-      bool suspend;
-      if (ntype == vk_ir_node_triangle) {
-         suspend = sw_test_triangle_leaf(q, handle, combined_flags,
-                                         instance_id, instance_custom_index,
-                                         obj_ray, blas_base);
-      } else if (ntype == vk_ir_node_aabb) {
-         suspend = sw_test_aabb_leaf(q, handle, combined_flags,
-                                     instance_id, instance_custom_index,
-                                     blas_base);
-      } else {
-         q.next_prim = 1u;
-         suspend = false;
-      }
-
-      if (suspend) return true;
+      /* Consume this leaf before suspending. Resume can never return the same
+       * primitive again, even when the application rejects a candidate. */
+      q.blas_next = sw_bvh4_after(base, handle, ray, q.tmin, q.tclosest);
+      bool candidate = false;
+      if (kind == VEL_RT_BVH4_TRIANGLE && (q.ray_flags & SW_RAY_FLAG_SKIP_TRIANGLES) == 0u)
+         candidate = sw_test_triangle_leaf(q, handle, combined_flags, instance_id, custom_index, ray, base);
+      else if (kind == VEL_RT_BVH4_AABB && (q.ray_flags & SW_RAY_FLAG_SKIP_AABB) == 0u)
+         candidate = sw_test_aabb_leaf(q, handle, combined_flags, instance_id, custom_index, base);
+      if (candidate) return true;
       if (q.cull_mask == 0u) return false;
-
-      q.resume = false;
-      q.stack_size--;
    }
    return false;
 }
 
-/* ------------------------------------------------------------------ */
-/* Top-level traversal + the public state machine                      */
-/* ------------------------------------------------------------------ */
-
-bool
-sw_ray_query_proceed(inout sw_ray_query_state q)
-{
-   if (q.cull_mask == 0u)
-      return false;
-
-   bool continuing_tlas = false;
-
-   /* A candidate returned from sw_bottom_traversal leaves BLAS nodes on
-    * the shared stack.  Resume that walk directly; entering the TLAS loop
-    * here would read those BLAS offsets from the TLAS buffer and silently
-    * discard siblings (notably the nearer of two overlapping triangles). */
-   if (q.resume && q.current_leaf_is_instance) {
-      q.intersection_type = SW_CAND_NONE;
-      if (sw_bottom_traversal(q, sw_ir_offset(q.current_instance)))
-         return true;
-      if (q.cull_mask == 0u)
-         return false;
-      q.resume = false;
-      q.current_leaf_is_instance = false;
-      /* The BLAS occupied stack slots above blas_stack_base.  Its walk
-       * is now complete, but TLAS siblings below that boundary still need
-       * to be processed. */
-      if (q.stack_size == 0u)
-         return false;
-      continuing_tlas = true;
-   }
-
-   if (!q.resume && !continuing_tlas) {
-      q.stack_size = 0u;
-      q.stack[q.stack_size++] = sw_tlas_root(q.as_address);
-   }
-
+bool sw_ray_query_proceed(inout sw_ray_query_state q) {
+   if (q.cull_mask == 0u) return false;
    q.intersection_type = SW_CAND_NONE;
-
-   while (q.stack_size > 0) {
-      uint handle = q.stack[q.stack_size - 1];
-      if (handle == SW_HANDLE_INVALID) {
-         q.stack_size--;
-         q.resume = false;
-         continue;
-      }
-      uint ntype  = sw_ir_type(handle);
-      uint nword  = sw_ir_offset(handle) / 4u;
-
-      bool resuming_leaf = q.resume && (handle == q.current_leaf) &&
-                           (ntype != vk_ir_node_instance);
-      if (!resuming_leaf) {
-         /* bounds come from nbase directly in sw_ray_box_test */
-         if (!sw_ray_box_test(q.ray,
-                             vec3(blas_f32(q.as_address, nword + 0u), blas_f32(q.as_address, nword + 1u), blas_f32(q.as_address, nword + 2u)),
-                             vec3(blas_f32(q.as_address, nword + 3u), blas_f32(q.as_address, nword + 4u), blas_f32(q.as_address, nword + 5u)),
-                             q.tmin, q.tclosest)) {
-            q.stack_size--;
-            q.resume = false;
-            continue;
-         }
-      }
-
-      if (ntype == vk_ir_node_internal) {
-         /* children[] is an array: read the two words rather than
-          * materialise a vk_ir_box_node local. */
-         q.stack_size--;
-         if (q.stack_size + 2 <= SW_RT_STACK_SIZE) {
-            q.stack[q.stack_size++] = blas_u32(q.as_address, nword + 7u);
-            q.stack[q.stack_size++] = blas_u32(q.as_address, nword + 6u);
-         }
-         q.resume = false;
-         continue;
-      }
-
-      if (ntype == vk_ir_node_instance) {
-         /* TLAS leaf: descend into the BLAS. */
-         q.resume = false;
-         q.current_instance = handle;
-         q.current_leaf_is_instance = true;
-         q.stack_size--;
-
-         if (sw_bottom_traversal(q, sw_ir_offset(handle)))
-            return true;
+   for (;;) {
+      if (q.blas_active) {
+         if (sw_bottom_traversal(q)) return true;
+         q.blas_active = false;
          if (q.cull_mask == 0u) return false;
-         q.resume = false;
+      }
+      if (q.tlas_next == SW_HANDLE_INVALID) return false;
+      uint handle = q.tlas_next;
+      if (!sw_bvh4_cursor_hit(q.as_address, handle, q.ray, q.tmin, q.tclosest)) {
+         q.tlas_next = sw_bvh4_after(q.as_address, handle, q.ray, q.tmin, q.tclosest);
          continue;
       }
-
-      /* Unexpected leaf type at TLAS level (tri/aabb in a TLAS). */
-      q.stack_size--;
-      q.resume = false;
+      uint kind = vel_rt_bvh4_kind(handle);
+      if (kind == VEL_RT_BVH4_INTERNAL) {
+         uint child = sw_bvh4_first(q.as_address, handle, q.ray, q.tmin, q.tclosest);
+         q.tlas_next = child == SW_HANDLE_INVALID ? sw_bvh4_after(q.as_address, handle, q.ray, q.tmin, q.tclosest) : child;
+         continue;
+      }
+      q.tlas_next = sw_bvh4_after(q.as_address, handle, q.ray, q.tmin, q.tclosest);
+      if (kind != VEL_RT_BVH4_INSTANCE) continue;
+      q.current_instance = handle;
+      uint64_t instance = vel_rt_bvh4_leaf(q.as_address, handle);
+      if (((blas_u32(instance, 2u) >> 24) & q.cull_mask) == 0u) continue;
+      sw_ray ray;
+      sw_make_object_ray(q.as_address, handle, q.ray, ray);
+      q.blas_next = sw_bvh4_root(blas_u64(instance, 0u), 1u, ray, q.tmin, q.tclosest);
+      q.blas_active = q.blas_next != SW_HANDLE_INVALID;
    }
-   return false;
 }
 
 /* --- The sw_* surface that the SPIR-V rewrite targets --------------- */
@@ -870,13 +636,10 @@ sw_ray_query_initialize(inout sw_ray_query_state q)
    q.intersection_type          = SW_CAND_NONE;
    q.committed_intersection_type = SW_COMM_NONE;
 
-   q.resume                = false;
-   q.current_leaf          = 0u;
-   q.current_instance      = 0u;
-   q.current_leaf_is_instance = false;
-   q.next_prim             = 0u;
-   q.stack_size            = 0u;
-   q.blas_stack_base       = 0u;
+   q.tlas_next = sw_bvh4_root(q.as_address, 0u, q.ray, q.tmin, q.tclosest);
+   q.blas_next = SW_HANDLE_INVALID;
+   q.current_instance = SW_HANDLE_INVALID;
+   q.blas_active = false;
 }
 
 void
@@ -970,9 +733,7 @@ uint
 sw_get_intersection_instance_sbt_offset(inout sw_ray_query_state q)
 {
    uint node = q.want_committed != 0u ? q.committed.instance_node : q.candidate.instance_node;
-   /* vk_ir_instance_node.sbt_offset_and_flags is at byte 36. The upper
-    * eight bits contain instance flags, not the SBT record offset. */
-   return blas_u32(q.as_address, node / 4u + 9u) & 0x00FFFFFFu;
+   return blas_u32(vel_rt_bvh4_leaf(q.as_address, node), 3u) & 0x00ffffffu;
 }
 
 bool
@@ -1009,28 +770,31 @@ vec3 sw_get_object_ray_origin(inout sw_ray_query_state q)
 {
    uint node = q.want_committed != 0u ? q.committed.instance_node : q.candidate.instance_node;
    sw_ray obj;
-   sw_make_object_ray(q.as_address, node / 4u, q.ray, obj);
+   sw_make_object_ray(q.as_address, node, q.ray, obj);
    return obj.origin;
 }
 vec3 sw_get_object_ray_direction(inout sw_ray_query_state q)
 {
    uint node = q.want_committed != 0u ? q.committed.instance_node : q.candidate.instance_node;
    sw_ray obj;
-   sw_make_object_ray(q.as_address, node / 4u, q.ray, obj);
+   sw_make_object_ray(q.as_address, node, q.ray, obj);
    return obj.direction;
 }
-mat4x3 sw_get_object_to_world(inout sw_ray_query_state q)
-{
-   uint node = q.want_committed != 0u ? q.committed.instance_node : q.candidate.instance_node;
-   uint w = node / 4u + 10u;
-   return mat4x3(vec3(blas_f32(q.as_address, w), blas_f32(q.as_address, w+4u), blas_f32(q.as_address, w+8u)),
-      vec3(blas_f32(q.as_address, w+1u), blas_f32(q.as_address, w+5u), blas_f32(q.as_address, w+9u)),
-      vec3(blas_f32(q.as_address, w+2u), blas_f32(q.as_address, w+6u), blas_f32(q.as_address, w+10u)),
-      vec3(blas_f32(q.as_address, w+3u), blas_f32(q.as_address, w+7u), blas_f32(q.as_address, w+11u)));
+mat4x3 sw_instance_matrix(uint64_t base, uint instance, uint byte_offset) {
+   uint64_t record = vel_rt_bvh4_leaf(base, instance);
+   uint w = byte_offset / 4u;
+   return mat4x3(vec3(blas_f32(record, w), blas_f32(record, w + 4u), blas_f32(record, w + 8u)),
+      vec3(blas_f32(record, w + 1u), blas_f32(record, w + 5u), blas_f32(record, w + 9u)),
+      vec3(blas_f32(record, w + 2u), blas_f32(record, w + 6u), blas_f32(record, w + 10u)),
+      vec3(blas_f32(record, w + 3u), blas_f32(record, w + 7u), blas_f32(record, w + 11u)));
 }
-mat4x3 sw_get_world_to_object(inout sw_ray_query_state q)
-{
-   return mat4x3(inverse(mat4(sw_get_object_to_world(q))));
+mat4x3 sw_get_object_to_world(inout sw_ray_query_state q) {
+   uint instance = q.want_committed != 0u ? q.committed.instance_node : q.candidate.instance_node;
+   return sw_instance_matrix(q.as_address, instance, VEL_RT_BVH4_INSTANCE_OTW);
+}
+mat4x3 sw_get_world_to_object(inout sw_ray_query_state q) {
+   uint instance = q.want_committed != 0u ? q.committed.instance_node : q.candidate.instance_node;
+   return sw_instance_matrix(q.as_address, instance, VEL_RT_BVH4_INSTANCE_WTO);
 }
 vec3
 sw_get_world_ray_direction(inout sw_ray_query_state q) { return q.ray.direction; }

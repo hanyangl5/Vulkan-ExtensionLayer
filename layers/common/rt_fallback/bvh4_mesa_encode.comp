@@ -11,7 +11,7 @@ layout(buffer_reference, scalar, buffer_reference_align = 4) buffer Word { uint 
 layout(push_constant, scalar) uniform Args {
     uint64_t source, source_size, output_as, mapping;
     uint64_t geometry_flags, runtime_blas, status, first;
-    uint capacity, geometry_type, geometry_count, reserved;
+    uint capacity, geometry_type, geometry_count, options;
 } args;
 const uint INVALID = 0xffffffffu;
 const uint RESERVED = 0xfffffffeu;
@@ -20,7 +20,10 @@ uint read32(uint64_t address) { return Word(address).value; }
 uint64_t read64(uint64_t address) { return uint64_t(read32(address)) | (uint64_t(read32(address + 4)) << 32); }
 void write32(uint64_t address, uint value) { Word(address).value = value; }
 void write64(uint64_t address, uint64_t value) { write32(address, uint(value)); write32(address + 4, uint(value >> 32)); }
-void fail(uint bits) { atomicOr(Word(args.status).value, bits); }
+void fail(uint bits) {
+    atomicOr(Word(args.status).value, bits);
+    atomicOr(Word(args.output_as + 12).value, 0x80000000u);
+}
 uint source32(uint offset) { return read32(args.source + uint64_t(offset)); }
 uint active_count() { return source32(24); }
 uint internal_count() { return source32(32); }
@@ -93,10 +96,11 @@ void emit_leaf(uint source_id, uint parent) {
         if (args.geometry_type == 1) for (uint field = 36; field < 48; field += 4) write32(dst + field, 0);
         return;
     }
-    if (args.runtime_blas == uint64_t(0) || read64(src + 24) == uint64_t(0) || (read32(src + 32) >> 24) == 0) {
+    bool identity_blas = (args.options & 1u) != 0;
+    if ((!identity_blas && args.runtime_blas == uint64_t(0)) || read64(src + 24) == uint64_t(0) || (read32(src + 32) >> 24) == 0) {
         fail(32); return;
     }
-    uint64_t blas = read64(args.runtime_blas + uint64_t(source_slot) * uint64_t(8));
+    uint64_t blas = identity_blas ? read64(src + 24) : read64(args.runtime_blas + uint64_t(source_slot) * uint64_t(8));
     if (blas == uint64_t(0) || (blas & uint64_t(127)) != uint64_t(0)) { fail(32); return; }
     write64(dst, blas);
     write32(dst + 8, read32(src + 32));
@@ -144,7 +148,8 @@ void main() {
         write32(args.output_as + 28, 0);
         write32(args.output_as + 32, 0);
         for (uint field = 96; field < 120; field += 4) write32(args.output_as + field, 0);
-        if (args.source_size < uint64_t(128) || args.geometry_type > 2) { fail(1); return; }
+        if (args.source_size < uint64_t(128) || args.geometry_type > 2 || (args.options & ~1u) != 0 ||
+            ((args.options & 1u) != 0 && args.runtime_blas != uint64_t(0))) { fail(1); return; }
         uint live = active_count(), internals = internal_count();
         uint64_t root_end = box_base() + uint64_t(internals) * uint64_t(40);
         if (source32(108) != 0x58424856u || source32(112) != 2 || source32(116) != args.capacity ||

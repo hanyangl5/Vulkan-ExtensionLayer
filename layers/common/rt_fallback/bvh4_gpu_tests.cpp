@@ -563,7 +563,7 @@ static void Run(Context& ctx, const std::vector<BuildNode>& tree, uint32_t root)
 static uint64_t RecordKey(uint32_t geometry, uint32_t primitive) { return (uint64_t(geometry) << 32) | primitive; }
 static void RunMesa(Context& ctx, const mesa_test::Fixture& fixture, const std::vector<uint32_t>& flags,
                     const std::vector<uint64_t>& runtime_blas = {}, uint32_t expected_error = 0,
-                    const std::function<void(VkCommandBuffer, uint64_t)>& producer = {}) {
+                    const std::function<void(VkCommandBuffer, uint64_t)>& producer = {}, uint32_t options = 0) {
     const auto plan = PlanMesaGpuLayout(fixture.capacity, fixture.type);
     const uint64_t mapping_bytes = MesaGpuMappingWords(fixture.capacity) * 4;
     auto source = ctx.Allocate(std::max(size_t(4), fixture.bytes.size()));
@@ -601,7 +601,7 @@ static void RunMesa(Context& ctx, const mesa_test::Fixture& fixture, const std::
                            fixture.capacity,
                            fixture.type,
                            uint32_t(flags.size()),
-                           0};
+                           options};
     ctx.EncodeMesa(args, producer
                              ? std::function<void(VkCommandBuffer)>([&](VkCommandBuffer cmd) { producer(cmd, source.address); })
                              : std::function<void(VkCommandBuffer)>());
@@ -611,6 +611,9 @@ static void RunMesa(Context& ctx, const mesa_test::Fixture& fixture, const std::
         std::cerr << "Mesa GPU fixture type=" << fixture.type << " capacity=" << fixture.capacity << " active=" << fixture.active
                   << " status=" << error << " expected=" << expected_error << '\n';
     Check(expected_error ? (error & expected_error) != 0 : error == 0, "Mesa GPU status mismatch");
+    std::memcpy(&header, output.mapped + 128, sizeof(header));
+    Check(((header.flags & VEL_RT_BVH4_FLAG_INVALID) != 0) == (expected_error != 0),
+          "failed encoding must invalidate the runtime AS header");
     Check(producer || fixture.bytes.empty() || std::memcmp(source.mapped, fixture.bytes.data(), fixture.bytes.size()) == 0,
           "Mesa source input mutated");
     for (size_t i = 0; i < 128; ++i) {
@@ -622,6 +625,7 @@ static void RunMesa(Context& ctx, const mesa_test::Fixture& fixture, const std::
         // Independent host adapter is only the test oracle. No adapted tree,
         // active count, record or map is ever uploaded to the GPU encoder.
         const auto oracle = AdaptMesaContainerV2(fixture.Span(), flags, [&](uint64_t source_address) {
+            if (options & VEL_RT_MESA_GPU_IDENTITY_BLAS) return source_address;
             for (size_t slot = 0; slot < runtime_blas.size(); ++slot) {
                 uint64_t address = 0;
                 std::memcpy(&address, fixture.bytes.data() + fixture.Leaf(uint32_t(slot)) + 24, 8);
@@ -786,6 +790,9 @@ static void MesaCases(Context& ctx) {
     instances.InternalBox(0, instances.LeafId(0), instances.LeafId(2), {{-8, -8, -8}, {8, 8, 8}});
     instances.InternalBox(1, instances.InternalId(0), instances.LeafId(4), {{-8, -8, -8}, {8, 8, 8}});
     RunMesa(ctx, instances, {}, blas);
+    RunMesa(ctx, instances, {}, {}, 0, {}, VEL_RT_MESA_GPU_IDENTITY_BLAS);
+    RunMesa(ctx, instances, {}, blas, MesaGpuMetadata, {}, VEL_RT_MESA_GPU_IDENTITY_BLAS);
+    RunMesa(ctx, instances, {}, {}, MesaGpuMetadata, {}, 2u);
     auto bad = sparse;
     mesa_test::U32(bad.bytes, 112, 3);
     RunMesa(ctx, bad, flags, {}, MesaGpuMetadata);

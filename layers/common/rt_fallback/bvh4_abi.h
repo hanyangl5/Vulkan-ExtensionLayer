@@ -8,6 +8,7 @@
 // Layer-owned, experimental wire ABI. These are not AMD hardware node IDs.
 #define VEL_RT_BVH4_MAGIC UINT32_C(0x344c4556)
 #define VEL_RT_BVH4_ABI_VERSION UINT32_C(1)
+#define VEL_RT_BVH4_FLAG_INVALID UINT32_C(0x80000000)
 #define VEL_RT_BVH4_INVALID_ID UINT32_C(0xffffffff)
 #define VEL_RT_BVH4_INDEX_MASK UINT32_C(0x3fffffff)
 // Reserve the last index uniformly, including the instance-tagged invalid ID.

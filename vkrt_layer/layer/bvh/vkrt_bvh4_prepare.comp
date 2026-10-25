@@ -1,0 +1,32 @@
+/* SPDX-License-Identifier: MIT */
+#version 460
+#extension GL_EXT_buffer_reference : require
+#extension GL_EXT_scalar_block_layout : require
+#extension GL_EXT_shader_explicit_arithmetic_types_int64 : require
+layout(local_size_x = 1) in;
+layout(buffer_reference, scalar, buffer_reference_align = 4) buffer Word { uint value; };
+layout(push_constant, scalar) uniform Prepare {
+   uint64_t output_as, status, geometry_flags;
+   uint64_t nodes, triangles, aabbs, instances, parents, total_size;
+   uint type, mode, geometry, flags;
+} args;
+void put32(uint offset, uint value) { Word(args.output_as + offset).value = value; }
+void put64(uint offset, uint64_t value) { put32(offset, uint(value)); put32(offset + 4, uint(value >> 32)); }
+void main() {
+   if (args.mode == 1) {
+      Word(args.geometry_flags + uint64_t(args.geometry) * 4ul).value = args.flags;
+      return;
+   }
+   for (uint offset = 0; offset < 128; offset += 4) put32(offset, 0);
+   put32(0, 0x344c4556u);
+   put32(4, 1);
+   put32(8, args.type);
+   put32(16, 0xffffffffu);
+   put64(48, args.nodes);
+   put64(56, args.triangles);
+   put64(64, args.aabbs);
+   put64(72, args.instances);
+   put64(80, args.parents);
+   put64(88, args.total_size);
+   Word(args.status).value = 0;
+}

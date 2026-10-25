@@ -45,6 +45,7 @@ class Emitter {
         output.bool_type = ID("bool");
         output.void_type = ID("void");
         output.memory = ID("memory");
+        output.word_pointer_type = ID("word_ptr");
         caps.insert("Shader");
         types << ID("void") << " = OpTypeVoid\n"
               << ID("bool") << " = OpTypeBool\n"
@@ -363,8 +364,9 @@ class Emitter {
 
 ContinuationFrameCodecs EmitContinuationFrameCodecs(const std::vector<uint32_t> &spirv, const std::string &entry,
                                                     uint32_t execution_model, uint32_t descriptor_set, uint32_t binding,
-                                                    const std::string &prefix) {
-    auto plan = PlanContinuationFrames(spirv, entry, execution_model);
+                                                    const std::string &prefix,
+                                                    const std::vector<uint32_t> &additional_value_types) {
+    auto plan = PlanContinuationFrames(spirv, entry, execution_model, additional_value_types);
     return Emitter(spirv, std::move(plan), prefix).Emit(descriptor_set, binding);
 }
 }  // namespace vel::rt
