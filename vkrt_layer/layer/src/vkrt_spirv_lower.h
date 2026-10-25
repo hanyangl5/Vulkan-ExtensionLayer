@@ -29,6 +29,13 @@ vkrt_spirv_lower(const uint32_t *user_words, size_t user_word_count,
                  uint32_t **out_words, size_t *out_word_count,
                  char *errbuf, size_t errbuf_len);
 
+/* Device-owned immutable AS resolver context is embedded as an ordinary
+ * constant, consuming no application descriptor or push-constant slot.
+ * The context-free entry above is for compile tests (unresolved AS -> null). */
+int vkrt_spirv_lower_with_context(const uint32_t *user_words, size_t user_word_count, const uint32_t *lib_words,
+                                  size_t lib_word_count, uint64_t as_context, uint32_t **out_words, size_t *out_word_count,
+                                  char *errbuf, size_t errbuf_len);
+
 void
 vkrt_spirv_lower_free(uint32_t *words);
 

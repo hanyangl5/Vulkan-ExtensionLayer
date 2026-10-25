@@ -1,8 +1,26 @@
 /* SPDX-License-Identifier: MIT */
 #include "vkrt_layer.h"
+#include "vkrt_as_registry.h"
 
 /* Mock only the downstream dispatch; exercise the actual layer entry points. */
 struct vkrt_global vkrt_global = VKRT_GLOBAL_INITIALIZER;
+/* Registry allocation/publication has its own fault/concurrency fixture. */
+static unsigned registry_creates, registry_destroys, downstream_buffer_destroys;
+static VkBuffer registered_buffer;
+static VkDeviceSize registered_size;
+static VkResult registry_result;
+VkResult vkrt_as_registry_buffer_create(struct vkrt_device_data *dev, VkBuffer buffer, VkDeviceSize size) {
+    (void)dev;
+    ++registry_creates;
+    registered_buffer = buffer;
+    registered_size = size;
+    return registry_result;
+}
+void vkrt_as_registry_buffer_destroy(struct vkrt_device_data *dev, VkBuffer buffer) {
+    (void)dev;
+    (void)buffer;
+    ++registry_destroys;
+}
 static unsigned failures, updates, allocations, buffer_creates, barriers, barriers2, submits, submits2;
 #define REQUIRE(x) do { if (!(x)) { fprintf(stderr, "FAIL line %d: %s\n", __LINE__, #x); ++failures; } } while (0)
 #define HANDLE(type, value) ((type)(uintptr_t)(value))
@@ -29,6 +47,11 @@ static VkBufferUsageFlags expected_usage;
 static const VkExternalMemoryBufferCreateInfo *external_buffer;
 static const VkBaseInStructure *buffer_suffix;
 static VkResult buffer_result;
+
+static VKAPI_ATTR void VKAPI_CALL mock_buffer_destroy(VkDevice d, VkBuffer buffer, const VkAllocationCallbacks *allocator) {
+    REQUIRE(d == device && buffer == HANDLE(VkBuffer, 71) && allocator == buffer_allocator);
+    ++downstream_buffer_destroys;
+}
 
 static VKAPI_ATTR VkResult VKAPI_CALL mock_buffer(VkDevice d, const VkBufferCreateInfo *info,
                                                   const VkAllocationCallbacks *allocator, VkBuffer *buffer) {
@@ -77,11 +100,13 @@ static void buffer_usages(void) {
         VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
     REQUIRE(vkrt_CreateBuffer(device, &info, &allocator, &buffer) == VK_SUCCESS);
     REQUIRE(buffer == HANDLE(VkBuffer, 71) && !memcmp(&info, &saved, sizeof(info)));
+    REQUIRE(registry_creates == 1 && registered_buffer == buffer && registered_size == info.size);
 
     info.usage = VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT;
     expected_usage =
         VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT;
     REQUIRE(vkrt_CreateBuffer(device, &info, &allocator, &buffer) == VK_SUCCESS);
+    REQUIRE(registry_creates == 1);
     info.usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT;
     expected_usage =
         VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
@@ -106,16 +131,24 @@ static void buffer_usages(void) {
     REQUIRE(vkrt_CreateBuffer(device, &info, &allocator, &buffer) == VK_SUCCESS);
     REQUIRE(!memcmp(&info, &saved, sizeof(info)) && !memcmp(&flags2, &saved2, sizeof(flags2)));
     REQUIRE(prefix.pNext == &flags2 && flags2.pNext == &suffix_node);
+    REQUIRE(registry_creates == 2 && registered_size == info.size);
     buffer_result = VK_ERROR_OUT_OF_DEVICE_MEMORY;
     REQUIRE(vkrt_CreateBuffer(device, &info, &allocator, &buffer) == VK_ERROR_OUT_OF_DEVICE_MEMORY);
     REQUIRE(!memcmp(&flags2, &saved2, sizeof(flags2)));
+    REQUIRE(registry_creates == 2 && downstream_buffer_destroys == 0);
     buffer_result = VK_SUCCESS;
+    registry_result = VK_ERROR_OUT_OF_HOST_MEMORY;
+    REQUIRE(vkrt_CreateBuffer(device, &info, &allocator, &buffer) == VK_ERROR_OUT_OF_HOST_MEMORY);
+    REQUIRE(buffer == VK_NULL_HANDLE && registry_creates == 3 && downstream_buffer_destroys == 1);
+    registry_result = VK_SUCCESS;
+    vkrt_DestroyBuffer(device, HANDLE(VkBuffer, 71), &allocator);
+    REQUIRE(registry_destroys == 1 && downstream_buffer_destroys == 2);
     /* A future/unknown prefix cannot be safely cloned. No partial request is
      * sent downstream and caller-owned storage remains intact. */
     VkBaseInStructure unknown = {.sType = VK_STRUCTURE_TYPE_MAX_ENUM, .pNext = (const void *)&flags2};
     info.pNext = &unknown;
     REQUIRE(vkrt_CreateBuffer(device, &info, &allocator, &buffer) == VK_ERROR_EXTENSION_NOT_PRESENT);
-    REQUIRE(buffer_creates == 5 && unknown.pNext == (const void *)&flags2);
+    REQUIRE(buffer_creates == 6 && unknown.pNext == (const void *)&flags2);
 }
 
 static VKAPI_ATTR void VKAPI_CALL mock_barrier(VkCommandBuffer cmd, VkPipelineStageFlags src, VkPipelineStageFlags dst,
@@ -941,6 +974,7 @@ int main(void)
    dev.vtable.UpdateDescriptorSets = mock_update;
    dev.vtable.AllocateMemory = mock_allocate;
    dev.vtable.CreateBuffer = mock_buffer;
+   dev.vtable.DestroyBuffer = mock_buffer_destroy;
    vkrt_map_object(VKRT_HKEY(device), &dev);
    descriptors();
    memory_flags();

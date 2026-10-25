@@ -18,6 +18,7 @@ if(VEL_RT_VULKAN_INCLUDE_DIR)
     target_include_directories(vel_rt_mesa_adapter_tests PRIVATE "${VEL_RT_VULKAN_INCLUDE_DIR}")
     target_compile_definitions(vel_rt_mesa_adapter_tests PRIVATE VEL_RT_MESA_CHECK_VULKAN_ABI=1)
 endif()
+
 if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
     target_compile_options(vel_rt_bvh4_reference PRIVATE -Wall -Wextra -Wconversion -Werror)
     target_compile_options(vel_rt_bvh4_tests PRIVATE -Wall -Wextra -Wconversion -Werror)
@@ -87,4 +88,24 @@ if(VEL_RT_BVH4_GPU_TESTS)
         set_tests_properties(portable_bvh4_mesa_gpu_build PROPERTIES
             ENVIRONMENT "VK_INSTANCE_LAYERS=" LABELS "gpu;software_compute;no_native_rt" SKIP_RETURN_CODE 77 TIMEOUT 120)
     endif()
+endif()
+
+if(VEL_RT_BVH4_GPU_TESTS)
+    set(VEL_RT_AS_ADDRESS_SPV "${CMAKE_CURRENT_BINARY_DIR}/as_address_tests.spv")
+    add_custom_command(OUTPUT "${VEL_RT_AS_ADDRESS_SPV}"
+        COMMAND "${VEL_RT_GLSLC}" --target-env=vulkan1.2 -fshader-stage=compute
+            -I "${CMAKE_CURRENT_SOURCE_DIR}" "${CMAKE_CURRENT_SOURCE_DIR}/as_address_tests.comp" -o "${VEL_RT_AS_ADDRESS_SPV}"
+        COMMAND "${VEL_RT_SPIRV_VAL}" --target-env vulkan1.2 --scalar-block-layout "${VEL_RT_AS_ADDRESS_SPV}"
+        DEPENDS as_address_tests.comp as_address.glsl VERBATIM)
+    add_custom_target(vel_rt_as_address_spv DEPENDS "${VEL_RT_AS_ADDRESS_SPV}")
+    add_executable(vel_rt_as_address_gpu_tests as_address_gpu_tests.cpp)
+    target_link_libraries(vel_rt_as_address_gpu_tests PRIVATE Vulkan::Vulkan)
+    if(VEL_RT_BVH4_SANITIZERS AND CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
+        target_compile_options(vel_rt_as_address_gpu_tests PRIVATE -fsanitize=address,undefined -fno-omit-frame-pointer)
+        target_link_options(vel_rt_as_address_gpu_tests PRIVATE -fsanitize=address,undefined)
+    endif()
+    add_dependencies(vel_rt_as_address_gpu_tests vel_rt_as_address_spv)
+    add_test(NAME portable_as_address_gpu_resolver COMMAND vel_rt_as_address_gpu_tests "${VEL_RT_AS_ADDRESS_SPV}")
+    set_tests_properties(portable_as_address_gpu_resolver PROPERTIES
+        ENVIRONMENT "VK_INSTANCE_LAYERS=" LABELS "gpu;software_compute;no_native_rt" SKIP_RETURN_CODE 77 TIMEOUT 120)
 endif()

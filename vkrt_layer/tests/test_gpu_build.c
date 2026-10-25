@@ -19,6 +19,48 @@ static struct built_as *g_builds[2];
 static PFN_vkCmdBuildAccelerationStructuresKHR pBuild;
 static bool g_software;
 static bool g_split_builds;
+static bool g_aligned_values;
+
+/* Bind at the smallest legal nonzero offset. Ordinary translated storage
+ * buffers can require only 16-byte alignment even though AS values require
+ * 256-byte alignment. Exercise that case through real AS builds and queries. */
+static void create_as_output(VkDeviceSize size, struct gpu_buf *out) {
+    const VkBufferUsageFlags usage = VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR |
+                                     VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
+    if (!g_aligned_values) {
+        buf_create(size, usage, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, out);
+        return;
+    }
+    memset(out, 0, sizeof(*out));
+    out->size = size;
+    VkBufferCreateInfo ci = {
+        .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO, .size = size, .usage = usage, .sharingMode = VK_SHARING_MODE_EXCLUSIVE};
+    CHECK(vkCreateBuffer(g_dev, &ci, NULL, &out->buf));
+    VkMemoryRequirements req;
+    vkGetBufferMemoryRequirements(g_dev, out->buf, &req);
+    VkMemoryAllocateFlagsInfo flags = {.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_FLAGS_INFO,
+                                       .flags = VK_MEMORY_ALLOCATE_DEVICE_ADDRESS_BIT};
+    VkMemoryAllocateInfo allocation = {
+        .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
+        .pNext = &flags,
+        .allocationSize = req.size + req.alignment,
+        .memoryTypeIndex =
+            find_mem_type(req.memoryTypeBits, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT)};
+    CHECK(vkAllocateMemory(g_dev, &allocation, NULL, &out->mem));
+    CHECK(vkBindBufferMemory(g_dev, out->buf, out->mem, req.alignment));
+    void *mapping;
+    CHECK(vkMapMemory(g_dev, out->mem, 0, VK_WHOLE_SIZE, 0, &mapping));
+    out->mapped = (uint8_t *)mapping + req.alignment;
+    PFN_vkGetBufferDeviceAddress address = (void *)vkGetDeviceProcAddr(g_dev, "vkGetBufferDeviceAddressKHR");
+    VkBufferDeviceAddressInfo ai = {.sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO, .buffer = out->buf};
+    out->addr = address(g_dev, &ai);
+    printf("AS suballocation: alignment=%llu bindOffset=%llu BDA=0x%llx mod256=%llu\n", (unsigned long long)req.alignment,
+           (unsigned long long)req.alignment, (unsigned long long)out->addr, (unsigned long long)(out->addr & 255));
+    if (req.alignment < 128 && !(out->addr & 127)) {
+        fprintf(stderr, "FAIL suballocation did not exercise a non-128-aligned physical root\n");
+        ++g_fail;
+    }
+}
 
 static void record_builds(VkCommandBuffer cmd)
 {
@@ -88,17 +130,45 @@ static void prepare_as(struct built_as *as, VkAccelerationStructureTypeKHR type,
    /* Restore the long-lived geometry pointer before returning. */
    as->info.pGeometries = geometries; as->info.ppGeometries = NULL;
    as->size = sizes.accelerationStructureSize;
-   buf_create(as->size + 512, VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR |
-      VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
-      VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, &as->output);
+   create_as_output(as->size + 512, &as->output);
    memset(as->output.mapped, 0xa5, (size_t)as->output.size);
    VkAccelerationStructureCreateInfoKHR ci = {.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_CREATE_INFO_KHR,
-      .buffer = as->output.buf, .offset = 256, .size = as->size, .type = type};
+                                              .buffer = as->output.buf,
+                                              .offset = 256,
+                                              .size = as->size,
+                                              .type = g_aligned_values ? VK_ACCELERATION_STRUCTURE_TYPE_GENERIC_KHR : type};
    CHECK(pCreateAS(g_dev, &ci, NULL, &as->handle));
    VkAccelerationStructureDeviceAddressInfoKHR ai = {.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_DEVICE_ADDRESS_INFO_KHR,
       .accelerationStructure = as->handle};
    PFN_vkGetAccelerationStructureDeviceAddressKHR address = (void *)vkGetDeviceProcAddr(g_dev, "vkGetAccelerationStructureDeviceAddressKHR");
    as->address = address(g_dev, &ai);
+   if (as->address & 255) {
+       fprintf(stderr, "FAIL public AS value is not 256-aligned\n");
+       ++g_fail;
+   }
+   if (g_aligned_values) {
+       VkAccelerationStructureKHR alias, sibling;
+       CHECK(pCreateAS(g_dev, &ci, NULL, &alias));
+       ci.offset = 0;
+       CHECK(pCreateAS(g_dev, &ci, NULL, &sibling));
+       ai.accelerationStructure = alias;
+       VkDeviceAddress alias_value = address(g_dev, &ai);
+       ai.accelerationStructure = sibling;
+       VkDeviceAddress sibling_value = address(g_dev, &ai);
+       printf("GENERIC values: original=0x%llx alias=0x%llx offset0=0x%llx physical=0x%llx\n", (unsigned long long)as->address,
+              (unsigned long long)alias_value, (unsigned long long)sibling_value, (unsigned long long)(as->output.addr + 256));
+       if (alias_value != as->address || sibling_value + 256 != as->address) {
+           fprintf(stderr, "FAIL GENERIC AS alias/relative-offset address contract\n");
+           ++g_fail;
+       }
+       pDestroyAS(g_dev, sibling, NULL);
+       pDestroyAS(g_dev, alias, NULL);
+       ai.accelerationStructure = as->handle;
+       if (address(g_dev, &ai) != as->address) {
+           fprintf(stderr, "FAIL alias destruction changed AS value\n");
+           ++g_fail;
+       }
+   }
    buf_create(sizes.buildScratchSize + 512, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
       VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, &as->scratch);
    memset(as->scratch.mapped, 0xa5, (size_t)as->scratch.size);
@@ -386,7 +456,7 @@ static void triangles_case(uint32_t n, bool inactive, bool indexed, bool two_geo
    uint32_t active = n - (inactive ? (n + 6) / 7 : 0);
    validate_tree(&blas, active);
    validate_tree(&tlas, active ? 1 : 0);
-   if (n == 1) rejected_builds(&blas);
+   if (n == 1 && !g_aligned_values) rejected_builds(&blas);
    g_before_dispatch = NULL;
    destroy_as(&tlas); destroy_as(&blas);
    buf_destroy(&instances); buf_destroy(&transforms); buf_destroy(&indices); buf_destroy(&vertices);
@@ -455,24 +525,29 @@ static void aabb_instances_case(void)
    buf_destroy(&pointers); buf_destroy(&instances); buf_destroy(&boxes);
 }
 
-int main(void)
-{
-   const char *layers = getenv("VK_INSTANCE_LAYERS");
-   g_software = layers && strstr(layers, "VK_LAYER_VKRT_SOFTWARE_RAY_QUERY");
-   init_vulkan();
-   pBuild = (void *)vkGetDeviceProcAddr(g_dev, "vkCmdBuildAccelerationStructuresKHR");
-   if (!pBuild) return 1;
-   triangles_case(0, false, false, false, false);
-   triangles_case(1, false, false, false, false);
-   triangles_case(2, false, true, true, true);
-   triangles_case(257, true, true, true, false);
-   g_split_builds = true;
-   triangles_case(1025, false, false, false, true);
-   g_submit_sync2 = true;
-   aabb_instances_case();
-   vkDestroyCommandPool(g_dev, g_pool, NULL);
-   vkDestroyDevice(g_dev, NULL);
-   vkDestroyInstance(g_instance, NULL);
-   printf("GPU BUILD %s (%d failures, %s)\n", g_fail ? "FAIL" : "PASS", g_fail, g_software ? "software" : "native");
-   return g_fail ? 1 : 0;
+int main(int argc, char **argv) {
+    const char *layers = getenv("VK_INSTANCE_LAYERS");
+    g_software = layers && strstr(layers, "VK_LAYER_VKRT_SOFTWARE_RAY_QUERY");
+    g_aligned_values = argc == 2 && !strcmp(argv[1], "--aligned-values");
+    init_vulkan();
+    pBuild = (void *)vkGetDeviceProcAddr(g_dev, "vkCmdBuildAccelerationStructuresKHR");
+    if (!pBuild) return 1;
+    if (g_aligned_values) {
+        triangles_case(1, false, false, false, false);
+        goto finish;
+    }
+    triangles_case(0, false, false, false, false);
+    triangles_case(1, false, false, false, false);
+    triangles_case(2, false, true, true, true);
+    triangles_case(257, true, true, true, false);
+    g_split_builds = true;
+    triangles_case(1025, false, false, false, true);
+    g_submit_sync2 = true;
+    aabb_instances_case();
+finish:
+    vkDestroyCommandPool(g_dev, g_pool, NULL);
+    vkDestroyDevice(g_dev, NULL);
+    vkDestroyInstance(g_instance, NULL);
+    printf("GPU BUILD %s (%d failures, %s)\n", g_fail ? "FAIL" : "PASS", g_fail, g_software ? "software" : "native");
+    return g_fail ? 1 : 0;
 }

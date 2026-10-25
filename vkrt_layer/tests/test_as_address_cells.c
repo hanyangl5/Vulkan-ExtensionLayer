@@ -1,5 +1,6 @@
 /* SPDX-License-Identifier: MIT */
 #include "vkrt_layer.h"
+#include "vkrt_as_registry.h"
 
 /* Exercise the real VirtualAS and descriptor translation with an ICD boundary
  * that supports only ordinary buffers/memory and exposes no native AS path. */
@@ -15,15 +16,17 @@ struct vkrt_global vkrt_global = VKRT_GLOBAL_INITIALIZER;
 static unsigned failures;
 static const VkDevice device = HANDLE(VkDevice, 1);
 static const VkBuffer backing = HANDLE(VkBuffer, 2);
-static const VkDeviceAddress backing_address = UINT64_C(0x123456780000);
+static const VkDeviceAddress backing_address = UINT64_C(0x123456780010);
 static const VkAllocationCallbacks *expected_allocator;
 static unsigned host_allocations, host_frees, buffer_creates, buffer_destroys, memory_allocations, memory_frees;
 static unsigned maps, unmaps, flushes, address_queries, updates, native_calls;
-static bool coherent, bound;
+static bool coherent, bound, private_requirements;
 static enum { FAIL_NONE, FAIL_HOST, FAIL_BUFFER, FAIL_MEMORY, FAIL_BIND, FAIL_MAP, FAIL_FLUSH, FAIL_MEMORY_TYPE } fail_stage;
 struct cell {
     bool buffer_live, memory_live, mapped;
-    uint8_t bytes[256];
+    bool registry;
+    VkDeviceSize size;
+    uint8_t bytes[4096];
 };
 static struct cell cells[32];
 static unsigned cell_count;
@@ -75,10 +78,15 @@ static VKAPI_ATTR void VKAPI_CALL host_free(void *user, void *allocation) {
 }
 static VKAPI_ATTR VkResult VKAPI_CALL create_buffer(VkDevice d, const VkBufferCreateInfo *info,
                                                     const VkAllocationCallbacks *allocator, VkBuffer *buffer) {
-    ++buffer_creates;
-    check_allocator(allocator);
+    bool registry = (info->usage & VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT) != 0;
+    if (!registry) {
+        ++buffer_creates;
+        check_allocator(allocator);
+    } else
+        CHECK(allocator == NULL);
     CHECK(d == device && info->sType == VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO && !info->pNext);
-    CHECK(info->size == 8 && info->usage == VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
+    CHECK(registry ? (info->size == 71 || info->size == 2055) : info->size == 8);
+    CHECK(info->usage == (VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | (registry ? VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT : 0)));
     if (expected_family_count > 1) {
         CHECK(info->sharingMode == VK_SHARING_MODE_CONCURRENT && info->queueFamilyIndexCount == expected_family_count);
         CHECK(info->pQueueFamilyIndices == expected_family_pointer);
@@ -91,12 +99,17 @@ static VKAPI_ATTR VkResult VKAPI_CALL create_buffer(VkDevice d, const VkBufferCr
     if (fail_stage == FAIL_BUFFER) return VK_ERROR_OUT_OF_DEVICE_MEMORY;
     CHECK(cell_count < VKRT_ARRAY_SIZE(cells));
     cells[cell_count].buffer_live = true;
+    cells[cell_count].registry = registry;
+    cells[cell_count].size = info->size;
     *buffer = HANDLE(VkBuffer, 100 + cell_count++);
     return VK_SUCCESS;
 }
 static VKAPI_ATTR void VKAPI_CALL requirements(VkDevice d, VkBuffer buffer, VkMemoryRequirements *info) {
     CHECK(d == device && buffer_cell(buffer)->buffer_live);
-    *info = (VkMemoryRequirements){.size = 256, .alignment = 64, .memoryTypeBits = fail_stage == FAIL_MEMORY_TYPE ? 1 : 6};
+    private_requirements = buffer_cell(buffer)->registry;
+    *info = (VkMemoryRequirements){.size = (buffer_cell(buffer)->size + 255) & ~UINT64_C(255),
+                                   .alignment = 64,
+                                   .memoryTypeBits = fail_stage == FAIL_MEMORY_TYPE ? 1 : 6};
 }
 static VKAPI_ATTR void VKAPI_CALL memory_properties(VkPhysicalDevice physical, VkPhysicalDeviceMemoryProperties *info) {
     CHECK(physical == HANDLE(VkPhysicalDevice, 3));
@@ -104,17 +117,27 @@ static VKAPI_ATTR void VKAPI_CALL memory_properties(VkPhysicalDevice physical, V
     info->memoryTypeCount = 3;
     info->memoryTypes[0].propertyFlags = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
     info->memoryTypes[1].propertyFlags = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT;
-    info->memoryTypes[2].propertyFlags = coherent ? VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT : 0;
+    info->memoryTypes[2].propertyFlags =
+        (coherent || private_requirements) ? VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT : 0;
 }
 static VKAPI_ATTR VkResult VKAPI_CALL allocate_memory(VkDevice d, const VkMemoryAllocateInfo *info,
                                                       const VkAllocationCallbacks *allocator, VkDeviceMemory *memory) {
-    ++memory_allocations;
-    check_allocator(allocator);
-    CHECK(d == device && info->sType == VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO && !info->pNext);
-    CHECK(info->allocationSize == 256 && info->memoryTypeIndex == (coherent ? 2u : 1u));
+    struct cell *cell = &cells[cell_count - 1];
+    if (!cell->registry) {
+        ++memory_allocations;
+        check_allocator(allocator);
+        CHECK(!info->pNext);
+    } else {
+        CHECK(allocator == NULL);
+        const VkMemoryAllocateFlagsInfo *flags = info->pNext;
+        CHECK(flags && flags->sType == VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_FLAGS_INFO &&
+              flags->flags == VK_MEMORY_ALLOCATE_DEVICE_ADDRESS_BIT);
+    }
+    CHECK(d == device && info->sType == VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO);
+    CHECK(info->allocationSize == ((cell->size + 255) & ~UINT64_C(255)) &&
+          info->memoryTypeIndex == ((coherent || cell->registry) ? 2u : 1u));
     *memory = HANDLE(VkDeviceMemory, 0xbad);
     if (fail_stage == FAIL_MEMORY) return VK_ERROR_OUT_OF_DEVICE_MEMORY;
-    struct cell *cell = &cells[cell_count - 1];
     cell->memory_live = true;
     memset(cell->bytes, 0xcd, sizeof(cell->bytes));
     *memory = HANDLE(VkDeviceMemory, 200 + cell_count - 1);
@@ -127,9 +150,9 @@ static VKAPI_ATTR VkResult VKAPI_CALL bind_memory(VkDevice d, VkBuffer buffer, V
 }
 static VKAPI_ATTR VkResult VKAPI_CALL map_memory(VkDevice d, VkDeviceMemory memory, VkDeviceSize offset, VkDeviceSize size,
                                                  VkMemoryMapFlags flags, void **pointer) {
-    ++maps;
     CHECK(d == device && offset == 0 && size == VK_WHOLE_SIZE && flags == 0);
     struct cell *cell = memory_cell(memory);
+    if (!cell->registry) ++maps;
     CHECK(cell->memory_live && !cell->mapped);
     *pointer = (void *)(uintptr_t)0xbad;
     if (fail_stage == FAIL_MAP) return VK_ERROR_MEMORY_MAP_FAILED;
@@ -138,8 +161,8 @@ static VKAPI_ATTR VkResult VKAPI_CALL map_memory(VkDevice d, VkDeviceMemory memo
     return VK_SUCCESS;
 }
 static VKAPI_ATTR void VKAPI_CALL unmap_memory(VkDevice d, VkDeviceMemory memory) {
-    ++unmaps;
     struct cell *cell = memory_cell(memory);
+    if (!cell->registry) ++unmaps;
     CHECK(d == device && cell->memory_live && cell->mapped);
     cell->mapped = false;
 }
@@ -151,20 +174,30 @@ static VKAPI_ATTR VkResult VKAPI_CALL flush_memory(VkDevice d, uint32_t count, c
     return fail_stage == FAIL_FLUSH ? VK_ERROR_DEVICE_LOST : VK_SUCCESS;
 }
 static VKAPI_ATTR void VKAPI_CALL destroy_buffer(VkDevice d, VkBuffer buffer, const VkAllocationCallbacks *allocator) {
-    ++buffer_destroys;
-    check_allocator(allocator);
     struct cell *cell = buffer_cell(buffer);
+    if (!cell->registry) {
+        ++buffer_destroys;
+        check_allocator(allocator);
+    } else
+        CHECK(allocator == NULL);
     CHECK(d == device && cell->buffer_live && !cell->mapped);
     cell->buffer_live = false;
 }
 static VKAPI_ATTR void VKAPI_CALL free_memory(VkDevice d, VkDeviceMemory memory, const VkAllocationCallbacks *allocator) {
-    ++memory_frees;
-    check_allocator(allocator);
     struct cell *cell = memory_cell(memory);
+    if (!cell->registry) {
+        ++memory_frees;
+        check_allocator(allocator);
+    } else
+        CHECK(allocator == NULL);
     CHECK(d == device && cell->memory_live && !cell->buffer_live && !cell->mapped);
     cell->memory_live = false;
 }
 static VKAPI_ATTR VkDeviceAddress VKAPI_CALL get_address(VkDevice d, const VkBufferDeviceAddressInfo *info) {
+    if (info->buffer != backing) {
+        CHECK(buffer_cell(info->buffer)->registry);
+        return UINT64_C(0x800000004) + ((uintptr_t)info->buffer - 100) * UINT64_C(0x10000);
+    }
     ++address_queries;
     CHECK(d == device && bound && info->buffer == backing && info->sType == VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO);
     return backing_address;
@@ -234,10 +267,17 @@ static void write_as(VkAccelerationStructureKHR handle) {
     vkrt_UpdateDescriptorSets(device, 1, &write, 0, NULL);
 }
 static void check_no_live_cells(void) {
-    for (unsigned i = 0; i < cell_count; ++i) CHECK(!cells[i].buffer_live && !cells[i].memory_live && !cells[i].mapped);
+    unsigned registry_live = 0;
+    for (unsigned i = 0; i < cell_count; ++i)
+        if (cells[i].registry && cells[i].buffer_live)
+            ++registry_live;
+        else
+            CHECK(!cells[i].buffer_live && !cells[i].memory_live && !cells[i].mapped);
+    CHECK(registry_live == (device_data.as_registry ? 2u : 0u));
     CHECK(buffer_destroys <= buffer_creates && memory_frees <= memory_allocations && native_calls == 0);
 }
 static void reset(void) {
+    vkrt_as_registry_finish(&device_data);
     check_no_live_cells();
     CHECK(!device_data.queue_families && device_data.queue_family_count == 0);
     memset(cells, 0, sizeof(cells));
@@ -250,11 +290,14 @@ static void reset(void) {
     expected_family_pointer = NULL;
     expected_family_count = family_allocations = family_frees = 0;
     fail_family_allocation = false;
+    CHECK(vkrt_as_registry_init(&device_data, NULL) == VK_SUCCESS);
+    CHECK(vkrt_as_registry_buffer_create(&device_data, backing, 65536) == VK_SUCCESS);
 }
 
 struct query_thread {
     VkAccelerationStructureKHR handle;
     bool valid;
+    VkDeviceAddress expected;
 };
 #ifdef _WIN32
 static DWORD WINAPI query_address(void *opaque)
@@ -265,7 +308,7 @@ static void *query_address(void *opaque)
     struct query_thread *query = opaque;
     query->valid = true;
     for (unsigned i = 0; i < 2000; ++i)
-        if (vkrt_as_device_address(&device_data, query->handle) != backing_address + 0x600) query->valid = false;
+        if (vkrt_as_device_address(&device_data, query->handle) != query->expected) query->valid = false;
     return 0;
 }
 static void lifecycle(bool use_coherent) {
@@ -274,19 +317,20 @@ static void lifecycle(bool use_coherent) {
     VkAccelerationStructureKHR handle;
     CHECK(create_as(0x600, &handle) == VK_SUCCESS);
     struct vkrt_virtual_as *as = VKRT_FIND(struct vkrt_virtual_as, handle);
-    CHECK(as != NULL && cell_address(as) == 0 && address_queries == 0);
+    CHECK(as != NULL && cell_address(as) == as->public_address && (as->public_address & 255) == 0 && address_queries == 0);
     CHECK(as->address_cell_coherent == coherent && as->address_cell_buffer != backing);
     CHECK(host_allocations == 1 && buffer_creates == 1 && memory_allocations == 1 && maps == 1);
     CHECK(flushes == (coherent ? 0u : 1u));
     /* Legal descriptor update before binding may neither query BDA nor publish. */
     write_as(handle);
-    CHECK(updates == 1 && address_queries == 0 && cell_address(as) == 0);
+    CHECK(updates == 1 && address_queries == 0 && cell_address(as) == as->public_address);
     bound = true;
     struct query_thread queries[8];
 #ifdef _WIN32
     HANDLE threads[8];
     for (unsigned i = 0; i < 8; ++i) {
         queries[i].handle = handle;
+        queries[i].expected = as->public_address;
         threads[i] = CreateThread(NULL, 0, query_address, &queries[i], 0, NULL);
         CHECK(threads[i] != NULL);
     }
@@ -296,16 +340,18 @@ static void lifecycle(bool use_coherent) {
     pthread_t threads[8];
     for (unsigned i = 0; i < 8; ++i) {
         queries[i].handle = handle;
+        queries[i].expected = as->public_address;
         CHECK(pthread_create(&threads[i], NULL, query_address, &queries[i]) == 0);
     }
     for (unsigned i = 0; i < 8; ++i) pthread_join(threads[i], NULL);
 #endif
     for (unsigned i = 0; i < 8; ++i) CHECK(queries[i].valid);
-    CHECK(address_queries == 1 && cell_address(as) == backing_address + 0x600);
-    CHECK(flushes == (coherent ? 0u : 2u));
-    for (unsigned i = 8; i < sizeof(cells[0].bytes); ++i) CHECK(cells[0].bytes[i] == 0xcd);
+    CHECK(address_queries == 1 && cell_address(as) == as->public_address && as->header_address == backing_address + 0x600);
+    CHECK(flushes == (coherent ? 0u : 1u));
+    const struct cell *descriptor_cell = buffer_cell(as->address_cell_buffer);
+    for (unsigned i = 8; i < sizeof(descriptor_cell->bytes); ++i) CHECK(descriptor_cell->bytes[i] == 0xcd);
     write_as(handle);
-    CHECK(updates == 2 && address_queries == 1 && flushes == (coherent ? 0u : 2u));
+    CHECK(updates == 2 && address_queries == 1 && flushes == (coherent ? 0u : 1u));
     /* A foreign device must neither resolve nor destroy this object's cell. */
     struct vkrt_device_data foreign = {.device = HANDLE(VkDevice, 99)};
     CHECK(vkrt_as_device_address(&foreign, handle) == 0);
@@ -349,19 +395,20 @@ static void independent_objects(void) {
     struct vkrt_virtual_as *second = VKRT_FIND(struct vkrt_virtual_as, b);
     CHECK(first->address_cell_buffer != second->address_cell_buffer);
     bound = true;
-    CHECK(vkrt_as_device_address(&device_data, b) == backing_address + 0x1000);
-    CHECK(cell_address(first) == 0 && cell_address(second) == backing_address + 0x1000);
-    CHECK(vkrt_as_device_address(&device_data, a) == backing_address + 0x600);
+    CHECK(vkrt_as_device_address(&device_data, b) == second->public_address);
+    CHECK(cell_address(first) == first->public_address && cell_address(second) == second->public_address);
+    CHECK(vkrt_as_device_address(&device_data, a) == first->public_address);
+    CHECK(second->public_address - first->public_address == 0xa00);
     write_as(a);
     write_as(b);
     vkrt_destroy_virtual_as(&device_data, a);
-    CHECK(vkrt_as_device_address(&device_data, b) == backing_address + 0x1000);
+    CHECK(vkrt_as_device_address(&device_data, b) == second->public_address);
     vkrt_destroy_virtual_as(&device_data, b);
     CHECK(address_queries == 2 && buffer_destroys == 2 && memory_frees == 2 && host_allocations == 0);
     vkrt_destroy_virtual_as(&device_data, VK_NULL_HANDLE);
     check_no_live_cells();
 }
-static void failed_publication_retry(void) {
+static void publication_never_flushes(void) {
     reset();
     coherent = false;
     VkAccelerationStructureKHR handle;
@@ -369,15 +416,49 @@ static void failed_publication_retry(void) {
     struct vkrt_virtual_as *as = VKRT_FIND(struct vkrt_virtual_as, handle);
     bound = true;
     fail_stage = FAIL_FLUSH;
-    CHECK(vkrt_as_device_address(&device_data, handle) == 0 && as->header_address == 0);
-    CHECK(address_queries == 1 && flushes == 2);
+    CHECK(vkrt_as_device_address(&device_data, handle) == as->public_address && as->header_address == backing_address + 0x600);
+    CHECK(address_queries == 1 && flushes == 1);
     fail_stage = FAIL_NONE;
-    CHECK(vkrt_as_device_address(&device_data, handle) == backing_address + 0x600);
-    CHECK(as->header_address == backing_address + 0x600 && cell_address(as) == as->header_address);
-    CHECK(address_queries == 2 && flushes == 3);
-    CHECK(vkrt_as_device_address(&device_data, handle) == as->header_address);
-    CHECK(address_queries == 2 && flushes == 3);
+    CHECK(vkrt_as_device_address(&device_data, handle) == as->public_address);
+    CHECK(as->header_address == backing_address + 0x600 && cell_address(as) == as->public_address);
+    CHECK(vkrt_as_backing_address(&device_data, handle) == as->header_address);
+    CHECK(address_queries == 1 && flushes == 1);
     vkrt_destroy_virtual_as(&device_data, handle);
+    check_no_live_cells();
+}
+static void generic_values_and_capture_rejection(void) {
+    reset();
+    VkAccelerationStructureCreateInfoKHR info = {.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_CREATE_INFO_KHR,
+                                                 .buffer = backing,
+                                                 .offset = 256,
+                                                 .size = 4096,
+                                                 .type = VK_ACCELERATION_STRUCTURE_TYPE_GENERIC_KHR};
+    VkAccelerationStructureKHR a, b, alias;
+    CHECK(vkrt_create_virtual_as(&device_data, &info, &allocator, &a) == VK_SUCCESS);
+    CHECK(vkrt_create_virtual_as(&device_data, &info, &allocator, &alias) == VK_SUCCESS);
+    info.offset = 768;
+    CHECK(vkrt_create_virtual_as(&device_data, &info, &allocator, &b) == VK_SUCCESS);
+    bound = true;
+    VkDeviceAddress av = vkrt_as_device_address(&device_data, a), bv = vkrt_as_device_address(&device_data, b);
+    CHECK(av && !(av & 255) && !(bv & 255) && bv - av == 512);
+    CHECK(vkrt_as_device_address(&device_data, alias) == av);
+    CHECK(vkrt_as_backing_address(&device_data, a) == backing_address + 256);
+    CHECK((vkrt_as_backing_address(&device_data, a) & 127) == 16);
+    vkrt_destroy_virtual_as(&device_data, a);
+    CHECK(vkrt_as_device_address(&device_data, alias) == av);
+    vkrt_destroy_virtual_as(&device_data, alias);
+    vkrt_destroy_virtual_as(&device_data, b);
+    check_no_live_cells();
+
+    /* Capture/replay is not advertised by this backend. In particular, never
+     * silently accept an external address as one of our public AS values. */
+    unsigned before = buffer_creates;
+    info.deviceAddress = 0x1000;
+    CHECK(vkrt_create_virtual_as(&device_data, &info, &allocator, &a) == VK_ERROR_FEATURE_NOT_PRESENT && !a);
+    info.deviceAddress = 0;
+    info.createFlags = VK_ACCELERATION_STRUCTURE_CREATE_DEVICE_ADDRESS_CAPTURE_REPLAY_BIT_KHR;
+    CHECK(vkrt_create_virtual_as(&device_data, &info, &allocator, &a) == VK_ERROR_FEATURE_NOT_PRESENT && !a);
+    CHECK(buffer_creates == before && host_frees == host_allocations);
     check_no_live_cells();
 }
 static void queue_family_sharing(void) {
@@ -449,8 +530,11 @@ int main(void) {
     lifecycle(false);
     failure_paths();
     independent_objects();
-    failed_publication_retry();
+    publication_never_flushes();
+    generic_values_and_capture_rejection();
     queue_family_sharing();
+    vkrt_as_registry_finish(&device_data);
+    check_no_live_cells();
     vkrt_unmap_object(VKRT_HKEY(device));
     vkrt_map_destroy(&vkrt_global.objects);
     printf("AS address-cell checks: %u failures\n", failures);

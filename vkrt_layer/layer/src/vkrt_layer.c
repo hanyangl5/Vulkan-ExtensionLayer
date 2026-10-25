@@ -17,6 +17,7 @@
  */
 
 #include "vkrt_layer.h"
+#include "vkrt_as_registry.h"
 
 struct vkrt_global vkrt_global = VKRT_GLOBAL_INITIALIZER;
 
@@ -213,10 +214,18 @@ vkrt_CreateDevice(VkPhysicalDevice physicalDevice,
        vkrt_free_device_data(data);
        return result;
    }
+   result = vkrt_as_registry_init(data, pAllocator);
+   if (result != VK_SUCCESS) {
+       data->vtable.DestroyDevice(*pDevice, pAllocator);
+       *pDevice = VK_NULL_HANDLE;
+       vkrt_free_device_data(data);
+       return result;
+   }
    result = vkrt_build_init(data);
    if (result != VK_SUCCESS) {
       VKRT_LOG_ERR("GPU BVH pipeline initialization failed: %d", result);
       vkrt_build_finish(data);
+      vkrt_as_registry_finish(data);
       data->vtable.DestroyDevice(*pDevice, pAllocator);
       *pDevice = VK_NULL_HANDLE;
       vkrt_free_device_data(data);
@@ -251,6 +260,7 @@ vkrt_DestroyDevice(VkDevice device, const VkAllocationCallbacks *pAllocator)
 
    vkrt_commands_finish(data);
    vkrt_build_finish(data);
+   vkrt_as_registry_finish(data);
    data->vtable.DestroyDevice(device, pAllocator);
    /* Remove device and queue aliases before releasing their shared owner. */
    vkrt_mutex_lock(&vkrt_global.objects_lock);
@@ -617,42 +627,30 @@ vkrt_find_device_fn(const char *name)
       const char *name;
       void       *ptr;
    } map[] = {
-      {"vkGetDeviceProcAddr", (void *)vkrt_GetDeviceProcAddr},
-      {"vkDestroyDevice", (void *)vkrt_DestroyDevice},
-      {"vkCreateShaderModule", (void *)vkrt_CreateShaderModule},
-      {"vkDestroyShaderModule", (void *)vkrt_DestroyShaderModule},
-      {"vkCreateBuffer", (void *)vkrt_CreateBuffer},
-      {"vkCreateDescriptorSetLayout", (void *)vkrt_CreateDescriptorSetLayout},
-      {"vkCreateDescriptorPool", (void *)vkrt_CreateDescriptorPool},
-      {"vkUpdateDescriptorSets", (void *)vkrt_UpdateDescriptorSets},
-      {"vkAllocateMemory", (void *)vkrt_AllocateMemory},
-      {"vkCreateAccelerationStructureKHR",
-       (void *)vkrt_CreateAccelerationStructureKHR},
-      {"vkDestroyAccelerationStructureKHR",
-       (void *)vkrt_DestroyAccelerationStructureKHR},
-      {"vkGetAccelerationStructureBuildSizesKHR",
-       (void *)vkrt_GetAccelerationStructureBuildSizesKHR},
-      {"vkGetAccelerationStructureDeviceAddressKHR",
-       (void *)vkrt_GetAccelerationStructureDeviceAddressKHR},
-      {"vkCmdBuildAccelerationStructuresKHR",
-       (void *)vkrt_CmdBuildAccelerationStructuresKHR},
-      {"vkCmdBuildAccelerationStructuresIndirectKHR",
-       (void *)vkrt_CmdBuildAccelerationStructuresIndirectKHR},
-      {"vkCmdCopyAccelerationStructureKHR",
-       (void *)vkrt_CmdCopyAccelerationStructureKHR},
-      {"vkCmdCopyAccelerationStructureToMemoryKHR",
-       (void *)vkrt_CmdCopyAccelerationStructureToMemoryKHR},
-      {"vkCmdCopyMemoryToAccelerationStructureKHR",
-       (void *)vkrt_CmdCopyMemoryToAccelerationStructureKHR},
-      {"vkCmdWriteAccelerationStructuresPropertiesKHR",
-       (void *)vkrt_CmdWriteAccelerationStructuresPropertiesKHR},
-      {"vkCmdSerializeAccelerationStructuresKHR",
-       (void *)vkrt_CmdSerializeAccelerationStructuresKHR},
-      {"vkCmdDeserializeAccelerationStructuresKHR",
-       (void *)vkrt_CmdDeserializeAccelerationStructuresKHR},
-      {"vkCreateRayTracingPipelinesKHR",
-       (void *)vkrt_CreateRayTracingPipelinesKHR},
-      {"vkCmdTraceRaysKHR", (void *)vkrt_CmdTraceRaysKHR},
+       {"vkGetDeviceProcAddr", (void *)vkrt_GetDeviceProcAddr},
+       {"vkDestroyDevice", (void *)vkrt_DestroyDevice},
+       {"vkCreateShaderModule", (void *)vkrt_CreateShaderModule},
+       {"vkDestroyShaderModule", (void *)vkrt_DestroyShaderModule},
+       {"vkCreateBuffer", (void *)vkrt_CreateBuffer},
+       {"vkDestroyBuffer", (void *)vkrt_DestroyBuffer},
+       {"vkCreateDescriptorSetLayout", (void *)vkrt_CreateDescriptorSetLayout},
+       {"vkCreateDescriptorPool", (void *)vkrt_CreateDescriptorPool},
+       {"vkUpdateDescriptorSets", (void *)vkrt_UpdateDescriptorSets},
+       {"vkAllocateMemory", (void *)vkrt_AllocateMemory},
+       {"vkCreateAccelerationStructureKHR", (void *)vkrt_CreateAccelerationStructureKHR},
+       {"vkDestroyAccelerationStructureKHR", (void *)vkrt_DestroyAccelerationStructureKHR},
+       {"vkGetAccelerationStructureBuildSizesKHR", (void *)vkrt_GetAccelerationStructureBuildSizesKHR},
+       {"vkGetAccelerationStructureDeviceAddressKHR", (void *)vkrt_GetAccelerationStructureDeviceAddressKHR},
+       {"vkCmdBuildAccelerationStructuresKHR", (void *)vkrt_CmdBuildAccelerationStructuresKHR},
+       {"vkCmdBuildAccelerationStructuresIndirectKHR", (void *)vkrt_CmdBuildAccelerationStructuresIndirectKHR},
+       {"vkCmdCopyAccelerationStructureKHR", (void *)vkrt_CmdCopyAccelerationStructureKHR},
+       {"vkCmdCopyAccelerationStructureToMemoryKHR", (void *)vkrt_CmdCopyAccelerationStructureToMemoryKHR},
+       {"vkCmdCopyMemoryToAccelerationStructureKHR", (void *)vkrt_CmdCopyMemoryToAccelerationStructureKHR},
+       {"vkCmdWriteAccelerationStructuresPropertiesKHR", (void *)vkrt_CmdWriteAccelerationStructuresPropertiesKHR},
+       {"vkCmdSerializeAccelerationStructuresKHR", (void *)vkrt_CmdSerializeAccelerationStructuresKHR},
+       {"vkCmdDeserializeAccelerationStructuresKHR", (void *)vkrt_CmdDeserializeAccelerationStructuresKHR},
+       {"vkCreateRayTracingPipelinesKHR", (void *)vkrt_CreateRayTracingPipelinesKHR},
+       {"vkCmdTraceRaysKHR", (void *)vkrt_CmdTraceRaysKHR},
    };
 
    for (size_t i = 0; i < VKRT_ARRAY_SIZE(map); i++) {

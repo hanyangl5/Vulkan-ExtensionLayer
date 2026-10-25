@@ -173,7 +173,9 @@ build_instance(inout vk_aabb bounds, VOID_REF src_ptr, VOID_REF dst_ptr, uint32_
 #ifdef VKRT_RUNTIME_BVH4
    /* The construction IR is transient scratch. Application instance values
     * always name the shared runtime BLAS, never retained Mesa IR. */
-   uint64_t blas = instance.accelerationStructureReference;
+   uint64_t blas = vel_rt_resolve_as(vkrt_as_registry_context, instance.accelerationStructureReference);
+   if (blas == uint64_t(0)) return false;
+   DEREF(node).base_ptr = blas;
    if (DEREF(REF(uint32_t)(blas)) != 0x344c4556u || DEREF(REF(uint32_t)(blas + 4)) != 1u ||
        (DEREF(REF(uint32_t)(blas + 12)) & 0x80000000u) != 0u || DEREF(REF(uint32_t)(blas + 16)) == 0xffffffffu)
        return false;

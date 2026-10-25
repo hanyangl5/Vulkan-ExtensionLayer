@@ -13,6 +13,8 @@
 #extension GL_EXT_shader_explicit_arithmetic_types : require
 
 #include "bvh4_abi.glsl"
+#include "as_address.glsl"
+layout(constant_id = 6) const uint64_t vkrt_as_registry_context = 0ul;
 
 /* ------------------------------------------------------------------ */
 /* Ray flag bits (gl_RayFlags*EXT values from the SPIR-V ray-query spec) */
@@ -629,7 +631,7 @@ bool sw_ray_query_proceed(inout sw_ray_query_state q) {
  * q.ray.direction, q.tmin and q.tclosest. See sw_ray_query_state for
  * why the signature is a single `inout q`. */
 void
-sw_ray_query_initialize(inout sw_ray_query_state q)
+sw_ray_query_initialize_data(inout sw_ray_query_state q)
 {
    q.ray.inv_direction = 1.0 / q.ray.direction;
 
@@ -640,6 +642,13 @@ sw_ray_query_initialize(inout sw_ray_query_state q)
    q.blas_next = SW_HANDLE_INVALID;
    q.current_instance = SW_HANDLE_INVALID;
    q.blas_active = false;
+}
+
+/* Public AS operands are opaque aligned values, not physical buffer BDAs.
+ * Only this boundary resolves them; the traversal core consumes BVH4 data. */
+void sw_ray_query_initialize(inout sw_ray_query_state q) {
+   q.as_address = vel_rt_resolve_as(vkrt_as_registry_context, q.as_address);
+   sw_ray_query_initialize_data(q);
 }
 
 void

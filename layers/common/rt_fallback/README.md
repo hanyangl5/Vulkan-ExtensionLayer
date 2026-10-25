@@ -18,9 +18,11 @@ offset and index-times-stride calculation, not 32-bit byte offsets.
 
 The C-compatible header describes packed scalar data. C and C++ tests check
 sizes and key offsets. Shader consumers must use explicit word loads or scalar
-layout; a default `std430` array of `vec3` would not match this ABI. AS base and
-internal-node storage must be aligned to 128 bytes. The planner aligns regions
-and rounds allocation size to 256 bytes.
+layout; a default `std430` array of `vec3` would not match this ABI. The planner
+aligns node regions relative to the base to 128 bytes and rounds allocation size
+to 256 bytes. Production word-load consumers require physical bases aligned to
+4 bytes; public Vulkan AS values are separately 256-aligned and resolved through
+`as_address.glsl`. Public values must never be dereferenced as buffer BDAs.
 
 The generic reference input is a compact binary tree with dense leaf indices for
 each kind. It is independent of Mesa host/runtime types; a Mesa IR adapter is

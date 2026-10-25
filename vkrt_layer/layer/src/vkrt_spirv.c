@@ -18,6 +18,7 @@
 
 #include "vkrt_layer.h"
 #include "vkrt_spirv_lower.h"
+#include "vkrt_as_registry.h"
 
 #include "sw_ray_query.spv.h"
 #define vkrt_traversal_words vkrt_spv_traversal
@@ -188,7 +189,6 @@ vkrt_rewrite_shader_module(struct vkrt_device_data *dev,
    *uses_ray_query             = false;
    *uses_ray_tracing_pipeline  = false;
    *out_ci                     = *ci;
-   (void)dev;
 
    const uint32_t *words = ci->pCode;
    const size_t    count = ci->codeSize / 4;
@@ -259,10 +259,10 @@ vkrt_rewrite_shader_module(struct vkrt_device_data *dev,
    uint32_t *lowered = NULL;
    size_t    lowered_words = 0;
    char      err[512];
-   int rc = vkrt_spirv_lower(words, count,
-                            vkrt_traversal_words, vkrt_traversal_word_count,
-                            &lowered, &lowered_words,
-                            err, sizeof(err));
+   uint64_t context = vkrt_as_registry_address(dev);
+   if (!context) return VK_ERROR_INITIALIZATION_FAILED;
+   int rc = vkrt_spirv_lower_with_context(words, count, vkrt_traversal_words, vkrt_traversal_word_count, context, &lowered,
+                                          &lowered_words, err, sizeof(err));
    if (rc != 0) {
       VKRT_LOG_ERR("SPIR-V ray-query lowering failed: %s", err);
       return VK_ERROR_INVALID_SHADER_NV;

@@ -1202,777 +1202,765 @@ get_const_u32(std::vector<uint32_t> *w, TypeIndex *ti, IdGen *ids,
 /* C entry point                                                       */
 /* ================================================================== */
 
-int
-vkrt_spirv_lower(const uint32_t *user_words, size_t user_word_count,
-                 const uint32_t *lib_words, size_t lib_word_count,
-                 uint32_t **out_words, size_t *out_word_count,
-                 char *errbuf, size_t errbuf_len)
-{
-   auto fail = [&](const char *msg) -> int {
-      if (errbuf && errbuf_len)
-         std::snprintf(errbuf, errbuf_len, "%s", msg);
-      std::fprintf(stderr, "VKRT SPIR-V lower: %s\n", msg);
-      return -1;
-   };
+int vkrt_spirv_lower_with_context(const uint32_t *user_words, size_t user_word_count, const uint32_t *lib_words,
+                                  size_t lib_word_count, uint64_t as_context, uint32_t **out_words, size_t *out_word_count,
+                                  char *errbuf, size_t errbuf_len) {
+    auto fail = [&](const char *msg) -> int {
+        if (errbuf && errbuf_len) std::snprintf(errbuf, errbuf_len, "%s", msg);
+        std::fprintf(stderr, "VKRT SPIR-V lower: %s\n", msg);
+        return -1;
+    };
 
-   if (out_words)
-      *out_words = nullptr;
-   if (out_word_count)
-      *out_word_count = 0;
+    if (out_words) *out_words = nullptr;
+    if (out_word_count) *out_word_count = 0;
 
-   /* ---- 1. Prep the library: drop its dummy entry point ------------ */
-   std::vector<uint32_t> lib(lib_words, lib_words + lib_word_count);
-   if (lib.size() < 5)
-      return fail("traversal library is not valid SPIR-V");
-   {
-      std::vector<uint32_t> dropped;
-      strip_entry_points(&lib, &dropped);
-      export_named_functions(&lib);
-      std::string error;
-      if (!vkrt_spv::dedupe_types(&lib, &error)) return fail(error.c_str());
-      strip_dangling_debug_names(&lib);
-   }
-
-   /* ---- 1b. Normalise the addressing model -------------------------
-    * The traversal uses GLSL buffer_reference (device addresses), which
-    * forces PhysicalStorageBuffer64. A Logical-addressed user shader is
-    * a strict subset -- PhysicalStorageBuffer64 only *adds* the ability
-    * to cast pointers to integers -- so retargeting the user module is
-    * safe and is what lets spvtools::Link accept both (it rejects
-    * mismatched addressing models).
-    */
-   std::vector<uint32_t> user(user_words, user_words + user_word_count);
-   {
-      /* OpMemoryModel <addressing> <memory>; addressing 0=Logical,
-       * 1=Physical32, 2=Physical64... actually:
-       *   0 Logical, 1 Physical32, 2 Physical64, 5348 PhysicalStorageBuffer64
-       * (PhysicalStorageBuffer64 is the one buffer_reference needs.) */
-      const uint32_t kPhysicalStorageBuffer64 = 5348;
-      bool touched = false;
-      for_each(user, [&](size_t i, uint32_t op, uint32_t len) {
-         if (op == SpvOpMemoryModel && len == 3 && !touched) {
-            if (user[i + 1] != kPhysicalStorageBuffer64) {
-               user[i + 1] = kPhysicalStorageBuffer64;
-               touched = true;
+    /* ---- 1. Prep the library: drop its dummy entry point ------------ */
+    std::vector<uint32_t> lib(lib_words, lib_words + lib_word_count);
+    if (lib.size() < 5) return fail("traversal library is not valid SPIR-V");
+    {
+        const auto name = spv_string_literal("vkrt_as_registry_context");
+        uint32_t context_id = 0;
+        for_each(lib, [&](size_t i, uint32_t op, uint32_t len) {
+            if (op == SpvOpName && len == 2 + name.size() && std::equal(name.begin(), name.end(), lib.begin() + i + 2))
+                context_id = lib[i + 1];
+        });
+        bool patched = false;
+        for_each(lib, [&](size_t i, uint32_t op, uint32_t len) {
+            if (op == 50 /* OpSpecConstant */ && len == 5 && lib[i + 2] == context_id) {
+                lib[i] = SPV_WORD0(SpvOpConstant, 5);
+                lib[i + 3] = uint32_t(as_context);
+                lib[i + 4] = uint32_t(as_context >> 32);
+                patched = true;
             }
-         }
-      });
-      if (touched) {
-         ensure_capability(&user, SpvCapabilityPhysicalStorageBufferAddresses);
-         ensure_extension(&user, "SPV_KHR_physical_storage_buffer");
-      }
-   }
+        });
+        if (!patched) return fail("traversal library has no AS resolver specialization constant");
+    }
+    {
+        std::vector<uint32_t> dropped;
+        strip_entry_points(&lib, &dropped);
+        export_named_functions(&lib);
+        std::string error;
+        if (!vkrt_spv::dedupe_types(&lib, &error)) return fail(error.c_str());
+        strip_dangling_debug_names(&lib);
+    }
 
-   /* ---- 2. Link ---------------------------------------------------- */
-   spvtools::Context ctx(SPV_ENV_VULKAN_1_2);
-   std::string link_diag;
-   ctx.SetMessageConsumer(
-      [&](spv_message_level_t, const char *, const spv_position_t &,
-          const char *message) {
-         if (!link_diag.empty())
-            link_diag += " | ";
-         link_diag += (message ? message : "(no message)");
-      });
+    /* ---- 1b. Normalise the addressing model -------------------------
+     * The traversal uses GLSL buffer_reference (device addresses), which
+     * forces PhysicalStorageBuffer64. A Logical-addressed user shader is
+     * a strict subset -- PhysicalStorageBuffer64 only *adds* the ability
+     * to cast pointers to integers -- so retargeting the user module is
+     * safe and is what lets spvtools::Link accept both (it rejects
+     * mismatched addressing models).
+     */
+    std::vector<uint32_t> user(user_words, user_words + user_word_count);
+    {
+        /* OpMemoryModel <addressing> <memory>; addressing 0=Logical,
+         * 1=Physical32, 2=Physical64... actually:
+         *   0 Logical, 1 Physical32, 2 Physical64, 5348 PhysicalStorageBuffer64
+         * (PhysicalStorageBuffer64 is the one buffer_reference needs.) */
+        const uint32_t kPhysicalStorageBuffer64 = 5348;
+        bool touched = false;
+        for_each(user, [&](size_t i, uint32_t op, uint32_t len) {
+            if (op == SpvOpMemoryModel && len == 3 && !touched) {
+                if (user[i + 1] != kPhysicalStorageBuffer64) {
+                    user[i + 1] = kPhysicalStorageBuffer64;
+                    touched = true;
+                }
+            }
+        });
+        if (touched) {
+            ensure_capability(&user, SpvCapabilityPhysicalStorageBufferAddresses);
+            ensure_extension(&user, "SPV_KHR_physical_storage_buffer");
+        }
+    }
 
-   spvtools::LinkerOptions lopts;
-   lopts.SetCreateLibrary(true);
-   lopts.SetAllowPartialLinkage(true);
-   lopts.SetVerifyIds(true);
-   lopts.SetUseHighestVersion(true);
+    /* ---- 2. Link ---------------------------------------------------- */
+    spvtools::Context ctx(SPV_ENV_VULKAN_1_2);
+    std::string link_diag;
+    ctx.SetMessageConsumer([&](spv_message_level_t, const char *, const spv_position_t &, const char *message) {
+        if (!link_diag.empty()) link_diag += " | ";
+        link_diag += (message ? message : "(no message)");
+    });
 
-   std::vector<uint32_t> merged;
-   std::vector<std::vector<uint32_t>> inputs = {
-      user,
-      lib,
-   };
-   spv_result_t lres = spvtools::Link(ctx, inputs, &merged, lopts);
-   if (lres != SPV_SUCCESS) {
-      std::string msg = "spvtools::Link failed: " +
-                        (link_diag.empty() ? "(no diagnostic)" : link_diag);
-      return fail(msg.c_str());
-   }
-   strip_linkage_decorations(&merged);
+    spvtools::LinkerOptions lopts;
+    lopts.SetCreateLibrary(true);
+    lopts.SetAllowPartialLinkage(true);
+    lopts.SetVerifyIds(true);
+    lopts.SetUseHighestVersion(true);
 
-   /* ---- 3. Index the merged module --------------------------------- */
-   Symbols sym;
-   collect_symbols(merged, &sym);
+    std::vector<uint32_t> merged;
+    std::vector<std::vector<uint32_t>> inputs = {
+        user,
+        lib,
+    };
+    spv_result_t lres = spvtools::Link(ctx, inputs, &merged, lopts);
+    if (lres != SPV_SUCCESS) {
+        std::string msg = "spvtools::Link failed: " + (link_diag.empty() ? "(no diagnostic)" : link_diag);
+        return fail(msg.c_str());
+    }
+    strip_linkage_decorations(&merged);
 
-   TypeIndex ti;
-   index_types(merged, &ti);
+    /* ---- 3. Index the merged module --------------------------------- */
+    Symbols sym;
+    collect_symbols(merged, &sym);
 
-   /* Locate the state struct. glslang emits an exact OpName for the
-    * struct ("sw_ray_query_state") but mangles function names, so prefer
-    * the struct name and fall back to digging it out of
-    * sw_ray_query_proceed's first parameter. */
-   uint32_t proceed_id = sym.find("sw_ray_query_proceed");
-   if (!proceed_id)
-      return fail("sw_ray_query_proceed not found after link");
-   uint32_t state_ty = sym.exact.count("sw_ray_query_state")
-                          ? sym.exact["sw_ray_query_state"]
-                          : fn_first_param_pointee(merged, ti, proceed_id);
-   if (!state_ty)
-      return fail("could not derive sw_ray_query_state type from proceed()");
+    TypeIndex ti;
+    index_types(merged, &ti);
 
-   /* Collect the sw_* function ids we will call. */
-   std::unordered_map<uint32_t, uint32_t> rqop_to_fn; /* RqOp index -> fn id */
-   std::unordered_map<uint16_t, uint32_t> op_to_fn;
-   for (const RqOp &r : kRqOps) {
-      uint32_t id = sym.find(r.fn);
-      if (!id) {
-         std::fprintf(stderr, "VKRT: traversal fn %s missing (op %u)\n",
-                      r.fn, (unsigned)r.opcode);
-         continue;
-      }
-      op_to_fn[r.opcode] = id;
-   }
+    /* Locate the state struct. glslang emits an exact OpName for the
+     * struct ("sw_ray_query_state") but mangles function names, so prefer
+     * the struct name and fall back to digging it out of
+     * sw_ray_query_proceed's first parameter. */
+    uint32_t proceed_id = sym.find("sw_ray_query_proceed");
+    if (!proceed_id) return fail("sw_ray_query_proceed not found after link");
+    uint32_t state_ty =
+        sym.exact.count("sw_ray_query_state") ? sym.exact["sw_ray_query_state"] : fn_first_param_pointee(merged, ti, proceed_id);
+    if (!state_ty) return fail("could not derive sw_ray_query_state type from proceed()");
 
-   /* Also map the AS type substitution. */
-   uint32_t as_type_id = 0;
-   for (auto &kv : ti.offset_of) {
-      if (SPV_OP(merged[kv.second]) == SpvOpTypeAccelerationStructureKHR) {
-         as_type_id = kv.first;
-         break;
-      }
-   }
+    /* Collect the sw_* function ids we will call. */
+    std::unordered_map<uint32_t, uint32_t> rqop_to_fn; /* RqOp index -> fn id */
+    std::unordered_map<uint16_t, uint32_t> op_to_fn;
+    for (const RqOp &r : kRqOps) {
+        uint32_t id = sym.find(r.fn);
+        if (!id) {
+            std::fprintf(stderr, "VKRT: traversal fn %s missing (op %u)\n", r.fn, (unsigned)r.opcode);
+            continue;
+        }
+        op_to_fn[r.opcode] = id;
+    }
 
-   /* Remap every OpTypeRayQueryKHR id to state_ty BEFORE the main
-    * rewrite pass drops the definition -- doing it afterwards leaves
-    * dangling ids (%_ptr_Private_<rq> no longer resolves). */
-   {
-      std::vector<uint32_t> rq_ids;
-      for_each(merged, [&](size_t i, uint32_t op, uint32_t len) {
-         if (op == SpvOpTypeRayQueryKHR && len >= 2)
-            rq_ids.push_back(merged[i + 1]);
-      });
-      if (!rq_ids.empty()) {
-         std::unordered_map<uint32_t, uint32_t> sub;
-         for (uint32_t id : rq_ids)
-            sub[id] = state_ty;
+    /* Also map the AS type substitution. */
+    uint32_t as_type_id = 0;
+    for (auto &kv : ti.offset_of) {
+        if (SPV_OP(merged[kv.second]) == SpvOpTypeAccelerationStructureKHR) {
+            as_type_id = kv.first;
+            break;
+        }
+    }
 
-         std::string error;
-         if (!vkrt_spv::remap_id_uses(&merged, sub, &error)) return fail(error.c_str());
+    /* Remap every OpTypeRayQueryKHR id to state_ty BEFORE the main
+     * rewrite pass drops the definition -- doing it afterwards leaves
+     * dangling ids (%_ptr_Private_<rq> no longer resolves). */
+    {
+        std::vector<uint32_t> rq_ids;
+        for_each(merged, [&](size_t i, uint32_t op, uint32_t len) {
+            if (op == SpvOpTypeRayQueryKHR && len >= 2) rq_ids.push_back(merged[i + 1]);
+        });
+        if (!rq_ids.empty()) {
+            std::unordered_map<uint32_t, uint32_t> sub;
+            for (uint32_t id : rq_ids) sub[id] = state_ty;
 
-         std::vector<uint32_t> tmp;
-         for (size_t i = 0; i < 5 && i < merged.size(); i++)
-            tmp.push_back(merged[i]);
-         for (size_t i = 5; i < merged.size();) {
+            std::string error;
+            if (!vkrt_spv::remap_id_uses(&merged, sub, &error)) return fail(error.c_str());
+
+            std::vector<uint32_t> tmp;
+            for (size_t i = 0; i < 5 && i < merged.size(); i++) tmp.push_back(merged[i]);
+            for (size_t i = 5; i < merged.size();) {
+                uint32_t op = SPV_OP(merged[i]);
+                uint32_t len = SPV_LEN(merged[i]);
+                if (len == 0 || i + len > merged.size()) break;
+                if (op == SpvOpTypeRayQueryKHR) {
+                    i += len;
+                    continue;
+                }
+                tmp.insert(tmp.end(), merged.begin() + i, merged.begin() + i + len);
+                i += len;
+            }
+            merged.swap(tmp);
+            /* The swap invalidated every offset in ti. Re-index before the
+             * get_* helpers below start indexing merged through it -- stale
+             * offsets read out of bounds and write garbage result ids. */
+            ti.offset_of.clear();
+            ti.pointers.clear();
+            ti.functions.clear();
+            index_types(merged, &ti);
+        }
+    }
+
+    /* Member indices by (type id, field name). The rewrite stores extra
+     * OpRayQuery* operands into sw_ray_query_state fields before each
+     * call -- every sw_* entry point takes only `inout q`, because
+     * glslang's ABI passes all parameters as Function-class pointers
+     * that a synthesised call site cannot materialise. */
+    std::unordered_map<uint32_t, std::unordered_map<std::string, uint32_t>> member_idx;
+    {
+        std::unordered_map<uint32_t, std::string> type_name;
+        for_each(merged, [&](size_t i, uint32_t op, uint32_t len) {
+            if (op == SpvOpName && len >= 3) {
+                std::string s2;
+                for (uint32_t k = 2; k < len; k++) {
+                    char c[5];
+                    std::memcpy(c, &merged[i + k], 4);
+                    for (int b = 0; b < 4; b++) {
+                        if (c[b] == '\0') break;
+                        s2.push_back(c[b]);
+                    }
+                }
+                type_name[merged[i + 1]] = s2;
+            } else if (op == SpvOpMemberName && len >= 4) {
+                std::string s2;
+                for (uint32_t k = 3; k < len; k++) {
+                    char c[5];
+                    std::memcpy(c, &merged[i + k], 4);
+                    for (int b = 0; b < 4; b++) {
+                        if (c[b] == '\0') break;
+                        s2.push_back(c[b]);
+                    }
+                }
+                member_idx[merged[i + 1]][s2] = merged[i + 2];
+            }
+        });
+        /* sw_ray's member indices are needed for q.ray.origin/.direction. */
+        for (auto &kv : type_name) {
+            if (kv.second == "sw_ray") member_idx[kv.first]; /* ensure it exists */
+        }
+    }
+
+    /* ---- 4. Rewrite -------------------------------------------------- */
+    /* We rebuild into a fresh word vector so we can expand instructions.
+     *
+     * Start allocating from the header's ID bound: by definition every
+     * valid id is < bound, so fresh() can never collide with an existing
+     * type (an earlier version collided with sw_ray_query_state and the
+     * duplicate OpTypeStruct silently ate the real definition). */
+    IdGen ids;
+    ids.next = (merged.size() >= 4 && merged[3] >= 1) ? merged[3] : 1;
+    for (auto &kv : ti.offset_of) {
+        /* SPIR-V ids are < 2^22. Anything larger came from a mis-read
+         * literal and must not steer allocation. */
+        if (kv.first < (1u << 22) && kv.first >= ids.next) ids.next = kv.first + 1;
+    }
+
+    uint32_t u32_ty = get_int_type(&merged, &ti, &ids, 32, 0);
+    uint32_t u64_ty = get_int_type(&merged, &ti, &ids, 64, 0);
+    uint32_t void_ty = get_void_type(&merged, &ti, &ids);
+    uint32_t bool_ty = get_bool_type(&merged, &ti, &ids);
+
+    /* Coerce `val` to `want_ty` so a store into a struct field type-checks.
+     * OpRayQuery* operands are whatever glslang constant-folded (often
+     * %int where the field is %uint, or %bool where it is %uint). */
+    auto emit_convert = [&](std::vector<uint32_t> *outv, uint32_t val, uint32_t from_ty, uint32_t want_ty) -> uint32_t {
+        if (val == 0 || from_ty == 0 || from_ty == want_ty) return val;
+        /* bool -> uint */
+        if (want_ty == u32_ty && from_ty == bool_ty) {
+            uint32_t r = ids.fresh();
+            uint32_t one = get_const_u32(&merged, &ti, &ids, u32_ty, 1);
+            uint32_t zero32 = get_const_u32(&merged, &ti, &ids, u32_ty, 0);
+            /* OpSelect <rty> <res> <cond> <a> <b> is 6 words. Emitting 7
+             * silently truncates every later instruction in the stream. */
+            outv->push_back(SPV_WORD0(169, 6)); /* OpSelect */
+            outv->push_back(u32_ty);
+            outv->push_back(r);
+            outv->push_back(val);
+            outv->push_back(one);
+            outv->push_back(zero32);
+            return r;
+        }
+        /* same-width scalar: bitcast covers int <-> uint <-> float */
+        uint32_t r = ids.fresh();
+        outv->push_back(SPV_WORD0(SpvOpBitcast, 4));
+        outv->push_back(want_ty);
+        outv->push_back(r);
+        outv->push_back(val);
+        return r;
+    };
+
+    /* Per-function OpRayQuery* call count. Each call needs a
+     * Function-class temporary to pass as `inout q`: glslang types that
+     * parameter as a FUNCTION pointer while a file-scope rayQueryEXT is a
+     * PRIVATE global, and OpFunctionCall only accepts a memory object
+     * declaration (so neither a bitcast nor a computed pointer works). */
+    std::unordered_map<uint32_t, uint32_t> fn_rq_count;
+    {
+        uint32_t cur_fn = 0;
+        for_each(merged, [&](size_t i, uint32_t op, uint32_t len) {
+            if (op == SpvOpFunction && len >= 3)
+                cur_fn = merged[i + 2];
+            else if (op == SpvOpFunctionEnd)
+                cur_fn = 0;
+            else if (cur_fn && op_to_fn.count((uint16_t)op))
+                fn_rq_count[cur_fn]++;
+        });
+    }
+
+    /* Helper: store `val` into q.<member chain>. `want_ty` is the struct
+     * field's type -- the AccessChain result type must match it. */
+    /* Wrap `q_orig` (a Private global) in a Function-class temporary the
+     * call can legally accept: load the state, store it into the temp,
+     * call with the temp, then store the mutated state back. */
+    auto emit_call_q = [&](std::vector<uint32_t> *outv, uint32_t temp, uint32_t q_orig) {
+        uint32_t v1 = ids.fresh();
+        outv->push_back(SPV_WORD0(SpvOpLoad, 4));
+        outv->push_back(state_ty);
+        outv->push_back(v1);
+        outv->push_back(q_orig);
+        outv->push_back(SPV_WORD0(SpvOpStore, 3));
+        outv->push_back(temp);
+        outv->push_back(v1);
+    };
+    auto emit_call_q_back = [&](std::vector<uint32_t> *outv, uint32_t temp, uint32_t q_orig) {
+        uint32_t v2 = ids.fresh();
+        outv->push_back(SPV_WORD0(SpvOpLoad, 4));
+        outv->push_back(state_ty);
+        outv->push_back(v2);
+        outv->push_back(temp);
+        outv->push_back(SPV_WORD0(SpvOpStore, 3));
+        outv->push_back(q_orig);
+        outv->push_back(v2);
+    };
+
+    /* A query may be a Private global or Function storage passed through a
+     * helper. Preserve its actual pointer storage class when addressing fields. */
+    std::unordered_map<uint32_t, uint32_t> val_ty;
+    for_each(merged, [&](size_t i, uint32_t op, uint32_t len) {
+        if (spv_result_id_index(op) == 2 && len >= 3) val_ty[merged[i + 2]] = merged[i + 1];
+    });
+    std::string rewrite_error;
+    auto emit_store = [&](std::vector<uint32_t> *outv, uint32_t qvar, const std::vector<uint32_t> &chain, uint32_t val,
+                          uint32_t source_ty, uint32_t want_ty) {
+        uint32_t coerced = emit_convert(outv, val, source_ty, want_ty);
+        auto value = val_ty.find(qvar);
+        auto pointer = value == val_ty.end() ? ti.pointers.end() : ti.pointers.find(value->second);
+        if (pointer == ti.pointers.end() ||
+            (pointer->second.first != SpvStorageClassPrivate && pointer->second.first != SpvStorageClassFunction)) {
+            rewrite_error = "ray-query operand has no Private/Function pointer type";
+            return;
+        }
+        uint32_t ptr_ty = get_ptr_type(&merged, &ti, &ids, pointer->second.first, want_ty);
+        uint32_t gep = ids.fresh();
+        outv->push_back(SPV_WORD0(SpvOpAccessChain, 4 + (uint32_t)chain.size()));
+        outv->push_back(ptr_ty);
+        outv->push_back(gep);
+        outv->push_back(qvar);
+        for (uint32_t idx : chain) /* OpAccessChain indices are constant IDS, not literals. */
+            outv->push_back(get_const_u32(&merged, &ti, &ids, u32_ty, idx));
+        outv->push_back(SPV_WORD0(SpvOpStore, 3));
+        outv->push_back(gep);
+        outv->push_back(coerced);
+    };
+
+    /* AS values are real 64-bit root addresses. A descriptor points at a
+     * layer-owned Block { u64 address } cell; arrays retain every original
+     * index and every descriptor keeps its application set/binding. Only
+     * UniformConstant descriptor pointers change representation. Function
+     * storage and SSA values become ordinary uint64 values. */
+    uint32_t as_struct = 0;
+    uint32_t as_member_ptr = 0;
+    uint32_t as_zero = 0;
+    std::unordered_map<uint32_t, uint32_t> descriptor_pointees;
+    std::unordered_map<uint32_t, uint32_t> descriptor_pointer_types;
+    bool descriptor_array = false;
+    std::unordered_set<uint32_t> nonuniform_ids;
+    for_each(merged, [&](size_t i, uint32_t op, uint32_t len) {
+        if (op == SpvOpDecorate && len == 3 && merged[i + 2] == 5300 /* NonUniform */) nonuniform_ids.insert(merged[i + 1]);
+    });
+    /* A decoration group carries NonUniform on behalf of every target. The
+     * newly introduced address-cell member pointer needs the same decoration
+     * whether the original descriptor pointer/load used a group or a direct
+     * OpDecorate. Collect group applications only after all group decorations. */
+    for_each(merged, [&](size_t i, uint32_t op, uint32_t len) {
+        if (op == 74 /* OpGroupDecorate */ && len >= 3 && nonuniform_ids.count(merged[i + 1]))
+            for (uint32_t operand = 2; operand < len; ++operand) nonuniform_ids.insert(merged[i + operand]);
+    });
+    if (as_type_id) {
+        as_struct = ids.fresh();
+        ti.offset_of[as_struct] = merged.size();
+        merged.insert(merged.end(), {SPV_WORD0(SpvOpTypeStruct, 3), as_struct, u64_ty});
+        as_member_ptr = get_ptr_type(&merged, &ti, &ids, SpvStorageClassStorageBuffer, u64_ty);
+        as_zero = get_const_u32(&merged, &ti, &ids, u32_ty, 0);
+        descriptor_pointees[as_type_id] = as_struct;
+        std::function<uint32_t(uint32_t)> descriptor_type = [&](uint32_t id) -> uint32_t {
+            auto known = descriptor_pointees.find(id);
+            if (known != descriptor_pointees.end()) return known->second;
+            auto def = ti.offset_of.find(id);
+            if (def == ti.offset_of.end()) return 0;
+            size_t at = def->second;
+            uint32_t op = SPV_OP(merged[at]), len = SPV_LEN(merged[at]);
+            if ((op != SpvOpTypeArray && op != SpvOpTypeRuntimeArray) || len < 3) return 0;
+            uint32_t length = op == SpvOpTypeArray ? merged[at + 3] : 0;
+            uint32_t child = descriptor_type(merged[at + 2]);
+            if (!child) return 0;
+            uint32_t result = ids.fresh();
+            ti.offset_of[result] = merged.size();
+            merged.insert(merged.end(), {SPV_WORD0(op, len), result, child});
+            if (op == SpvOpTypeArray) merged.push_back(length);
+            descriptor_pointees[id] = result;
+            descriptor_array = true;
+            return result;
+        };
+        for (const auto &pointer : ti.pointers) {
+            if (pointer.second.first != SpvStorageClassUniformConstant) continue;
+            uint32_t pointee = descriptor_type(pointer.second.second);
+            if (pointee) descriptor_pointer_types[pointer.first] = pointee;
+        }
+        std::vector<uint32_t> ann = {
+            SPV_WORD0(SpvOpDecorate, 3), as_struct, SpvDecorationBlock, SPV_WORD0(SpvOpMemberDecorate, 5), as_struct, 0,
+            SpvDecorationOffset,         0};
+        size_t at = 5;
+        for_each(merged, [&](size_t i, uint32_t op, uint32_t len) {
+            if (op == SpvOpDecorate || op == SpvOpMemberDecorate || op == SpvOpName || op == SpvOpMemberName) at = i + len;
+        });
+        merged.insert(merged.begin() + at, ann.begin(), ann.end());
+        /* Inserting annotations invalidates offsets, including helper types. */
+        ti.offset_of.clear();
+        ti.pointers.clear();
+        ti.functions.clear();
+        index_types(merged, &ti);
+    }
+    if (descriptor_array) ensure_capability(&merged, 30 /* StorageBufferArrayDynamicIndexing */);
+    if (descriptor_array && !nonuniform_ids.empty()) {
+        ensure_capability(&merged, 5301 /* ShaderNonUniform */);
+        ensure_capability(&merged, 5308 /* StorageBufferArrayNonUniformIndexing */);
+    }
+    /* Native opaque descriptor pointers can cross helper calls without a
+     * variable-pointers capability. Their SSBO representation requires the
+     * narrower StorageBuffer capability, enabled privately on the device. */
+    bool descriptor_pointer_helper = false;
+    for_each(merged, [&](size_t i, uint32_t op, uint32_t len) {
+        if (op == SpvOpFunctionParameter && len >= 3 && descriptor_pointer_types.count(merged[i + 1]))
+            descriptor_pointer_helper = true;
+        if (op == SpvOpTypeFunction && len >= 3 && descriptor_pointer_types.count(merged[i + 2])) descriptor_pointer_helper = true;
+    });
+    if (descriptor_pointer_helper) ensure_capability(&merged, 4441 /* VariablePointersStorageBuffer */);
+
+    /* Ensure Int64 + PhysicalStorageBufferAddresses are declared (the
+     * traversal uses uint64_t buffer references). */
+    ensure_capability(&merged, SpvCapabilityInt64);
+    ensure_capability(&merged, SpvCapabilityPhysicalStorageBufferAddresses);
+    ensure_extension(&merged, "SPV_KHR_physical_storage_buffer");
+
+    /* Every OpRayQuery* and OpTypeRayQueryKHR is gone at this point, so
+     * the RayQueryKHR capability is no longer required. Dropping it is
+     * what lets the module run on an ICD with no ray-query support (the
+     * whole point of the layer). */
+    {
+        std::vector<uint32_t> out_caps;
+        const auto rq_extension = spv_string_literal("SPV_KHR_ray_query");
+        const auto rt_extension = spv_string_literal("SPV_KHR_ray_tracing");
+        /* Keep the 5-word SPIR-V header! Rebuilding from offset 5 and
+         * swapping without re-prepending it destroys the module (magic
+         * number gone -> the whole rewrite emits a 5-word stub). */
+        for (size_t h = 0; h < 5 && h < merged.size(); h++) out_caps.push_back(merged[h]);
+        size_t i = 5;
+        while (i < merged.size()) {
             uint32_t op = SPV_OP(merged[i]);
             uint32_t len = SPV_LEN(merged[i]);
-            if (len == 0 || i + len > merged.size())
-               break;
-            if (op == SpvOpTypeRayQueryKHR) {
-               i += len;
-               continue;
+            if (len == 0 || i + len > merged.size()) break;
+            /* The device extension is consumed by the layer too. Leaving an
+             * unused SPIR-V RT extension would still require native RT at
+             * vkCreateShaderModule, even after every RT instruction is gone. */
+            if (op == 10 /* OpExtension */ &&
+                ((len == 1 + rq_extension.size() && std::equal(rq_extension.begin(), rq_extension.end(), merged.begin() + i + 1)) ||
+                 (len == 1 + rt_extension.size() &&
+                  std::equal(rt_extension.begin(), rt_extension.end(), merged.begin() + i + 1)))) {
+                i += len;
+                continue;
             }
-            tmp.insert(tmp.end(), merged.begin() + i, merged.begin() + i + len);
+            if (op == SpvOpCapability && len == 2 &&
+                (merged[i + 1] == SpvCapabilityRayQueryKHR || merged[i + 1] == SpvCapabilityRayTracingKHR)) {
+                i += len;
+                continue;
+            }
+            for (uint32_t k = 0; k < len; k++) out_caps.push_back(merged[i + k]);
             i += len;
-         }
-         merged.swap(tmp);
-         /* The swap invalidated every offset in ti. Re-index before the
-          * get_* helpers below start indexing merged through it -- stale
-          * offsets read out of bounds and write garbage result ids. */
-         ti.offset_of.clear();
-         ti.pointers.clear();
-         ti.functions.clear();
-         index_types(merged, &ti);
-      }
-   }
+        }
+        merged.swap(out_caps);
+    }
+    /* Walk and rewrite into `out`. */
+    std::vector<uint32_t> out;
+    out.push_back(merged[0]);
+    out.push_back(merged[1]);
+    out.push_back(merged[2]);
+    out.push_back(merged[3]);
+    out.push_back(merged[4]);
 
-   /* Member indices by (type id, field name). The rewrite stores extra
-    * OpRayQuery* operands into sw_ray_query_state fields before each
-    * call -- every sw_* entry point takes only `inout q`, because
-    * glslang's ABI passes all parameters as Function-class pointers
-    * that a synthesised call site cannot materialise. */
-   std::unordered_map<uint32_t, std::unordered_map<std::string, uint32_t>> member_idx;
-   {
-      std::unordered_map<uint32_t, std::string> type_name;
-      for_each(merged, [&](size_t i, uint32_t op, uint32_t len) {
-         if (op == SpvOpName && len >= 3) {
-            std::string s2;
-            for (uint32_t k = 2; k < len; k++) {
-               char c[5];
-               std::memcpy(c, &merged[i + k], 4);
-               for (int b = 0; b < 4; b++) {
-                  if (c[b] == '\0') break;
-                  s2.push_back(c[b]);
-               }
-            }
-            type_name[merged[i + 1]] = s2;
-         } else if (op == SpvOpMemberName && len >= 4) {
-            std::string s2;
-            for (uint32_t k = 3; k < len; k++) {
-               char c[5];
-               std::memcpy(c, &merged[i + k], 4);
-               for (int b = 0; b < 4; b++) {
-                  if (c[b] == '\0') break;
-                  s2.push_back(c[b]);
-               }
-            }
-            member_idx[merged[i + 1]][s2] = merged[i + 2];
-         }
-      });
-      /* sw_ray's member indices are needed for q.ray.origin/.direction. */
-      for (auto &kv : type_name) {
-         if (kv.second == "sw_ray")
-            member_idx[kv.first]; /* ensure it exists */
-      }
-   }
+    /* Pending function bodies' "insert after this point" is just linear
+     * append; SPIR-V allows the type/const sections to grow. */
 
-   /* ---- 4. Rewrite -------------------------------------------------- */
-   /* We rebuild into a fresh word vector so we can expand instructions.
-    *
-    * Start allocating from the header's ID bound: by definition every
-    * valid id is < bound, so fresh() can never collide with an existing
-    * type (an earlier version collided with sw_ray_query_state and the
-    * duplicate OpTypeStruct silently ate the real definition). */
-   IdGen ids;
-   ids.next = (merged.size() >= 4 && merged[3] >= 1) ? merged[3] : 1;
-   for (auto &kv : ti.offset_of) {
-      /* SPIR-V ids are < 2^22. Anything larger came from a mis-read
-       * literal and must not steer allocation. */
-      if (kv.first < (1u << 22) && kv.first >= ids.next)
-         ids.next = kv.first + 1;
-   }
+    /* One Function-class temporary per ray-query call in each function.
+     * They are emitted just after that function's first OpLabel, which is
+     * the only place SPIR-V allows a Function OpVariable. */
+    uint32_t cur_fn = 0;
+    uint32_t cur_fn_next_temp = 0;
+    std::unordered_map<uint32_t, uint32_t> fn_temp_base;
+    std::unordered_map<uint32_t, uint32_t> fn_temps_emitted;
+    uint32_t state_fn_ptr = get_ptr_type(&merged, &ti, &ids, SpvStorageClassFunction, state_ty);
 
-   uint32_t u32_ty = get_int_type(&merged, &ti, &ids, 32, 0);
-   uint32_t u64_ty = get_int_type(&merged, &ti, &ids, 64, 0);
-   uint32_t void_ty = get_void_type(&merged, &ti, &ids);
-   uint32_t bool_ty = get_bool_type(&merged, &ti, &ids);
+    for (size_t i = 5; i < merged.size();) {
+        uint32_t op = SPV_OP(merged[i]);
+        uint32_t len = SPV_LEN(merged[i]);
+        if (len == 0 || i + len > merged.size()) break;
 
-   /* Coerce `val` to `want_ty` so a store into a struct field type-checks.
-    * OpRayQuery* operands are whatever glslang constant-folded (often
-    * %int where the field is %uint, or %bool where it is %uint). */
-   auto emit_convert = [&](std::vector<uint32_t> *outv, uint32_t val,
-                           uint32_t from_ty, uint32_t want_ty) -> uint32_t {
-      if (val == 0 || from_ty == 0 || from_ty == want_ty)
-         return val;
-      /* bool -> uint */
-      if (want_ty == u32_ty && from_ty == bool_ty) {
-         uint32_t r = ids.fresh();
-         uint32_t one = get_const_u32(&merged, &ti, &ids, u32_ty, 1);
-         uint32_t zero32 = get_const_u32(&merged, &ti, &ids, u32_ty, 0);
-         /* OpSelect <rty> <res> <cond> <a> <b> is 6 words. Emitting 7
-          * silently truncates every later instruction in the stream. */
-         outv->push_back(SPV_WORD0(169, 6));   /* OpSelect */
-         outv->push_back(u32_ty);
-         outv->push_back(r);
-         outv->push_back(val);
-         outv->push_back(one);
-         outv->push_back(zero32);
-         return r;
-      }
-      /* same-width scalar: bitcast covers int <-> uint <-> float */
-      uint32_t r = ids.fresh();
-      outv->push_back(SPV_WORD0(SpvOpBitcast, 4));
-      outv->push_back(want_ty);
-      outv->push_back(r);
-      outv->push_back(val);
-      return r;
-   };
-
-   /* Per-function OpRayQuery* call count. Each call needs a
-    * Function-class temporary to pass as `inout q`: glslang types that
-    * parameter as a FUNCTION pointer while a file-scope rayQueryEXT is a
-    * PRIVATE global, and OpFunctionCall only accepts a memory object
-    * declaration (so neither a bitcast nor a computed pointer works). */
-   std::unordered_map<uint32_t, uint32_t> fn_rq_count;
-   {
-      uint32_t cur_fn = 0;
-      for_each(merged, [&](size_t i, uint32_t op, uint32_t len) {
-         if (op == SpvOpFunction && len >= 3)
-            cur_fn = merged[i + 2];
-         else if (op == SpvOpFunctionEnd)
-            cur_fn = 0;
-         else if (cur_fn && op_to_fn.count((uint16_t)op))
-            fn_rq_count[cur_fn]++;
-      });
-   }
-
-   /* Helper: store `val` into q.<member chain>. `want_ty` is the struct
-    * field's type -- the AccessChain result type must match it. */
-   /* Wrap `q_orig` (a Private global) in a Function-class temporary the
-    * call can legally accept: load the state, store it into the temp,
-    * call with the temp, then store the mutated state back. */
-   auto emit_call_q = [&](std::vector<uint32_t> *outv, uint32_t temp,
-                          uint32_t q_orig) {
-      uint32_t v1 = ids.fresh();
-      outv->push_back(SPV_WORD0(SpvOpLoad, 4));
-      outv->push_back(state_ty);
-      outv->push_back(v1);
-      outv->push_back(q_orig);
-      outv->push_back(SPV_WORD0(SpvOpStore, 3));
-      outv->push_back(temp);
-      outv->push_back(v1);
-   };
-   auto emit_call_q_back = [&](std::vector<uint32_t> *outv, uint32_t temp,
-                               uint32_t q_orig) {
-      uint32_t v2 = ids.fresh();
-      outv->push_back(SPV_WORD0(SpvOpLoad, 4));
-      outv->push_back(state_ty);
-      outv->push_back(v2);
-      outv->push_back(temp);
-      outv->push_back(SPV_WORD0(SpvOpStore, 3));
-      outv->push_back(q_orig);
-      outv->push_back(v2);
-   };
-
-   /* A query may be a Private global or Function storage passed through a
-    * helper. Preserve its actual pointer storage class when addressing fields. */
-   std::unordered_map<uint32_t, uint32_t> val_ty;
-   for_each(merged, [&](size_t i, uint32_t op, uint32_t len) {
-       if (spv_result_id_index(op) == 2 && len >= 3) val_ty[merged[i + 2]] = merged[i + 1];
-   });
-   std::string rewrite_error;
-   auto emit_store = [&](std::vector<uint32_t> *outv, uint32_t qvar, const std::vector<uint32_t> &chain, uint32_t val,
-                         uint32_t source_ty, uint32_t want_ty) {
-       uint32_t coerced = emit_convert(outv, val, source_ty, want_ty);
-       auto value = val_ty.find(qvar);
-       auto pointer = value == val_ty.end() ? ti.pointers.end() : ti.pointers.find(value->second);
-       if (pointer == ti.pointers.end() ||
-           (pointer->second.first != SpvStorageClassPrivate && pointer->second.first != SpvStorageClassFunction)) {
-           rewrite_error = "ray-query operand has no Private/Function pointer type";
-           return;
-       }
-       uint32_t ptr_ty = get_ptr_type(&merged, &ti, &ids, pointer->second.first, want_ty);
-       uint32_t gep = ids.fresh();
-       outv->push_back(SPV_WORD0(SpvOpAccessChain, 4 + (uint32_t)chain.size()));
-       outv->push_back(ptr_ty);
-       outv->push_back(gep);
-       outv->push_back(qvar);
-       for (uint32_t idx : chain) /* OpAccessChain indices are constant IDS, not literals. */
-           outv->push_back(get_const_u32(&merged, &ti, &ids, u32_ty, idx));
-       outv->push_back(SPV_WORD0(SpvOpStore, 3));
-       outv->push_back(gep);
-       outv->push_back(coerced);
-   };
-
-   /* AS values are real 64-bit root addresses. A descriptor points at a
-    * layer-owned Block { u64 address } cell; arrays retain every original
-    * index and every descriptor keeps its application set/binding. Only
-    * UniformConstant descriptor pointers change representation. Function
-    * storage and SSA values become ordinary uint64 values. */
-   uint32_t as_struct = 0;
-   uint32_t as_member_ptr = 0;
-   uint32_t as_zero = 0;
-   std::unordered_map<uint32_t, uint32_t> descriptor_pointees;
-   std::unordered_map<uint32_t, uint32_t> descriptor_pointer_types;
-   bool descriptor_array = false;
-   std::unordered_set<uint32_t> nonuniform_ids;
-   for_each(merged, [&](size_t i, uint32_t op, uint32_t len) {
-       if (op == SpvOpDecorate && len == 3 && merged[i + 2] == 5300 /* NonUniform */) nonuniform_ids.insert(merged[i + 1]);
-   });
-   /* A decoration group carries NonUniform on behalf of every target. The
-    * newly introduced address-cell member pointer needs the same decoration
-    * whether the original descriptor pointer/load used a group or a direct
-    * OpDecorate. Collect group applications only after all group decorations. */
-   for_each(merged, [&](size_t i, uint32_t op, uint32_t len) {
-       if (op == 74 /* OpGroupDecorate */ && len >= 3 && nonuniform_ids.count(merged[i + 1]))
-           for (uint32_t operand = 2; operand < len; ++operand) nonuniform_ids.insert(merged[i + operand]);
-   });
-   if (as_type_id) {
-      as_struct = ids.fresh();
-      ti.offset_of[as_struct] = merged.size();
-      merged.insert(merged.end(), {SPV_WORD0(SpvOpTypeStruct, 3), as_struct, u64_ty});
-      as_member_ptr = get_ptr_type(&merged, &ti, &ids, SpvStorageClassStorageBuffer, u64_ty);
-      as_zero = get_const_u32(&merged, &ti, &ids, u32_ty, 0);
-      descriptor_pointees[as_type_id] = as_struct;
-      std::function<uint32_t(uint32_t)> descriptor_type = [&](uint32_t id) -> uint32_t {
-          auto known = descriptor_pointees.find(id);
-          if (known != descriptor_pointees.end()) return known->second;
-          auto def = ti.offset_of.find(id);
-          if (def == ti.offset_of.end()) return 0;
-          size_t at = def->second;
-          uint32_t op = SPV_OP(merged[at]), len = SPV_LEN(merged[at]);
-          if ((op != SpvOpTypeArray && op != SpvOpTypeRuntimeArray) || len < 3) return 0;
-          uint32_t length = op == SpvOpTypeArray ? merged[at + 3] : 0;
-          uint32_t child = descriptor_type(merged[at + 2]);
-          if (!child) return 0;
-          uint32_t result = ids.fresh();
-          ti.offset_of[result] = merged.size();
-          merged.insert(merged.end(), {SPV_WORD0(op, len), result, child});
-          if (op == SpvOpTypeArray) merged.push_back(length);
-          descriptor_pointees[id] = result;
-          descriptor_array = true;
-          return result;
-      };
-      for (const auto &pointer : ti.pointers) {
-          if (pointer.second.first != SpvStorageClassUniformConstant) continue;
-          uint32_t pointee = descriptor_type(pointer.second.second);
-          if (pointee) descriptor_pointer_types[pointer.first] = pointee;
-      }
-      std::vector<uint32_t> ann = {
-          SPV_WORD0(SpvOpDecorate, 3), as_struct, SpvDecorationBlock, SPV_WORD0(SpvOpMemberDecorate, 5), as_struct, 0,
-          SpvDecorationOffset,         0};
-      size_t at = 5;
-      for_each(merged, [&](size_t i, uint32_t op, uint32_t len) {
-          if (op == SpvOpDecorate || op == SpvOpMemberDecorate || op == SpvOpName || op == SpvOpMemberName) at = i + len;
-      });
-      merged.insert(merged.begin() + at, ann.begin(), ann.end());
-      /* Inserting annotations invalidates offsets, including helper types. */
-      ti.offset_of.clear();
-      ti.pointers.clear();
-      ti.functions.clear();
-      index_types(merged, &ti);
-   }
-   if (descriptor_array) ensure_capability(&merged, 30 /* StorageBufferArrayDynamicIndexing */);
-   if (descriptor_array && !nonuniform_ids.empty()) {
-       ensure_capability(&merged, 5301 /* ShaderNonUniform */);
-       ensure_capability(&merged, 5308 /* StorageBufferArrayNonUniformIndexing */);
-   }
-   /* Native opaque descriptor pointers can cross helper calls without a
-    * variable-pointers capability. Their SSBO representation requires the
-    * narrower StorageBuffer capability, enabled privately on the device. */
-   bool descriptor_pointer_helper = false;
-   for_each(merged, [&](size_t i, uint32_t op, uint32_t len) {
-       if (op == SpvOpFunctionParameter && len >= 3 && descriptor_pointer_types.count(merged[i + 1]))
-           descriptor_pointer_helper = true;
-       if (op == SpvOpTypeFunction && len >= 3 && descriptor_pointer_types.count(merged[i + 2])) descriptor_pointer_helper = true;
-   });
-   if (descriptor_pointer_helper) ensure_capability(&merged, 4441 /* VariablePointersStorageBuffer */);
-
-   /* Ensure Int64 + PhysicalStorageBufferAddresses are declared (the
-    * traversal uses uint64_t buffer references). */
-   ensure_capability(&merged, SpvCapabilityInt64);
-   ensure_capability(&merged, SpvCapabilityPhysicalStorageBufferAddresses);
-   ensure_extension(&merged, "SPV_KHR_physical_storage_buffer");
-
-   /* Every OpRayQuery* and OpTypeRayQueryKHR is gone at this point, so
-   * the RayQueryKHR capability is no longer required. Dropping it is
-   * what lets the module run on an ICD with no ray-query support (the
-   * whole point of the layer). */
-   {
-      std::vector<uint32_t> out_caps;
-      const auto rq_extension = spv_string_literal("SPV_KHR_ray_query");
-      const auto rt_extension = spv_string_literal("SPV_KHR_ray_tracing");
-      /* Keep the 5-word SPIR-V header! Rebuilding from offset 5 and
-       * swapping without re-prepending it destroys the module (magic
-       * number gone -> the whole rewrite emits a 5-word stub). */
-      for (size_t h = 0; h < 5 && h < merged.size(); h++)
-         out_caps.push_back(merged[h]);
-      size_t i = 5;
-      while (i < merged.size()) {
-         uint32_t op = SPV_OP(merged[i]);
-         uint32_t len = SPV_LEN(merged[i]);
-         if (len == 0 || i + len > merged.size())
-            break;
-         /* The device extension is consumed by the layer too. Leaving an
-          * unused SPIR-V RT extension would still require native RT at
-          * vkCreateShaderModule, even after every RT instruction is gone. */
-         if (op == 10 /* OpExtension */ &&
-             ((len == 1 + rq_extension.size() && std::equal(rq_extension.begin(), rq_extension.end(), merged.begin() + i + 1)) ||
-              (len == 1 + rt_extension.size() && std::equal(rt_extension.begin(), rt_extension.end(), merged.begin() + i + 1)))) {
-             i += len;
-             continue;
-         }
-         if (op == SpvOpCapability && len == 2 &&
-             (merged[i + 1] == SpvCapabilityRayQueryKHR ||
-              merged[i + 1] == SpvCapabilityRayTracingKHR)) {
+        /* --- OpTypeRayQueryKHR: dropped; its id is remapped to the
+         *     sw_ray_query_state struct by the substitution below ------- */
+        /* OpModuleProcessed is linker bookkeeping. The validator treats it
+         * as the end of the debug section, so any OpName after it is
+         * rejected as "in an invalid layout section". */
+        if (op == 330) {
             i += len;
             continue;
-         }
-         for (uint32_t k = 0; k < len; k++)
-            out_caps.push_back(merged[i + k]);
-         i += len;
-      }
-      merged.swap(out_caps);
-   }
-   /* Walk and rewrite into `out`. */
-   std::vector<uint32_t> out;
-   out.push_back(merged[0]);
-   out.push_back(merged[1]);
-   out.push_back(merged[2]);
-   out.push_back(merged[3]);
-   out.push_back(merged[4]);
+        }
 
-   /* Pending function bodies' "insert after this point" is just linear
-    * append; SPIR-V allows the type/const sections to grow. */
+        if (op == SpvOpTypeRayQueryKHR) {
+            i += len;
+            continue;
+        }
 
-   /* One Function-class temporary per ray-query call in each function.
-    * They are emitted just after that function's first OpLabel, which is
-    * the only place SPIR-V allows a Function OpVariable. */
-   uint32_t cur_fn = 0;
-   uint32_t cur_fn_next_temp = 0;
-   std::unordered_map<uint32_t, uint32_t> fn_temp_base;
-   std::unordered_map<uint32_t, uint32_t> fn_temps_emitted;
-   uint32_t state_fn_ptr = get_ptr_type(&merged, &ti, &ids,
-                                        SpvStorageClassFunction, state_ty);
+        /* --- OpTypeAccelerationStructureKHR -> OpTypeInt %same-id 64 ---
+         * Reusing the SAME result id means every OpTypePointer / OpLoad
+         * that referenced it keeps working -- no dangling ids. The value
+         * is the BVHIR root device address. -------------------------------- */
+        if (op == SpvOpTypeAccelerationStructureKHR && len == 2) {
+            out.push_back(SPV_WORD0(SpvOpTypeInt, 4));
+            out.push_back(merged[i + 1]); /* keep the result id */
+            out.push_back(64);
+            out.push_back(0); /* unsigned */
+            i += len;
+            continue;
+        }
 
-   for (size_t i = 5; i < merged.size();) {
-      uint32_t op = SPV_OP(merged[i]);
-      uint32_t len = SPV_LEN(merged[i]);
-      if (len == 0 || i + len > merged.size())
-         break;
-
-      /* --- OpTypeRayQueryKHR: dropped; its id is remapped to the
-      *     sw_ray_query_state struct by the substitution below ------- */
-      /* OpModuleProcessed is linker bookkeeping. The validator treats it
-       * as the end of the debug section, so any OpName after it is
-       * rejected as "in an invalid layout section". */
-      if (op == 330) {
-         i += len;
-         continue;
-      }
-
-      if (op == SpvOpTypeRayQueryKHR) {
-         i += len;
-         continue;
-      }
-
-      /* --- OpTypeAccelerationStructureKHR -> OpTypeInt %same-id 64 ---
-      * Reusing the SAME result id means every OpTypePointer / OpLoad
-      * that referenced it keeps working -- no dangling ids. The value
-      * is the BVHIR root device address. -------------------------------- */
-      if (op == SpvOpTypeAccelerationStructureKHR && len == 2) {
-         out.push_back(SPV_WORD0(SpvOpTypeInt, 4));
-         out.push_back(merged[i + 1]); /* keep the result id */
-         out.push_back(64);
-         out.push_back(0); /* unsigned */
-         i += len;
-         continue;
-      }
-
-      if (op == SpvOpTypePointer && len == 4 && descriptor_pointer_types.count(merged[i + 1])) {
-          out.insert(out.end(), {SPV_WORD0(SpvOpTypePointer, 4), merged[i + 1], SpvStorageClassStorageBuffer,
-                                 descriptor_pointer_types.at(merged[i + 1])});
-          i += len;
-          continue;
-      }
-      if (op == SpvOpVariable && len >= 4 && descriptor_pointer_types.count(merged[i + 1])) {
-          out.insert(out.end(), merged.begin() + i, merged.begin() + i + len);
-          out[out.size() - len + 3] = SpvStorageClassStorageBuffer;
-          i += len;
-          continue;
-      }
-      if (op == SpvOpLoad && as_type_id && len >= 4 && merged[i + 1] == as_type_id) {
-          auto value = val_ty.find(merged[i + 3]);
-          if (value != val_ty.end() && descriptor_pointer_types.count(value->second)) {
-              uint32_t member = ids.fresh();
-              out.insert(out.end(), {SPV_WORD0(SpvOpAccessChain, 5), as_member_ptr, member, merged[i + 3], as_zero});
-              if (nonuniform_ids.count(merged[i + 3]) || nonuniform_ids.count(merged[i + 2]))
-                  out.insert(out.end(), {SPV_WORD0(SpvOpDecorate, 3), member, 5300 /* NonUniform */});
-              out.insert(out.end(), merged.begin() + i, merged.begin() + i + len);
-              out[out.size() - len + 3] = member;
-              i += len;
-              continue;
-          }
-      }
-      if (op == SpvOpConvertUToAccelerationStructureKHR && len == 4) {
-          out.insert(out.end(), {SPV_WORD0(SpvOpBitcast, 4), merged[i + 1], merged[i + 2], merged[i + 3]});
-          i += len;
-          continue;
-      }
-
-      /* --- OpRayQuery*KHR -> OpFunctionCall ------------------------- */
-      auto rqit = op_to_fn.find((uint16_t)op);
-      if (rqit != op_to_fn.end()) {
-         uint32_t fn = rqit->second;
-         bool returns = false;
-         for (const RqOp &r : kRqOps)
-            if (r.opcode == op) { returns = r.returns_value; break; }
-
-         /* Every sw_* entry point takes a single `inout q`; the extra
-          * OpRayQuery* operands are stored into q's fields first. */
-         auto m_of = [&](const char *f) -> uint32_t {
-            auto it = member_idx.find(state_ty);
-            if (it == member_idx.end()) return 0u;
-            auto jt = it->second.find(f);
-            return jt == it->second.end() ? 0u : jt->second;
-         };
-
-         if (op == SpvOpRayQueryInitializeKHR && len >= 9) {
-             /* Preserve the actual AS operand, including descriptor array
-              * selection, helper-returned values and integer conversion. */
-             uint32_t rq_var = merged[i + 1];
-             emit_store(&out, rq_var, {m_of("as_address")}, merged[i + 2], u64_ty, u64_ty);
-             emit_store(&out, rq_var, {m_of("ray_flags")}, merged[i + 3],
-                        val_ty.count(merged[i + 3]) ? val_ty[merged[i + 3]] : u32_ty, u32_ty);
-             emit_store(&out, rq_var, {m_of("cull_mask")}, merged[i + 4],
-                        val_ty.count(merged[i + 4]) ? val_ty[merged[i + 4]] : u32_ty, u32_ty);
-             /* sw_ray is { origin, direction, inv_direction }. */
-             emit_store(&out, rq_var, {m_of("ray"), 0u}, merged[i + 5],
-                        val_ty.count(merged[i + 5]) ? val_ty[merged[i + 5]] : u32_ty,
-                        val_ty.count(merged[i + 5]) ? val_ty[merged[i + 5]] : u32_ty);
-             emit_store(&out, rq_var, {m_of("tmin")}, merged[i + 6], val_ty.count(merged[i + 6]) ? val_ty[merged[i + 6]] : u32_ty,
-                        val_ty.count(merged[i + 6]) ? val_ty[merged[i + 6]] : u32_ty);
-             emit_store(&out, rq_var, {m_of("ray"), 1u}, merged[i + 7],
-                        val_ty.count(merged[i + 7]) ? val_ty[merged[i + 7]] : u32_ty,
-                        val_ty.count(merged[i + 7]) ? val_ty[merged[i + 7]] : u32_ty);
-             emit_store(&out, rq_var, {m_of("tclosest")}, merged[i + 8],
-                        val_ty.count(merged[i + 8]) ? val_ty[merged[i + 8]] : u32_ty,
-                        val_ty.count(merged[i + 8]) ? val_ty[merged[i + 8]] : u32_ty);
-         } else if (op == SpvOpRayQueryGenerateIntersectionKHR && len >= 3) {
-            /* OpRayQueryGenerateIntersectionKHR %rq %thit */
-            emit_store(&out, merged[i + 1], {m_of("gen_thit")},
-                       merged[i + 2],
-                       val_ty.count(merged[i + 2]) ? val_ty[merged[i + 2]] : u32_ty,
-                       val_ty.count(merged[i + 2]) ? val_ty[merged[i + 2]] : u32_ty);
-         } else if (len >= 5 &&
-                    (op == SpvOpRayQueryGetIntersectionTypeKHR || op == SpvOpRayQueryGetIntersectionTKHR ||
-                     op == SpvOpRayQueryGetIntersectionBarycentricsKHR || op == SpvOpRayQueryGetIntersectionPrimitiveIndexKHR ||
-                     op == SpvOpRayQueryGetIntersectionGeometryIndexKHR || op == SpvOpRayQueryGetIntersectionInstanceIdKHR ||
-                     op == SpvOpRayQueryGetIntersectionInstanceCustomIndexKHR ||
-                     op == SpvOpRayQueryGetIntersectionInstanceShaderBindingTableRecordOffsetKHR ||
-                     op == SpvOpRayQueryGetIntersectionObjectRayOriginKHR ||
-                     op == SpvOpRayQueryGetIntersectionObjectRayDirectionKHR ||
-                     op == SpvOpRayQueryGetIntersectionObjectToWorldKHR || op == SpvOpRayQueryGetIntersectionWorldToObjectKHR ||
-                     op == SpvOpRayQueryGetIntersectionFrontFaceKHR)) {
-             /* OpX %rty %res %rq %committed  ->  store committed into q */
-             emit_store(&out, merged[i + 3], {m_of("want_committed")}, merged[i + 4],
-                        val_ty.count(merged[i + 4]) ? val_ty[merged[i + 4]] : bool_ty, u32_ty);
-         }
-
-         if (returns) {
-            /* OpX %resultType %result %rq <extra...> */
-            if (len < 4) {
-               i += len;
-               continue;
+        if (op == SpvOpTypePointer && len == 4 && descriptor_pointer_types.count(merged[i + 1])) {
+            out.insert(out.end(), {SPV_WORD0(SpvOpTypePointer, 4), merged[i + 1], SpvStorageClassStorageBuffer,
+                                   descriptor_pointer_types.at(merged[i + 1])});
+            i += len;
+            continue;
+        }
+        if (op == SpvOpVariable && len >= 4 && descriptor_pointer_types.count(merged[i + 1])) {
+            out.insert(out.end(), merged.begin() + i, merged.begin() + i + len);
+            out[out.size() - len + 3] = SpvStorageClassStorageBuffer;
+            i += len;
+            continue;
+        }
+        if (op == SpvOpLoad && as_type_id && len >= 4 && merged[i + 1] == as_type_id) {
+            auto value = val_ty.find(merged[i + 3]);
+            if (value != val_ty.end() && descriptor_pointer_types.count(value->second)) {
+                uint32_t member = ids.fresh();
+                out.insert(out.end(), {SPV_WORD0(SpvOpAccessChain, 5), as_member_ptr, member, merged[i + 3], as_zero});
+                if (nonuniform_ids.count(merged[i + 3]) || nonuniform_ids.count(merged[i + 2]))
+                    out.insert(out.end(), {SPV_WORD0(SpvOpDecorate, 3), member, 5300 /* NonUniform */});
+                out.insert(out.end(), merged.begin() + i, merged.begin() + i + len);
+                out[out.size() - len + 3] = member;
+                i += len;
+                continue;
             }
-            uint32_t rty = merged[i + 1];
-            uint32_t res = merged[i + 2];
-            /* SPIR-V permits either signedness for this 32-bit result;
-             * the GLSL helper has the unsigned return type. */
-            uint32_t call_type = op == SpvOpRayQueryGetIntersectionInstanceShaderBindingTableRecordOffsetKHR ? val_ty.at(fn) : rty;
-            uint32_t call_result = call_type == rty ? res : ids.fresh();
-            uint32_t q_orig = merged[i + 3];
-            uint32_t q_arg = q_orig;
-            if (cur_fn && fn_temp_base.count(cur_fn)) {
-               q_arg = fn_temp_base[cur_fn] + cur_fn_next_temp++;
-               emit_call_q(&out, q_arg, q_orig);
+        }
+        if (op == SpvOpConvertUToAccelerationStructureKHR && len == 4) {
+            out.insert(out.end(), {SPV_WORD0(SpvOpBitcast, 4), merged[i + 1], merged[i + 2], merged[i + 3]});
+            i += len;
+            continue;
+        }
+
+        /* --- OpRayQuery*KHR -> OpFunctionCall ------------------------- */
+        auto rqit = op_to_fn.find((uint16_t)op);
+        if (rqit != op_to_fn.end()) {
+            uint32_t fn = rqit->second;
+            bool returns = false;
+            for (const RqOp &r : kRqOps)
+                if (r.opcode == op) {
+                    returns = r.returns_value;
+                    break;
+                }
+
+            /* Every sw_* entry point takes a single `inout q`; the extra
+             * OpRayQuery* operands are stored into q's fields first. */
+            auto m_of = [&](const char *f) -> uint32_t {
+                auto it = member_idx.find(state_ty);
+                if (it == member_idx.end()) return 0u;
+                auto jt = it->second.find(f);
+                return jt == it->second.end() ? 0u : jt->second;
+            };
+
+            if (op == SpvOpRayQueryInitializeKHR && len >= 9) {
+                /* Preserve the actual AS operand, including descriptor array
+                 * selection, helper-returned values and integer conversion. */
+                uint32_t rq_var = merged[i + 1];
+                emit_store(&out, rq_var, {m_of("as_address")}, merged[i + 2], u64_ty, u64_ty);
+                emit_store(&out, rq_var, {m_of("ray_flags")}, merged[i + 3],
+                           val_ty.count(merged[i + 3]) ? val_ty[merged[i + 3]] : u32_ty, u32_ty);
+                emit_store(&out, rq_var, {m_of("cull_mask")}, merged[i + 4],
+                           val_ty.count(merged[i + 4]) ? val_ty[merged[i + 4]] : u32_ty, u32_ty);
+                /* sw_ray is { origin, direction, inv_direction }. */
+                emit_store(&out, rq_var, {m_of("ray"), 0u}, merged[i + 5],
+                           val_ty.count(merged[i + 5]) ? val_ty[merged[i + 5]] : u32_ty,
+                           val_ty.count(merged[i + 5]) ? val_ty[merged[i + 5]] : u32_ty);
+                emit_store(&out, rq_var, {m_of("tmin")}, merged[i + 6],
+                           val_ty.count(merged[i + 6]) ? val_ty[merged[i + 6]] : u32_ty,
+                           val_ty.count(merged[i + 6]) ? val_ty[merged[i + 6]] : u32_ty);
+                emit_store(&out, rq_var, {m_of("ray"), 1u}, merged[i + 7],
+                           val_ty.count(merged[i + 7]) ? val_ty[merged[i + 7]] : u32_ty,
+                           val_ty.count(merged[i + 7]) ? val_ty[merged[i + 7]] : u32_ty);
+                emit_store(&out, rq_var, {m_of("tclosest")}, merged[i + 8],
+                           val_ty.count(merged[i + 8]) ? val_ty[merged[i + 8]] : u32_ty,
+                           val_ty.count(merged[i + 8]) ? val_ty[merged[i + 8]] : u32_ty);
+            } else if (op == SpvOpRayQueryGenerateIntersectionKHR && len >= 3) {
+                /* OpRayQueryGenerateIntersectionKHR %rq %thit */
+                emit_store(&out, merged[i + 1], {m_of("gen_thit")}, merged[i + 2],
+                           val_ty.count(merged[i + 2]) ? val_ty[merged[i + 2]] : u32_ty,
+                           val_ty.count(merged[i + 2]) ? val_ty[merged[i + 2]] : u32_ty);
+            } else if (len >= 5 &&
+                       (op == SpvOpRayQueryGetIntersectionTypeKHR || op == SpvOpRayQueryGetIntersectionTKHR ||
+                        op == SpvOpRayQueryGetIntersectionBarycentricsKHR || op == SpvOpRayQueryGetIntersectionPrimitiveIndexKHR ||
+                        op == SpvOpRayQueryGetIntersectionGeometryIndexKHR || op == SpvOpRayQueryGetIntersectionInstanceIdKHR ||
+                        op == SpvOpRayQueryGetIntersectionInstanceCustomIndexKHR ||
+                        op == SpvOpRayQueryGetIntersectionInstanceShaderBindingTableRecordOffsetKHR ||
+                        op == SpvOpRayQueryGetIntersectionObjectRayOriginKHR ||
+                        op == SpvOpRayQueryGetIntersectionObjectRayDirectionKHR ||
+                        op == SpvOpRayQueryGetIntersectionObjectToWorldKHR || op == SpvOpRayQueryGetIntersectionWorldToObjectKHR ||
+                        op == SpvOpRayQueryGetIntersectionFrontFaceKHR)) {
+                /* OpX %rty %res %rq %committed  ->  store committed into q */
+                emit_store(&out, merged[i + 3], {m_of("want_committed")}, merged[i + 4],
+                           val_ty.count(merged[i + 4]) ? val_ty[merged[i + 4]] : bool_ty, u32_ty);
             }
-            out.push_back(SPV_WORD0(SpvOpFunctionCall, 5));
-            out.push_back(call_type);
-            out.push_back(call_result);
-            out.push_back(fn);
-            out.push_back(q_arg);   /* %rq */
-            if (call_type != rty) {
-                out.push_back(SPV_WORD0(SpvOpBitcast, 4));
-                out.push_back(rty);
-                out.push_back(res);
+
+            if (returns) {
+                /* OpX %resultType %result %rq <extra...> */
+                if (len < 4) {
+                    i += len;
+                    continue;
+                }
+                uint32_t rty = merged[i + 1];
+                uint32_t res = merged[i + 2];
+                /* SPIR-V permits either signedness for this 32-bit result;
+                 * the GLSL helper has the unsigned return type. */
+                uint32_t call_type =
+                    op == SpvOpRayQueryGetIntersectionInstanceShaderBindingTableRecordOffsetKHR ? val_ty.at(fn) : rty;
+                uint32_t call_result = call_type == rty ? res : ids.fresh();
+                uint32_t q_orig = merged[i + 3];
+                uint32_t q_arg = q_orig;
+                if (cur_fn && fn_temp_base.count(cur_fn)) {
+                    q_arg = fn_temp_base[cur_fn] + cur_fn_next_temp++;
+                    emit_call_q(&out, q_arg, q_orig);
+                }
+                out.push_back(SPV_WORD0(SpvOpFunctionCall, 5));
+                out.push_back(call_type);
                 out.push_back(call_result);
+                out.push_back(fn);
+                out.push_back(q_arg); /* %rq */
+                if (call_type != rty) {
+                    out.push_back(SPV_WORD0(SpvOpBitcast, 4));
+                    out.push_back(rty);
+                    out.push_back(res);
+                    out.push_back(call_result);
+                }
+                if (q_arg != q_orig) emit_call_q_back(&out, q_arg, q_orig);
+            } else {
+                /* OpX %rq <extra...>  (no result). Only the ray-query object
+                 * is passed; everything else is already in q. The call is
+                 * therefore always 5 words: word0, void, res, fn, %rq. */
+                uint32_t q_orig = merged[i + 1];
+                uint32_t q_arg = q_orig;
+                if (cur_fn && fn_temp_base.count(cur_fn)) {
+                    q_arg = fn_temp_base[cur_fn] + cur_fn_next_temp++;
+                    emit_call_q(&out, q_arg, q_orig);
+                }
+                out.push_back(SPV_WORD0(SpvOpFunctionCall, 5));
+                out.push_back(void_ty);
+                out.push_back(ids.fresh()); /* unused result id for void call */
+                out.push_back(fn);
+                out.push_back(q_arg); /* %rq */
+                if (q_arg != q_orig) emit_call_q_back(&out, q_arg, q_orig);
             }
-            if (q_arg != q_orig)
-               emit_call_q_back(&out, q_arg, q_orig);
-         } else {
-            /* OpX %rq <extra...>  (no result). Only the ray-query object
-             * is passed; everything else is already in q. The call is
-             * therefore always 5 words: word0, void, res, fn, %rq. */
-            uint32_t q_orig = merged[i + 1];
-            uint32_t q_arg = q_orig;
-            if (cur_fn && fn_temp_base.count(cur_fn)) {
-               q_arg = fn_temp_base[cur_fn] + cur_fn_next_temp++;
-               emit_call_q(&out, q_arg, q_orig);
+            i += len;
+            continue;
+        }
+
+        /* --- track the enclosing function and mint its temporaries ----- */
+        if (op == SpvOpFunction && len >= 3) {
+            cur_fn = merged[i + 2];
+            cur_fn_next_temp = 0;
+        } else if (op == SpvOpFunctionEnd) {
+            cur_fn = 0;
+        } else if (op == 248 /* OpLabel */ && cur_fn && fn_rq_count.count(cur_fn) && !fn_temps_emitted.count(cur_fn)) {
+            out.push_back(SPV_WORD0(248, 2));
+            out.push_back(merged[i + 1]);
+            uint32_t n = fn_rq_count[cur_fn];
+            fn_temp_base[cur_fn] = ids.fresh();
+            /* Consume the whole block up front: fresh() hands out one id at
+             * a time, so allocating n of them as base+k without advancing
+             * next makes every later fresh() collide. */
+            for (uint32_t k = 1; k < n; k++) (void)ids.fresh();
+            for (uint32_t k = 0; k < n; k++) {
+                uint32_t tid = fn_temp_base[cur_fn] + k;
+                out.push_back(SPV_WORD0(SpvOpVariable, 4));
+                out.push_back(state_fn_ptr);
+                out.push_back(tid);
+                out.push_back(SpvStorageClassFunction);
             }
-            out.push_back(SPV_WORD0(SpvOpFunctionCall, 5));
-            out.push_back(void_ty);
-            out.push_back(ids.fresh()); /* unused result id for void call */
-            out.push_back(fn);
-            out.push_back(q_arg);   /* %rq */
-            if (q_arg != q_orig)
-               emit_call_q_back(&out, q_arg, q_orig);
-         }
-         i += len;
-         continue;
-      }
+            fn_temps_emitted[cur_fn] = 1;
+            i += len;
+            continue;
+        }
 
-      /* --- track the enclosing function and mint its temporaries ----- */
-      if (op == SpvOpFunction && len >= 3) {
-         cur_fn = merged[i + 2];
-         cur_fn_next_temp = 0;
-      } else if (op == SpvOpFunctionEnd) {
-         cur_fn = 0;
-      } else if (op == 248 /* OpLabel */ && cur_fn &&
-                 fn_rq_count.count(cur_fn) && !fn_temps_emitted.count(cur_fn)) {
-         out.push_back(SPV_WORD0(248, 2));
-         out.push_back(merged[i + 1]);
-         uint32_t n = fn_rq_count[cur_fn];
-         fn_temp_base[cur_fn] = ids.fresh();
-         /* Consume the whole block up front: fresh() hands out one id at
-          * a time, so allocating n of them as base+k without advancing
-          * next makes every later fresh() collide. */
-         for (uint32_t k = 1; k < n; k++)
-            (void)ids.fresh();
-         for (uint32_t k = 0; k < n; k++) {
-            uint32_t tid = fn_temp_base[cur_fn] + k;
-            out.push_back(SPV_WORD0(SpvOpVariable, 4));
-            out.push_back(state_fn_ptr);
-            out.push_back(tid);
-            out.push_back(SpvStorageClassFunction);
-         }
-         fn_temps_emitted[cur_fn] = 1;
-         i += len;
-         continue;
-      }
+        /* --- default: copy through ------------------------------------ */
+        for (uint32_t k = 0; k < len; k++) out.push_back(merged[i + k]);
+        i += len;
+    }
 
-      /* --- default: copy through ------------------------------------ */
-      for (uint32_t k = 0; k < len; k++)
-         out.push_back(merged[i + k]);
-      i += len;
-   }
+    if (!rewrite_error.empty()) return fail(rewrite_error.c_str());
+    /* (OpTypeRayQueryKHR ids were remapped before the main pass.) */
 
-   if (!rewrite_error.empty()) return fail(rewrite_error.c_str());
-   /* (OpTypeRayQueryKHR ids were remapped before the main pass.) */
+    /* ---- 5. Emit ---------------------------------------------------- */
+    /* Hoist BEFORE the layout pass: at this point the module is still in
+     * glslc's logical order (annotations -> types -> functions), so the
+     * splice lands at the head of the type region. Running it after
+     * normalize_layout would insert types into the middle of a function.
+     * normalize_layout then keeps them first within the type bucket. */
+    hoist_type_and_deps(&out, state_ty);
+    normalize_layout(&out);
+    std::string dedupe_error;
+    if (!vkrt_spv::dedupe_types(&out, &dedupe_error)) return fail(dedupe_error.c_str());
+    strip_dangling_debug_names(&out);
 
-   /* ---- 5. Emit ---------------------------------------------------- */
-   /* Hoist BEFORE the layout pass: at this point the module is still in
-    * glslc's logical order (annotations -> types -> functions), so the
-    * splice lands at the head of the type region. Running it after
-    * normalize_layout would insert types into the middle of a function.
-    * normalize_layout then keeps them first within the type bucket. */
-   hoist_type_and_deps(&out, state_ty);
-   normalize_layout(&out);
-   std::string dedupe_error;
-   if (!vkrt_spv::dedupe_types(&out, &dedupe_error)) return fail(dedupe_error.c_str());
-   strip_dangling_debug_names(&out);
+    /* Word 3 of the header is the ID bound: every result id in the module
+     * must be < bound. The rewrite allocates fresh ids (ids.fresh()) so
+     * the original bound is stale. Recompute it from what the module
+     * actually defines rather than trusting ids.next -- a single bogus
+     * result id would otherwise push the bound past the 2^22-1 limit. */
+    if (out.size() >= 4) {
+        uint32_t max_id = out[3];
+        for (size_t i = 5; i < out.size();) {
+            uint32_t op = SPV_OP(out[i]);
+            uint32_t len = SPV_LEN(out[i]);
+            if (len == 0 || i + len > out.size()) break;
+            uint32_t rid = result_id(out, i, op);
+            if (rid > max_id && rid < (1u << 22)) max_id = rid;
+            i += len;
+        }
+        /* Also cover ids we allocated but that a pass may have dropped. */
+        if (ids.next > max_id && ids.next < (1u << 22)) max_id = ids.next;
+        out[3] = max_id + 1;
+    }
 
-   /* Word 3 of the header is the ID bound: every result id in the module
-    * must be < bound. The rewrite allocates fresh ids (ids.fresh()) so
-    * the original bound is stale. Recompute it from what the module
-    * actually defines rather than trusting ids.next -- a single bogus
-    * result id would otherwise push the bound past the 2^22-1 limit. */
-   if (out.size() >= 4) {
-      uint32_t max_id = out[3];
-      for (size_t i = 5; i < out.size();) {
-         uint32_t op = SPV_OP(out[i]);
-         uint32_t len = SPV_LEN(out[i]);
-         if (len == 0 || i + len > out.size())
-            break;
-         uint32_t rid = result_id(out, i, op);
-         if (rid > max_id && rid < (1u << 22))
-            max_id = rid;
-         i += len;
-      }
-      /* Also cover ids we allocated but that a pass may have dropped. */
-      if (ids.next > max_id && ids.next < (1u << 22))
-         max_id = ids.next;
-      out[3] = max_id + 1;
-   }
+    /* Never hand an invalid rewrite to the driver. Scalar layout is enabled
+     * on the device by the layer and is required by our packed BVH nodes. */
+    spvtools::SpirvTools validator(SPV_ENV_VULKAN_1_2);
+    std::string validation_diag;
+    validator.SetMessageConsumer([&](spv_message_level_t, const char *, const spv_position_t &, const char *message) {
+        if (!validation_diag.empty()) validation_diag += " | ";
+        validation_diag += message ? message : "(no diagnostic)";
+    });
+    spvtools::ValidatorOptions validation_options;
+    validation_options.SetScalarBlockLayout(true);
+    if (!validator.Validate(out.data(), out.size(), validation_options))
+        return fail(("rewritten SPIR-V validation failed: " + validation_diag).c_str());
 
-   /* Never hand an invalid rewrite to the driver. Scalar layout is enabled
-    * on the device by the layer and is required by our packed BVH nodes. */
-   spvtools::SpirvTools validator(SPV_ENV_VULKAN_1_2);
-   std::string validation_diag;
-   validator.SetMessageConsumer([&](spv_message_level_t, const char *,
-                                    const spv_position_t &, const char *message) {
-      if (!validation_diag.empty()) validation_diag += " | ";
-      validation_diag += message ? message : "(no diagnostic)";
-   });
-   spvtools::ValidatorOptions validation_options;
-   validation_options.SetScalarBlockLayout(true);
-   if (!validator.Validate(out.data(), out.size(), validation_options))
-      return fail(("rewritten SPIR-V validation failed: " + validation_diag).c_str());
-
-   size_t n = out.size();
-   uint32_t *buf = (uint32_t *)std::malloc(n * 4);
-   if (!buf)
-      return fail("out of memory emitting rewritten SPIR-V");
-   std::memcpy(buf, out.data(), n * 4);
-   *out_words = buf;
-   *out_word_count = n;
-   return 0;
+    size_t n = out.size();
+    uint32_t *buf = (uint32_t *)std::malloc(n * 4);
+    if (!buf) return fail("out of memory emitting rewritten SPIR-V");
+    std::memcpy(buf, out.data(), n * 4);
+    *out_words = buf;
+    *out_word_count = n;
+    return 0;
 }
 
 void
 vkrt_spirv_lower_free(uint32_t *words)
 {
    std::free(words);
+}
+
+int vkrt_spirv_lower(const uint32_t *user_words, size_t user_word_count, const uint32_t *lib_words, size_t lib_word_count,
+                     uint32_t **out_words, size_t *out_word_count, char *errbuf, size_t errbuf_len) {
+    return vkrt_spirv_lower_with_context(user_words, user_word_count, lib_words, lib_word_count, 0, out_words, out_word_count,
+                                         errbuf, errbuf_len);
 }

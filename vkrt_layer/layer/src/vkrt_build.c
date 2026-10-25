@@ -1,5 +1,6 @@
 /* SPDX-License-Identifier: MIT */
 #include "vkrt_layer.h"
+#include "vkrt_as_registry.h"
 #include "vkrt_build_layout.h"
 #include "bvh_ir_builder.h"
 #include "vkrt_init.spv.h"
@@ -34,11 +35,15 @@ VkResult vkrt_build_init(struct vkrt_device_data *dev)
 #undef SHADER
    };
    /* 128 threads * 2 keys = 256 leaves per sorting workgroup. */
-   uint32_t values[] = {64, VKRT_BOUNDS_OFFSET, 0, 0, 128, 2};
-   VkSpecializationMapEntry entries[6];
+   struct {
+       uint32_t values[6];
+       uint64_t context;
+   } values = {{64, VKRT_BOUNDS_OFFSET, 0, 0, 128, 2}, vkrt_as_registry_address(dev)};
+   VkSpecializationMapEntry entries[7];
    for (uint32_t i = 0; i < 6; ++i)
       entries[i] = (VkSpecializationMapEntry){i, i * 4, 4};
-   VkSpecializationInfo spec = {6, entries, sizeof(values), values};
+   entries[6] = (VkSpecializationMapEntry){6, 24, 8};
+   VkSpecializationInfo spec = {7, entries, sizeof(values), &values};
    for (uint32_t i = 0; i < VKRT_ARRAY_SIZE(shaders); ++i) {
        uint32_t phase = i >= ENCODE_0 ? i - ENCODE_0 : 0;
        VkSpecializationMapEntry phase_entry = {0, 0, sizeof(phase)};
@@ -134,7 +139,7 @@ void vkrt_cmd_build_as(struct vkrt_device_data *dev, VkCommandBuffer cmd, uint32
           cb->record_result = VK_ERROR_OUT_OF_DEVICE_MEMORY;
           break;
       }
-      VkDeviceAddress address = vkrt_as_device_address(dev, info->dstAccelerationStructure);
+      VkDeviceAddress address = vkrt_as_backing_address(dev, info->dstAccelerationStructure);
       VkDeviceAddress scratch = info->scratchData.deviceAddress;
       if (!address) { cb->record_result = VK_ERROR_INITIALIZATION_FAILED; break; }
       if (address > UINT64_MAX - l.as_size || scratch > UINT64_MAX - l.scratch_size) {

@@ -54,9 +54,9 @@ $env:VK_INSTANCE_LAYERS='VK_LAYER_VKRT_SOFTWARE_RAY_QUERY'
 ./your-application.exe
 ```
 
-Disable other RT fallback layers before running. The GPU tests currently require native RT capability exposure and the software backend's real prerequisites: BDA, scalar block layout, shader int8/int16/int64, buffer 8/16-bit access, the Vulkan memory model with device scope, SSBO dynamic/nonuniform indexing and variablePointersStorageBuffer.
+Disable other RT fallback layers before running. The GPU tests currently require native RT capability exposure and the software backend's real prerequisites: BDA, scalar block layout, shader int8/int16/int64, buffer 8/16-bit access, the Vulkan memory model with device scope, SSBO dynamic/nonuniform indexing, variablePointersStorageBuffer and a compatible HOST_VISIBLE | HOST_COHERENT memory type for private resolver buffers. The [AS address ABI](../layers/common/rt_fallback/AS_ADDRESS_ABI.md) explains public values, physical roots and publication lifetime.
 
-CTest currently defines eleven offline tests and four GPU tests. The `cpu_fixture` test uploads a CPU-built fixture but still executes a shader on the GPU. The native GPU test disables this layer; the software AS tests enable it through their CTest environment. The additional `no_native_rt` test runs production traversal helpers on ordinary compute without enabling native RT or the fallback layer; it validates those helpers, not a complete no-RT AS/layer path.
+CTest currently defines twelve offline tests and six GPU tests. The `cpu_fixture` test uploads a CPU-built fixture but still executes a shader on the GPU. Native GPU tests disable this layer; software AS tests enable it through their CTest environment. `gpu_build.aligned_values` binds output buffers at their smallest legal nonzero memory offset and checks GENERIC AS aliases, relative offsets, GPU builds and query results. The `no_native_rt` traversal test executes production helpers on ordinary compute without enabling native RT or the fallback layer; it validates those helpers, not a complete no-RT AS/layer path.
 
 ```sh
 # All tests, including software and native GPU execution:

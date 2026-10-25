@@ -101,7 +101,7 @@ void emit_leaf(uint source_id, uint parent) {
         fail(32); return;
     }
     uint64_t blas = identity_blas ? read64(src + 24) : read64(args.runtime_blas + uint64_t(source_slot) * uint64_t(8));
-    if (blas == uint64_t(0) || (blas & uint64_t(127)) != uint64_t(0)) { fail(32); return; }
+    if (blas == uint64_t(0) || (blas & uint64_t(3)) != uint64_t(0)) { fail(32); return; }
     write64(dst, blas);
     write32(dst + 8, read32(src + 32));
     write32(dst + 12, read32(src + 36));

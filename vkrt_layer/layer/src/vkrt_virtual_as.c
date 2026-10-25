@@ -1,10 +1,11 @@
 /* SPDX-License-Identifier: MIT
  *
- * A virtual AS is a layer-owned token backed by ordinary BVHIR buffer storage.
- * Its descriptor is a lifetime-owned cell containing the root BDA.
+ * A virtual AS is a layer-owned handle backed by ordinary shared-BVH4 storage.
+ * Its descriptor cell contains the opaque public value resolved before access.
  */
 #include "vkrt_layer.h"
 #include "vkrt_build_layout.h"
+#include "vkrt_as_registry.h"
 
 VkResult vkrt_device_queue_families_init(struct vkrt_device_data *dev, const VkDeviceCreateInfo *ci,
                                          const VkAllocationCallbacks *allocator) {
@@ -64,6 +65,7 @@ static void free_virtual_as(struct vkrt_device_data *dev, struct vkrt_virtual_as
     if (as->address_cell_mapping) dev->vtable.UnmapMemory(dev->device, as->address_cell_memory);
     if (as->address_cell_buffer) dev->vtable.DestroyBuffer(dev->device, as->address_cell_buffer, allocator);
     if (as->address_cell_memory) dev->vtable.FreeMemory(dev->device, as->address_cell_memory, allocator);
+    vkrt_as_registry_release(dev, as->registry_entry);
 #ifndef _WIN32
     pthread_mutex_destroy(&as->address_lock);
 #endif
@@ -138,7 +140,7 @@ static VkResult create_address_cell(struct vkrt_device_data *dev, struct vkrt_vi
     result = dev->vtable.MapMemory(dev->device, as->address_cell_memory, 0, VK_WHOLE_SIZE, 0, &mapping);
     if (result != VK_SUCCESS) return result;
     as->address_cell_mapping = mapping;
-    memset(as->address_cell_mapping, 0, sizeof(VkDeviceAddress));
+    memcpy(as->address_cell_mapping, &as->public_address, sizeof(VkDeviceAddress));
     return flush_address_cell(dev, as);
 }
 
@@ -151,7 +153,17 @@ VkResult vkrt_create_virtual_as(struct vkrt_device_data *dev, const VkAccelerati
                                      : malloc(sizeof(*as));
     if (!as) return VK_ERROR_OUT_OF_HOST_MEMORY;
     memset(as, 0, sizeof(*as));
+#ifdef _WIN32
     vkrt_mutex_init(&as->address_lock);
+#else
+    if (pthread_mutex_init(&as->address_lock, NULL)) {
+        if (allocator)
+            allocator->pfnFree(allocator->pUserData, as);
+        else
+            free(as);
+        return VK_ERROR_OUT_OF_HOST_MEMORY;
+    }
+#endif
     if (allocator) {
         as->has_allocator = true;
         as->allocator = *allocator;
@@ -161,10 +173,15 @@ VkResult vkrt_create_virtual_as(struct vkrt_device_data *dev, const VkAccelerati
     as->backing_buffer = ci->buffer;
     as->offset = ci->offset;
     as->size = ci->size;
+    if (ci->deviceAddress || (ci->createFlags & VK_ACCELERATION_STRUCTURE_CREATE_DEVICE_ADDRESS_CAPTURE_REPLAY_BIT_KHR)) {
+        free_virtual_as(dev, as);
+        return VK_ERROR_FEATURE_NOT_PRESENT;
+    }
 
     /* Allocate here so failures can be returned. The AS backing buffer need
      * not be bound at creation: do not query its device address. */
-    VkResult result = create_address_cell(dev, as);
+    VkResult result = vkrt_as_registry_acquire(dev, ci->buffer, ci->offset, &as->registry_entry, &as->public_address);
+    if (result == VK_SUCCESS) result = create_address_cell(dev, as);
     if (result != VK_SUCCESS) {
         free_virtual_as(dev, as);
         return result;
@@ -200,17 +217,19 @@ void vkrt_as_build_sizes(struct vkrt_device_data *dev, const VkAccelerationStruc
     pSizeInfo->updateScratchSize = 0; /* refit is explicitly unsupported */
 }
 
-VkDeviceAddress vkrt_as_device_address(struct vkrt_device_data *dev, VkAccelerationStructureKHR handle) {
+VkDeviceAddress vkrt_as_backing_address(struct vkrt_device_data *dev, VkAccelerationStructureKHR handle) {
     struct vkrt_virtual_as *as = VKRT_FIND(struct vkrt_virtual_as, handle);
     if (!as || as->owner != dev->device) {
         VKRT_LOG_WARN("as_device_address: unknown or foreign handle %p", (void *)handle);
         return 0;
     }
 
-    /* Only valid GetASAddress/build calls resolve this address, after backing
-     * memory is bound. Descriptor updates may precede binding and just use the
-     * zero-initialized cell. Valid nonsparse buffer bindings are immutable,
-     * so later descriptor updates never rewrite a cell in use by the GPU. */
+    /* Resolve the real storage after binding. Public AS values in descriptor
+     * cells never change; only the preallocated coherent radix leaf publishes
+     * a physical address, with no fallible allocation/flush in this path.
+     * Construction requires a Build/Copy targeting this AS object; creating
+     * a new view of old bytes does not construct it. Future Copy entry points
+     * must also call this helper before their destination can be used. */
     vkrt_mutex_lock(&as->address_lock);
     VkDeviceAddress address = as->header_address;
     if (!address && dev->vtable.GetBufferDeviceAddress && as->backing_buffer) {
@@ -218,16 +237,16 @@ VkDeviceAddress vkrt_as_device_address(struct vkrt_device_data *dev, VkAccelerat
         VkDeviceAddress base = dev->vtable.GetBufferDeviceAddress(dev->device, &info);
         if (base && as->offset <= UINT64_MAX - base) {
             address = base + as->offset;
-            memcpy(as->address_cell_mapping, &address, sizeof(address));
-            VkResult result = flush_address_cell(dev, as);
-            if (result == VK_SUCCESS) {
-                as->header_address = address;
-            } else {
-                VKRT_LOG_ERR("as_device_address: address-cell flush failed (%d)", result);
-                address = 0;
-            }
+            address = vkrt_as_registry_publish(dev, as->registry_entry, address);
+            if (address) as->header_address = address;
         }
     }
     vkrt_mutex_unlock(&as->address_lock);
     return address;
+}
+
+VkDeviceAddress vkrt_as_device_address(struct vkrt_device_data *dev, VkAccelerationStructureKHR handle) {
+    if (!vkrt_as_backing_address(dev, handle)) return 0;
+    struct vkrt_virtual_as *as = VKRT_FIND(struct vkrt_virtual_as, handle);
+    return as->public_address;
 }

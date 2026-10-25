@@ -20,6 +20,8 @@ struct vkrt_virtual_as {
    VkDeviceSize                   offset;
    VkDeviceSize                   size;
    VkDeviceAddress                header_address; /* &vk_ir_header        */
+   VkDeviceAddress public_address;
+   struct vkrt_as_registry_entry *registry_entry;
    VkBuffer address_cell_buffer;
    VkDeviceMemory address_cell_memory;
    void *address_cell_mapping;
@@ -44,6 +46,7 @@ struct vkrt_device_data {
    VkDevice                    device;
    VkPhysicalDevice            physical_device;
    struct vkrt_instance_data  *instance_data;
+   struct vkrt_as_registry *as_registry;
    /* Immutable enabled queue families. Hidden AS cells are shared across
     * every family the application can use, without exposed ownership state. */
    uint32_t queue_family_count;
@@ -104,6 +107,7 @@ extern struct vkrt_global vkrt_global;
 /* vkrt_translate.c: host-side translations, also exercised without an ICD. */
 VKAPI_ATTR VkResult VKAPI_CALL vkrt_CreateBuffer(VkDevice device, const VkBufferCreateInfo *info,
                                                  const VkAllocationCallbacks *allocator, VkBuffer *buffer);
+VKAPI_ATTR void VKAPI_CALL vkrt_DestroyBuffer(VkDevice device, VkBuffer buffer, const VkAllocationCallbacks *allocator);
 VKAPI_ATTR void VKAPI_CALL vkrt_UpdateDescriptorSets(VkDevice device,
    uint32_t writeCount, const VkWriteDescriptorSet *writes,
    uint32_t copyCount, const VkCopyDescriptorSet *copies);
@@ -131,6 +135,7 @@ void     vkrt_as_build_sizes(struct vkrt_device_data *dev,
                              VkAccelerationStructureBuildSizesInfoKHR *pSizeInfo);
 VkDeviceAddress vkrt_as_device_address(struct vkrt_device_data *dev,
                                        VkAccelerationStructureKHR as);
+VkDeviceAddress vkrt_as_backing_address(struct vkrt_device_data *dev, VkAccelerationStructureKHR as);
 
 /* vkrt_build.c */
 VkResult vkrt_create_device_with_features(struct vkrt_instance_data *inst,

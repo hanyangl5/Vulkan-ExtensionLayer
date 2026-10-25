@@ -44,6 +44,7 @@ add_library(${VKRT_LAYER_NAME} SHARED
    src/vkrt_spirv_lower.cpp
    src/vkrt_spirv_ids.cpp
    src/vkrt_virtual_as.c
+   src/vkrt_as_registry.c
    src/vkrt_build.c
    src/vkrt_features.c
    src/vkrt_discovery.c
@@ -78,6 +79,7 @@ add_custom_command(
       ${CMAKE_CURRENT_SOURCE_DIR}/traversal/sw_ray_query_library.comp
       ${CMAKE_CURRENT_SOURCE_DIR}/traversal/sw_ray_query.glsl
       ${VKRT_COMMON_BVH4}/bvh4_abi.glsl
+      ${VKRT_COMMON_BVH4}/as_address.glsl
       ${CMAKE_CURRENT_SOURCE_DIR}/bvh/vk_bvh_defines.h
       ${CMAKE_CURRENT_SOURCE_DIR}/bvh/bvh_ir_contract.h
       ${CMAKE_CURRENT_SOURCE_DIR}/bvh/bvh_ir_builder.h
@@ -122,6 +124,7 @@ foreach(_vkrt_bvh_src IN LISTS VKRT_BVH_SHADER_SOURCES)
               -fshader-stage=compute
               --target-env=vulkan1.2
               -I ${CMAKE_CURRENT_SOURCE_DIR}/bvh
+              -I ${VKRT_COMMON_BVH4}
               ${CMAKE_CURRENT_SOURCE_DIR}/${_vkrt_bvh_src}
               -o ${_vkrt_bvh_spv}
       COMMAND ${VKRT_SPIRV_VAL} --target-env vulkan1.2 --scalar-block-layout ${_vkrt_bvh_spv}
@@ -137,6 +140,7 @@ foreach(_vkrt_bvh_src IN LISTS VKRT_BVH_SHADER_SOURCES)
          ${CMAKE_CURRENT_SOURCE_DIR}/bvh/bvh_ir_build_layout.h
          ${CMAKE_CURRENT_SOURCE_DIR}/bvh/vk_bvh_helpers.h
          ${CMAKE_CURRENT_SOURCE_DIR}/bvh/leaf.h
+         ${VKRT_COMMON_BVH4}/as_address.glsl
          ${CMAKE_CURRENT_SOURCE_DIR}/bvh/pair_triangles.h
          ${CMAKE_CURRENT_SOURCE_DIR}/embed_spv.cmake
       COMMENT "Compiling GPU BVH builder ${_vkrt_bvh_name}"
@@ -409,12 +413,18 @@ if(BUILD_TESTING)
    add_test(NAME vkrt.bvh4_build_layout COMMAND test_bvh4_build_layout)
    set_tests_properties(vkrt.bvh4_build_layout PROPERTIES LABELS "offline;no_native_rt")
    add_test(NAME vkrt.host_translation COMMAND test_host_translation)
-   add_executable(test_as_address_cells ../tests/test_as_address_cells.c src/vkrt_virtual_as.c src/vkrt_translate.c)
+   add_executable(test_as_address_cells ../tests/test_as_address_cells.c src/vkrt_virtual_as.c src/vkrt_as_registry.c src/vkrt_translate.c)
    target_include_directories(test_as_address_cells PRIVATE src bvh ${VKRT_COMMON_BVH4} ${CMAKE_CURRENT_BINARY_DIR} ${Vulkan_INCLUDE_DIRS})
    target_link_libraries(test_as_address_cells PRIVATE Threads::Threads)
    set_target_properties(test_as_address_cells PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED ON)
    add_test(NAME vkrt.as_address_cells COMMAND test_as_address_cells)
    set_tests_properties(vkrt.as_address_cells PROPERTIES LABELS "offline;concurrency" TIMEOUT 60)
+   add_executable(test_as_registry ../tests/test_as_registry.c src/vkrt_as_registry.c)
+   target_include_directories(test_as_registry PRIVATE src ${Vulkan_INCLUDE_DIRS})
+   target_link_libraries(test_as_registry PRIVATE Threads::Threads)
+   set_target_properties(test_as_registry PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED ON)
+   add_test(NAME vkrt.as_registry COMMAND test_as_registry)
+   set_tests_properties(vkrt.as_registry PROPERTIES LABELS "offline;no_native_rt;concurrency" TIMEOUT 60)
    add_test(NAME vkrt.spirv_ids COMMAND test_spirv_ids)
    set_tests_properties(vkrt.host_translation vkrt.spirv_ids PROPERTIES LABELS "offline")
    add_test(NAME vkrt.spirv_lower COMMAND test_spirv_lower
@@ -429,9 +439,12 @@ if(BUILD_TESTING)
    add_test(NAME vkrt.cpu_fixture COMMAND test_single_tri)
    add_test(NAME vkrt.gpu_build.software COMMAND test_gpu_build)
    add_test(NAME vkrt.gpu_build.native COMMAND test_gpu_build)
-   set_tests_properties(vkrt.cpu_fixture vkrt.gpu_build.software PROPERTIES
+   add_test(NAME vkrt.gpu_build.aligned_values COMMAND test_gpu_build --aligned-values)
+   add_test(NAME vkrt.gpu_build.aligned_values.native COMMAND test_gpu_build --aligned-values)
+   set_tests_properties(vkrt.cpu_fixture vkrt.gpu_build.software vkrt.gpu_build.aligned_values PROPERTIES
       ENVIRONMENT "VK_LAYER_PATH=${CMAKE_BINARY_DIR}/layers;VK_INSTANCE_LAYERS=VK_LAYER_VKRT_SOFTWARE_RAY_QUERY"
       LABELS "gpu" TIMEOUT 600)
    set_tests_properties(vkrt.gpu_build.native PROPERTIES ENVIRONMENT "VK_INSTANCE_LAYERS=" LABELS "gpu;native_rt" TIMEOUT 600)
+   set_tests_properties(vkrt.gpu_build.aligned_values.native PROPERTIES ENVIRONMENT "VK_INSTANCE_LAYERS=" LABELS "gpu;native_rt" TIMEOUT 120)
    set_tests_properties(vkrt.spirv_lower PROPERTIES LABELS "offline")
 endif()

@@ -1,0 +1,31 @@
+// Copyright 2026 The Khronos Group Inc.
+// SPDX-License-Identifier: Apache-2.0
+#version 460
+#include "as_address.glsl"
+
+layout(local_size_x = 64) in;
+layout(buffer_reference, scalar, buffer_reference_align = 8) readonly buffer Query {
+    uint64_t context;
+    uint64_t public_value;
+};
+layout(buffer_reference, scalar, buffer_reference_align = 8) buffer Result {
+    uint64_t physical;
+    uint marker;
+    uint reserved;
+};
+layout(push_constant, scalar) uniform Args {
+    uint64_t queries;
+    uint64_t results;
+    uint count;
+} args;
+
+void main() {
+    uint index = gl_GlobalInvocationID.x;
+    if (index >= args.count) return;
+    Query query = Query(args.queries + uint64_t(index) * uint64_t(16));
+    uint64_t physical = vel_rt_resolve_as(query.context, query.public_value);
+    Result result = Result(args.results + uint64_t(index) * uint64_t(16));
+    result.physical = physical;
+    result.marker = physical == uint64_t(0) ? 0u : vel_rt_as_address_u32(physical);
+    result.reserved = 0;
+}

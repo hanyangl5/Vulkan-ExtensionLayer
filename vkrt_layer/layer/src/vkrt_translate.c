@@ -1,6 +1,18 @@
 /* SPDX-License-Identifier: MIT */
 #include "vkrt_layer.h"
 #include "vkrt_chain.h"
+#include "vkrt_as_registry.h"
+
+static VkResult track_as_buffer(struct vkrt_device_data *dev, VkResult result, VkBuffer buffer, VkDeviceSize size,
+                                VkBufferUsageFlags2KHR usage, const VkAllocationCallbacks *allocator, VkBuffer *out) {
+    if (result != VK_SUCCESS || !(usage & VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR)) return result;
+    result = vkrt_as_registry_buffer_create(dev, buffer, size);
+    if (result != VK_SUCCESS) {
+        dev->vtable.DestroyBuffer(dev->device, buffer, allocator);
+        *out = VK_NULL_HANDLE;
+    }
+    return result;
+}
 
 static VkBufferUsageFlags2KHR buffer_usage(VkBufferUsageFlags2KHR usage) {
     /* The software builder and traversal access AS storage through ordinary
@@ -18,7 +30,11 @@ VKAPI_ATTR VkResult VKAPI_CALL vkrt_CreateBuffer(VkDevice device, const VkBuffer
     local.usage = (VkBufferUsageFlags)buffer_usage(info->usage);
     const VkBaseInStructure *existing = info->pNext;
     while (existing && existing->sType != VK_STRUCTURE_TYPE_BUFFER_USAGE_FLAGS_2_CREATE_INFO_KHR) existing = existing->pNext;
-    if (!existing) return dev->vtable.CreateBuffer(device, &local, allocator, buffer);
+    if (!existing) {
+        VkResult result = dev->vtable.CreateBuffer(device, &local, allocator, buffer);
+        return track_as_buffer(dev, result, result == VK_SUCCESS ? *buffer : VK_NULL_HANDLE, info->size, info->usage, allocator,
+                               buffer);
+    }
 
     /* Flags2 overrides VkBufferCreateInfo::usage. Clone its prefix and retain
      * the opaque suffix without mutating or truncating the caller's chain. */
@@ -45,6 +61,8 @@ VKAPI_ATTR VkResult VKAPI_CALL vkrt_CreateBuffer(VkDevice device, const VkBuffer
     *tail = (VkBaseOutStructure *)&usage2;
     local.pNext = head;
     result = dev->vtable.CreateBuffer(device, &local, allocator, buffer);
+    result = track_as_buffer(dev, result, result == VK_SUCCESS ? *buffer : VK_NULL_HANDLE, info->size,
+                             ((const VkBufferUsageFlags2CreateInfoKHR *)existing)->usage, allocator, buffer);
 done:
     while (head && head != (VkBaseOutStructure *)&usage2) {
         VkBaseOutStructure *next = head->pNext;
@@ -52,6 +70,13 @@ done:
         head = next;
     }
     return result;
+}
+
+VKAPI_ATTR void VKAPI_CALL vkrt_DestroyBuffer(VkDevice device, VkBuffer buffer, const VkAllocationCallbacks *allocator) {
+    struct vkrt_device_data *dev = VKRT_FIND(struct vkrt_device_data, device);
+    if (!dev) return;
+    vkrt_as_registry_buffer_destroy(dev, buffer);
+    dev->vtable.DestroyBuffer(device, buffer, allocator);
 }
 
 VKAPI_ATTR void VKAPI_CALL vkrt_UpdateDescriptorSets(VkDevice device,

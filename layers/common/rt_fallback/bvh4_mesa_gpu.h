@@ -13,8 +13,10 @@ namespace vel::rt::bvh4 {
 // topology. Plan output for capacity-1 nodes (zero for capacity <= 1), capacity
 // leaves of the given kind, and mapping for capacity+max(capacity,2)-1 words.
 // Header offsets/total_size are initialized from that capacity plan. Source,
-// mapping, side tables, status and output must not alias. AS alignment is 128;
-// source/mapping/flags/status are 4-byte aligned and the BLAS table is 8-aligned.
+// mapping, side tables, status and output must not alias. Physical AS roots and
+// source/mapping/flags/status are 4-byte aligned; the BLAS table is 8-aligned.
+// Region offsets retain the planner's preferred 128-byte node alignment.
+// Public Vulkan AS values are separately 256-aligned and require resolution.
 //
 // Clear status to zero, then dispatch phases 0,1,2 (specialization constant 0),
 // separated by compute write -> read/write barriers. Each phase dispatches

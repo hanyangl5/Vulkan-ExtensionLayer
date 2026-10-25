@@ -22,7 +22,7 @@ void main()
       q.cull_mask = 255u;
       q.tmin = 0.0;
       q.tclosest = 100.0;
-      sw_ray_query_initialize(q);
+      sw_ray_query_initialize_data(q);
       uint candidates = 0u, observed = 0u;
       while (sw_ray_query_proceed(q) && candidates < 10u) {
          uint primitive = q.candidate.primitive_index;

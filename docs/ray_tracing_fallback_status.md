@@ -32,6 +32,8 @@ service or imply that an external scheduler is running.
 - [x] Adopt shared BVH4 in the production RQ builder and resumable traverser.
 - [x] Verify constant-space four-child/depth140 traversal and expand actual RQ CTS to 40 cases.
 - [x] Generate and execute real source CFG ReportIntersection continuations.
+- [x] Resolve aligned opaque AS values for legal 16-byte buffer suballocations, including GENERIC aliases/offsets.
+- [x] Expand actual RQ CTS to 46 cases with validation and matching native controls.
 - [ ] M0: complete all capability, no-native-RT, resource ABI, and continuation proofs.
 - [ ] M1: integrate Mesa builders, GPU BVH4 encoding/refit, and shared AS objects.
 - [ ] M2: complete Ray Query lowering and state semantics.
@@ -249,22 +251,34 @@ Unsupported provenance/memory operations, specialization, execution semantics
 and source memory models fail explicitly. This ReportIntersection component does
 not resolve the legacy RTP CTS failures or complete M0/M3.
 
-A new ordinary-buffer qualification probe found an actual address-alignment gap:
-translated usage permits 16-byte memory bindings on RTX3080, producing BDA
-`0x6fe0010`. Returning BDA+ASoffset does not guarantee the required public
-256-byte AS address alignment, and the shared encoder requires 128-byte aligned BLAS
-references. The AS failure is inferred from code plus the resource probe, not
-an AS CTS execution. An aligned opaque-address/context mechanism must also
-preserve GENERIC AS same-buffer offset differences. See the latest report and
-committed manual probe; the passing CTS subset does not close this M0/M4 gate.
+The observed AS alignment gap is now fixed in the RQ production path. A sparse
+seven-level resolver separates 256-aligned public AS values from 4-aligned
+physical BVH4 roots. GENERIC objects retain same-buffer offset differences and
+same-offset aliases. GetASAddress publishes into a preallocated coherent leaf;
+stable calls neither allocate nor flush/write mapped memory. RQ embeds the
+per-device context as an ordinary constant; TLAS construction resolves public
+BLAS references into physical runtime records. The [address ABI](../layers/common/rt_fallback/AS_ADDRESS_ABI.md)
+records the pinned normative contract, publication/lifetime and remaining limits.
+
+An actual public-API GPU build/query regression passes with backing BDA
+`0x7332010` and physical BLAS root `0x7332110`, both 16 modulo 256, while its
+public GENERIC value is `0x200`. Aliases/offset differences and destruction are
+checked; Khronos validation reports zero errors. This is executed AS evidence,
+unlike the earlier ordinary-buffer probe. Real CTS now passes **46/46** with
+validation: the previous 40 rerun after this change plus six new GENERIC
+triangle/AABB combinations. Matching native controls pass all 46 (the original
+40 retain their previous controls). See [the new evidence report](rt_cts_aligned_as_2026-10-26.md).
+Full application descriptor/allocation budgets, optional capture/replay,
+mandatory Copy/update/serialization and physical no-RT qualification stay open.
 
 ## Next work
 
 Run M0 proof work in parallel with shared-backend construction:
 
-1. Prove and implement aligned public AS values for suballocated backing buffers,
-   including GENERIC same-buffer offset differences and full resource budgets.
-   Complete one capability/device/object translation path for genuinely no-RT
+1. Complete the public AS resolver's application resource budgets and share its
+   object/address model with RTP. Aligned suballocation values and GENERIC
+   same-buffer differences are now implemented and tested. Complete one
+   capability/device/object translation path for genuinely no-RT
    drivers. Device stripping and buffer/barrier/submit/event/timestamp/render-pass
    masks are now tested; truthful no-RT base discovery/limits, deferred operations
    and buffer-requirement/external-buffer queries remain open.
@@ -283,13 +297,14 @@ Run M0 proof work in parallel with shared-backend construction:
    production integration is now tested. Implement four-child GPU collapse/refit
    and qualify numerical cases and large construction IDs. Wire PLOC/HPLOC only
    with complete host contracts. M1 remains incomplete.
-5. Expand the [external CTS matrix](rt_cts_bvh4_2026-10-26.md), including
+5. Expand the [external CTS matrix](rt_cts_aligned_as_2026-10-26.md), including
    new supported configurations and validation. Retain historical failures and
    investigate the old unexplained startup crash if it recurs. Do not erase
    failures or count skips as passes.
 6. Qualify the complete capability profile and threading/queue-family behavior
    on physical no-RT GPUs and POSIX. SSBO dynamic/nonuniform indexing and
-   variablePointersStorageBuffer are now explicit private prerequisites;
+   variablePointersStorageBuffer and compatible coherent resolver memory are
+   now explicit private prerequisites;
    legacy Vulkan 1.0 extension-dependency coverage remains unqualified.
 
 Follow the goal's [iteration and stop policy](ray_tracing_fallback_goal.md#iteration-and-stop-policy).

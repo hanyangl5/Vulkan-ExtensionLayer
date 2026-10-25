@@ -526,9 +526,9 @@ OpExtension "SPV_KHR_ray_query"
 OpMemoryModel Logical GLSL450
 OpEntryPoint GLCompute %main "main" %scene
 OpExecutionMode %main LocalSize 64 1 1
-OpName %user_spec "regression_user_spec0"
+OpName %user_spec "regression_user_spec6"
 OpDecorate %workgroup BuiltIn WorkgroupSize
-OpDecorate %user_spec SpecId 0
+OpDecorate %user_spec SpecId 6
 OpDecorate %scene DescriptorSet 0
 OpDecorate %scene Binding 0
 %void = OpTypeVoid
@@ -571,7 +571,7 @@ OpFunctionEnd
     std::unordered_map<uint32_t, std::vector<uint32_t>> composites;
     for (size_t i = 5; i < lowered.size(); i += SPV_LEN(lowered[i])) {
         uint32_t op = SPV_OP(lowered[i]), len = SPV_LEN(lowered[i]);
-        if (op == 5 && spirv_string(lowered, i + 2, i + len) == "regression_user_spec0") user_spec = lowered[i + 1];
+        if (op == 5 && spirv_string(lowered, i + 2, i + len) == "regression_user_spec6") user_spec = lowered[i + 1];
         if (op == 16 && len == 6 && lowered[i + 2] == 17) {
             if (lowered[i + 3] != 64 || lowered[i + 4] != 1 || lowered[i + 5] != 1) return false;
             ++local_size_count;
@@ -581,7 +581,7 @@ OpFunctionEnd
             ++workgroup_count;
         }
         if (op == 71 && len == 4 && lowered[i + 2] == 1) {
-            if (lowered[i + 3] != 0) return false;
+            if (lowered[i + 3] != 6) return false;
             spec_target = lowered[i + 1];
             ++spec_count;
         }
@@ -593,7 +593,38 @@ OpFunctionEnd
                          constants[shape->second[1]] == 1 && constants[shape->second[2]] == 1;
     if (local_size_count != 1 || workgroup_count != 1 || !correct_shape || spec_count != 1 || !user_spec ||
         spec_target != user_spec) {
-        std::fprintf(stderr, "FAIL: traversal dummy entry-point metadata changed application workgroup/SpecId0 semantics\n");
+        std::fprintf(stderr, "FAIL: traversal metadata changed application workgroup/SpecId6 semantics\n");
+        return false;
+    }
+    return true;
+}
+
+static bool check_as_context_literal(const std::vector<uint32_t> &user, const std::vector<uint32_t> &lib) {
+    const uint64_t context = UINT64_C(0xfedcba9876543210);
+    uint32_t *output = nullptr;
+    size_t count = 0;
+    char error[1024];
+    if (vkrt_spirv_lower_with_context(user.data(), user.size(), lib.data(), lib.size(), context, &output, &count, error,
+                                      sizeof(error))) {
+        std::fprintf(stderr, "FAIL: AS context lowering: %s\n", error);
+        return false;
+    }
+    std::vector<uint32_t> lowered(output, output + count);
+    vkrt_spirv_lower_free(output);
+    uint32_t context_id = 0;
+    for (size_t i = 5; i < lowered.size(); i += SPV_LEN(lowered[i])) {
+        if (SPV_OP(lowered[i]) == 5 && spirv_string(lowered, i + 2, i + SPV_LEN(lowered[i])) == "vkrt_as_registry_context")
+            context_id = lowered[i + 1];
+    }
+    bool correct_literal = false;
+    for (size_t i = 5; i < lowered.size(); i += SPV_LEN(lowered[i])) {
+        uint32_t op = SPV_OP(lowered[i]), len = SPV_LEN(lowered[i]);
+        if (op == 43 && len == 5 && lowered[i + 2] == context_id)
+            correct_literal = (uint64_t(lowered[i + 4]) << 32 | lowered[i + 3]) == context;
+        if (op == 71 && len == 4 && lowered[i + 1] == context_id && lowered[i + 2] == 1) return false;
+    }
+    if (!context_id || !correct_literal) {
+        std::fprintf(stderr, "FAIL: private AS resolver did not retain the full 64-bit ordinary context constant\n");
         return false;
     }
     return true;
@@ -629,6 +660,7 @@ main(int argc, char **argv)
    if (!check_as_operand_values(lib)) failures++;
    if (!check_as_runtime_nonuniform(lib)) failures++;
    if (!check_workgroup_metadata(lib)) failures++;
+   if (!check_as_context_literal(user, lib)) failures++;
    if (argc == 5 && before.op_sbt_offset != 2) {
        std::printf("FAIL: getter fixture must contain both SBT-offset selectors (found %d)\n", before.op_sbt_offset);
        failures++;
