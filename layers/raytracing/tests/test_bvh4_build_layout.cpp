@@ -33,13 +33,15 @@ int main() {
                       result.instances == reference.instances && result.parents == reference.leaf_parents,
                   "production size query disagrees with shared ABI planner");
             check(result.source >= result.ir.scratch_size && result.mapping >= result.source + result.ir.as_size &&
-                      result.geometry_flags >=
-                          result.mapping + (uint64_t(capacity) + (capacity > 1 ? uint64_t(capacity) - 1 : 1)) * 4 &&
+                      result.geometry_flags >= result.mapping + vel_rt_mesa_mapping_words(capacity) * 4 &&
                       result.status >= result.geometry_flags + 4 && result.scratch_size >= result.status + 4,
                   "transient construction/encoder scratch regions overlap");
             check((result.source | result.mapping | result.scratch_size | result.as_size) % 256 == 0,
                   "construction/scratch/AS alignment");
             if (capacity == (1u << 29) - 1u) check(result.as_size > UINT32_MAX, "large AS planning truncated at 4 GiB");
+            const uint32_t rounds = vel_rt_mesa_jump_rounds(capacity);
+            check((rounds & 1u) == 0 && (capacity <= 1 || (UINT64_C(1) << rounds) >= capacity),
+                  "pointer-jump schedule does not cover deep input trees");
             VkAccelerationStructureBuildRangeInfoKHR range{};
             range.primitiveCount = capacity;
             auto recorded = vkrt_build_layout(&info, nullptr, &range);

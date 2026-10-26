@@ -19,7 +19,7 @@ vendored. Windows project/package settings are omitted from the runtime source
 import. `manifest.json` records the exact selected paths and Git blob IDs.
 
 ```sh
-python3 layers/raytracing/upstream/verify.py
+python3 layers/raytracing/docs/upstream/verify.py
 ```
 
 Do not reformat or edit these references. Implement Vulkan adaptations outside

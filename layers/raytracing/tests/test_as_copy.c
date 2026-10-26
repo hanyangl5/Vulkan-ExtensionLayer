@@ -13,6 +13,7 @@ static struct built_as copy_tlas_source, copy_tlas_clone, copy_tlas_compact;
 static void prepare_copy_storage(struct built_as *out, VkDeviceSize size) {
     memset(out, 0, sizeof(*out));
     out->size = size;
+    out->offset = 256;
     const VkBufferUsageFlags usage = VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
                                      VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
     buf_create(size + 512, usage, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, &out->output);

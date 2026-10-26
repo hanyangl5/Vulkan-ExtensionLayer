@@ -1,7 +1,7 @@
 // Derived from microsoft/DirectXShaderCompiler lib/DxrFallback/runtime/runtime.c.
 // Pinned revision: 61e9771fc34bc914565dfc95a11f731f853e8ac9.
 // SPDX-License-Identifier: NCSA
-// See upstream/dxc/LICENSE.TXT for the upstream copyright and license notice.
+// See ../docs/upstream/dxc/LICENSE.TXT for the upstream copyright and license notice.
 //
 // Vulkan adaptations: pointer arguments become inout parameters; per-invocation
 // stack storage is embedded in RuntimeData; matrices are scalar arrays. The

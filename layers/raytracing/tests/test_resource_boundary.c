@@ -122,14 +122,36 @@ int main(int argc, char **argv) {
         return 1;
     }
     init_vulkan();
-    struct vkrt_resource_profile profile;
+    struct vkrt_resource_profile profile = {0};
     enum vkrt_resource_failure why;
-    if (!vkrt_query_resource_profile(vkGetPhysicalDeviceProperties2, vkGetPhysicalDeviceFeatures2, g_pdev, &profile, &why)) {
+    const char *layers = getenv("VK_INSTANCE_LAYERS");
+    bool software = layers && strstr(layers, "VK_LAYER_VKRT_SOFTWARE_RAY_QUERY");
+    if (!software &&
+        !vkrt_query_resource_profile(vkGetPhysicalDeviceProperties2, vkGetPhysicalDeviceFeatures2, g_pdev, &profile, &why)) {
         fprintf(stderr, "Descriptor profile unavailable: %d\n", why);
         return 77;
     }
     VkPhysicalDeviceProperties properties;
     vkGetPhysicalDeviceProperties(g_pdev, &properties);
+    if (software) {
+        /* The layer now publishes the proven budget itself. Planning again
+         * from public values would reserve AS headroom twice and fail to
+         * exercise the advertised boundary. Native controls still plan once. */
+        VkPhysicalDeviceAccelerationStructurePropertiesKHR as = {
+            .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_PROPERTIES_KHR};
+        VkPhysicalDeviceProperties2 public_properties = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2, .pNext = &as};
+        vkGetPhysicalDeviceProperties2(g_pdev, &public_properties);
+        profile.limits = public_properties.properties.limits;
+        profile.as_per_stage = as.maxPerStageDescriptorAccelerationStructures;
+        profile.as_per_set = as.maxDescriptorSetAccelerationStructures;
+        if (profile.as_per_stage != 16 || profile.as_per_set != 16 ||
+            properties.limits.maxDescriptorSetStorageBuffers != profile.limits.maxDescriptorSetStorageBuffers ||
+            properties.limits.maxDescriptorSetStorageBuffersDynamic != profile.limits.maxDescriptorSetStorageBuffersDynamic ||
+            properties.limits.maxPerStageDescriptorStorageBuffers != profile.limits.maxPerStageDescriptorStorageBuffers) {
+            fprintf(stderr, "Inconsistent public descriptor profile\n");
+            return 1;
+        }
+    }
     uint32_t set_count = properties.limits.maxBoundDescriptorSets, push_bytes = properties.limits.maxPushConstantsSize;
     uint32_t static_count = profile.limits.maxDescriptorSetStorageBuffers;
     uint32_t dynamic_count = profile.limits.maxDescriptorSetStorageBuffersDynamic;

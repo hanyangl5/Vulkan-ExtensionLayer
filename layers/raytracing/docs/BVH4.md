@@ -44,12 +44,13 @@ RQ production traversal now uses these parent links for constant-space
 resumable walks without fixed-stack truncation. It tests all four child slots,
 including a depth140/fourth-child regression. Production CLONE/COMPACT and GPU
 serialization now use this representation. Complete property-query publication,
-refit and full RTP integration/qualification remain open.
+query replay/synchronization, refit and full API/resource qualification remain
+open; canonical typed RTP already uses the shared backend.
 
 ## Mesa construction IR adapter
 
 `mesa_ir_adapter.h` accepts separate header/node byte spans or the existing
-[VKRT v2 envelope](../docs/IR_CONTRACT_V2.md). Its scalar record
+[VKRT v2 envelope](IR_CONTRACT_V2.md). Its scalar record
 contract is the locally imported Mesa `d1a2854aec69179f2b80d1c7368771041181cda5`
 schema; it does not yet qualify every builder variant in the newer Mesa reference
 selected by the implementation goal. It reads bytes without alignment-dependent
@@ -90,9 +91,21 @@ final GPU-only construction path.
 `bvh4_mesa_encode.comp` now provides a direct GPU path from the current default
 Mesa scalar IR v2 envelope. Its host contract is `bvh4_mesa_gpu.h`. The host plans
 capacity-sized output/scratch from input capacity and geometry type; active
-counts and topology remain on GPU. Three barrier-separated dispatches initialize
-maps/header, assign unique parents and compact referenced leaves, then emit
-hierarchy and triangle/AABB/instance records. Geometry side tables preserve full
+counts and topology remain on GPU. Seven shader phases initialize maps/header,
+assign unique input parents and compact leaves, validate the source graph,
+derive depth parity with two alternating pointer-jump banks, compact retained
+internal IDs, then emit hierarchy and triangle/AABB/instance records. Each
+pointer-jump pass has its own dispatch and memory barrier. For capacity C the
+host schedules `5 + J(C)` phase executions, where J is ceil(log2(C)) rounded up
+to an even number (zero for C <= 1). Each execution supports chunked dispatches.
+The shared C host contract defines this schedule and the `C + 4*I` mapping-word
+budget, with `I = max(C,2)-1`; offsets and products are 64-bit.
+
+The encoder keeps even-depth internal nodes and expands each odd-depth internal
+child once, producing two to four children with dense node IDs and rewritten
+internal/leaf parents. Empty and singleton inputs retain their special roots.
+The CPU reference's largest-area frontier selection remains a separate encoder;
+production uses the deterministic depth-pair choice. Geometry side tables preserve full
 flags and explicit per-instance runtime BLAS addresses prevent IR-address reuse.
 Node/record/parent accesses use 64-bit offsets. A nonzero GPU status invalidates
 the entire output and atomically sets FLAG_INVALID in its runtime header.
@@ -104,32 +117,38 @@ detects a legacy format.
 
 The additional `portable_bvh4_mesa_gpu_build` test runs the imported init, leaf,
 Morton sort, LBVH and bounds kernels followed by this encoder in one command
-buffer. Source IR starts poisoned; no CPU count/topology readback or adapted CPU
-tree is used. Eight triangle/AABB scenes cover 0, 1, 321 and 1025 inputs, multiple
+buffer. Source IR starts poisoned; construction and encoding consume GPU counts
+and topology. After completion, the test reads that IR for its independent
+depth-pair topology oracle. Original geometry, IDs and full flags supply a
+separate record oracle. Eight triangle/AABB scenes cover 0, 1, 321 and 1025 inputs, multiple
 geometries/full flags and inactive NaN slots. Separate fixtures cover sparse,
 empty/singleton/deep graphs, TLAS relocation/inverse transforms and rejection
 status paths. These tests need the actual imported builder's additional integer,
 storage and memory-model prerequisites; the generic encoder test keeps its
 smaller compute feature predicate.
 
-This direct path still retains binary arity and Mesa's existing 32-bit
-construction IDs. Active bounds must be finite; its scaled FP32 inverse needs
+This direct production path performs four-child collapse while retaining Mesa's
+existing 32-bit construction IDs. Active bounds must be finite; its scaled FP32 inverse needs
 further qualification for ill-conditioned legal transforms. It checks encoded
 root/child bounds but does not claim the CPU adapter's complete header-validation
-contract. Four-child GPU collapse, refit, RTP integration and unified objects
-remain open. Production RQ uses shared nodes/leaves/header/parent data only;
-its external CTS evidence is in the [current report](../../../docs/rt_cts_bvh4_2026-10-26.md).
+contract. Refit, large construction IDs, builder variants and complete
+qualification remain open. Output regions and total_size still follow the
+capacity plan; fewer live internal nodes do not make COMPACT shrink storage.
+Production RQ/RTP use shared nodes/leaves/header/parent data only. The
+[collapse record](../../../docs/rt_bvh4_collapse_2026-10-26.md) preserves the
+algorithm and component evidence; the [implementation status](../../../docs/ray_tracing_fallback_status.md)
+tracks external CTS snapshots and remaining goal gates.
 
 Build and run independently:
 
 ```sh
-cmake -S layers/raytracing/bvh4 -B build-bvh4
+cmake -S layers/raytracing -DVKRT_BVH4_COMPONENTS_ONLY=ON -B build-bvh4
 cmake --build build-bvh4
 ctest --test-dir build-bvh4 --output-on-failure
 
 # Optional Vulkan/glslc/spirv-val component test. The device enables only
 # Vulkan 1.2 compute, BDA, scalar layout and shaderInt64; no RT extensions.
-cmake -S layers/raytracing/bvh4 -B build-bvh4 -DVEL_RT_BVH4_GPU_TESTS=ON
+cmake -S layers/raytracing -DVKRT_BVH4_COMPONENTS_ONLY=ON -B build-bvh4 -DVEL_RT_BVH4_GPU_TESTS=ON
 cmake --build build-bvh4
 ctest --test-dir build-bvh4 -L no_native_rt --output-on-failure
 ```

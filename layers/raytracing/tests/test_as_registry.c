@@ -1,6 +1,7 @@
 /* SPDX-License-Identifier: MIT */
 #include "vkrt_layer.h"
 #include "vkrt_as_registry.h"
+#include <stdatomic.h>
 
 struct vkrt_global vkrt_global = VKRT_GLOBAL_INITIALIZER;
 #define H(type, n) ((type)(uintptr_t)(n))
@@ -11,8 +12,15 @@ struct vkrt_global vkrt_global = VKRT_GLOBAL_INITIALIZER;
             ++failures;                                     \
         }                                                   \
     } while (0)
-static unsigned failures, operations, failure_at, host_live;
+static _Atomic unsigned failures, operations, host_live;
+static unsigned failure_at;
+static void *allocation_owner = &host_live;
 static bool coherent_available = true;
+static unsigned native_allocations, native_frees, native_budget = 128;
+static uint64_t native_address_override;
+static bool undersized_requirements;
+static unsigned tested_fault_positions, budget_allocations;
+static _Atomic unsigned concurrent_slice_allocations;
 struct resource {
     bool buffer, memory, mapped;
     VkDeviceSize size;
@@ -29,33 +37,36 @@ static unsigned live_buffers(void) {
 }
 static bool fault(void) { return ++operations == failure_at; }
 static VKAPI_ATTR void *VKAPI_CALL allocation(void *user, size_t size, size_t alignment, VkSystemAllocationScope scope) {
-    CHECK(user == &host_live && scope == VK_SYSTEM_ALLOCATION_SCOPE_DEVICE && alignment && !(alignment & (alignment - 1)));
+    CHECK(user == allocation_owner && scope == VK_SYSTEM_ALLOCATION_SCOPE_DEVICE && alignment && !(alignment & (alignment - 1)));
     if (fault()) return NULL;
     void *out = malloc(size);
     if (out) ++host_live;
     return out;
 }
 static VKAPI_ATTR void VKAPI_CALL release_allocation(void *user, void *value) {
-    CHECK(user == &host_live && host_live && value);
+    CHECK(user == allocation_owner && host_live && value);
     --host_live;
     free(value);
 }
 static VkAllocationCallbacks allocator = {.pUserData = &host_live, .pfnAllocation = allocation, .pfnFree = release_allocation};
 static void check_allocator(const VkAllocationCallbacks *a) {
-    CHECK(a && a->pUserData == &host_live && a->pfnAllocation == allocation && a->pfnFree == release_allocation);
+    CHECK(a && a->pUserData == allocation_owner && a->pfnAllocation == allocation && a->pfnFree == release_allocation);
 }
 static VKAPI_ATTR VkResult VKAPI_CALL create_buffer(VkDevice d, const VkBufferCreateInfo *info, const VkAllocationCallbacks *a,
                                                     VkBuffer *out) {
     check_allocator(a);
     CHECK(d == device && info->usage == (VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT));
-    CHECK(info->size == 71 || info->size == 2055);
+    CHECK(info->size >= 65536 && !(info->size & 7));
     *out = H(VkBuffer, 0xbad);
     if (fault()) return VK_ERROR_OUT_OF_DEVICE_MEMORY;
     unsigned i = 0;
     while (i < 128 && (resources[i].buffer || resources[i].memory)) ++i;
     CHECK(i < 128);
     if (i == 128) return VK_ERROR_OUT_OF_DEVICE_MEMORY;
-    resources[i] = (struct resource){.buffer = true, .size = info->size, .address = UINT64_C(0x100000001) + (uint64_t)i * 65536};
+    resources[i] = (struct resource){
+        .buffer = true,
+        .size = info->size,
+        .address = native_address_override ? native_address_override : UINT64_C(0x100000003) + (uint64_t)i * 1048576};
     current_resource = i;
     *out = H(VkBuffer, i + 1);
     return VK_SUCCESS;
@@ -63,7 +74,10 @@ static VKAPI_ATTR VkResult VKAPI_CALL create_buffer(VkDevice d, const VkBufferCr
 static VKAPI_ATTR void VKAPI_CALL requirements(VkDevice d, VkBuffer buffer, VkMemoryRequirements *out) {
     unsigned i = (unsigned)(uintptr_t)buffer - 1;
     CHECK(d == device && i < 128 && resources[i].buffer);
-    *out = (VkMemoryRequirements){.size = (resources[i].size + 255) & ~UINT64_C(255), .alignment = 1, .memoryTypeBits = 3};
+    *out =
+        (VkMemoryRequirements){.size = undersized_requirements ? resources[i].size - 1 : (resources[i].size + 255) & ~UINT64_C(255),
+                               .alignment = 1,
+                               .memoryTypeBits = 3};
 }
 static VKAPI_ATTR void VKAPI_CALL properties(VkPhysicalDevice physical, VkPhysicalDeviceMemoryProperties *out) {
     memset(out, 0, sizeof(*out));
@@ -72,17 +86,27 @@ static VKAPI_ATTR void VKAPI_CALL properties(VkPhysicalDevice physical, VkPhysic
     out->memoryTypes[1].propertyFlags =
         coherent_available ? VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT : 0;
 }
+static VKAPI_ATTR void VKAPI_CALL device_properties(VkPhysicalDevice physical, VkPhysicalDeviceProperties *out) {
+    memset(out, 0, sizeof(*out));
+    out->limits.minStorageBufferOffsetAlignment = 64;
+    out->limits.maxMemoryAllocationCount = 4096;
+}
 static VKAPI_ATTR VkResult VKAPI_CALL allocate_memory(VkDevice d, const VkMemoryAllocateInfo *info, const VkAllocationCallbacks *a,
                                                       VkDeviceMemory *out) {
     check_allocator(a);
     const VkMemoryAllocateFlagsInfo *flags = info->pNext;
     CHECK(d == device && info->memoryTypeIndex == 1 && flags && flags->flags == VK_MEMORY_ALLOCATE_DEVICE_ADDRESS_BIT);
+    const VkMemoryDedicatedAllocateInfo *dedicated = flags ? flags->pNext : NULL;
+    CHECK(dedicated && dedicated->sType == VK_STRUCTURE_TYPE_MEMORY_DEDICATED_ALLOCATE_INFO &&
+          dedicated->buffer == H(VkBuffer, current_resource + 1) && !dedicated->image && !dedicated->pNext);
     *out = H(VkDeviceMemory, 0xbad);
     if (fault()) return VK_ERROR_OUT_OF_DEVICE_MEMORY;
+    if (native_allocations - native_frees >= native_budget) return VK_ERROR_OUT_OF_DEVICE_MEMORY;
     struct resource *r = &resources[current_resource];
     r->bytes = malloc((size_t)info->allocationSize);
     CHECK(r->bytes != NULL);
     r->memory = true;
+    ++native_allocations;
     memset(r->bytes, 0xcd, (size_t)info->allocationSize);
     *out = H(VkDeviceMemory, current_resource + 257);
     return VK_SUCCESS;
@@ -119,13 +143,15 @@ static VKAPI_ATTR void VKAPI_CALL free_memory(VkDevice d, VkDeviceMemory memory,
     free(r->bytes);
     r->bytes = NULL;
     r->memory = false;
+    ++native_frees;
 }
 static VKAPI_ATTR VkDeviceAddress VKAPI_CALL address(VkDevice d, const VkBufferDeviceAddressInfo *info) {
     CHECK(d == device);
     if (fault()) return 0;
     return resources[(uintptr_t)info->buffer - 1].address;
 }
-static struct vkrt_instance_data instance = {.vtable.GetPhysicalDeviceMemoryProperties = properties};
+static struct vkrt_instance_data instance = {
+    .vtable = {.GetPhysicalDeviceMemoryProperties = properties, .GetPhysicalDeviceProperties = device_properties}};
 static struct vkrt_device_data dev = {.device = H(VkDevice, 1),
                                       .physical_device = H(VkPhysicalDevice, 2),
                                       .instance_data = &instance,
@@ -157,6 +183,7 @@ static uint64_t gpu_u64(uint64_t address) {
 static uint64_t resolve(uint64_t value) {
     CHECK(value && !(value & 255));
     uint64_t header = vkrt_as_registry_address(&dev);
+    CHECK(!(header & 7));
     uint32_t fields[8];
     const void *p = gpu_bytes(header, 64);
     if (!p) return 0;
@@ -165,20 +192,28 @@ static uint64_t resolve(uint64_t value) {
           !fields[6] && !fields[7]);
     CHECK(gpu_u64(header + 40) == 0 && gpu_u64(header + 48) == 0 && gpu_u64(header + 56) == 0);
     uint64_t page = gpu_u64(header + 32), key = value >> 8;
-    for (unsigned level = 0; level < 7 && page; ++level) page = gpu_u64(page + ((key >> ((6 - level) * 8)) & 255) * 8);
+    for (unsigned level = 0; level < 7 && page; ++level) {
+        CHECK(!(page & 7));
+        page = gpu_u64(page + ((key >> ((6 - level) * 8)) & 255) * 8);
+    }
     return page;
 }
 static void clean(void) {
     vkrt_as_registry_finish(&dev);
+    vkrt_private_pool_finish(&dev);
     CHECK(!dev.as_registry && !host_live && !live_buffers());
     for (unsigned i = 0; i < 128; ++i) CHECK(!resources[i].memory && !resources[i].mapped && !resources[i].bytes);
     operations = failure_at = 0;
     coherent_available = true;
+    native_allocations = native_frees = 0;
+    native_budget = 128;
+    native_address_override = 0;
+    undersized_requirements = false;
 }
 static void begin(void) {
     clean();
     CHECK(vkrt_as_registry_init(&dev, &allocator) == VK_SUCCESS);
-    CHECK(live_buffers() == 2);
+    CHECK(live_buffers() == 1 && native_allocations == 1);
 }
 
 static void namespace_and_aliases(void) {
@@ -192,9 +227,17 @@ static void namespace_and_aliases(void) {
     uint64_t av, aliasv, fv, endv;
     CHECK(vkrt_as_registry_acquire(&dev, a, 0, &first, &av) == VK_SUCCESS);
     unsigned pages = live_buffers();
-    CHECK(pages == 8 && resolve(av) == 0);
+    CHECK(pages == 1 && resolve(av) == 0); /* Header, radix pages and descriptor share a native allocation. */
     CHECK(vkrt_as_registry_acquire(&dev, a, 0, &alias, &aliasv) == VK_SUCCESS && alias == first && aliasv == av &&
           live_buffers() == pages);
+    struct vkrt_private_slice descriptor = *vkrt_as_registry_descriptor(first);
+    const struct vkrt_private_slice *alias_descriptor = vkrt_as_registry_descriptor(alias);
+    uint64_t descriptor_value = 0;
+    memcpy(&descriptor_value, descriptor.mapping, 8);
+    CHECK(descriptor_value == av && descriptor.buffer == alias_descriptor->buffer &&
+          descriptor.offset == alias_descriptor->offset && descriptor.mapping == alias_descriptor->mapping);
+    CHECK(descriptor.offset && !(descriptor.offset & 63) && (descriptor.offset & 255) && descriptor.size == 8);
+    CHECK((descriptor.address & 7) == 3); /* Descriptor offset, unlike radix BDA, follows the SSBO limit. */
     CHECK(vkrt_as_registry_acquire(&dev, a, offset, &far_entry, &fv) == VK_SUCCESS && fv - av == offset);
     CHECK(vkrt_as_registry_acquire(&dev, a, size, &end, &endv) == VK_SUCCESS && endv - av == size);
     uint64_t physical = UINT64_C(0x123456780010);
@@ -211,13 +254,17 @@ static void namespace_and_aliases(void) {
     vkrt_as_registry_release(&dev, future);
     vkrt_as_registry_release(&dev, first);
     CHECK(resolve(aliasv) == physical);
+    memcpy(&descriptor_value, alias_descriptor->mapping, 8);
+    CHECK(descriptor_value == av); /* One AS alias cannot release the borrowed descriptor slice. */
     vkrt_as_registry_release(&dev, alias);
     CHECK(resolve(av) == 0);
     vkrt_as_registry_release(&dev, far_entry);
     vkrt_as_registry_release(&dev, end);
-    CHECK(live_buffers() == 2);
+    CHECK(live_buffers() == 1);
     CHECK(vkrt_as_registry_acquire(&dev, a, 0, &first, &aliasv) == VK_SUCCESS && aliasv == av && resolve(aliasv) == physical);
-    vkrt_as_registry_buffer_destroy(&dev, a); /* Keep range until this final AS ref dies. */
+    CHECK(vkrt_as_registry_descriptor(first)->buffer == descriptor.buffer &&
+          vkrt_as_registry_descriptor(first)->offset == descriptor.offset); /* Freed slots are reused. */
+    vkrt_as_registry_buffer_destroy(&dev, a);                               /* Keep range until this final AS ref dies. */
     CHECK(vkrt_as_registry_buffer_create(&dev, c, 256) == VK_SUCCESS);
     struct vkrt_as_registry_entry *other;
     uint64_t cv;
@@ -254,7 +301,7 @@ static void full_width_and_churn(void) {
         uint64_t physical = (uint64_t)i * UINT64_C(0x100000000) + 4;
         CHECK(resolve(value) == physical && vkrt_as_registry_publish(&dev, entry, physical) == physical);
         vkrt_as_registry_release(&dev, entry);
-        CHECK(live_buffers() == 2);
+        CHECK(live_buffers() == 1);
     }
     CHECK(vkrt_as_registry_acquire(&dev, buffer, 1, &entry, &value) == VK_ERROR_INITIALIZATION_FAILED && !entry && !value);
     vkrt_as_registry_buffer_destroy(&dev, buffer);
@@ -268,6 +315,7 @@ static void fault_paths(void) {
     uint64_t value;
     CHECK(vkrt_as_registry_acquire(&dev, H(VkBuffer, 3001), 0, &entry, &value) == VK_SUCCESS);
     unsigned full_operations = operations;
+    tested_fault_positions = full_operations;
     vkrt_as_registry_release(&dev, entry);
     clean();
     for (unsigned fail = 1; fail <= full_operations; ++fail) {
@@ -279,13 +327,163 @@ static void fault_paths(void) {
             if (result == VK_SUCCESS)
                 vkrt_as_registry_release(&dev, entry);
             else
-                CHECK(!entry && !value && live_buffers() == 2);
+                CHECK(!entry && !value && live_buffers() == 1);
         }
         CHECK(result != VK_SUCCESS);
         clean();
     }
     coherent_available = false;
     CHECK(vkrt_as_registry_init(&dev, &allocator) == VK_ERROR_FEATURE_NOT_PRESENT);
+    clean();
+}
+static void allocation_budget(void) {
+    begin();
+    /* Other application allocations may leave only four native allocation
+     * slots available. Sparse views must not consume one allocation per page. */
+    native_budget = 4;
+    const VkBuffer buffer = H(VkBuffer, 3501);
+    CHECK(vkrt_as_registry_buffer_create(&dev, buffer, UINT64_C(1) << 45) == VK_SUCCESS);
+    struct vkrt_as_registry_entry *entries[24];
+    uint64_t values[24];
+    for (unsigned i = 0; i < 24; ++i) {
+        CHECK(vkrt_as_registry_acquire(&dev, buffer, (uint64_t)i << 32, &entries[i], &values[i]) == VK_SUCCESS);
+        const struct vkrt_private_slice *slice = vkrt_as_registry_descriptor(entries[i]);
+        CHECK(slice->size == 8 && !(slice->offset & 63));
+        uint64_t stored;
+        memcpy(&stored, slice->mapping, 8);
+        CHECK(stored == values[i]);
+        for (unsigned j = 0; j < i; ++j) {
+            const struct vkrt_private_slice *other = vkrt_as_registry_descriptor(entries[j]);
+            CHECK(slice->buffer != other->buffer || slice->offset != other->offset);
+        }
+    }
+    CHECK(live_buffers() <= native_budget && native_allocations <= native_budget && native_allocations > 1);
+    budget_allocations = native_allocations;
+    for (unsigned i = 0; i < 24; ++i) {
+        uint64_t stored;
+        memcpy(&stored, vkrt_as_registry_descriptor(entries[i])->mapping, 8);
+        CHECK(stored == values[i] && resolve(values[i]) == 0);
+    }
+    for (unsigned i = 0; i < 24; ++i) vkrt_as_registry_release(&dev, entries[i]);
+    CHECK(live_buffers() == 1 && native_frees == native_allocations - 1); /* Empty grown chunks return immediately. */
+    clean();
+}
+static void owner_precedence(void) {
+    clean();
+    unsigned instance_owner = 0, device_owner = 0;
+    instance.has_allocator = true;
+    instance.allocator = allocator;
+    instance.allocator.pUserData = &instance_owner;
+    dev.queue_families_have_allocator = true;
+    dev.queue_families_allocator = allocator;
+    dev.queue_families_allocator.pUserData = &device_owner;
+    allocation_owner = &device_owner;
+    CHECK(vkrt_as_registry_init(&dev, NULL) == VK_SUCCESS && native_allocations == 1);
+    CHECK(vkrt_as_registry_buffer_create(&dev, H(VkBuffer, 3601), 4096) == VK_SUCCESS);
+    struct vkrt_as_registry_entry *entry;
+    uint64_t value;
+    CHECK(vkrt_as_registry_acquire(&dev, H(VkBuffer, 3601), 0, &entry, &value) == VK_SUCCESS);
+    vkrt_as_registry_release(&dev, entry);
+    clean();
+    dev.queue_families_have_allocator = false;
+    allocation_owner = &instance_owner;
+    CHECK(vkrt_as_registry_init(&dev, NULL) == VK_SUCCESS && native_allocations == 1);
+    CHECK(vkrt_as_registry_buffer_create(&dev, H(VkBuffer, 3602), 4096) == VK_SUCCESS);
+    CHECK(vkrt_as_registry_acquire(&dev, H(VkBuffer, 3602), 0, &entry, &value) == VK_SUCCESS);
+    vkrt_as_registry_release(&dev, entry);
+    clean();
+    instance.has_allocator = false;
+    allocation_owner = &host_live;
+}
+static void allocation_boundaries(void) {
+    clean();
+    CHECK(vkrt_private_pool_init(&dev, &allocator) == VK_SUCCESS);
+    native_address_override = UINT64_MAX - 65535; /* A 64 KiB buffer whose final byte is exactly UINT64_MAX. */
+    native_budget = 1;
+    struct vkrt_private_slice first, last, extra;
+    CHECK(vkrt_private_pool_allocate(&dev, 65520, false, &first) == VK_SUCCESS);
+    CHECK(vkrt_private_pool_allocate(&dev, 16, false, &last) == VK_SUCCESS);
+    CHECK(first.buffer == last.buffer && first.address == native_address_override && last.address == UINT64_MAX - 15);
+    CHECK(vkrt_private_pool_allocate(&dev, 1, false, &extra) == VK_ERROR_OUT_OF_DEVICE_MEMORY);
+    CHECK(!extra.buffer && !extra.allocation && !extra.mapping); /* Full-chunk scan must not wrap the BDA. */
+    vkrt_private_pool_release(&dev, &first);
+    CHECK(vkrt_private_pool_allocate(&dev, 65520, false, &first) == VK_SUCCESS && first.buffer == last.buffer &&
+          first.address == native_address_override);
+    vkrt_private_pool_release(&dev, &first);
+    vkrt_private_pool_release(&dev, &last);
+    CHECK(!live_buffers() && native_allocations == native_frees);
+    clean();
+
+    CHECK(vkrt_private_pool_init(&dev, &allocator) == VK_SUCCESS);
+    native_address_override = UINT64_MAX - 65534; /* One-byte overflow is rejected and fully rolled back. */
+    CHECK(vkrt_private_pool_allocate(&dev, 8, false, &first) == VK_ERROR_INITIALIZATION_FAILED);
+    CHECK(!first.buffer && !first.allocation && !first.mapping && !live_buffers() && native_allocations == native_frees);
+    clean();
+
+    CHECK(vkrt_private_pool_init(&dev, &allocator) == VK_SUCCESS);
+    undersized_requirements = true;
+    CHECK(vkrt_private_pool_allocate(&dev, 8, false, &first) == VK_ERROR_INITIALIZATION_FAILED);
+    CHECK(!first.buffer && !first.allocation && !first.mapping && !live_buffers() && !native_allocations);
+    clean();
+}
+struct slice_worker {
+    unsigned id;
+    bool valid;
+};
+#ifdef _WIN32
+static DWORD WINAPI slice_worker(void *opaque)
+#else
+static void *slice_worker(void *opaque)
+#endif
+{
+    struct slice_worker *worker = opaque;
+    worker->valid = true;
+    for (unsigned i = 0; i < 500; ++i) {
+        struct vkrt_private_slice a = {0}, b = {0};
+        uint64_t expected = ((uint64_t)worker->id << 32) | i, observed;
+        if (vkrt_private_pool_allocate(&dev, 8, false, &a) != VK_SUCCESS) {
+            worker->valid = false;
+            break;
+        }
+        memcpy(a.mapping, &expected, 8);
+        if (vkrt_private_pool_allocate(&dev, 8, true, &b) != VK_SUCCESS) {
+            worker->valid = false;
+            vkrt_private_pool_release(&dev, &a);
+            break;
+        }
+        memcpy(&observed, a.mapping, 8);
+        concurrent_slice_allocations += 2;
+        if (observed != expected || (a.address & 7) || (b.offset & 63) || (a.buffer == b.buffer && a.offset == b.offset))
+            worker->valid = false;
+        vkrt_private_pool_release(&dev, &b);
+        vkrt_private_pool_release(&dev, &a);
+        if (a.allocation || a.mapping || a.buffer || b.allocation || b.mapping || b.buffer) worker->valid = false;
+    }
+    return 0;
+}
+static void concurrent_slices(void) {
+    begin();
+    native_budget = 1; /* Existing registry keeps the chunk alive during concurrent churn. */
+    struct slice_worker workers[8];
+#ifdef _WIN32
+    HANDLE threads[8];
+    for (unsigned i = 0; i < 8; ++i) {
+        workers[i] = (struct slice_worker){.id = i};
+        threads[i] = CreateThread(NULL, 0, slice_worker, &workers[i], 0, NULL);
+        CHECK(threads[i] != NULL);
+    }
+    WaitForMultipleObjects(8, threads, TRUE, INFINITE);
+    for (unsigned i = 0; i < 8; ++i) CloseHandle(threads[i]);
+#else
+    pthread_t threads[8];
+    for (unsigned i = 0; i < 8; ++i) {
+        workers[i] = (struct slice_worker){.id = i};
+        CHECK(pthread_create(&threads[i], NULL, slice_worker, &workers[i]) == 0);
+    }
+    for (unsigned i = 0; i < 8; ++i) pthread_join(threads[i], NULL);
+#endif
+    for (unsigned i = 0; i < 8; ++i) CHECK(workers[i].valid);
+    CHECK(native_allocations == 1 && native_frees == 0 && live_buffers() == 1 && concurrent_slice_allocations == 8000);
     clean();
 }
 struct worker {
@@ -338,16 +536,23 @@ static void concurrent_aliases(void) {
     for (unsigned i = 0; i < 8; ++i) pthread_join(threads[i], NULL);
 #endif
     for (unsigned i = 0; i < 8; ++i) CHECK(workers[i].valid);
-    CHECK(resolve(value) == UINT64_C(0x1234000010) && operations == before && live_buffers() == 8);
+    CHECK(resolve(value) == UINT64_C(0x1234000010) && operations == before && live_buffers() == 1);
     vkrt_as_registry_release(&dev, anchor);
-    CHECK(live_buffers() == 2);
+    CHECK(live_buffers() == 1);
     clean();
 }
 int main(void) {
     namespace_and_aliases();
     full_width_and_churn();
+    allocation_budget();
+    owner_precedence();
+    allocation_boundaries();
+    concurrent_slices();
     concurrent_aliases();
     fault_paths();
-    printf("AS registry checks: %u failures\n", failures);
+    printf(
+        "AS registry checks: %u failures; 24 sparse views used %u native allocations (budget 4); %u fault positions; "
+        "%u concurrent slice allocations\n",
+        failures, budget_allocations, tested_fault_positions, concurrent_slice_allocations);
     return failures != 0;
 }

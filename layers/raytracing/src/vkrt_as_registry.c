@@ -6,14 +6,8 @@
 #include "vkrt_as_registry.h"
 #include "vkrt_layer.h"
 
-struct registry_storage {
-    VkBuffer buffer;
-    VkDeviceMemory memory;
-    void *mapping;
-    VkDeviceAddress address;
-};
 struct registry_page {
-    struct registry_storage storage;
+    struct vkrt_private_slice storage;
     struct registry_page *children[VKRT_AS_REGISTRY_SLOTS];
     uint64_t users;
 };
@@ -34,11 +28,12 @@ struct vkrt_as_registry_entry {
     uint32_t indices[VKRT_AS_REGISTRY_LEVELS];
     VkDeviceSize offset;
     VkDeviceAddress public_address, physical_address;
+    struct vkrt_private_slice descriptor;
     uint64_t references;
 };
 struct vkrt_as_registry {
     struct vkrt_device_data *dev;
-    struct registry_storage header;
+    struct vkrt_private_slice header;
     struct registry_page *root;
     struct registry_buffer *buffers;
     vkrt_mutex_t lock;
@@ -64,75 +59,11 @@ static void deallocate(struct vkrt_as_registry *registry, void *value) {
     else
         free(value);
 }
-static void storage_finish(struct vkrt_as_registry *registry, struct registry_storage *storage) {
-    struct vkrt_device_data *dev = registry->dev;
-    if (storage->mapping) dev->vtable.UnmapMemory(dev->device, storage->memory);
-    if (storage->buffer) dev->vtable.DestroyBuffer(dev->device, storage->buffer, callbacks(registry));
-    if (storage->memory) dev->vtable.FreeMemory(dev->device, storage->memory, callbacks(registry));
-    memset(storage, 0, sizeof(*storage));
+static void storage_finish(struct vkrt_as_registry *registry, struct vkrt_private_slice *storage) {
+    vkrt_private_pool_release(registry->dev, storage);
 }
-static VkResult storage_init(struct vkrt_as_registry *registry, VkDeviceSize size, struct registry_storage *storage) {
-    struct vkrt_device_data *dev = registry->dev;
-    VkBufferCreateInfo info = {.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
-                               .size = size + 7,
-                               .usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
-                               .sharingMode = VK_SHARING_MODE_EXCLUSIVE};
-    if (dev->queue_family_count > 1) {
-        info.sharingMode = VK_SHARING_MODE_CONCURRENT;
-        info.queueFamilyIndexCount = dev->queue_family_count;
-        info.pQueueFamilyIndices = dev->queue_families;
-    }
-    VkBuffer buffer = VK_NULL_HANDLE;
-    VkResult result = dev->vtable.CreateBuffer(dev->device, &info, callbacks(registry), &buffer);
-    if (result != VK_SUCCESS) return result;
-    storage->buffer = buffer;
-    VkMemoryRequirements requirements;
-    dev->vtable.GetBufferMemoryRequirements(dev->device, buffer, &requirements);
-    VkPhysicalDeviceMemoryProperties properties;
-    dev->instance_data->vtable.GetPhysicalDeviceMemoryProperties(dev->physical_device, &properties);
-    uint32_t type = UINT32_MAX;
-    for (uint32_t i = 0; i < properties.memoryTypeCount; ++i)
-        if ((requirements.memoryTypeBits & (1u << i)) &&
-            (properties.memoryTypes[i].propertyFlags &
-             (VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT)) ==
-                (VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT)) {
-            type = i;
-            break;
-        }
-    if (type == UINT32_MAX) {
-        result = VK_ERROR_FEATURE_NOT_PRESENT;
-        goto fail;
-    }
-    VkMemoryAllocateFlagsInfo flags = {.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_FLAGS_INFO,
-                                       .flags = VK_MEMORY_ALLOCATE_DEVICE_ADDRESS_BIT};
-    VkMemoryAllocateInfo allocation = {.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
-                                       .pNext = &flags,
-                                       .allocationSize = requirements.size,
-                                       .memoryTypeIndex = type};
-    VkDeviceMemory memory = VK_NULL_HANDLE;
-    result = dev->vtable.AllocateMemory(dev->device, &allocation, callbacks(registry), &memory);
-    if (result != VK_SUCCESS) goto fail;
-    storage->memory = memory;
-    result = dev->vtable.BindBufferMemory(dev->device, buffer, memory, 0);
-    if (result != VK_SUCCESS) goto fail;
-    void *mapping = NULL;
-    result = dev->vtable.MapMemory(dev->device, memory, 0, VK_WHOLE_SIZE, 0, &mapping);
-    if (result != VK_SUCCESS) goto fail;
-    storage->mapping = mapping;
-    VkBufferDeviceAddressInfo address = {.sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO, .buffer = buffer};
-    VkDeviceAddress base = dev->vtable.GetBufferDeviceAddress(dev->device, &address);
-    if (!base || base > UINT64_MAX - 7) {
-        result = VK_ERROR_INITIALIZATION_FAILED;
-        goto fail;
-    }
-    VkDeviceSize padding = (0 - base) & 7;
-    storage->address = base + padding;
-    storage->mapping = (uint8_t *)mapping + padding;
-    memset(storage->mapping, 0, (size_t)size);
-    return VK_SUCCESS;
-fail:
-    storage_finish(registry, storage);
-    return result;
+static VkResult storage_init(struct vkrt_as_registry *registry, VkDeviceSize size, struct vkrt_private_slice *storage) {
+    return vkrt_private_pool_allocate(registry->dev, size, false, storage);
 }
 static VkResult page_create(struct vkrt_as_registry *registry, struct registry_page **out) {
     struct registry_page *page = allocate(registry, sizeof(*page), _Alignof(struct registry_page));
@@ -158,6 +89,10 @@ VkResult vkrt_as_registry_init(struct vkrt_device_data *dev, const VkAllocationC
         !dev->vtable.UnmapMemory || !dev->vtable.GetBufferDeviceAddress || !dev->instance_data ||
         !dev->instance_data->vtable.GetPhysicalDeviceMemoryProperties)
         return VK_ERROR_FEATURE_NOT_PRESENT;
+    VkResult pool_result = vkrt_private_pool_init(dev, allocator);
+    if (pool_result != VK_SUCCESS) return pool_result;
+    if (!allocator && dev->queue_families_have_allocator) allocator = &dev->queue_families_allocator;
+    if (!allocator && dev->instance_data->has_allocator) allocator = &dev->instance_data->allocator;
     struct vkrt_as_registry seed = {.dev = dev};
     if (allocator) {
         seed.has_allocator = true;
@@ -197,6 +132,7 @@ void vkrt_as_registry_finish(struct vkrt_device_data *dev) {
         while (buffer->entries) {
             struct vkrt_as_registry_entry *entry = buffer->entries;
             buffer->entries = entry->next;
+            vkrt_private_pool_release(dev, &entry->descriptor);
             deallocate(registry, entry);
         }
         deallocate(registry, buffer);
@@ -342,6 +278,13 @@ VkResult vkrt_as_registry_acquire(struct vkrt_device_data *dev, VkBuffer handle,
         }
         entry->path[level + 1] = parent->children[index];
     }
+    result = vkrt_private_pool_allocate(dev, sizeof(VkDeviceAddress), true, &entry->descriptor);
+    if (result != VK_SUCCESS) {
+        path_prune(registry, entry);
+        deallocate(registry, entry);
+        goto done;
+    }
+    memcpy(entry->descriptor.mapping, &entry->public_address, sizeof(VkDeviceAddress));
     for (uint32_t level = 0; level < VKRT_AS_REGISTRY_LEVELS; ++level) ++entry->path[level]->users;
     entry->next = buffer->entries;
     buffer->entries = entry;
@@ -360,6 +303,7 @@ void vkrt_as_registry_release(struct vkrt_device_data *dev, struct vkrt_as_regis
     struct registry_buffer *buffer = entry->owner;
     --buffer->references;
     if (!--entry->references) {
+        vkrt_private_pool_release(dev, &entry->descriptor);
         uint64_t empty = 0;
         memcpy(
             (uint8_t *)entry->path[VKRT_AS_REGISTRY_LEVELS - 1]->storage.mapping + entry->indices[VKRT_AS_REGISTRY_LEVELS - 1] * 8,
@@ -404,4 +348,8 @@ VkDeviceAddress vkrt_as_registry_publish(struct vkrt_device_data *dev, struct vk
 done:
     vkrt_mutex_unlock(&registry->lock);
     return result;
+}
+
+const struct vkrt_private_slice *vkrt_as_registry_descriptor(const struct vkrt_as_registry_entry *entry) {
+    return &entry->descriptor;
 }

@@ -217,7 +217,7 @@ not complete until its full proof set passes. A CPU encoder is a reference and
 layout-validation tool; it does not satisfy the GPU encoding or shared integration
 milestones.
 
-The initial [BVH4 reference foundation](../layers/raytracing/bvh4/README.md)
+The initial [BVH4 reference foundation](../layers/raytracing/docs/BVH4.md)
 provides the experimental C-compatible ABI, checked size planner, CPU encoder,
 and structural tests. It is intentionally labelled as component work until the
 GPU producers and both consumers adopt it.

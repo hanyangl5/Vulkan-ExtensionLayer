@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #include "mesa_ir_adapter.h"
 
-#include "../bvh/bvh_ir_contract.h"
+#include "bvh_ir_contract.h"
 #include <algorithm>
 #include <cmath>
 #include <cstring>

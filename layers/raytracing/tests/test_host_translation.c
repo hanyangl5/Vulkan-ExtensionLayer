@@ -1032,9 +1032,9 @@ static VKAPI_ATTR void VKAPI_CALL mock_update(VkDevice d, uint32_t count, const 
         const unsigned indices[] = {0, 1, 2, 2, 0};
         for (unsigned j = 0; j < 5; ++j) {
             const VkDescriptorBufferInfo *b = j < 3 ? &writes[0].pBufferInfo[j] : &writes[2].pBufferInfo[j - 3];
-            REQUIRE(b->buffer == objects[indices[j]].address_cell_buffer);
+            REQUIRE(b->buffer == objects[indices[j]].address_cell.buffer);
             REQUIRE(b->buffer != objects[indices[j]].backing_buffer);
-            REQUIRE(b->offset == 0);
+            REQUIRE(b->offset == objects[indices[j]].address_cell.offset);
             REQUIRE(b->range == sizeof(VkDeviceAddress));
         }
     } else if (update_mode == 1) {
@@ -1042,8 +1042,9 @@ static VKAPI_ATTR void VKAPI_CALL mock_update(VkDevice d, uint32_t count, const 
         REQUIRE(writes[0].pBufferInfo[0].buffer == VK_NULL_HANDLE);
         REQUIRE(writes[0].pBufferInfo[0].offset == 0);
         REQUIRE(writes[0].pBufferInfo[0].range == VK_WHOLE_SIZE);
-        REQUIRE(writes[0].pBufferInfo[1].buffer == objects[1].address_cell_buffer);
-        REQUIRE(writes[0].pBufferInfo[1].offset == 0 && writes[0].pBufferInfo[1].range == sizeof(VkDeviceAddress));
+        REQUIRE(writes[0].pBufferInfo[1].buffer == objects[1].address_cell.buffer);
+        REQUIRE(writes[0].pBufferInfo[1].offset == objects[1].address_cell.offset &&
+                writes[0].pBufferInfo[1].range == sizeof(VkDeviceAddress));
     } else {
         REQUIRE(writes == original_writes);
     }
@@ -1087,11 +1088,12 @@ static VKAPI_ATTR VkResult VKAPI_CALL mock_allocate(VkDevice d, const VkMemoryAl
 static void descriptors(void) {
     VkAccelerationStructureKHR handles[5];
     for (unsigned i = 0; i < 3; ++i) {
-        objects[i] = (struct vkrt_virtual_as){.owner = device,
-                                              .backing_buffer = HANDLE(VkBuffer, 100 + i),
-                                              .offset = 256 * (i + 1),
-                                              .size = 512 * (i + 1),
-                                              .address_cell_buffer = HANDLE(VkBuffer, 300 + i)};
+        objects[i] =
+            (struct vkrt_virtual_as){.owner = device,
+                                     .backing_buffer = HANDLE(VkBuffer, 100 + i),
+                                     .offset = 256 * (i + 1),
+                                     .size = 512 * (i + 1),
+                                     .address_cell = {.buffer = HANDLE(VkBuffer, 300), .offset = 512 * (i + 1), .size = 8}};
         handles[i] = HANDLE(VkAccelerationStructureKHR, 200 + i);
         vkrt_map_object(VKRT_HKEY(handles[i]), &objects[i]);
     }
@@ -1151,7 +1153,7 @@ static void descriptors(void) {
     vkrt_UpdateDescriptorSets(device, 1, writes, 1, &copy);
     REQUIRE(updates == 2);
     objects[1].owner = device;
-    objects[1].address_cell_buffer = VK_NULL_HANDLE;
+    objects[1].address_cell.buffer = VK_NULL_HANDLE;
     vkrt_UpdateDescriptorSets(device, 1, writes, 1, &copy);
     REQUIRE(updates == 2);
     update_mode = 2;

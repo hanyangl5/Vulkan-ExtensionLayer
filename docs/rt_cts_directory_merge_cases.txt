@@ -1,0 +1,20 @@
+# Copyright 2026 The Khronos Group Inc.
+# SPDX-License-Identifier: Apache-2.0
+# Post-directory-consolidation regression slice, including four prior crashes.
+# VK-GL-CTS d18e4c68543103371715845cd914c71e5859963e
+dEQP-VK.ray_query.builtin.flow.comp.triangles
+dEQP-VK.ray_query.builtin.flow.comp.aabbs
+dEQP-VK.ray_query.builtin.flow.frag.triangles
+dEQP-VK.ray_tracing_pipeline.builtin.launchidext.rgen_1_1_1
+dEQP-VK.ray_tracing_pipeline.complexcontrolflow.if.report_intersection.sect
+dEQP-VK.ray_tracing_pipeline.data_spill.execute_callable.image
+dEQP-VK.ray_query.acceleration_structures.operations.traditional_structures.compute_shader.compaction.gpu_built.top_acceleration_structure.triangles
+dEQP-VK.ray_query.acceleration_structures.operations.traditional_structures.compute_shader.serialization.gpu_built.top_acceleration_structure.triangles
+dEQP-VK.shader_object.binary.query.comp.unlinked.shader_from_binary_different_layout
+dEQP-VK.shader_object.binary.query.comp.unlinked.shader_from_binary_null_layout
+dEQP-VK.shader_object.create.all.fail
+dEQP-VK.shader_object.create.all_with_mesh.fail
+dEQP-VK.ray_query.ray_flags.compute_shader.opacity.aabbs.cullopaque
+dEQP-VK.ray_tracing_pipeline.memguarantee.between.miss
+dEQP-VK.ray_tracing_pipeline.memguarantee.between.rgen
+dEQP-VK.ray_tracing_pipeline.data_spill.trace_ray.v3uint64

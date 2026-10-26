@@ -11,7 +11,7 @@
  *        custom-BVH buffer accesses.
  *
  * Two stages:
- *   1. spvtools::Link merges traversal/sw_ray_query.spv into the user
+ *   1. spvtools::Link merges sw_ray_query.spv into the user
  *      module. The SPIRV-Tools linker remaps IDs and deduplicates types,
  *      which is exactly the hard part of doing this by hand.
  *   2. A word-level pass substitutes types and turns each OpRayQuery*

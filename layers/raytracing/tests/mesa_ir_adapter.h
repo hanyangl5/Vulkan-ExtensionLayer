@@ -15,7 +15,7 @@ struct ByteSpan {
 
 enum class MesaGeometryType : uint32_t { Triangles = 0, Aabbs = 1, Instances = 2 };
 
-// Mesa's scalar record ABI, as declared in layers/raytracing/bvh/vk_bvh_defines.h.
+// Mesa's scalar record ABI, as declared in layers/raytracing/src/vk_bvh_defines.h.
 // Unlike the optional VKRT v2 envelope, Mesa itself takes header and node bases
 // separately. Node IDs contain a 32-bit byte offset and a two-bit node kind.
 // This adapter does not replace that construction-time capacity limit with an

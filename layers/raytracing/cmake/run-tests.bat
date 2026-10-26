@@ -11,7 +11,7 @@ if not defined VKRT_SAMPLE_WORKDIR set "VKRT_SAMPLE_WORKDIR=%VKRT_SAMPLE_DIR%"
 if defined VKRT_SAMPLE_PROGRAM for %%I in ("%VKRT_SAMPLE_PROGRAM%") do set "VKRT_SAMPLE_PROGRAM=%%~fI"
 if defined VKRT_SAMPLE_WORKDIR for %%I in ("%VKRT_SAMPLE_WORKDIR%") do set "VKRT_SAMPLE_WORKDIR=%%~fI"
 
-pushd "%~dp0..\.."
+pushd "%~dp0..\..\.."
 if errorlevel 1 exit /b 1
 set "VKRT_EXIT_CODE=0"
 

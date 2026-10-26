@@ -96,13 +96,13 @@ VKAPI_ATTR void VKAPI_CALL vkrt_UpdateDescriptorSets(VkDevice device,
             VKRT_LOG_ERR("UpdateDescriptorSets: unknown or foreign AS handle");
             goto done;
          }
-         if (!as->address_cell_buffer) {
+         if (!as->address_cell.buffer) {
              VKRT_LOG_ERR("UpdateDescriptorSets: AS address cell is unavailable");
              goto done;
          }
          /* Bind the immutable AS value cell without querying an unbound
           * backing buffer or writing storage that a shader may be reading. */
-         buffers[cursor++] = (VkDescriptorBufferInfo){as->address_cell_buffer, 0, sizeof(VkDeviceAddress)};
+         buffers[cursor++] = (VkDescriptorBufferInfo){as->address_cell.buffer, as->address_cell.offset, sizeof(VkDeviceAddress)};
       }
    }
    /* Keep each write's binding, array element and count. Each now owns a

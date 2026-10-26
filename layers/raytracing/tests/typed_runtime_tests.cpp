@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #include "typed_runtime.h"
 #include "glsl_compiler.h"
-#include "bvh4/bvh4_abi.h"
+#include "bvh4_abi.h"
 #include <spirv-tools/libspirv.hpp>
 #include <algorithm>
 #include <cstring>

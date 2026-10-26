@@ -18,6 +18,8 @@ layout(push_constant, scalar) uniform Args {
 const uint INVALID = 0xffffffffu;
 const uint RESERVED = 0xfffffffeu;
 const uint OFFSET_MASK = 0xfffffffcu;
+const uint JUMP_INVALID = 0x7fffffffu;
+const uint DEPTH_PARITY = 0x80000000u;
 uint read32(uint64_t address) { return Word(address).value; }
 uint64_t read64(uint64_t address) { return uint64_t(read32(address)) | (uint64_t(read32(address + 4)) << 32); }
 void write32(uint64_t address, uint value) { Word(address).value = value; }
@@ -36,7 +38,13 @@ uint64_t box_base() { return uint64_t(args.capacity) * uint64_t(stride()); }
 uint64_t source_node(uint id) { return args.source + 128 + uint64_t(id & OFFSET_MASK); }
 uint64_t box_address(uint index) { return args.source + 128 + box_base() + uint64_t(index) * uint64_t(40); }
 uint64_t map_address(uint index) { return args.mapping + uint64_t(index) * uint64_t(4); }
-uint64_t parent_map_address(uint index) { return args.mapping + (uint64_t(args.capacity) + uint64_t(index)) * uint64_t(4); }
+uint64_t work_map_address(uint array, uint index) {
+    uint64_t internals = uint64_t(max(args.capacity, 2) - 1);
+    return args.mapping + (uint64_t(args.capacity) + uint64_t(array) * internals + uint64_t(index)) * uint64_t(4);
+}
+uint64_t parent_map_address(uint index) { return work_map_address(0, index); }
+uint64_t jump_map_address(uint bank, uint index) { return work_map_address(1 + bank, index); }
+uint64_t internal_map_address(uint index) { return work_map_address(3, index); }
 uint64_t output_region(uint offset) { return args.output_as + read64(args.output_as + uint64_t(offset)); }
 uint64_t output_node(uint index) { return output_region(48) + uint64_t(index) * uint64_t(128); }
 uint64_t output_leaf(uint index) {
@@ -64,7 +72,8 @@ bool valid_reference(uint id, uint parent_index) {
     return (id & 3) == source_leaf_kind() && offset < box_base() && offset % uint64_t(stride()) == uint64_t(0);
 }
 uint output_id(uint source_id) {
-    if ((source_id & 3) == 1) return uint((uint64_t(source_id & OFFSET_MASK) - box_base()) / uint64_t(40));
+    if ((source_id & 3) == 1)
+        return read32(internal_map_address(uint((uint64_t(source_id & OFFSET_MASK) - box_base()) / uint64_t(40))));
     uint source_slot = (source_id & OFFSET_MASK) / stride();
     return (leaf_kind() << 30) | read32(map_address(source_slot));
 }
@@ -164,7 +173,6 @@ void main() {
             root_end > uint64_t(0xfffffffcu) + uint64_t(40) || uint64_t(128) + root_end > args.source_size) {
             fail(1); return;
         }
-        if (live > 1) write32(args.output_as + 20, internals);
         return;
     }
     // Other invocations can publish an error in this same dispatch. Reading
@@ -191,37 +199,96 @@ void main() {
         }
         return;
     }
-    uint mapped_leaves = read32(args.output_as + 24 + args.geometry_type * 4);
-    if (mapped_leaves != live || (index + 1 < internal_count() && read32(parent_map_address(index)) == INVALID)) {
-        fail(128); return;
-    }
-    if (live == 0) {
-        if (read_vec(box) != vec3(uintBitsToFloat(0x7f800000u)) || read_vec(box + 12) != vec3(uintBitsToFloat(0xff800000u))) fail(8);
+    if (phase == 2) {
+        uint parent = read32(parent_map_address(index));
+        uint mapped_leaves = read32(args.output_as + 24 + args.geometry_type * 4);
+        if (mapped_leaves != live || (index + 1 < internal_count() && parent == INVALID)) { fail(128); return; }
+        if (parent != INVALID && (parent <= index || parent >= internal_count())) { fail(2); return; }
+        if (live == 0) {
+            if (read_vec(box) != vec3(uintBitsToFloat(0x7f800000u)) || read_vec(box + 12) != vec3(uintBitsToFloat(0xff800000u))) {
+                fail(8); return;
+            }
+        } else {
+            if (!valid_box(box)) { fail(8); return; }
+            for (uint child = 0; child < (live == 1 ? 1u : 2u); ++child) {
+                uint64_t src = source_node(children[child]);
+                if (!valid_box(src) || !contains_box(box, src)) { fail(8); return; }
+            }
+        }
+        write32(jump_map_address(0, index), parent == INVALID ? JUMP_INVALID : parent | DEPTH_PARITY);
         return;
     }
-    if (!valid_box(box)) { fail(8); return; }
+    if (phase == 3 || phase == 4) {
+        uint input_bank = phase - 3;
+        uint value = read32(jump_map_address(input_bank, index));
+        uint ancestor = value & JUMP_INVALID;
+        if (ancestor != JUMP_INVALID) {
+            if (ancestor >= internal_count()) { fail(2); return; }
+            uint next = read32(jump_map_address(input_bank, ancestor));
+            value = (next & JUMP_INVALID) | ((value ^ next) & DEPTH_PARITY);
+        }
+        write32(jump_map_address(1 - input_bank, index), value);
+        return;
+    }
+    if (phase == 5) {
+        uint value = read32(jump_map_address(0, index));
+        if ((value & JUMP_INVALID) != JUMP_INVALID) { fail(2); return; }
+        uint id = INVALID;
+        if (live > 1 && (value & DEPTH_PARITY) == 0) id = atomicAdd(Word(args.output_as + 20).value, 1);
+        write32(internal_map_address(index), id);
+        return;
+    }
+    if (live < 2) {
+        if (live == 1 && index + 1 == internal_count()) {
+            write32(args.output_as + 16, output_id(children[0]));
+            for (uint field = 0; field < 24; field += 4) write32(args.output_as + 96 + field, read32(box + field));
+            emit_leaf(children[0], INVALID);
+        }
+        return;
+    }
+    uint id = read32(internal_map_address(index));
+    if (id == INVALID) return;
     if (index + 1 == internal_count()) {
-        write32(args.output_as + 16, live == 1 ? output_id(children[0]) : index);
+        write32(args.output_as + 16, id);
         for (uint field = 0; field < 24; field += 4) write32(args.output_as + 96 + field, read32(box + field));
     }
-    uint64_t dst = output_node(index);
-    for (uint child = 0; child < (live == 1 ? 1u : 2u); ++child) {
-        uint id = children[child];
-        uint64_t src = source_node(id);
-        if (!valid_box(src) || !contains_box(box, src)) { fail(8); return; }
-        if ((id & 3) != 1) emit_leaf(id, live == 1 ? INVALID : index);
-        if (live == 1) continue;
-        for (uint axis = 0; axis < 3; ++axis) {
-            write32(dst + child * 12 + axis * 4, read32(src + axis * 4));
-            write32(dst + 48 + child * 12 + axis * 4, read32(src + 12 + axis * 4));
-        }
-        write32(dst + 96 + child * 4, output_id(id));
+    uint parent = read32(parent_map_address(index)), output_parent = INVALID;
+    if (parent != INVALID) {
+        uint grandparent = read32(parent_map_address(parent));
+        if (grandparent == INVALID) { fail(2); return; }
+        output_parent = read32(internal_map_address(grandparent));
+        if (output_parent == INVALID) { fail(2); return; }
     }
-    if (live == 1) return;
-    for (uint field = 24; field < 48; field += 4) write32(dst + field, 0);
-    for (uint field = 72; field < 96; field += 4) write32(dst + field, 0);
-    write32(dst + 104, INVALID); write32(dst + 108, INVALID);
-    write32(dst + 112, 2);
-    write32(dst + 116, read32(parent_map_address(index)));
+    // Even-depth internals survive; each odd-depth child is expanded once.
+    // Each retained internal/leaf therefore has one output parent and writer.
+    uint frontier[4];
+    uint child_count = 0;
+    for (uint child = 0; child < 2; ++child) {
+        uint source_id = children[child];
+        if ((source_id & 3) == 1) {
+            uint64_t expanded = source_node(source_id);
+            frontier[child_count++] = read32(expanded + 24);
+            frontier[child_count++] = read32(expanded + 28);
+        } else frontier[child_count++] = source_id;
+    }
+    uint64_t dst = output_node(id);
+    for (uint child = 0; child < 4; ++child) {
+        uint mapped = INVALID;
+        uint64_t src = 0;
+        if (child < child_count) {
+            uint source_id = frontier[child];
+            src = source_node(source_id);
+            mapped = output_id(source_id);
+            if (mapped == INVALID) { fail(2); return; }
+            if ((source_id & 3) != 1) emit_leaf(source_id, id);
+        }
+        for (uint axis = 0; axis < 3; ++axis) {
+            write32(dst + child * 12 + axis * 4, child < child_count ? read32(src + axis * 4) : 0);
+            write32(dst + 48 + child * 12 + axis * 4, child < child_count ? read32(src + 12 + axis * 4) : 0);
+        }
+        write32(dst + 96 + child * 4, mapped);
+    }
+    write32(dst + 112, child_count);
+    write32(dst + 116, output_parent);
     write32(dst + 120, 0); write32(dst + 124, 0);
 }

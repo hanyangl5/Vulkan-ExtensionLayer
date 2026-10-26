@@ -21,6 +21,7 @@ static PFN_vkCmdCopyMemoryToAccelerationStructureKHR deserialize_as;
 static void storage(struct built_as *as, uint64_t size) {
     memset(as, 0, sizeof(*as));
     as->size = size;
+    as->offset = 256;
     /* A legal ordinary-buffer suballocation can put the physical AS header
      * at 16 mod 256. Public AS values still satisfy their 256-byte contract. */
     as->output.size = size + 512;

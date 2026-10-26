@@ -81,6 +81,15 @@ static void bounds(const struct vkrt_resource_native *n, const struct vkrt_resou
     REQUIRE((uint64_t)maximum(c->maxDescriptorSetStorageBuffers, u->maxDescriptorSetUpdateAfterBindStorageBuffers) +
                 p->as_per_set <=
             maximum(nc->maxDescriptorSetStorageBuffers, nu->maxDescriptorSetUpdateAfterBindStorageBuffers));
+    /* Pinned 1.4.357 03024/03039 use the native UAB SSBO limits directly when
+     * that feature is supported. Ordinary AS descriptors still become SSBOs
+     * in this ALL-layout count, despite AS UAB bindings remaining unsupported. */
+    if (n->indexing_features.descriptorBindingStorageBufferUpdateAfterBind) {
+        REQUIRE(all_s <= nu->maxPerStageDescriptorUpdateAfterBindStorageBuffers);
+        REQUIRE((uint64_t)maximum(c->maxDescriptorSetStorageBuffers, u->maxDescriptorSetUpdateAfterBindStorageBuffers) +
+                    p->as_per_set <=
+                nu->maxDescriptorSetUpdateAfterBindStorageBuffers);
+    }
     REQUIRE((uint64_t)c->maxDescriptorSetUniformBuffers + c->maxDescriptorSetUniformBuffersDynamic <=
             nc->maxPerStageDescriptorUniformBuffers);
     REQUIRE((uint64_t)maximum(c->maxDescriptorSetUniformBuffers, u->maxDescriptorSetUpdateAfterBindUniformBuffers) +
@@ -294,8 +303,15 @@ static void application(void) {
     vkrt_apply_resource_profile(&p, &core);
     REQUIRE(core.pNext == &u && u.pNext == &i && i.pNext == &a && a.pNext == &m && m.pNext == &tail);
     REQUIRE(tail.sentinel == UINT64_C(0xabcdef0123456789));
-    REQUIRE(a.maxGeometryCount == 777 && a.maxDescriptorSetAccelerationStructures == 16 &&
-            !a.maxDescriptorSetUpdateAfterBindAccelerationStructures);
+    REQUIRE(a.maxGeometryCount == 777 && a.maxPerStageDescriptorAccelerationStructures == 16 &&
+            a.maxDescriptorSetAccelerationStructures == 16 && a.maxPerStageDescriptorUpdateAfterBindAccelerationStructures == 16 &&
+            a.maxDescriptorSetUpdateAfterBindAccelerationStructures == 16);
+    /* A legal normal layout with one or sixteen AS descriptors also meets
+     * unconditional ALL-layout limits 03572/03574; zero would reject both. */
+    for (uint32_t ordinary_as = 1; ordinary_as <= 16; ordinary_as += 15) {
+        REQUIRE(ordinary_as <= a.maxPerStageDescriptorUpdateAfterBindAccelerationStructures);
+        REQUIRE(ordinary_as <= a.maxDescriptorSetUpdateAfterBindAccelerationStructures);
+    }
     REQUIRE(u.quadDivergentImplicitLod && m.robustFragmentShadingRateAttachmentAccess && core.properties.deviceID == 123);
     REQUIRE(core.properties.limits.maxPushConstantsSize == 192);
     REQUIRE(u.maxDescriptorSetUpdateAfterBindStorageBuffers == p.indexing.maxDescriptorSetUpdateAfterBindStorageBuffers);
@@ -310,10 +326,114 @@ static void application(void) {
             v13.maxInlineUniformTotalSize == p.max_inline_uniform_total_size);
 }
 
+static struct vkrt_resource_native queried_native;
+static unsigned property_queries, feature_queries;
+static bool ignore_optional;
+static const VkPhysicalDevice physical = (VkPhysicalDevice)(uintptr_t)7;
+
+static VKAPI_ATTR void VKAPI_CALL query_properties(VkPhysicalDevice device, VkPhysicalDeviceProperties2 *properties) {
+    REQUIRE(device == physical && properties->sType == VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2);
+    ++property_queries;
+    properties->properties = queried_native.properties;
+    for (VkBaseOutStructure *p = properties->pNext; p; p = p->pNext) {
+        void *next = p->pNext;
+        VkStructureType type = p->sType;
+        if (!ignore_optional) {
+            if (type == VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_INDEXING_PROPERTIES)
+                *(VkPhysicalDeviceDescriptorIndexingProperties *)p = queried_native.indexing;
+            else if (type == VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_INLINE_UNIFORM_BLOCK_PROPERTIES)
+                *(VkPhysicalDeviceInlineUniformBlockProperties *)p = queried_native.inline_uniform;
+            else if (type == VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MAINTENANCE_7_PROPERTIES_KHR)
+                *(VkPhysicalDeviceMaintenance7PropertiesKHR *)p = queried_native.maintenance7;
+            else if (type == VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_PROPERTIES) {
+                VkPhysicalDeviceVulkan13Properties *v = (void *)p;
+                const VkPhysicalDeviceInlineUniformBlockProperties *i = &queried_native.inline_uniform;
+                v->maxInlineUniformBlockSize = i->maxInlineUniformBlockSize;
+                v->maxPerStageDescriptorInlineUniformBlocks = i->maxPerStageDescriptorInlineUniformBlocks;
+                v->maxPerStageDescriptorUpdateAfterBindInlineUniformBlocks =
+                    i->maxPerStageDescriptorUpdateAfterBindInlineUniformBlocks;
+                v->maxDescriptorSetInlineUniformBlocks = i->maxDescriptorSetInlineUniformBlocks;
+                v->maxDescriptorSetUpdateAfterBindInlineUniformBlocks = i->maxDescriptorSetUpdateAfterBindInlineUniformBlocks;
+                v->maxInlineUniformTotalSize = queried_native.max_inline_uniform_total_size;
+            } else
+                REQUIRE(false);
+        }
+        p->sType = type;
+        p->pNext = next;
+    }
+}
+static VKAPI_ATTR void VKAPI_CALL query_features(VkPhysicalDevice device, VkPhysicalDeviceFeatures2 *features) {
+    REQUIRE(device == physical && features->sType == VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2);
+    ++feature_queries;
+    for (VkBaseOutStructure *p = features->pNext; p; p = p->pNext) {
+        void *next = p->pNext;
+        VkStructureType type = p->sType;
+        if (!ignore_optional) {
+            if (type == VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES) {
+                VkPhysicalDeviceVulkan12Features *v = (void *)p;
+                const VkPhysicalDeviceDescriptorIndexingFeatures *f = &queried_native.indexing_features;
+                v->descriptorIndexing = queried_native.descriptor_indexing;
+                v->descriptorBindingUniformBufferUpdateAfterBind = f->descriptorBindingUniformBufferUpdateAfterBind;
+                v->descriptorBindingStorageBufferUpdateAfterBind = f->descriptorBindingStorageBufferUpdateAfterBind;
+                v->descriptorBindingSampledImageUpdateAfterBind = f->descriptorBindingSampledImageUpdateAfterBind;
+                v->descriptorBindingStorageImageUpdateAfterBind = f->descriptorBindingStorageImageUpdateAfterBind;
+                v->descriptorBindingUniformTexelBufferUpdateAfterBind = f->descriptorBindingUniformTexelBufferUpdateAfterBind;
+                v->descriptorBindingStorageTexelBufferUpdateAfterBind = f->descriptorBindingStorageTexelBufferUpdateAfterBind;
+            } else if (type == VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_INLINE_UNIFORM_BLOCK_FEATURES)
+                *(VkPhysicalDeviceInlineUniformBlockFeatures *)p = queried_native.inline_features;
+            else if (type == VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MAINTENANCE_7_FEATURES_KHR)
+                ((VkPhysicalDeviceMaintenance7FeaturesKHR *)p)->maintenance7 = queried_native.has_maintenance7;
+            else
+                REQUIRE(false);
+        }
+        p->sType = type;
+        p->pNext = next;
+    }
+}
+static void capture(void) {
+    for (uint32_t version = VK_API_VERSION_1_2; version <= VK_API_VERSION_1_4; version += 1u << 12) {
+        queried_native = native();
+        queried_native.properties.apiVersion = version;
+        struct vkrt_resource_native snapshot;
+        REQUIRE(vkrt_capture_resource_native(query_properties, query_features, physical, &snapshot, NULL));
+        REQUIRE(!snapshot.indexing.pNext && !snapshot.inline_uniform.pNext && !snapshot.indexing_features.pNext &&
+                !snapshot.inline_features.pNext && !snapshot.maintenance7.pNext);
+        REQUIRE(snapshot.descriptor_indexing && snapshot.has_maintenance7 && snapshot.inline_features.inlineUniformBlock);
+        REQUIRE(snapshot.indexing.maxDescriptorSetUpdateAfterBindStorageBuffers == 1048576);
+        if (version < VK_API_VERSION_1_3) queried_native.max_inline_uniform_total_size = 0;
+        struct vkrt_resource_profile expected, actual;
+        REQUIRE(vkrt_plan_resource_profile(&queried_native, &expected, NULL));
+        REQUIRE(vkrt_query_resource_profile(query_properties, query_features, physical, &actual, NULL));
+        REQUIRE(!memcmp(&actual, &expected, sizeof(actual)));
+    }
+    /* Ignored optional structures must stay zero, not inherit stale output
+     * bytes or a previous query's native support. */
+    ignore_optional = true;
+    queried_native.properties.apiVersion = VK_API_VERSION_1_2;
+    struct vkrt_resource_native snapshot;
+    memset(&snapshot, 0xa5, sizeof(snapshot));
+    REQUIRE(vkrt_capture_resource_native(query_properties, query_features, physical, &snapshot, NULL));
+    REQUIRE(!snapshot.descriptor_indexing && !snapshot.has_maintenance7 && !snapshot.inline_features.inlineUniformBlock &&
+            !snapshot.indexing.maxDescriptorSetUpdateAfterBindStorageBuffers && !snapshot.inline_uniform.maxInlineUniformBlockSize);
+    ignore_optional = false;
+    struct vkrt_resource_native saved;
+    memset(&snapshot, 0xa5, sizeof(snapshot));
+    saved = snapshot;
+    unsigned before = feature_queries;
+    queried_native.properties.apiVersion = VK_API_VERSION_1_1;
+    enum vkrt_resource_failure reason;
+    REQUIRE(!vkrt_capture_resource_native(query_properties, query_features, physical, &snapshot, &reason) &&
+            reason == VKRT_RESOURCE_API_VERSION && feature_queries == before && !memcmp(&snapshot, &saved, sizeof(snapshot)));
+    REQUIRE(!vkrt_capture_resource_native(NULL, query_features, physical, &snapshot, &reason) &&
+            reason == VKRT_RESOURCE_BAD_ARGUMENT && !memcmp(&snapshot, &saved, sizeof(snapshot)));
+    REQUIRE(property_queries && feature_queries);
+}
+
 int main(void) {
     planning();
     adversarial();
     application();
+    capture();
     printf("Flat RTP descriptor budget: %s (%u failures)\n", failures ? "FAIL" : "PASS", failures);
     return failures ? 1 : 0;
 }

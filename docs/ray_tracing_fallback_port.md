@@ -21,7 +21,7 @@ is not implemented yet.**
 ## Source baseline
 
 The exact source paths, revisions and Git blob IDs are recorded in
-`layers/raytracing/upstream/manifest.json`. The reference copies include the
+`layers/raytracing/docs/upstream/manifest.json`. The reference copies include the
 original GPU algorithms, traversal, runtime, compiler passes and D3D12 unit tests.
 Their presence does not mean they execute on Vulkan. Run `upstream/verify.py` to
 check source identity. The original Windows/D3D12 tests have not been executed in

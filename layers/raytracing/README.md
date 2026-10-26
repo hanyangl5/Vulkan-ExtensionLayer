@@ -15,15 +15,17 @@ or qualification on physical GPUs without native RT. See the
 
 ## Source layout
 
-| Directory or files | Purpose |
+| Directory | Purpose |
 | --- | --- |
-| `src/` | Vulkan entry points, AS objects, descriptor/resource/synchronization translation, Ray Query lowering, and RTP integration |
-| `bvh/` | Mesa-derived GPU construction algorithms, build IR, and AS operation shaders |
-| `bvh4/` | Shared portable runtime ABI, encoding, address contract, and component checks |
-| `traversal/` | Shared software candidate and committed traversal |
-| `continuations.*`, `state_compiler.*`, `typed_pipeline.*`, `typed_runtime.*` | Typed SPIR-V continuation compiler and compute scheduler |
-| `tests/` | Public API, host contract, shader, and GPU fixtures |
-| `docs/` | Imported construction IR contract, design, and historical RQ records |
+| `src/` | Production C/C++: Vulkan layer, typed compiler/runtime, and shared CPU/shader ABI headers |
+| `shaders/` | Production GPU construction, BVH4 encoding, traversal, AS operations, and typed runtime GLSL |
+| `tests/` | Test programs/shaders, CPU reference oracles, GPU test helpers, and diagnostics |
+| `docs/` | Design, ABI and provenance records; pinned D3D12/DXC references live in `docs/upstream/` |
+| `cmake/` | Build modules, generated-header templates, layer manifest/export files, and build helpers |
+
+The layer root contains only this README and the canonical CMake entry.
+BVH4 component checks use the same entry with
+`-DVKRT_BVH4_COMPONENTS_ONLY=ON`; `-DVEL_RT_BVH4_GPU_TESTS=ON` adds their GPU checks.
 
 ## Build
 
@@ -103,7 +105,7 @@ IR and encodes the shared BVH4 runtime. It supports semantic UPDATE through
 reconstruction, GPU CLONE/COMPACT, serialization and relocation, and bounded
 public AS property-query publication. COMPACT retains the same representation and
 size; UPDATE is not a refit optimization. The
-[AS address contract](bvh4/AS_ADDRESS_ABI.md) distinguishes public values,
+[AS address contract](docs/AS_ADDRESS_ABI.md) distinguishes public values,
 physical roots, and publication lifetime.
 
 Ray Query lowers supported typed SPIR-V operations to traversal in the consuming

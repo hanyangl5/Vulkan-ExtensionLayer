@@ -1,4 +1,4 @@
 # Imported reference sources are verified against their original Git blob IDs.
 # Preserve exact upstream bytes, including line endings, on every platform.
-/layers/raytracing/upstream/d3d12/** -text
-/layers/raytracing/upstream/dxc/** -text
+/layers/raytracing/docs/upstream/d3d12/** -text
+/layers/raytracing/docs/upstream/dxc/** -text

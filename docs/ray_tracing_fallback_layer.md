@@ -27,7 +27,7 @@ The baseline limitations below describe the older
 
 The starting point is Microsoft's [D3D12RaytracingFallback](https://github.com/microsoft/DirectX-Graphics-Samples/tree/master/Libraries/D3D12RaytracingFallback). Its [uber-shader program](https://github.com/microsoft/DirectX-Graphics-Samples/blob/master/Libraries/D3D12RaytracingFallback/src/UberShaderRayTracingProgram.cpp) links application shaders, traversal and a scheduler into a compute PSO. Its [traversal wrapper](https://github.com/microsoft/DirectX-Graphics-Samples/blob/master/Libraries/D3D12RaytracingFallback/src/TraverseShader.hlsli) selects hit or miss shader IDs from shader tables.
 
-The executable prototype reimplements only that architecture. Pinned Microsoft runtime/compiler references now live in `layers/raytracing/upstream`, with original licenses. The complete port has begun with typed SPIR-V continuation analysis and a tested GLSL adaptation of the original runtime helpers. The prototype execution path still uses synchronous nonrecursive calls; state-function generation and runtime integration remain unfinished.
+The executable prototype reimplements only that architecture. Pinned Microsoft runtime/compiler references now live in `layers/raytracing/docs/upstream`, with original licenses. The complete port has begun with typed SPIR-V continuation analysis and a tested GLSL adaptation of the original runtime helpers. The prototype execution path still uses synchronous nonrecursive calls; state-function generation and runtime integration remain unfinished.
 
 | D3D12 fallback concept | Vulkan prototype |
 | --- | --- |

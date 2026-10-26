@@ -4,7 +4,7 @@
 #include "bvh4_mesa_gpu.h"
 #include "mesa_ir_test_fixture.h"
 #include <vulkan/vulkan.h>
-#include "../bvh/bvh_ir_builder.h"
+#include "bvh_ir_builder.h"
 
 #include <algorithm>
 #include <array>
@@ -50,7 +50,7 @@ struct Context {
     VkPipelineLayout layout = VK_NULL_HANDLE;
     VkPipeline pipeline[2]{};
     VkPipelineLayout mesa_layout = VK_NULL_HANDLE;
-    VkPipeline mesa_pipeline[3]{};
+    VkPipeline mesa_pipeline[VEL_RT_MESA_GPU_ENCODE_PHASE_COUNT]{};
     VkPipelineLayout builder_layout = VK_NULL_HANDLE;
     VkPipeline builder_pipeline[5]{};
     VkPhysicalDeviceMemoryProperties memory{};
@@ -223,7 +223,7 @@ struct Context {
         smci.pCode = code.data();
         VkShaderModule module;
         VkCheck(vkCreateShaderModule(device, &smci, nullptr, &module));
-        for (uint32_t phase = 0; phase < 3; ++phase) {
+        for (uint32_t phase = 0; phase < VEL_RT_MESA_GPU_ENCODE_PHASE_COUNT; ++phase) {
             VkSpecializationMapEntry entry{0, 0, sizeof(phase)};
             VkSpecializationInfo specialization{1, &entry, sizeof(phase), &phase};
             VkComputePipelineCreateInfo p{VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO};
@@ -377,7 +377,9 @@ struct Context {
         VkCommandBufferBeginInfo begin{VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
         VkCheck(vkBeginCommandBuffer(cmd, &begin));
         if (producer) producer(cmd);
-        for (uint32_t phase = 0; phase < 3; ++phase) {
+        uint32_t passes = vel_rt_mesa_encode_passes(args.capacity);
+        for (uint32_t pass = 0; pass < passes; ++pass) {
+            uint32_t phase = vel_rt_mesa_encode_phase(args.capacity, pass);
             vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, mesa_pipeline[phase]);
             for (uint64_t first = 0; first < std::max(args.capacity, 1u); first += 128) {
                 args.first = first;
@@ -387,10 +389,11 @@ struct Context {
             }
             VkMemoryBarrier barrier{VK_STRUCTURE_TYPE_MEMORY_BARRIER};
             barrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
-            barrier.dstAccessMask = phase == 2 ? VK_ACCESS_HOST_READ_BIT : VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;
+            barrier.dstAccessMask =
+                pass + 1 == passes ? VK_ACCESS_HOST_READ_BIT : VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;
             vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-                                 phase == 2 ? VK_PIPELINE_STAGE_HOST_BIT : VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 1, &barrier, 0,
-                                 nullptr, 0, nullptr);
+                                 pass + 1 == passes ? VK_PIPELINE_STAGE_HOST_BIT : VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 1,
+                                 &barrier, 0, nullptr, 0, nullptr);
         }
         VkCheck(vkEndCommandBuffer(cmd));
         VkSubmitInfo submit{VK_STRUCTURE_TYPE_SUBMIT_INFO};
@@ -633,15 +636,45 @@ static void RunMesa(Context& ctx, const mesa_test::Fixture& fixture, const std::
             }
             return uint64_t(0);
         });
+        // Geometry/IDs above remain independently derived from original test
+        // inputs. Read actual construction topology only after GPU completion
+        // to predict the depth-pair collapse, including the real LBVH producer.
+        const auto topology = AdaptMesaContainerV2({source.mapped, fixture.bytes.size()}, flags, [&](uint64_t source_address) {
+            if (options & VEL_RT_MESA_GPU_IDENTITY_BLAS) return source_address;
+            for (size_t slot = 0; slot < runtime_blas.size(); ++slot) {
+                uint64_t address = 0;
+                std::memcpy(&address, fixture.bytes.data() + fixture.Leaf(uint32_t(slot)) + 24, 8);
+                if (address == source_address) return runtime_blas[slot];
+            }
+            return uint64_t(0);
+        });
+        std::array<uint32_t, 5> expected_arities{}, actual_arities{};
+        std::vector<std::pair<uint32_t, bool>> pending;
+        if (!topology.tree.empty()) pending.push_back({topology.root, false});
+        uint32_t expected_nodes = 0;
+        while (!pending.empty()) {
+            const auto [input, odd] = pending.back();
+            pending.pop_back();
+            const auto& node = topology.tree[input];
+            if (node.leaf_id != VEL_RT_BVH4_INVALID_ID) continue;
+            if (!odd) {
+                ++expected_nodes;
+                const uint32_t arity = 2u + (topology.tree[node.left].leaf_id == VEL_RT_BVH4_INVALID_ID ? 1u : 0u) +
+                                       (topology.tree[node.right].leaf_id == VEL_RT_BVH4_INVALID_ID ? 1u : 0u);
+                ++expected_arities[arity];
+            }
+            pending.push_back({node.left, !odd});
+            pending.push_back({node.right, !odd});
+        }
+        if (producer && fixture.active >= 4) Check(expected_arities[4] != 0, "production LBVH fixture must exercise four children");
         std::memcpy(&header, output.mapped + 128, sizeof(header));
         Check(header.magic == VEL_RT_BVH4_MAGIC && header.version == VEL_RT_BVH4_ABI_VERSION && header.total_size == plan.size &&
                   header.node_offset == plan.nodes && header.triangle_offset == plan.triangles &&
                   header.aabb_offset == plan.aabbs && header.instance_offset == plan.instances &&
                   header.leaf_parent_offset == plan.leaf_parents,
               "Mesa output layout corruption");
-        Check(header.node_count == (fixture.active > 1 ? fixture.active - 1 : 0) &&
-                  header.triangle_count == oracle.triangles.size() && header.aabb_count == oracle.aabbs.size() &&
-                  header.instance_count == oracle.instances.size(),
+        Check(header.node_count == expected_nodes && header.triangle_count == oracle.triangles.size() &&
+                  header.aabb_count == oracle.aabbs.size() && header.instance_count == oracle.instances.size(),
               "Mesa GPU compact counts");
         struct Expected {
             Bounds bounds;
@@ -738,17 +771,18 @@ static void RunMesa(Context& ctx, const mesa_test::Fixture& fixture, const std::
                 computed[task.id] = bounds;
                 continue;
             }
-            Check(visited.insert(task.id).second && node.child_count == 2 && node.parent_id == task.parent,
+            Check(visited.insert(task.id).second && node.child_count >= 2 && node.child_count <= 4 && node.parent_id == task.parent,
                   "Mesa graph arity/parent/cycle");
-            Check(node.child_id[2] == VEL_RT_BVH4_INVALID_ID && node.child_id[3] == VEL_RT_BVH4_INVALID_ID,
-                  "Mesa unused child IDs");
+            ++actual_arities[node.child_count];
+            for (uint32_t child = node.child_count; child < 4; ++child)
+                Check(node.child_id[child] == VEL_RT_BVH4_INVALID_ID, "Mesa unused child IDs");
             stack.push_back({task.id, task.parent, true});
-            stack.push_back({node.child_id[0], task.id, false});
-            stack.push_back({node.child_id[1], task.id, false});
+            for (uint32_t child = 0; child < node.child_count; ++child) stack.push_back({node.child_id[child], task.id, false});
             ++internals;
         }
         Check(internals == header.node_count && leaves == fixture.active && record_ids.size() == expected.size(),
               "Mesa hierarchy/record coverage");
+        Check(actual_arities == expected_arities, "Mesa depth-pair collapse membership/arity");
         if (fixture.active) Check(Contains(header.bounds_min, header.bounds_max, computed.at(header.root_id)), "Mesa root bounds");
     }
     ctx.Free(status);
@@ -773,6 +807,27 @@ static void MesaCases(Context& ctx) {
     singleton.Triangle(3, -2, 510, 0x80000000u);
     singleton.InternalBox(0, singleton.LeafId(3), 0xffffffffu, {{-2, 0, 0}, {-1, 1, 1}});
     RunMesa(ctx, singleton, {1});
+    for (uint32_t type = 0; type < 3; ++type) {
+        // Every retained root must expose all four leaves and remove both
+        // binary children. Sparse slots retain original IDs and full flags.
+        mesa_test::Fixture balanced(8, 4, type);
+        std::vector<uint64_t> blas(8);
+        const float identity[12] = {1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0};
+        for (uint32_t i = 0; i < 4; ++i) {
+            if (type == 0) balanced.Triangle(i * 2, float(i), 501 - i, 0x80000000u);
+            if (type == 1) balanced.Aabb(i * 2, {{float(i), 0, 0}, {float(i + 1), 1, 1}}, 501 - i, 0x80000000u);
+            if (type == 2) {
+                balanced.Instance(i * 2, UINT64_C(0x123400000000) + uint64_t(i) * 256, 501 - i, identity);
+                blas[i * 2] = UINT64_C(0xfedc00000000) + uint64_t(i) * 256;
+            }
+        }
+        const Bounds bounds = type == 2 ? Bounds{{-8, -8, -8}, {8, 8, 8}} : Bounds{{0, 0, 0}, {4, 1, 1}};
+        balanced.InternalBox(0, balanced.LeafId(0), balanced.LeafId(2), bounds);
+        balanced.InternalBox(1, balanced.LeafId(4), balanced.LeafId(6), bounds);
+        balanced.InternalBox(2, balanced.InternalId(0), balanced.InternalId(1), bounds);
+        RunMesa(ctx, balanced, type == 2 ? std::vector<uint32_t>{} : std::vector<uint32_t>{3},
+                type == 2 ? blas : std::vector<uint64_t>{});
+    }
     constexpr uint32_t count = 4096;
     mesa_test::Fixture deep(count * 2, count, 1);
     for (uint32_t i = 0; i < count; ++i) deep.Aabb(i * 2, {{float(i), 0, 0}, {float(i + 1), 1, 1}}, 100000 - i, i % 2);
@@ -925,7 +980,7 @@ int main(int argc, char** argv) {
             ctx.InitBuilder(argv[4]);
             MesaBuilderCases(ctx);
             Check(validation_errors == 0, "Vulkan validation errors");
-            std::cout << "Mesa GPU BUILD -> shared BVH4: 8 triangle/AABB scenes, sparse and multigeometry inputs, "
+            std::cout << "Mesa GPU BUILD -> shared four-child BVH4: 8 triangle/AABB scenes, sparse and multigeometry inputs, "
                          "same-command-buffer encoding passed\n";
             return 0;
         }
@@ -946,7 +1001,8 @@ int main(int argc, char** argv) {
         MesaCases(ctx);
         Check(validation_errors == 0, "Vulkan validation errors");
         std::cout << "BVH4 GPU encode: empty, 28 shuffled trees, deep tree, Mesa adapter input, chunks, bounds, parents and guards "
-                     "passed; direct Mesa GPU triangle/AABB/TLAS records, sparse/empty/deep graphs and rejection checks passed\n";
+                     "passed; direct Mesa GPU four-child triangle/AABB/TLAS collapse, sparse/empty/deep graphs and rejection "
+                     "checks passed\n";
         return 0;
     } catch (const std::exception& error) {
         std::cerr << error.what() << '\n';

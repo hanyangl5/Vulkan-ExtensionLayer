@@ -64,9 +64,6 @@ static const VkAllocationCallbacks *as_allocator(const struct vkrt_virtual_as *a
 
 static void free_virtual_as(struct vkrt_device_data *dev, struct vkrt_virtual_as *as) {
     const VkAllocationCallbacks *allocator = as_allocator(as);
-    if (as->address_cell_mapping) dev->vtable.UnmapMemory(dev->device, as->address_cell_memory);
-    if (as->address_cell_buffer) dev->vtable.DestroyBuffer(dev->device, as->address_cell_buffer, allocator);
-    if (as->address_cell_memory) dev->vtable.FreeMemory(dev->device, as->address_cell_memory, allocator);
     vkrt_as_registry_release(dev, as->registry_entry);
 #ifndef _WIN32
     pthread_mutex_destroy(&as->address_lock);
@@ -78,72 +75,6 @@ static void free_virtual_as(struct vkrt_device_data *dev, struct vkrt_virtual_as
     } else {
         free(as);
     }
-}
-
-static VkResult flush_address_cell(struct vkrt_device_data *dev, const struct vkrt_virtual_as *as) {
-    if (as->address_cell_coherent) return VK_SUCCESS;
-    VkMappedMemoryRange range = {
-        .sType = VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE, .memory = as->address_cell_memory, .offset = 0, .size = VK_WHOLE_SIZE};
-    return dev->vtable.FlushMappedMemoryRanges(dev->device, 1, &range);
-}
-
-static VkResult create_address_cell(struct vkrt_device_data *dev, struct vkrt_virtual_as *as) {
-    if (!dev->vtable.CreateBuffer || !dev->vtable.GetBufferMemoryRequirements || !dev->vtable.AllocateMemory ||
-        !dev->vtable.BindBufferMemory || !dev->vtable.MapMemory || !dev->vtable.UnmapMemory || !dev->vtable.DestroyBuffer ||
-        !dev->vtable.FreeMemory || !dev->instance_data || !dev->instance_data->vtable.GetPhysicalDeviceMemoryProperties)
-        return VK_ERROR_FEATURE_NOT_PRESENT;
-
-    const VkAllocationCallbacks *allocator = as_allocator(as);
-    VkBufferCreateInfo buffer = {.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
-                                 .size = sizeof(VkDeviceAddress),
-                                 .usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
-                                 .sharingMode = VK_SHARING_MODE_EXCLUSIVE};
-    if (dev->queue_family_count > 1) {
-        /* The application cannot transfer ownership of this hidden buffer.
-         * Concurrent sharing makes every enabled family independently legal. */
-        buffer.sharingMode = VK_SHARING_MODE_CONCURRENT;
-        buffer.queueFamilyIndexCount = dev->queue_family_count;
-        buffer.pQueueFamilyIndices = dev->queue_families;
-    }
-    VkBuffer cell_buffer = VK_NULL_HANDLE;
-    VkResult result = dev->vtable.CreateBuffer(dev->device, &buffer, allocator, &cell_buffer);
-    if (result != VK_SUCCESS) return result;
-    as->address_cell_buffer = cell_buffer;
-
-    VkMemoryRequirements requirements;
-    dev->vtable.GetBufferMemoryRequirements(dev->device, as->address_cell_buffer, &requirements);
-    VkPhysicalDeviceMemoryProperties properties;
-    dev->instance_data->vtable.GetPhysicalDeviceMemoryProperties(dev->physical_device, &properties);
-    uint32_t type = UINT32_MAX;
-    /* Prefer coherent memory; whole-allocation flushes avoid assumptions
-     * about the device's nonCoherentAtomSize. */
-    for (unsigned pass = 0; pass < 2 && type == UINT32_MAX; ++pass) {
-        for (uint32_t i = 0; i < properties.memoryTypeCount; ++i) {
-            VkMemoryPropertyFlags flags = properties.memoryTypes[i].propertyFlags;
-            if (!(requirements.memoryTypeBits & (1u << i)) || !(flags & VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT)) continue;
-            if (pass == 0 && !(flags & VK_MEMORY_PROPERTY_HOST_COHERENT_BIT)) continue;
-            if (!(flags & VK_MEMORY_PROPERTY_HOST_COHERENT_BIT) && !dev->vtable.FlushMappedMemoryRanges) continue;
-            type = i;
-            as->address_cell_coherent = (flags & VK_MEMORY_PROPERTY_HOST_COHERENT_BIT) != 0;
-            break;
-        }
-    }
-    if (type == UINT32_MAX) return VK_ERROR_FEATURE_NOT_PRESENT;
-
-    VkMemoryAllocateInfo allocation = {
-        .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO, .allocationSize = requirements.size, .memoryTypeIndex = type};
-    VkDeviceMemory cell_memory = VK_NULL_HANDLE;
-    result = dev->vtable.AllocateMemory(dev->device, &allocation, allocator, &cell_memory);
-    if (result != VK_SUCCESS) return result;
-    as->address_cell_memory = cell_memory;
-    result = dev->vtable.BindBufferMemory(dev->device, as->address_cell_buffer, as->address_cell_memory, 0);
-    if (result != VK_SUCCESS) return result;
-    void *mapping = NULL;
-    result = dev->vtable.MapMemory(dev->device, as->address_cell_memory, 0, VK_WHOLE_SIZE, 0, &mapping);
-    if (result != VK_SUCCESS) return result;
-    as->address_cell_mapping = mapping;
-    memcpy(as->address_cell_mapping, &as->public_address, sizeof(VkDeviceAddress));
-    return flush_address_cell(dev, as);
 }
 
 VkResult vkrt_create_virtual_as(struct vkrt_device_data *dev, const VkAccelerationStructureCreateInfoKHR *ci,
@@ -183,7 +114,7 @@ VkResult vkrt_create_virtual_as(struct vkrt_device_data *dev, const VkAccelerati
     /* Allocate here so failures can be returned. The AS backing buffer need
      * not be bound at creation: do not query its device address. */
     VkResult result = vkrt_as_registry_acquire(dev, ci->buffer, ci->offset, &as->registry_entry, &as->public_address);
-    if (result == VK_SUCCESS) result = create_address_cell(dev, as);
+    if (result == VK_SUCCESS) as->address_cell = *vkrt_as_registry_descriptor(as->registry_entry);
     if (result != VK_SUCCESS) {
         free_virtual_as(dev, as);
         return result;

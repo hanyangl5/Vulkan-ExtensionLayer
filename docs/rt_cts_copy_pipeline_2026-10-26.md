@@ -91,7 +91,7 @@ The compiler now emits a SPIR-V 1.5 library exporting
 No frame descriptor or application push-constant range is required. A fixed
 256-byte system prefix carries actual launch/ray/ID/transform state, shader-record
 BDA, application push snapshot BDA and context BDA. Its byte offsets are pinned
-in `layers/raytracing/typed_system_abi.h`. Private frame pools/index multiplication
+in `layers/raytracing/src/typed_system_abi.h`. Private frame pools/index multiplication
 use 64-bit addresses; the per-source-frame layout still has a documented <4-GiB
 boundary. This is not a large physical frame-pool allocation test.
 

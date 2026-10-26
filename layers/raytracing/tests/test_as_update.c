@@ -60,6 +60,7 @@ static void prepare(struct built_as *as, VkAccelerationStructureTypeKHR type, co
         ++g_fail;
     }
     as->size = size.accelerationStructureSize;
+    as->offset = 256;
     buf_create(as->size + 256,
                VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
                    VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,

@@ -43,7 +43,7 @@ The new typed compiler component is not yet the production RTP pipeline.
 
 ## Address implementation and executed regression
 
-The [AS address ABI](../layers/raytracing/bvh4/AS_ADDRESS_ABI.md) documents the
+The [AS address ABI](../layers/raytracing/docs/AS_ADDRESS_ABI.md) documents the
 pinned normative contract, wire layout and publication/lifetime proof. Each
 AS-storage buffer gets one affine public range; sparse seven-level pages cover
 the complete 56-bit key space without a dense allocation proportional to buffer

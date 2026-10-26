@@ -4,7 +4,7 @@
 #include "mesa_ir_test_fixture.h"
 
 #if defined(VEL_RT_MESA_CHECK_VULKAN_ABI)
-#include "../bvh/vk_bvh_defines.h"
+#include "vk_bvh_defines.h"
 static_assert(sizeof(vk_ir_header) == 108);
 static_assert(sizeof(vk_ir_box_node) == 40);
 static_assert(sizeof(vk_ir_triangle_node) == 68);

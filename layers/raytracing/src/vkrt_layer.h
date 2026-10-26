@@ -8,6 +8,7 @@
 
 #include "vkrt_common.h"
 #include "vkrt_dispatch.h"
+#include "vkrt_private_pool.h"
 
 /* ------------------------------------------------------------------ */
 /* Virtual acceleration structure (design doc section 7)               */
@@ -22,10 +23,7 @@ struct vkrt_virtual_as {
    VkDeviceAddress                header_address; /* &vk_ir_header        */
    VkDeviceAddress public_address;
    struct vkrt_as_registry_entry *registry_entry;
-   VkBuffer address_cell_buffer;
-   VkDeviceMemory address_cell_memory;
-   void *address_cell_mapping;
-   bool address_cell_coherent;
+   struct vkrt_private_slice address_cell;
    vkrt_mutex_t address_lock;
    bool has_allocator;
    VkAllocationCallbacks allocator;
@@ -56,6 +54,7 @@ struct vkrt_device_data {
    struct vkrt_shader_object_state *shader_objects;
    struct vkrt_shader_interface_state *shader_interfaces;
    struct vkrt_as_registry *as_registry;
+   struct vkrt_private_pool *private_pool;
    struct vkrt_deferred_state *deferred;
    struct vkrt_serialization_state *serialization;
    struct vkrt_query_device *queries;
@@ -72,7 +71,7 @@ struct vkrt_device_data {
     * is not evidence that a native RT feature was enabled downstream. */
    bool app_requested_ray_query;
    VkPipelineLayout            build_pipeline_layout;
-   VkPipeline build_pipelines[9];
+   VkPipeline build_pipelines[13];
    VkPipelineLayout copy_pipeline_layout;
    VkPipeline copy_pipeline;
    uint32_t                    max_build_dispatch_x;
@@ -201,6 +200,9 @@ bool vkrt_device_uses_virtual_rt(const VkDeviceCreateInfo *info);
 bool vkrt_device_requests_shader_objects(const VkDeviceCreateInfo *info);
 /* Existing GPU component prerequisites, not complete public RT qualification. */
 bool vkrt_native_backend_eligible(struct vkrt_instance_data *inst, VkPhysicalDevice physical);
+struct vkrt_resource_profile;
+bool vkrt_virtual_rt_resource_profile(struct vkrt_instance_data *inst, VkPhysicalDevice physical,
+                                      struct vkrt_resource_profile *profile);
 VkResult vkrt_create_device_with_features(struct vkrt_instance_data *inst,
    VkPhysicalDevice physical, PFN_vkCreateDevice create,
    const VkDeviceCreateInfo *ci, const VkAllocationCallbacks *alloc, VkDevice *device);

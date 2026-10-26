@@ -4,7 +4,7 @@
 
 ## 1. 共同边界
 
-应用、高校 builder 和 VKRT 内置 builder 输出同一种容器。XM 将它编码为 Mali AS；VKRT 直接遍历其中的二叉树。公共 builder 在 [layer/bvh/](layer/bvh/) 中；XM DDK 的 `samples/custom_bvh/portable/` 导出同一份源码，该目录的 `check_sources.py` 校验 12 个公共文件及 HAL 容器常量完全一致。
+应用、高校 builder 和 VKRT 内置 builder 输出同一种容器。XM 将它编码为 Mali AS；VKRT 直接遍历其中的二叉树。公共 builder 在 [shaders/](../shaders/) / [src/](../src/) 中；XM DDK 的 `samples/custom_bvh/portable/` 导出同一份源码，该目录的 `check_sources.py` 校验 12 个公共文件及 HAL 容器常量完全一致。
 
 公共构建入口是 `bvh_ir_record_build()`。它只依赖 Vulkan 类型和调用者提供的 dispatch callback，不依赖 VKRT layer 状态、XM 驱动内部函数、旧格式探测或失败后的其他构建路径。算法私有 Morton/拓扑/扫描 scratch 不进入消费协议。
 

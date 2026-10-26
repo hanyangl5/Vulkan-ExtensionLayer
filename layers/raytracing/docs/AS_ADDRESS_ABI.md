@@ -46,19 +46,27 @@ values, absent paths and unknown header metadata return zero. The resolver uses
 explicit 64-bit byte arithmetic and 4-byte word loads. There is no physical-BDA
 fallback or old runtime-format detection.
 
-Private pages/header use persistently mapped HOST_VISIBLE | HOST_COHERENT
-storage/device-address buffers, shared concurrently across all enabled queue
-families when needed. Buffers include seven spare bytes so their logical data
-can be aligned to eight inside the actual buffer, independently of buffer BDA
-alignment. This compatible coherent memory type is a private prerequisite.
+Private pages/header and immutable descriptor values now suballocate from
+device-owned, persistently mapped HOST_VISIBLE | HOST_COHERENT storage/BDA
+arenas. Arenas grow in 64-KiB chunks and release an empty chunk immediately;
+there is no fixed AS-object capacity. They use concurrent sharing across all
+enabled queue families when needed. Physical page addresses align to eight
+independently of the native buffer BDA, while descriptor offsets separately
+obey the native minStorageBufferOffsetAlignment. Host access uses memcpy rather
+than assuming the CPU mapping has the BDA's alignment. This compatible coherent
+memory type was already a registry prerequisite. Native memory allocation
+counts for the complete application/private-resource contract remain open.
 There is no application descriptor or push-constant slot for the resolver root:
 RQ compilation embeds the device's full 64-bit root as an ordinary constant,
 after converting a dedicated library specialization constant. Application
 specialization IDs remain intact. The TLAS builder uses private specialization.
 
-CreateAS allocates its complete path and its descriptor value cell while failure
-can be returned. The cell is initialized once to the public value; noncoherent
-cell memory is flushed at creation. After valid backing binding, Build/GetASAddress
+CreateAS allocates its complete path and descriptor value while failure can be
+returned. Same-buffer/same-offset aliases share both the registry entry and its
+immutable descriptor slice; the last reference releases it. Private storage uses
+the Device allocator, falling back to Instance ownership, independently of an
+individual AS object's callbacks. The value is written once into coherent memory.
+After valid backing binding, Build/GetASAddress
 publishes a physical address into the preallocated coherent leaf. A stable or
 aliased GetASAddress performs no allocation, flush or mapped-memory write.
 Existing live paths are immutable; different AS entries update disjoint slots.
@@ -76,8 +84,10 @@ also retains the original public BLAS value at instance byte 120 for serialized
 reference lists; the physical traversal root remains at byte 0.
 
 This closes the observed legal 16-byte buffer-suballocation address gap, not
-the complete resource ABI proof. Per-AS descriptor SSBOs and native allocation
-budgets remain unresolved for full-limit applications. GPU copy/compaction and
+the complete resource ABI proof. AS descriptors still consume native SSBOs;
+the descriptor profile now accounts for their union with ordinary resources.
+Pooled native allocation counts, all other private resources and complete
+full-limit applications still require qualification. GPU copy/compaction and
 serialization and semantic UPDATE are implemented; full property-query publication and
 complete RTP qualification remain unfinished. Optional
 capture/replay and device-address commands are not claimed by this path.

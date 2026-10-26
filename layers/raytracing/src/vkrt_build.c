@@ -11,7 +11,7 @@
 #include "vkrt_bvh4_prepare.spv.h"
 #include "bvh4_mesa_encode.spv.h"
 
-enum { INIT, LEAF, SORT, TREE, BOUNDS, PREPARE, ENCODE_0, ENCODE_1, ENCODE_2 };
+enum { INIT, LEAF, SORT, TREE, BOUNDS, PREPARE, ENCODE_0, ENCODE_1, ENCODE_2, ENCODE_3, ENCODE_4, ENCODE_5, ENCODE_6 };
 
 VkResult vkrt_build_init(struct vkrt_device_data *dev)
 {
@@ -31,9 +31,11 @@ VkResult vkrt_build_init(struct vkrt_device_data *dev)
 #define SHADER(name) {vkrt_spv_##name, sizeof(vkrt_spv_##name)}
        SHADER(vkrt_init),        SHADER(leaf_bvh4),         SHADER(morton_sort),      SHADER(lbvh_main),
        SHADER(lbvh_generate_ir), SHADER(vkrt_bvh4_prepare), SHADER(bvh4_mesa_encode), SHADER(bvh4_mesa_encode),
+       SHADER(bvh4_mesa_encode), SHADER(bvh4_mesa_encode),  SHADER(bvh4_mesa_encode), SHADER(bvh4_mesa_encode),
        SHADER(bvh4_mesa_encode)
 #undef SHADER
    };
+   _Static_assert(VKRT_ARRAY_SIZE(shaders) == VKRT_ARRAY_SIZE(dev->build_pipelines), "build pipeline phase table");
    /* 128 threads * 2 keys = 256 leaves per sorting workgroup. */
    struct {
        uint32_t values[6];
@@ -199,7 +201,8 @@ void vkrt_cmd_build_as(struct vkrt_device_data *dev, VkCommandBuffer cmd, uint32
                                        geometry_type,
                                        info->geometryCount,
                                        VEL_RT_MESA_GPU_IDENTITY_BLAS | VEL_RT_MESA_GPU_PUBLIC_BLAS};
-      for (uint32_t phase = ENCODE_0; phase <= ENCODE_2; ++phase) {
+      for (uint32_t pass = 0; pass < vel_rt_mesa_encode_passes((uint32_t)l.leaf_count); ++pass) {
+          uint32_t phase = ENCODE_0 + vel_rt_mesa_encode_phase((uint32_t)l.leaf_count, pass);
           uint64_t invocations = l.leaf_count ? l.leaf_count : 1;
           uint64_t chunk = (uint64_t)dev->max_build_dispatch_x * 64;
           for (encode.first = 0; encode.first < invocations; encode.first += chunk) {

@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: MIT
  *
- * sw_ray_query_library.comp - builds traversal/sw_ray_query.spv.
+ * sw_ray_query_library.comp - builds sw_ray_query.spv.
  *
  * sw_ray_query.glsl is a pure function library with no entry point, but
  * glslc requires a compute entry point. This file provides a dummy one
@@ -8,10 +8,10 @@
  * strips the entry point (and main's body) before spvtools::Link merges
  * the library into the user's shader module.
  *
- * Build (via layer/CMakeLists.txt):
+ * Build (from layers/raytracing; normally via CMakeLists.txt):
  *   glslc -fshader-stage=compute --target-env=vulkan1.2 -O
- *         -I bvh -I traversal
- *         traversal/sw_ray_query_library.comp
+ *         -I src -I shaders
+ *         shaders/sw_ray_query_library.comp
  *         -o sw_ray_query.spv
  */
 

@@ -4,7 +4,7 @@
 
 VEL 导入说明：本目录由独立的 Ray Query 补丁导入，与 RT pipeline fallback
 分别构建、分别启用，AS 格式不能混用。构建不依赖私有 Mesa checkout；依赖和
-独立构建方法见 [README.md](README.md)。当前代码采用下述 BVHIR v2；本文件保留的
+独立构建方法见 [README.md](../README.md)。当前代码采用下述 BVHIR v2；本文件保留的
 Windows / RTX 3080 验证记录属于原始工作及当时的格式版本，不能视为本次导入或
 当前 v2 GPU 链路已经重新验证。当前导入的实际检查结果应与历史记录分开报告。
 

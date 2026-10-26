@@ -275,6 +275,7 @@ vkrt_CreateDevice(VkPhysicalDevice physicalDevice,
       vkrt_shader_objects_finish(data);
       vkrt_shader_interface_finish(data);
       vkrt_as_registry_finish(data);
+      vkrt_private_pool_finish(data);
       data->vtable.DestroyDevice(*pDevice, pAllocator);
       *pDevice = VK_NULL_HANDLE;
       vkrt_free_device_data(data);
@@ -317,6 +318,7 @@ vkrt_DestroyDevice(VkDevice device, const VkAllocationCallbacks *pAllocator)
    vkrt_shader_objects_finish(data);
    vkrt_shader_interface_finish(data);
    vkrt_as_registry_finish(data);
+   vkrt_private_pool_finish(data);
    data->vtable.DestroyDevice(device, pAllocator);
    /* Remove device and queue aliases before releasing their shared owner. */
    vkrt_mutex_lock(&vkrt_global.objects_lock);

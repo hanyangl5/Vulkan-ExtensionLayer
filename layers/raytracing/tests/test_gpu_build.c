@@ -12,6 +12,7 @@ struct built_as {
    VkAccelerationStructureKHR handle;
    VkDeviceAddress address;
    VkDeviceSize size;
+   VkDeviceSize offset;
    VkAccelerationStructureBuildGeometryInfoKHR info;
    VkAccelerationStructureBuildRangeInfoKHR ranges[2];
 };
@@ -20,6 +21,8 @@ static PFN_vkCmdBuildAccelerationStructuresKHR pBuild;
 static bool g_software;
 static bool g_split_builds;
 static bool g_aligned_values;
+static bool g_pool_pressure;
+static VkAccelerationStructureKHR g_pressure_views[1023];
 
 /* Bind at the smallest legal nonzero offset. Ordinary translated storage
  * buffers can require only 16-byte alignment even though AS values require
@@ -130,13 +133,26 @@ static void prepare_as(struct built_as *as, VkAccelerationStructureTypeKHR type,
    /* Restore the long-lived geometry pointer before returning. */
    as->info.pGeometries = geometries; as->info.ppGeometries = NULL;
    as->size = sizes.accelerationStructureSize;
-   create_as_output(as->size + 512, &as->output);
+   as->offset = 256;
+   bool pressure = g_pool_pressure && type == VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR;
+   VkDeviceSize stride = (as->size + 255) & ~UINT64_C(255);
+   create_as_output(pressure ? stride * 1024 + 512 : as->size + 512, &as->output);
    memset(as->output.mapped, 0xa5, (size_t)as->output.size);
-   VkAccelerationStructureCreateInfoKHR ci = {.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_CREATE_INFO_KHR,
-                                              .buffer = as->output.buf,
-                                              .offset = 256,
-                                              .size = as->size,
-                                              .type = g_aligned_values ? VK_ACCELERATION_STRUCTURE_TYPE_GENERIC_KHR : type};
+   VkAccelerationStructureCreateInfoKHR ci = {
+       .sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_CREATE_INFO_KHR,
+       .buffer = as->output.buf,
+       .offset = 256,
+       .size = as->size,
+       .type = g_aligned_values || pressure ? VK_ACCELERATION_STRUCTURE_TYPE_GENERIC_KHR : type};
+   if (pressure) {
+       /* Keep 1024 distinct offsets live while building/querying the last one.
+        * This forces pool growth, rather than repeatedly recycling one slot. */
+       for (uint32_t i = 0; i < ARRAY_SIZE(g_pressure_views); ++i) {
+           ci.offset = 256 + stride * i;
+           CHECK(pCreateAS(g_dev, &ci, NULL, &g_pressure_views[i]));
+       }
+       as->offset = ci.offset = 256 + stride * ARRAY_SIZE(g_pressure_views);
+   }
    CHECK(pCreateAS(g_dev, &ci, NULL, &as->handle));
    VkAccelerationStructureDeviceAddressInfoKHR ai = {.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_DEVICE_ADDRESS_INFO_KHR,
       .accelerationStructure = as->handle};
@@ -145,6 +161,25 @@ static void prepare_as(struct built_as *as, VkAccelerationStructureTypeKHR type,
    if (as->address & 255) {
        fprintf(stderr, "FAIL public AS value is not 256-aligned\n");
        ++g_fail;
+   }
+   if (pressure) {
+       ai.accelerationStructure = g_pressure_views[0];
+       VkDeviceAddress first = address(g_dev, &ai);
+       if (first + stride * ARRAY_SIZE(g_pressure_views) != as->address) ++g_fail;
+       VkAccelerationStructureKHR alias;
+       CHECK(pCreateAS(g_dev, &ci, NULL, &alias));
+       ai.accelerationStructure = alias;
+       if (address(g_dev, &ai) != as->address) ++g_fail;
+       pDestroyAS(g_dev, as->handle, NULL);
+       as->handle = alias;
+       /* Retire/recreate holes with neighbors live, before GPU consumption. */
+       for (uint32_t i = 1; i < ARRAY_SIZE(g_pressure_views); i += 2) {
+           pDestroyAS(g_dev, g_pressure_views[i], NULL);
+           ci.offset = 256 + stride * i;
+           CHECK(pCreateAS(g_dev, &ci, NULL, &g_pressure_views[i]));
+       }
+       printf("AS pool pressure: 1024 live offsets, alias survives, holes reused; last offset=%llu\n",
+              (unsigned long long)as->offset);
    }
    if (g_aligned_values) {
        VkAccelerationStructureKHR alias, sibling;
@@ -178,8 +213,11 @@ static void prepare_as(struct built_as *as, VkAccelerationStructureTypeKHR type,
 
 static void destroy_as(struct built_as *as)
 {
-   pDestroyAS(g_dev, as->handle, NULL);
-   buf_destroy(&as->scratch); buf_destroy(&as->output);
+    if (g_pool_pressure && as->info.type == VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR)
+        for (uint32_t i = 0; i < ARRAY_SIZE(g_pressure_views); ++i) pDestroyAS(g_dev, g_pressure_views[i], NULL);
+    pDestroyAS(g_dev, as->handle, NULL);
+    buf_destroy(&as->scratch);
+    buf_destroy(&as->output);
 }
 
 static void rejected_builds(const struct built_as *as)
@@ -221,12 +259,14 @@ static void validate_tree(const struct built_as *as, uint32_t expected_leaves)
    const uint8_t *bytes = as->output.mapped;
    for (uint32_t i = 0; i < 256; ++i) {
       const uint8_t *scratch = as->scratch.mapped;
-      if (bytes[i] != 0xa5 || bytes[256 + as->size + i] != 0xa5 ||
+      if (bytes[as->offset - 256 + i] != 0xa5 || bytes[as->offset + as->size + i] != 0xa5 ||
           scratch[as->scratch.size - 256 + i] != 0xa5) {
-         fprintf(stderr, "AS/scratch bounds guard corrupted\n"); ++g_fail; break;
+          fprintf(stderr, "AS/scratch bounds guard corrupted\n");
+          ++g_fail;
+          break;
       }
    }
-   bytes += 256;
+   bytes += as->offset;
    VelRtBvh4Header h;
    memcpy(&h, bytes, sizeof(h));
    expect_u("shared magic", h.magic, VEL_RT_BVH4_MAGIC);
@@ -456,7 +496,7 @@ static void triangles_case(uint32_t n, bool inactive, bool indexed, bool two_geo
    uint32_t active = n - (inactive ? (n + 6) / 7 : 0);
    validate_tree(&blas, active);
    validate_tree(&tlas, active ? 1 : 0);
-   if (n == 1 && !g_aligned_values) rejected_builds(&blas);
+   if (n == 1 && !g_aligned_values && !g_pool_pressure) rejected_builds(&blas);
    g_before_dispatch = NULL;
    destroy_as(&tlas); destroy_as(&blas);
    buf_destroy(&instances); buf_destroy(&transforms); buf_destroy(&indices); buf_destroy(&vertices);
@@ -529,10 +569,11 @@ int main(int argc, char **argv) {
     const char *layers = getenv("VK_INSTANCE_LAYERS");
     g_software = layers && strstr(layers, "VK_LAYER_VKRT_SOFTWARE_RAY_QUERY");
     g_aligned_values = argc == 2 && !strcmp(argv[1], "--aligned-values");
+    g_pool_pressure = argc == 2 && !strcmp(argv[1], "--pool-pressure");
     init_vulkan();
     pBuild = (void *)vkGetDeviceProcAddr(g_dev, "vkCmdBuildAccelerationStructuresKHR");
     if (!pBuild) return 1;
-    if (g_aligned_values) {
+    if (g_aligned_values || g_pool_pressure) {
         triangles_case(1, false, false, false, false);
         goto finish;
     }

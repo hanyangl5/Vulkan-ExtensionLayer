@@ -2,6 +2,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 #include "vkrt_layer.h"
+#include "vkrt_resource_profile.h"
 #include <stddef.h>
 
 #define HANDLE(type, value) ((type)(uintptr_t)(value))
@@ -14,6 +15,7 @@
     } while (0)
 static unsigned failures, creates, queries, property_queries;
 static unsigned missing_capability;
+static unsigned missing_resource, resource_queries;
 static uint32_t driver_api;
 static const VkPhysicalDevice physical = HANDLE(VkPhysicalDevice, 7);
 static const VkDevice created_device = HANDLE(VkDevice, 8);
@@ -37,6 +39,23 @@ static const VkBaseInStructure *find_original(VkStructureType type) {
 static VKAPI_ATTR void VKAPI_CALL mock_features(VkPhysicalDevice p, VkPhysicalDeviceFeatures2 *features) {
     REQUIRE(p == physical);
     ++queries;
+    if (features->pNext &&
+        ((VkBaseOutStructure *)features->pNext)->sType == VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES) {
+        ++resource_queries;
+        VkPhysicalDeviceVulkan12Features *v12 = features->pNext;
+        v12->descriptorIndexing = VK_TRUE;
+        v12->descriptorBindingUniformBufferUpdateAfterBind = v12->descriptorBindingSampledImageUpdateAfterBind =
+            v12->descriptorBindingStorageBufferUpdateAfterBind = v12->descriptorBindingStorageImageUpdateAfterBind =
+                v12->descriptorBindingUniformTexelBufferUpdateAfterBind = v12->descriptorBindingStorageTexelBufferUpdateAfterBind =
+                    VK_TRUE;
+        VkPhysicalDeviceInlineUniformBlockFeatures *inline_uniform = v12->pNext;
+        REQUIRE(inline_uniform && inline_uniform->sType == VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_INLINE_UNIFORM_BLOCK_FEATURES);
+        inline_uniform->inlineUniformBlock = inline_uniform->descriptorBindingInlineUniformBlockUpdateAfterBind = VK_TRUE;
+        VkPhysicalDeviceMaintenance7FeaturesKHR *m7 = inline_uniform->pNext;
+        REQUIRE(m7 && m7->sType == VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MAINTENANCE_7_FEATURES_KHR && !m7->pNext);
+        m7->maintenance7 = VK_TRUE;
+        return;
+    }
     features->features.shaderInt64 = missing_capability != 1;
     features->features.shaderInt16 = missing_capability != 2;
     features->features.shaderStorageBufferArrayDynamicIndexing = missing_capability != 10;
@@ -128,11 +147,68 @@ static VKAPI_ATTR void VKAPI_CALL mock_properties(VkPhysicalDevice p, VkPhysical
     properties->limits.maxComputeWorkGroupCount[2] = missing_capability == 24 ? 0 : 1;
     properties->limits.maxPushConstantsSize = missing_capability == 25 ? 127 : 128;
     properties->limits.maxComputeSharedMemorySize = missing_capability == 26 ? 2067 : 2068;
+    VkPhysicalDeviceLimits *c = &properties->limits;
+    c->maxPerStageDescriptorSamplers = c->maxPerStageDescriptorUniformBuffers = c->maxPerStageDescriptorStorageBuffers =
+        c->maxPerStageDescriptorSampledImages = c->maxPerStageDescriptorStorageImages = c->maxPerStageDescriptorInputAttachments =
+            c->maxDescriptorSetSamplers = c->maxDescriptorSetUniformBuffers = c->maxDescriptorSetStorageBuffers =
+                c->maxDescriptorSetSampledImages = c->maxDescriptorSetStorageImages = c->maxDescriptorSetInputAttachments = 1048576;
+    c->maxDescriptorSetUniformBuffersDynamic = 15;
+    c->maxDescriptorSetStorageBuffersDynamic = 16;
+    c->maxPerStageResources = missing_resource == 3 ? 200 : UINT32_MAX;
+    if (missing_resource == 1) c->maxPerStageDescriptorStorageBuffers = 19;
+    if (missing_resource == 2) c->maxDescriptorSetStorageBuffers = 39;
 }
+
+#define INLINE_PROPERTY_VALUES(i)                                                                                \
+    do {                                                                                                         \
+        (i)->maxInlineUniformBlockSize = 256;                                                                    \
+        (i)->maxPerStageDescriptorInlineUniformBlocks = missing_resource == 4 ? 3 : 32;                          \
+        (i)->maxPerStageDescriptorUpdateAfterBindInlineUniformBlocks = 32;                                       \
+        (i)->maxDescriptorSetInlineUniformBlocks = (i)->maxDescriptorSetUpdateAfterBindInlineUniformBlocks = 32; \
+    } while (0)
 
 static VKAPI_ATTR void VKAPI_CALL mock_properties2(VkPhysicalDevice p, VkPhysicalDeviceProperties2 *properties) {
     REQUIRE(properties->sType == VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2);
     mock_properties(p, &properties->properties);
+    if (!properties->pNext) return; /* The resource capture first queries API version. */
+    if (((VkBaseOutStructure *)properties->pNext)->sType == VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_INDEXING_PROPERTIES) {
+        unsigned seen = 0;
+        for (VkBaseOutStructure *next = properties->pNext; next; next = next->pNext) {
+            if (next->sType == VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_INDEXING_PROPERTIES) {
+                VkPhysicalDeviceDescriptorIndexingProperties *u = (void *)next;
+                u->maxPerStageDescriptorUpdateAfterBindSamplers = u->maxPerStageDescriptorUpdateAfterBindUniformBuffers =
+                    u->maxPerStageDescriptorUpdateAfterBindStorageBuffers = u->maxPerStageDescriptorUpdateAfterBindSampledImages =
+                        u->maxPerStageDescriptorUpdateAfterBindStorageImages =
+                            u->maxPerStageDescriptorUpdateAfterBindInputAttachments = u->maxDescriptorSetUpdateAfterBindSamplers =
+                                u->maxDescriptorSetUpdateAfterBindUniformBuffers =
+                                    u->maxDescriptorSetUpdateAfterBindStorageBuffers =
+                                        u->maxDescriptorSetUpdateAfterBindSampledImages =
+                                            u->maxDescriptorSetUpdateAfterBindStorageImages =
+                                                u->maxDescriptorSetUpdateAfterBindInputAttachments = 1048576;
+                u->maxPerStageUpdateAfterBindResources = u->maxUpdateAfterBindDescriptorsInAllPools = UINT32_MAX;
+                u->maxDescriptorSetUpdateAfterBindUniformBuffersDynamic = 15;
+                u->maxDescriptorSetUpdateAfterBindStorageBuffersDynamic = 16;
+                if (missing_resource == 5) u->maxPerStageDescriptorUpdateAfterBindStorageBuffers = 499999;
+            } else if (next->sType == VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_PROPERTIES) {
+                VkPhysicalDeviceVulkan13Properties *v13 = (void *)next;
+                INLINE_PROPERTY_VALUES(v13);
+                v13->maxInlineUniformTotalSize = 3584;
+            } else if (next->sType == VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_INLINE_UNIFORM_BLOCK_PROPERTIES) {
+                VkPhysicalDeviceInlineUniformBlockProperties *inline_uniform = (void *)next;
+                INLINE_PROPERTY_VALUES(inline_uniform);
+            } else if (next->sType == VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MAINTENANCE_7_PROPERTIES_KHR) {
+                VkPhysicalDeviceMaintenance7PropertiesKHR *m = (void *)next;
+                m->maxDescriptorSetTotalUniformBuffersDynamic = m->maxDescriptorSetUpdateAfterBindTotalUniformBuffersDynamic = 15;
+                m->maxDescriptorSetTotalStorageBuffersDynamic = m->maxDescriptorSetUpdateAfterBindTotalStorageBuffersDynamic = 16;
+                m->maxDescriptorSetTotalBuffersDynamic = missing_resource == 6 ? 30 : 31;
+                m->maxDescriptorSetUpdateAfterBindTotalBuffersDynamic = 31;
+            } else
+                REQUIRE(false);
+            ++seen;
+        }
+        REQUIRE(seen == 3);
+        return;
+    }
     unsigned seen = 0;
     for (VkBaseOutStructure *next = properties->pNext; next; next = next->pNext) {
         if (next->sType == VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SUBGROUP_PROPERTIES) {
@@ -415,6 +491,7 @@ static void defaults(void) {
     expected_extension_count = 0;
     opaque_suffix = NULL;
     missing_capability = 0;
+    missing_resource = 0;
     downstream_result = VK_SUCCESS;
     expect_private_dynamic_indexing = false;
     query_capabilities = 0;
@@ -1033,6 +1110,58 @@ static void shader_object_backend(void) {
     REQUIRE(!vkrt_native_backend_eligible(NULL, physical));
 }
 
+static void descriptor_profile_boundary(void) {
+    defaults();
+    expect_private_dynamic_indexing = true;
+    const char *extension = VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME;
+    basic.enabledExtensionCount = 1;
+    basic.ppEnabledExtensionNames = &extension;
+    struct vkrt_resource_profile profile, saved;
+    for (uint32_t version = VK_API_VERSION_1_2; version <= VK_API_VERSION_1_4; version += 1u << 12) {
+        driver_api = version;
+        REQUIRE(vkrt_virtual_rt_resource_profile(&instance, physical, &profile));
+        REQUIRE(profile.limits.maxPerStageDescriptorStorageBuffers == 1048560);
+        REQUIRE(profile.limits.maxDescriptorSetStorageBuffers == 1048544 && profile.as_per_set == 16);
+        REQUIRE(profile.limits.maxDescriptorSetUniformBuffersDynamic == 15 &&
+                profile.limits.maxDescriptorSetStorageBuffersDynamic == 16);
+        REQUIRE(call(&basic) == VK_SUCCESS);
+    }
+    VkDeviceCreateInfo saved_ci = basic;
+    for (missing_resource = 1; missing_resource <= 6; ++missing_resource) {
+        memset(&profile, 0xa5, sizeof(profile));
+        saved = profile;
+        REQUIRE(vkrt_native_backend_eligible(&instance, physical));
+        REQUIRE(!vkrt_virtual_rt_resource_profile(&instance, physical, &profile) && !memcmp(&profile, &saved, sizeof(profile)));
+        unsigned before = creates;
+        REQUIRE(call(&basic) == VK_ERROR_FEATURE_NOT_PRESENT && creates == before);
+        REQUIRE(!memcmp(&basic, &saved_ci, sizeof(basic)));
+    }
+    memset(&profile, 0xa5, sizeof(profile));
+    saved = profile;
+    REQUIRE(!vkrt_virtual_rt_resource_profile(NULL, physical, &profile));
+    REQUIRE(!vkrt_virtual_rt_resource_profile(&instance, VK_NULL_HANDLE, &profile));
+    REQUIRE(!vkrt_virtual_rt_resource_profile(&instance, physical, NULL));
+    REQUIRE(!memcmp(&profile, &saved, sizeof(profile)));
+
+    /* Descriptor qualification cannot change the physical source-binary
+     * component domain or reject an ordinary logical device. */
+    missing_resource = 1;
+    REQUIRE(vkrt_native_backend_eligible(&instance, physical));
+    VkPhysicalDeviceShaderObjectFeaturesEXT shader = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_OBJECT_FEATURES_EXT,
+                                                      .shaderObject = VK_TRUE};
+    extension = VK_EXT_SHADER_OBJECT_EXTENSION_NAME;
+    expected_extensions[0] = extension;
+    expected_extension_count = 1;
+    basic.pNext = &shader;
+    unsigned before = resource_queries;
+    REQUIRE(call(&basic) == VK_SUCCESS && resource_queries == before);
+    basic.pNext = NULL;
+    basic.enabledExtensionCount = 0;
+    basic.ppEnabledExtensionNames = NULL;
+    expected_extension_count = 0;
+    REQUIRE(call_non_rt(&basic) == VK_SUCCESS && resource_queries == before);
+}
+
 int main(void) {
     non_rt_boundary();
     shader_object_backend();
@@ -1044,6 +1173,7 @@ int main(void) {
     builder_property_prerequisites();
     rejection();
     per_stage_descriptor_interaction();
+    descriptor_profile_boundary();
     for (unsigned capabilities = 0; capabilities < 4; ++capabilities) {
         defaults();
         query_capabilities = capabilities;

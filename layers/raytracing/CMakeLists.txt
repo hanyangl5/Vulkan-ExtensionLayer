@@ -16,6 +16,17 @@ if(WIN32)
    add_compile_definitions(NOMINMAX)
 endif()
 
+# Portable BVH4 components use this same entry point without requiring the
+# full layer's SPIRV-Tools/glslang/Vulkan development dependencies.
+option(VKRT_BVH4_COMPONENTS_ONLY "Build only portable BVH4 reference and optional GPU tests" OFF)
+if(VKRT_BVH4_COMPONENTS_ONLY)
+   include(CTest)
+   if(BUILD_TESTING)
+      include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/bvh4_tests.cmake)
+   endif()
+   return()
+endif()
+
 # The SDK's SPIRV-Tools import libs are release-CRT. Building without a
 # CMAKE_BUILD_TYPE mixes CRTs and the resulting binary dies before main
 # with no diagnostic, so pin one.
@@ -41,10 +52,10 @@ foreach(_vkrt_component IN ITEMS SPIRV-Tools-link SPIRV-Tools-opt SPIRV-Tools)
       list(APPEND VKRT_SPIRV_LIBRARIES "${VKRT_${_vkrt_component}_LIBRARY}")
    endif()
 endforeach()
-include(${CMAKE_CURRENT_SOURCE_DIR}/pnext_sizes.cmake)
+include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/pnext_sizes.cmake)
 
 set(VKRT_LAYER_NAME VkLayer_VKRT_SOFTWARE_RAY_QUERY)
-set(VKRT_COMMON_BVH4 ${CMAKE_CURRENT_SOURCE_DIR}/bvh4)
+set(VKRT_SHARED_HEADERS ${CMAKE_CURRENT_SOURCE_DIR}/src)
 
 add_library(${VKRT_LAYER_NAME} SHARED
    src/vkrt_layer.c
@@ -53,6 +64,7 @@ add_library(${VKRT_LAYER_NAME} SHARED
    src/vkrt_spirv_ids.cpp
    src/vkrt_virtual_as.c
    src/vkrt_as_registry.c
+   src/vkrt_private_pool.c
    src/vkrt_as_copy.c
    src/vkrt_as_serialization.c
    src/vkrt_rtp.cpp
@@ -75,10 +87,10 @@ add_library(${VKRT_LAYER_NAME} SHARED
 # compiler. This target has no SPIRV-Cross/GLSL regex or legacy builder runtime.
 set(VKRT_TYPED_SOURCE ${CMAKE_CURRENT_SOURCE_DIR})
 add_library(vkrt_typed_compiler STATIC
-   ${VKRT_TYPED_SOURCE}/continuations.cpp ${VKRT_TYPED_SOURCE}/frame_emitter.cpp
-   ${VKRT_TYPED_SOURCE}/state_compiler.cpp ${VKRT_TYPED_SOURCE}/typed_pipeline.cpp
-   ${VKRT_TYPED_SOURCE}/typed_runtime.cpp ${VKRT_TYPED_SOURCE}/glsl_compiler.cpp)
-include(${VKRT_TYPED_SOURCE}/typed_runtime_sources.cmake)
+   ${VKRT_TYPED_SOURCE}/src/continuations.cpp ${VKRT_TYPED_SOURCE}/src/frame_emitter.cpp
+   ${VKRT_TYPED_SOURCE}/src/state_compiler.cpp ${VKRT_TYPED_SOURCE}/src/typed_pipeline.cpp
+   ${VKRT_TYPED_SOURCE}/src/typed_runtime.cpp ${VKRT_TYPED_SOURCE}/src/glsl_compiler.cpp)
+include(${VKRT_TYPED_SOURCE}/cmake/typed_runtime_sources.cmake)
 target_include_directories(vkrt_typed_compiler PRIVATE ${CMAKE_CURRENT_BINARY_DIR})
 if(WIN32)
    find_path(VKRT_GLSLANG_INCLUDE_DIR glslang/Public/ShaderLang.h HINTS ${Vulkan_INCLUDE_DIRS} REQUIRED)
@@ -93,7 +105,7 @@ else()
    find_package(glslang CONFIG REQUIRED)
    target_link_libraries(vkrt_typed_compiler PUBLIC glslang::SPIRV glslang::glslang glslang::glslang-default-resource-limits)
 endif()
-target_include_directories(vkrt_typed_compiler PUBLIC ${VKRT_TYPED_SOURCE} ${Vulkan_INCLUDE_DIRS} ${VKRT_SPIRV_HEADERS_INCLUDE_DIR})
+target_include_directories(vkrt_typed_compiler PUBLIC ${VKRT_TYPED_SOURCE}/src ${Vulkan_INCLUDE_DIRS} ${VKRT_SPIRV_HEADERS_INCLUDE_DIR})
 target_link_libraries(vkrt_typed_compiler PUBLIC ${VKRT_SPIRV_LIBRARIES})
 target_compile_features(vkrt_typed_compiler PUBLIC cxx_std_17)
 set_target_properties(vkrt_typed_compiler PROPERTIES POSITION_INDEPENDENT_CODE ON)
@@ -113,24 +125,23 @@ add_custom_command(
    COMMAND ${VKRT_GLSLC}
            -fshader-stage=compute
            --target-env=vulkan1.2
-           -I ${CMAKE_CURRENT_SOURCE_DIR}/bvh
-           -I ${CMAKE_CURRENT_SOURCE_DIR}/traversal -I ${VKRT_COMMON_BVH4}
-           ${CMAKE_CURRENT_SOURCE_DIR}/traversal/sw_ray_query_library.comp
+           -I ${CMAKE_CURRENT_SOURCE_DIR}/shaders -I ${VKRT_SHARED_HEADERS}
+           ${CMAKE_CURRENT_SOURCE_DIR}/shaders/sw_ray_query_library.comp
            -o ${VKRT_TRAVERSAL_SPV}
    COMMAND ${VKRT_SPIRV_VAL} --target-env vulkan1.2 --scalar-block-layout ${VKRT_TRAVERSAL_SPV}
    COMMAND ${CMAKE_COMMAND} -DINPUT=${VKRT_TRAVERSAL_SPV}
            -DOUTPUT=${VKRT_TRAVERSAL_SPV}.h -DNAME=traversal
-           -P ${CMAKE_CURRENT_SOURCE_DIR}/embed_spv.cmake
+           -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/embed_spv.cmake
    DEPENDS
-      ${CMAKE_CURRENT_SOURCE_DIR}/traversal/sw_ray_query_library.comp
-      ${CMAKE_CURRENT_SOURCE_DIR}/traversal/sw_ray_query.glsl
-      ${VKRT_COMMON_BVH4}/bvh4_abi.glsl
-      ${VKRT_COMMON_BVH4}/as_address.glsl
-      ${CMAKE_CURRENT_SOURCE_DIR}/bvh/vk_bvh_defines.h
-      ${CMAKE_CURRENT_SOURCE_DIR}/bvh/bvh_ir_contract.h
-      ${CMAKE_CURRENT_SOURCE_DIR}/bvh/bvh_ir_builder.h
-      ${CMAKE_CURRENT_SOURCE_DIR}/bvh/bvh_ir_build_layout.h
-      ${CMAKE_CURRENT_SOURCE_DIR}/embed_spv.cmake
+      ${CMAKE_CURRENT_SOURCE_DIR}/shaders/sw_ray_query_library.comp
+      ${CMAKE_CURRENT_SOURCE_DIR}/shaders/sw_ray_query.glsl
+      ${CMAKE_CURRENT_SOURCE_DIR}/shaders/bvh4_abi.glsl
+      ${CMAKE_CURRENT_SOURCE_DIR}/shaders/as_address.glsl
+      ${CMAKE_CURRENT_SOURCE_DIR}/src/vk_bvh_defines.h
+      ${CMAKE_CURRENT_SOURCE_DIR}/src/bvh_ir_contract.h
+      ${CMAKE_CURRENT_SOURCE_DIR}/src/bvh_ir_builder.h
+      ${CMAKE_CURRENT_SOURCE_DIR}/src/bvh_ir_build_layout.h
+      ${CMAKE_CURRENT_SOURCE_DIR}/cmake/embed_spv.cmake
    COMMENT "Compiling sw_ray_query traversal library to SPIR-V"
    VERBATIM
 )
@@ -145,22 +156,22 @@ add_dependencies(${VKRT_LAYER_NAME} vkrt_traversal_spv)
 # builder used by the initial LBVH path.  Keep the shader names stable: M2's
 # runtime pipeline cache loads the staged files by these names.
 set(VKRT_BVH_SHADER_SOURCES
-   bvh/vkrt_init.comp
-   bvh/leaf.comp
-   bvh/leaf_bvh4.comp
-   bvh/vkrt_bvh4_prepare.comp
-   bvh/vkrt_bvh4_copy.comp
-   bvh/vkrt_bvh4_serialization.comp
-   bvh/vkrt_as_query.comp
-   bvh/vkrt_query_format.comp
-   bvh/vkrt_query_publish.comp
-   bvh4/bvh4_mesa_encode.comp
-   bvh/id_prefix_sum.comp
-   bvh/morton_sort.comp
-   bvh/lbvh_main.comp
-   bvh/lbvh_generate_ir.comp
-   bvh/pair_triangles.comp
-   bvh/ploc_internal.comp
+   shaders/vkrt_init.comp
+   shaders/leaf.comp
+   shaders/leaf_bvh4.comp
+   shaders/vkrt_bvh4_prepare.comp
+   shaders/vkrt_bvh4_copy.comp
+   shaders/vkrt_bvh4_serialization.comp
+   shaders/vkrt_as_query.comp
+   shaders/vkrt_query_format.comp
+   shaders/vkrt_query_publish.comp
+   shaders/bvh4_mesa_encode.comp
+   shaders/id_prefix_sum.comp
+   shaders/morton_sort.comp
+   shaders/lbvh_main.comp
+   shaders/lbvh_generate_ir.comp
+   shaders/pair_triangles.comp
+   shaders/ploc_internal.comp
 )
 set(VKRT_BVH_SPV)
 find_program(VKRT_SPIRV_VAL spirv-val HINTS "${Vulkan_INCLUDE_DIRS}/../Bin" REQUIRED)
@@ -174,28 +185,28 @@ foreach(_vkrt_bvh_src IN LISTS VKRT_BVH_SHADER_SOURCES)
       COMMAND ${VKRT_GLSLC}
               -fshader-stage=compute
               --target-env=vulkan1.2
-              -I ${CMAKE_CURRENT_SOURCE_DIR}/bvh
-              -I ${VKRT_COMMON_BVH4}
+              -I ${CMAKE_CURRENT_SOURCE_DIR}/shaders
+              -I ${VKRT_SHARED_HEADERS}
               ${CMAKE_CURRENT_SOURCE_DIR}/${_vkrt_bvh_src}
               -o ${_vkrt_bvh_spv}
       COMMAND ${VKRT_SPIRV_VAL} --target-env vulkan1.2 --scalar-block-layout ${_vkrt_bvh_spv}
       COMMAND ${CMAKE_COMMAND} -DINPUT=${_vkrt_bvh_spv}
               -DOUTPUT=${_vkrt_bvh_spv}.h -DNAME=${_vkrt_bvh_name}
-              -P ${CMAKE_CURRENT_SOURCE_DIR}/embed_spv.cmake
+              -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/embed_spv.cmake
       DEPENDS
          ${CMAKE_CURRENT_SOURCE_DIR}/${_vkrt_bvh_src}
-         ${CMAKE_CURRENT_SOURCE_DIR}/bvh/vkrt_bvh_preamble.h
-         ${CMAKE_CURRENT_SOURCE_DIR}/bvh/vk_bvh_defines.h
-         ${CMAKE_CURRENT_SOURCE_DIR}/bvh/bvh_ir_contract.h
-         ${CMAKE_CURRENT_SOURCE_DIR}/bvh/bvh_ir_builder.h
-         ${CMAKE_CURRENT_SOURCE_DIR}/bvh/bvh_ir_build_layout.h
-         ${CMAKE_CURRENT_SOURCE_DIR}/bvh/vk_bvh_helpers.h
-         ${CMAKE_CURRENT_SOURCE_DIR}/bvh/leaf.h
-         ${CMAKE_CURRENT_SOURCE_DIR}/bvh/vkrt_as_serialization.glsl
-         ${VKRT_COMMON_BVH4}/as_address.glsl
-         ${VKRT_COMMON_BVH4}/bvh4_abi.glsl
-         ${CMAKE_CURRENT_SOURCE_DIR}/bvh/pair_triangles.h
-         ${CMAKE_CURRENT_SOURCE_DIR}/embed_spv.cmake
+         ${CMAKE_CURRENT_SOURCE_DIR}/shaders/vkrt_bvh_preamble.h
+         ${CMAKE_CURRENT_SOURCE_DIR}/src/vk_bvh_defines.h
+         ${CMAKE_CURRENT_SOURCE_DIR}/src/bvh_ir_contract.h
+         ${CMAKE_CURRENT_SOURCE_DIR}/src/bvh_ir_builder.h
+         ${CMAKE_CURRENT_SOURCE_DIR}/src/bvh_ir_build_layout.h
+         ${CMAKE_CURRENT_SOURCE_DIR}/shaders/vk_bvh_helpers.h
+         ${CMAKE_CURRENT_SOURCE_DIR}/shaders/leaf.h
+         ${CMAKE_CURRENT_SOURCE_DIR}/shaders/vkrt_as_serialization.glsl
+         ${CMAKE_CURRENT_SOURCE_DIR}/shaders/as_address.glsl
+         ${CMAKE_CURRENT_SOURCE_DIR}/shaders/bvh4_abi.glsl
+         ${CMAKE_CURRENT_SOURCE_DIR}/shaders/pair_triangles.h
+         ${CMAKE_CURRENT_SOURCE_DIR}/cmake/embed_spv.cmake
       COMMENT "Compiling GPU BVH builder ${_vkrt_bvh_name}"
       VERBATIM
    )
@@ -228,15 +239,15 @@ if(WIN32)
    # auto-exported. A .def file is the clean way to export exactly that
    # one symbol without the dllexport-redeclaration warning. CMake passes
    # a .def in target_sources straight to the linker (MSVC and lld-link).
-   target_sources(${VKRT_LAYER_NAME} PRIVATE vkrt_layer.def)
+   target_sources(${VKRT_LAYER_NAME} PRIVATE cmake/vkrt_layer.def)
 endif()
 
 target_include_directories(${VKRT_LAYER_NAME}
    PRIVATE
       ${CMAKE_CURRENT_SOURCE_DIR}/src
-      ${VKRT_COMMON_BVH4}
+      ${VKRT_SHARED_HEADERS}
       ${CMAKE_CURRENT_BINARY_DIR}
-      ${CMAKE_CURRENT_SOURCE_DIR}/bvh
+      ${CMAKE_CURRENT_SOURCE_DIR}/shaders
       ${Vulkan_INCLUDE_DIRS}
       ${Vulkan_INCLUDE_DIRS}/spirv-tools
       ${VKRT_SPIRV_HEADERS_INCLUDE_DIR}
@@ -249,7 +260,7 @@ target_compile_definitions(${VKRT_LAYER_NAME}
 )
 add_compile_definitions(_CRT_SECURE_NO_WARNINGS)
 
-# Export only the negotiate entry point (via vkrt_layer.def on Windows).
+# Export only the negotiate entry point (via cmake/vkrt_layer.def on Windows).
 if(MSVC)
    target_compile_options(${VKRT_LAYER_NAME} PRIVATE /W3 /wd4100)
 else()
@@ -285,7 +296,7 @@ set_source_files_properties(src/vkrt_spirv_lower.cpp PROPERTIES LANGUAGE CXX)
 # ------------------------------------------------------------------
 # Use the actual target path, including the platform filename and build
 # configuration, rather than guessing a library prefix or output directory.
-file(READ ${CMAKE_CURRENT_SOURCE_DIR}/VkLayer_VKRT_SOFTWARE_RAY_QUERY.json.in _vkrt_manifest_template)
+file(READ ${CMAKE_CURRENT_SOURCE_DIR}/cmake/VkLayer_VKRT_SOFTWARE_RAY_QUERY.json.in _vkrt_manifest_template)
 set(library_path "$<TARGET_FILE:${VKRT_LAYER_NAME}>")
 string(CONFIGURE "${_vkrt_manifest_template}" _vkrt_manifest @ONLY)
 file(GENERATE
@@ -312,15 +323,16 @@ message(STATUS "               VK_LAYER_PATH=<build>/layers")
 # CPU debug BVHIR builder (used by the tests, not by the layer)
 # ------------------------------------------------------------------
 if(NOT TARGET vel_rt_bvh4_reference)
-   add_library(vel_rt_bvh4_reference STATIC ${VKRT_COMMON_BVH4}/bvh4_reference.cpp ${VKRT_COMMON_BVH4}/mesa_ir_adapter.cpp)
-   target_include_directories(vel_rt_bvh4_reference PUBLIC ${VKRT_COMMON_BVH4})
+   add_library(vel_rt_bvh4_reference STATIC ${CMAKE_CURRENT_SOURCE_DIR}/tests/bvh4_reference.cpp ${CMAKE_CURRENT_SOURCE_DIR}/tests/mesa_ir_adapter.cpp)
+   target_include_directories(vel_rt_bvh4_reference PUBLIC ${VKRT_SHARED_HEADERS} ${CMAKE_CURRENT_SOURCE_DIR}/tests)
    set_target_properties(vel_rt_bvh4_reference PROPERTIES CXX_STANDARD 17 POSITION_INDEPENDENT_CODE ON)
 endif()
-add_library(vkrt_cpu_bvh STATIC src/vkrt_cpu_bvh.c src/vkrt_cpu_bvh_bridge.cpp)
+add_library(vkrt_cpu_bvh STATIC tests/vkrt_cpu_bvh.c tests/vkrt_cpu_bvh_bridge.cpp)
 target_link_libraries(vkrt_cpu_bvh PUBLIC vel_rt_bvh4_reference)
 set_target_properties(vkrt_cpu_bvh PROPERTIES CXX_STANDARD 17)
 target_include_directories(vkrt_cpu_bvh PUBLIC
    ${CMAKE_CURRENT_SOURCE_DIR}/src
+   ${CMAKE_CURRENT_SOURCE_DIR}/tests
    ${Vulkan_INCLUDE_DIRS}
 )
 set_target_properties(vkrt_cpu_bvh PROPERTIES C_STANDARD 11 POSITION_INDEPENDENT_CODE ON)
@@ -432,7 +444,7 @@ set_target_properties(test_as_copy PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED 
 add_dependencies(test_as_copy vkrt_test_rq_spv)
 add_executable(test_as_update tests/test_as_update.c)
 target_link_libraries(test_as_update PRIVATE vkrt_cpu_bvh ${Vulkan_LIBRARIES})
-target_include_directories(test_as_update PRIVATE src ${VKRT_COMMON_BVH4})
+target_include_directories(test_as_update PRIVATE src ${VKRT_SHARED_HEADERS})
 set_target_properties(test_as_update PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED ON)
 add_dependencies(test_as_update vkrt_test_rq_spv)
 add_executable(test_as_serialization tests/test_as_serialization.c)
@@ -442,7 +454,7 @@ set_target_properties(test_as_serialization PROPERTIES C_STANDARD 11 C_STANDARD_
 add_dependencies(test_as_serialization vkrt_test_rq_spv)
 add_executable(test_query_properties tests/test_query_properties.c)
 target_link_libraries(test_query_properties PRIVATE vkrt_cpu_bvh ${Vulkan_LIBRARIES})
-target_include_directories(test_query_properties PRIVATE src bvh ${VKRT_COMMON_BVH4})
+target_include_directories(test_query_properties PRIVATE src ${VKRT_SHARED_HEADERS})
 set_target_properties(test_query_properties PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED ON)
 add_dependencies(test_query_properties vkrt_test_rq_spv vkrt_bvh_spv)
 
@@ -476,7 +488,7 @@ if(BUILD_TESTING)
    endforeach()
    add_custom_target(vkrt_rtp_api_spv DEPENDS ${VKRT_RTP_API_SPV})
    add_executable(test_rtp_api tests/test_rtp_api.c)
-   target_include_directories(test_rtp_api PRIVATE src ${VKRT_COMMON_BVH4} ${Vulkan_INCLUDE_DIRS})
+   target_include_directories(test_rtp_api PRIVATE src ${VKRT_SHARED_HEADERS} ${Vulkan_INCLUDE_DIRS})
    target_link_libraries(test_rtp_api PRIVATE vkrt_cpu_bvh ${Vulkan_LIBRARIES})
    set_target_properties(test_rtp_api PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED ON)
    add_dependencies(test_rtp_api vkrt_rtp_api_spv)
@@ -500,21 +512,21 @@ if(BUILD_TESTING)
    add_custom_command(
       OUTPUT ${VKRT_CLASSIFICATION_SPV}
       COMMAND ${VKRT_GLSLC} -fshader-stage=compute --target-env=vulkan1.2
-         -I ${CMAKE_CURRENT_SOURCE_DIR}/bvh -I ${CMAKE_CURRENT_SOURCE_DIR}/traversal -I ${VKRT_COMMON_BVH4}
+         -I ${CMAKE_CURRENT_SOURCE_DIR}/shaders -I ${VKRT_SHARED_HEADERS}
          ${CMAKE_CURRENT_SOURCE_DIR}/tests/traversal_classification.comp -o ${VKRT_CLASSIFICATION_SPV}
       COMMAND ${VKRT_SPIRV_VAL} --target-env vulkan1.2 --scalar-block-layout ${VKRT_CLASSIFICATION_SPV}
       DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/tests/traversal_classification.comp
-         ${CMAKE_CURRENT_SOURCE_DIR}/traversal/sw_ray_query.glsl
-         ${VKRT_COMMON_BVH4}/bvh4_abi.glsl
-         ${VKRT_COMMON_BVH4}/as_address.glsl
-         ${CMAKE_CURRENT_SOURCE_DIR}/bvh/vk_bvh_defines.h
-         ${CMAKE_CURRENT_SOURCE_DIR}/bvh/bvh_ir_contract.h
+         ${CMAKE_CURRENT_SOURCE_DIR}/shaders/sw_ray_query.glsl
+         ${CMAKE_CURRENT_SOURCE_DIR}/shaders/bvh4_abi.glsl
+         ${CMAKE_CURRENT_SOURCE_DIR}/shaders/as_address.glsl
+         ${CMAKE_CURRENT_SOURCE_DIR}/src/vk_bvh_defines.h
+         ${CMAKE_CURRENT_SOURCE_DIR}/src/bvh_ir_contract.h
       COMMENT "Compiling production traversal helper semantics test"
       VERBATIM
    )
    add_custom_target(vkrt_classification_spv DEPENDS ${VKRT_CLASSIFICATION_SPV})
    add_executable(test_traversal_classification tests/test_traversal_classification.c)
-   target_include_directories(test_traversal_classification PRIVATE ${Vulkan_INCLUDE_DIRS} ${VKRT_COMMON_BVH4})
+   target_include_directories(test_traversal_classification PRIVATE ${Vulkan_INCLUDE_DIRS} ${VKRT_SHARED_HEADERS})
    target_link_libraries(test_traversal_classification PRIVATE ${Vulkan_LIBRARIES})
    set_target_properties(test_traversal_classification PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED ON)
    add_dependencies(test_traversal_classification vkrt_classification_spv)
@@ -689,12 +701,12 @@ if(BUILD_TESTING)
    add_test(NAME vkrt.rtp_api.derivatives.native COMMAND test_rtp_api ${VKRT_RTP_API_SPV} --derivatives)
    set_tests_properties(vkrt.rtp_api.derivatives.native PROPERTIES
       ENVIRONMENT "VK_INSTANCE_LAYERS=" LABELS "gpu;typed_rtp;native_rt" SKIP_RETURN_CODE 77 TIMEOUT 600)
-   add_executable(test_device_features tests/test_device_features.c src/vkrt_features.c)
+   add_executable(test_device_features tests/test_device_features.c src/vkrt_features.c src/vkrt_resource_profile.c)
    target_include_directories(test_device_features PRIVATE src ${CMAKE_CURRENT_BINARY_DIR} ${Vulkan_INCLUDE_DIRS})
    set_target_properties(test_device_features PROPERTIES C_STANDARD 11)
    add_test(NAME vkrt.device_features COMMAND test_device_features)
    set_tests_properties(vkrt.device_features PROPERTIES LABELS "offline;no_native_rt")
-   add_executable(test_discovery tests/test_discovery.c src/vkrt_discovery.c)
+   add_executable(test_discovery tests/test_discovery.c src/vkrt_discovery.c src/vkrt_resource_profile.c)
    target_include_directories(test_discovery PRIVATE src ${CMAKE_CURRENT_BINARY_DIR} ${Vulkan_INCLUDE_DIRS})
    set_target_properties(test_discovery PROPERTIES C_STANDARD 11)
    add_test(NAME vkrt.discovery COMMAND test_discovery)
@@ -716,7 +728,7 @@ if(BUILD_TESTING)
    target_link_libraries(test_spirv_ids PRIVATE ${VKRT_SPIRV_LIBRARIES})
    set_target_properties(test_spirv_ids PROPERTIES CXX_STANDARD 17)
    add_executable(test_ir_builder_contract tests/test_ir_builder_contract.c)
-   target_include_directories(test_ir_builder_contract PRIVATE bvh ${Vulkan_INCLUDE_DIRS})
+   target_include_directories(test_ir_builder_contract PRIVATE src ${Vulkan_INCLUDE_DIRS})
    set_target_properties(test_ir_builder_contract PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED ON)
    add_test(NAME vkrt.ir_builder_contract COMMAND test_ir_builder_contract)
    set_tests_properties(vkrt.ir_builder_contract PROPERTIES LABELS "offline")
@@ -726,19 +738,19 @@ if(BUILD_TESTING)
    add_test(NAME vkrt.cpu_bvh4 COMMAND test_cpu_bvh4)
    set_tests_properties(vkrt.cpu_bvh4 PROPERTIES LABELS "offline;no_native_rt")
    add_executable(test_bvh4_build_layout tests/test_bvh4_build_layout.cpp)
-   target_include_directories(test_bvh4_build_layout PRIVATE src bvh ${Vulkan_INCLUDE_DIRS})
+   target_include_directories(test_bvh4_build_layout PRIVATE src ${Vulkan_INCLUDE_DIRS})
    target_link_libraries(test_bvh4_build_layout PRIVATE vel_rt_bvh4_reference)
    set_target_properties(test_bvh4_build_layout PROPERTIES CXX_STANDARD 17)
    add_test(NAME vkrt.bvh4_build_layout COMMAND test_bvh4_build_layout)
    set_tests_properties(vkrt.bvh4_build_layout PROPERTIES LABELS "offline;no_native_rt")
    add_test(NAME vkrt.host_translation COMMAND test_host_translation)
-   add_executable(test_as_address_cells tests/test_as_address_cells.c src/vkrt_virtual_as.c src/vkrt_as_registry.c src/vkrt_translate.c)
-   target_include_directories(test_as_address_cells PRIVATE src bvh ${VKRT_COMMON_BVH4} ${CMAKE_CURRENT_BINARY_DIR} ${Vulkan_INCLUDE_DIRS})
+   add_executable(test_as_address_cells tests/test_as_address_cells.c src/vkrt_virtual_as.c src/vkrt_as_registry.c src/vkrt_private_pool.c src/vkrt_translate.c)
+   target_include_directories(test_as_address_cells PRIVATE src ${VKRT_SHARED_HEADERS} ${CMAKE_CURRENT_BINARY_DIR} ${Vulkan_INCLUDE_DIRS})
    target_link_libraries(test_as_address_cells PRIVATE Threads::Threads)
    set_target_properties(test_as_address_cells PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED ON)
    add_test(NAME vkrt.as_address_cells COMMAND test_as_address_cells)
    set_tests_properties(vkrt.as_address_cells PROPERTIES LABELS "offline;concurrency" TIMEOUT 60)
-   add_executable(test_as_registry tests/test_as_registry.c src/vkrt_as_registry.c)
+   add_executable(test_as_registry tests/test_as_registry.c src/vkrt_as_registry.c src/vkrt_private_pool.c)
    target_include_directories(test_as_registry PRIVATE src ${Vulkan_INCLUDE_DIRS})
    target_link_libraries(test_as_registry PRIVATE Threads::Threads)
    set_target_properties(test_as_registry PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED ON)
@@ -751,13 +763,13 @@ if(BUILD_TESTING)
    add_test(NAME vkrt.deferred COMMAND test_deferred)
    set_tests_properties(vkrt.deferred PROPERTIES LABELS "offline;no_native_rt;concurrency" TIMEOUT 60)
    add_executable(test_as_copy_host tests/test_as_copy_host.c src/vkrt_as_copy.c)
-   target_include_directories(test_as_copy_host PRIVATE src ${CMAKE_CURRENT_BINARY_DIR}/bvh ${VKRT_COMMON_BVH4} ${Vulkan_INCLUDE_DIRS})
+   target_include_directories(test_as_copy_host PRIVATE src ${CMAKE_CURRENT_BINARY_DIR}/bvh ${VKRT_SHARED_HEADERS} ${Vulkan_INCLUDE_DIRS})
    target_link_libraries(test_as_copy_host PRIVATE Threads::Threads)
    set_target_properties(test_as_copy_host PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED ON)
    add_dependencies(test_as_copy_host vkrt_bvh_spv)
    add_test(NAME vkrt.as_copy_host COMMAND test_as_copy_host)
    add_executable(test_as_serialization_host tests/test_as_serialization_host.c src/vkrt_as_serialization.c)
-   target_include_directories(test_as_serialization_host PRIVATE src ${CMAKE_CURRENT_BINARY_DIR}/bvh ${VKRT_COMMON_BVH4} ${Vulkan_INCLUDE_DIRS})
+   target_include_directories(test_as_serialization_host PRIVATE src ${CMAKE_CURRENT_BINARY_DIR}/bvh ${VKRT_SHARED_HEADERS} ${Vulkan_INCLUDE_DIRS})
    target_link_libraries(test_as_serialization_host PRIVATE Threads::Threads)
    set_target_properties(test_as_serialization_host PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED ON)
    add_dependencies(test_as_serialization_host vkrt_bvh_spv)
@@ -780,6 +792,12 @@ if(BUILD_TESTING)
    add_test(NAME vkrt.gpu_build.native COMMAND test_gpu_build)
    add_test(NAME vkrt.gpu_build.aligned_values COMMAND test_gpu_build --aligned-values)
    add_test(NAME vkrt.gpu_build.aligned_values.native COMMAND test_gpu_build --aligned-values)
+   add_test(NAME vkrt.gpu_build.pool_pressure COMMAND test_gpu_build --pool-pressure)
+   set_tests_properties(vkrt.gpu_build.pool_pressure PROPERTIES
+      ENVIRONMENT "VK_LAYER_PATH=${CMAKE_BINARY_DIR}/layers;VK_INSTANCE_LAYERS=VK_LAYER_VKRT_SOFTWARE_RAY_QUERY"
+      LABELS "gpu;no_native_rt" TIMEOUT 120)
+   add_test(NAME vkrt.gpu_build.pool_pressure.native COMMAND test_gpu_build --pool-pressure)
+   set_tests_properties(vkrt.gpu_build.pool_pressure.native PROPERTIES ENVIRONMENT "VK_INSTANCE_LAYERS=" LABELS "gpu;native_rt" TIMEOUT 120)
    add_test(NAME vkrt.as_copy.software COMMAND test_as_copy)
    add_test(NAME vkrt.as_update.software COMMAND test_as_update)
    add_test(NAME vkrt.as_serialization.software COMMAND test_as_serialization)
@@ -796,5 +814,6 @@ endif()
 
 # Compiler component tests share the production typed compiler.
 if(BUILD_TESTING)
-   include(${CMAKE_CURRENT_SOURCE_DIR}/compiler_tests.cmake)
+   include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/compiler_tests.cmake)
+   include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/bvh4_tests.cmake)
 endif()

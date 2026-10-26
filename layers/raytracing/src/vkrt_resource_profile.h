@@ -57,7 +57,11 @@ bool vkrt_plan_resource_profile(const struct vkrt_resource_native *native, struc
 
 /* Uses downstream physical-device functions, never this layer's discovery
  * wrappers. Optional outputs start zero so ignored extension structs do not
- * fabricate support. No caller input/output chains are borrowed or modified. */
+ * fabricate support. No caller input/output chains are borrowed or modified.
+ * Both functions leave output untouched on failure; captured links are NULL. */
+bool vkrt_capture_resource_native(PFN_vkGetPhysicalDeviceProperties2 properties, PFN_vkGetPhysicalDeviceFeatures2 features,
+                                  VkPhysicalDevice physical, struct vkrt_resource_native *output,
+                                  enum vkrt_resource_failure *failure);
 bool vkrt_query_resource_profile(PFN_vkGetPhysicalDeviceProperties2 properties, PFN_vkGetPhysicalDeviceFeatures2 features,
                                  VkPhysicalDevice physical, struct vkrt_resource_profile *output,
                                  enum vkrt_resource_failure *failure);

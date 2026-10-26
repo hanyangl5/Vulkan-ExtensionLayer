@@ -3,7 +3,7 @@
 
 # Software RT Fallback: Implementation Status
 
-Checkpoint: 2026-10-26 (Asia/Hong_Kong). The [implementation goal](ray_tracing_fallback_goal.md)
+Checkpoint: 2026-10-27 (Asia/Hong_Kong). The [implementation goal](ray_tracing_fallback_goal.md)
 is in progress. **The complete AS/RQ/RTP fallback is not implemented.**
 The [review](ray_tracing_fallback_review.md) records the pre-change `f18c40d3`
 baseline; goal alignment was committed as `82251ec3`.
@@ -12,11 +12,14 @@ This file is the repository progress checkpoint. GitHub Issues are disabled in
 this repository. It records project work; it does not activate a hosted execution
 service or imply that an external scheduler is running.
 
-Source is consolidated under `layers/raytracing`: public API in `src`, Mesa
-construction in `bvh`, shared layout/reference components in `bvh4`, traversal
-in `traversal` and integration fixtures in `tests`. The separate `vkrt_layer`
+Source is consolidated under `layers/raytracing`: production C/C++ and ABI
+headers in `src`, all production GPU code in `shaders`, fixtures/oracles in
+`tests`, documentation and pinned references in `docs`, and build support in
+`cmake`. The root has one canonical CMake entry and README. The separate `vkrt_layer`
 tree and superseded HANYANG executable path have been removed. The canonical
 layer uses one AS/RQ/RTP backend; pinned upstream references remain intact.
+The [directory consolidation record](rt_directory_layout_2026-10-27.md) records
+the final layout, passing build/local checks and the 16-case external CTS recheck.
 
 ## Goal progress
 
@@ -53,6 +56,7 @@ layer uses one AS/RQ/RTP backend; pinned upstream references remain intact.
 - [x] Execute bounded public AS property-query publication and real CTS compaction/serialization paths.
 - [x] Back numeric module-Private state per logical RT invocation and execute the additional control-flow CTS slice.
 - [x] Preserve shader-object binary interfaces, linked peers, successful batch prefixes and legal SPIR-V 1.6 RQ inputs, with expanded external CTS.
+- [x] Pool sparse AS pages and shared descriptor values, apply the descriptor budget to discovery/device creation, and emit real four-child GPU BVH4 nodes.
 - [ ] M0: complete all capability, no-native-RT, resource ABI, and continuation proofs.
 - [ ] M1: integrate Mesa builders, GPU BVH4 encoding/refit, and shared AS objects.
 - [ ] M2: complete Ray Query lowering and state semantics.
@@ -66,7 +70,7 @@ Component checkmarks do not complete M0/M1/M2 or the full goal.
 
 | Component | Implemented and tested | Remaining boundary |
 | --- | --- | --- |
-| [Portable BVH4 components](../layers/raytracing/bvh4/README.md) | Checked reference/CPU adapter; generic BDA hierarchy encoder; direct default Mesa GPU IR adaptation/record emission with compact active leaves, full flags and explicit TLAS relocation; actual LBVH build-to-encode in one command buffer | Four-child GPU collapse, broader builder variants/large construction IDs, numerical qualification, full object/resource qualification, refit |
+| [Portable BVH4 components](../layers/raytracing/docs/BVH4.md) | Checked reference/CPU adapter; generic BDA hierarchy encoder; direct default Mesa GPU IR adaptation/record emission with compact active leaves, full flags and explicit TLAS relocation; actual LBVH build-to-encode and two-to-four-child GPU collapse in one command buffer | Broader builder variants/large construction IDs, numerical qualification, full object/resource qualification, refit |
 | Typed continuation frames | Typed CFG/continuations; BDA and invocation-private library backing; builtin/push/record state; specialization, linked six-stage scheduler/shared traversal; traditional descriptor-backed opaque provenance snapshots | Complete pointer Phi/parameter provenance, actual large aggregate values, conflicting per-stage FP modes and complete resource qualification |
 | RQ host translation | Consume AS/RQ device requirements; translate resource/synchronization masks and explicit RT buffer queries; lifetime-owned AS address cells with allocator/flush/failure handling and enabled-queue-family sharing; private SSBO indexing/variable-pointer prerequisites | Complete emulation capability/limit reporting on no-RT ICDs, future unknown buffer chains, full-layout descriptor transport and private allocation budgets |
 | AS operations and host dependency | GPU CLONE/COMPACT, serialization/UUID/BLAS relocation, semantic UPDATE; bounded public property pools with GPU payload/native completion acquisition and reuse/reset/free publication; synchronous deferred operations | Simultaneous query replay, complete logical-stage/native-query interaction, true shrinking compaction, refit performance and full resource budgets |
@@ -93,7 +97,7 @@ It verifies those production helpers; it is not the complete no-native-RT proof.
 With the documented toolchain and Vulkan dependencies installed:
 
 ```sh
-cmake -S layers/raytracing/bvh4 -B build-bvh4 \
+cmake -S layers/raytracing -DVKRT_BVH4_COMPONENTS_ONLY=ON -B build-bvh4 \
   -DCMAKE_BUILD_TYPE=Debug -DVEL_RT_BVH4_SANITIZERS=ON
 cmake --build build-bvh4 --parallel
 ctest --test-dir build-bvh4 --output-on-failure
@@ -170,7 +174,7 @@ for the full M0-M5 contract; this checkpoint does not complete any full mileston
 Reproduce shared component checks on this Windows toolchain:
 
 ```powershell
-cmake -S layers/raytracing/bvh4 -B build-rt-bvh4 -G Ninja `
+cmake -S layers/raytracing -DVKRT_BVH4_COMPONENTS_ONLY=ON -B build-rt-bvh4 -G Ninja `
   -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ `
   -DCMAKE_BUILD_TYPE=Debug -DVEL_RT_BVH4_GPU_TESTS=ON
 cmake --build build-rt-bvh4 --parallel 4
@@ -180,7 +184,7 @@ ctest --test-dir build-rt-bvh4 --output-on-failure
 # Release CRT avoids Debug-CRT/ASan startup incompatibility in this installation.
 # The LLVM ASan runtime DLL must be discoverable when running instrumented EXEs.
 $env:PATH='C:\Program Files\LLVM\lib\clang\20\lib\windows;' + $env:PATH
-cmake -S layers/raytracing/bvh4 -B build-rt-bvh4-sanitize-release -G Ninja `
+cmake -S layers/raytracing -DVKRT_BVH4_COMPONENTS_ONLY=ON -B build-rt-bvh4-sanitize-release -G Ninja `
   -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ `
   -DCMAKE_BUILD_TYPE=RelWithDebInfo -DVEL_RT_BVH4_SANITIZERS=ON `
   -DVEL_RT_BVH4_GPU_TESTS=ON
@@ -294,7 +298,7 @@ physical BVH4 roots. GENERIC objects retain same-buffer offset differences and
 same-offset aliases. GetASAddress publishes into a preallocated coherent leaf;
 stable calls neither allocate nor flush/write mapped memory. RQ embeds the
 per-device context as an ordinary constant; TLAS construction resolves public
-BLAS references into physical runtime records. The [address ABI](../layers/raytracing/bvh4/AS_ADDRESS_ABI.md)
+BLAS references into physical runtime records. The [address ABI](../layers/raytracing/docs/AS_ADDRESS_ABI.md)
 records the pinned normative contract, publication/lifetime and remaining limits.
 
 An actual public-API GPU build/query regression passes with backing BDA
@@ -442,6 +446,41 @@ The [context-free address candidate](rt_context_free_address_design.md) records
 one potential way to eliminate resolver-specialized replay; it is not adopted.
 The complete M0-M5 goal remains active.
 
+The following resource/construction work after `c88decf` is currently in
+validation. The [resource profile](rt_resource_profile_2026-10-26.md) now applies
+to legacy/2/KHR properties, base-feature/extension masking and virtual RT device
+creation. Ordinary no-RT properties retain native truth, and complete emulated
+base RT advertisement is still gated. AS four descriptor caps are 16 even though
+the AS update-after-bind feature remains false: SDK357's ALL-layout rules also
+apply to ordinary AS bindings. The original 03572/03574 validation failure and
+its fix are retained.
+
+Sparse registry pages/header and same-offset shared descriptor values now use
+DEVICE/Instance-owned coherent arenas. They retain distinct physical-BDA and
+descriptor-offset alignment rules and release empty grown arenas. Actual public
+BUILD/RQ execution over 1024 simultaneously live offsets, alias retirement and
+hole reuse passes both software and native controls. Its software validation
+runs each allocate one 64-KiB AS-address arena. The complete RTP resource-boundary
+fixture now consumes the advertised public budget directly and passes both VVL
+orders and the native control. Six positive VVL/synchronization processes have
+zero diagnostics; an existing intentionally invalid undersized-build probe is
+retained in a separate historical log. Full private allocation-count minima
+and all other private resource budgets remain open.
+
+The [production GPU collapse](rt_bvh4_collapse_2026-10-26.md) uses pointer-jump
+depth parity, dense retained-node IDs and correct four-child/parent records.
+Five independent component tests and the first six public GPU BUILD/control
+tests pass. The main offline suite passes 25/25. UPDATE remains reconstruction,
+and full numerical, refit, large source-ID and no-RT qualification remain open.
+
+The exact prior 226-case RT selection completed against its immutable DLL
+snapshot in `build-rt-cts-evidence/resource-collapse-rt-first`: **220 pass,
+2 NotSupported, 4 crashes**. Three early exits are `0xc0000008` with empty
+stdout/QPA; the separate `data_spill.trace_ray.v3uint64` internal touch-watchdog
+termination reports `0xffffffff`. These are separate observations, not one proven
+cause. The older startup investigation remains open. All raw failures remain
+retained; this is not a clean 226-case run.
+
 ## Next work
 
 Run M0 proof work in parallel with shared-backend construction:
@@ -458,8 +497,9 @@ Run M0 proof work in parallel with shared-backend construction:
    CTS slice and the now-integrated shared BVH4 representation to complete
    opcode/stage semantics and full resource budgets. A bounded fast traversal
    path can be added ahead of the proven constant-space parent-walk path.
-   Address-cell transport still consumes an SSBO per AS descriptor
-   and an allocation per AS; it does not prove full application resource budgets.
+   Address-cell transport still consumes an SSBO per AS descriptor. Native
+   storage is now pooled and same-offset aliases share a value cell; complete
+   application/private allocation budgets still require proof.
 3. Expand external CTS beyond the passing typed RTP selection. Image atomics,
    BDA root classification and resource/value aggregate types are now fixed;
    traditional descriptor-backed opaque values now cross suspension. Complete
@@ -474,7 +514,8 @@ Run M0 proof work in parallel with shared-backend construction:
    destination; qualify unknown extension chains and the complete compiler
    environment before claiming general binary compatibility.
 4. Extend the now-shared RQ/RTP builder, BVH4 traversal and AS object model.
-   Implement four-child GPU collapse/refit and qualify numerical cases and large construction IDs. Wire PLOC/HPLOC only
+   Four-child GPU collapse now executes in production. Implement refit and
+   qualify numerical cases and large construction IDs. Wire PLOC/HPLOC only
    with complete host contracts. M1 remains incomplete.
 5. Complete public AS queries beyond the bounded non-simultaneous route. Its
    actual GPU properties and native completion acquisition now execute the two

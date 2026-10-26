@@ -33,9 +33,9 @@ static bool shrink_resources(uint32_t values[KIND_COUNT], const uint32_t minimum
     return total <= budget;
 }
 
-bool vkrt_query_resource_profile(PFN_vkGetPhysicalDeviceProperties2 properties, PFN_vkGetPhysicalDeviceFeatures2 features,
-                                 VkPhysicalDevice physical, struct vkrt_resource_profile *output,
-                                 enum vkrt_resource_failure *failure) {
+bool vkrt_capture_resource_native(PFN_vkGetPhysicalDeviceProperties2 properties, PFN_vkGetPhysicalDeviceFeatures2 features,
+                                  VkPhysicalDevice physical, struct vkrt_resource_native *output,
+                                  enum vkrt_resource_failure *failure) {
     if (!properties || !features || !physical || !output) return fail(failure, VKRT_RESOURCE_BAD_ARGUMENT);
     struct vkrt_resource_native n = {0};
     VkPhysicalDeviceProperties2 core = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2};
@@ -76,7 +76,22 @@ bool vkrt_query_resource_profile(PFN_vkGetPhysicalDeviceProperties2 properties, 
     n.indexing_features.descriptorBindingStorageImageUpdateAfterBind = v12.descriptorBindingStorageImageUpdateAfterBind;
     n.indexing_features.descriptorBindingUniformTexelBufferUpdateAfterBind = v12.descriptorBindingUniformTexelBufferUpdateAfterBind;
     n.indexing_features.descriptorBindingStorageTexelBufferUpdateAfterBind = v12.descriptorBindingStorageTexelBufferUpdateAfterBind;
-    return vkrt_plan_resource_profile(&n, output, failure);
+    /* All query chains were local. The captured snapshot must not retain any
+     * address into this function's stack, including ignored optional structs. */
+    n.indexing.pNext = n.inline_uniform.pNext = NULL;
+    n.inline_features.pNext = NULL;
+    *output = n;
+    if (failure) *failure = VKRT_RESOURCE_OK;
+    return true;
+}
+
+bool vkrt_query_resource_profile(PFN_vkGetPhysicalDeviceProperties2 properties, PFN_vkGetPhysicalDeviceFeatures2 features,
+                                 VkPhysicalDevice physical, struct vkrt_resource_profile *output,
+                                 enum vkrt_resource_failure *failure) {
+    if (!output) return fail(failure, VKRT_RESOURCE_BAD_ARGUMENT);
+    struct vkrt_resource_native native;
+    if (!vkrt_capture_resource_native(properties, features, physical, &native, failure)) return false;
+    return vkrt_plan_resource_profile(&native, output, failure);
 }
 
 /* The pipeline-layout VUIDs distinguish static set totals from dynamic totals,
@@ -346,8 +361,11 @@ void vkrt_apply_resource_profile(const struct vkrt_resource_profile *profile, Vk
                 VkPhysicalDeviceAccelerationStructurePropertiesKHR *target = (void *)p;
                 target->maxPerStageDescriptorAccelerationStructures = profile->as_per_stage;
                 target->maxDescriptorSetAccelerationStructures = profile->as_per_set;
-                target->maxPerStageDescriptorUpdateAfterBindAccelerationStructures = 0;
-                target->maxDescriptorSetUpdateAfterBindAccelerationStructures = 0;
+                /* In the pinned 1.4.357 rules, 03572/03574 count ordinary AS
+                 * bindings too. These ALL-layout caps retain the same reserved
+                 * AS budget; they do not enable the optional UAB binding bit. */
+                target->maxPerStageDescriptorUpdateAfterBindAccelerationStructures = profile->as_per_stage;
+                target->maxDescriptorSetUpdateAfterBindAccelerationStructures = profile->as_per_set;
                 break;
             }
             default:

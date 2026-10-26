@@ -13,7 +13,7 @@
  */
 
 #include "vkrt_cpu_bvh.h"
-#include "../bvh/bvh_ir_contract.h"
+#include "bvh_ir_contract.h"
 
 /* Mesa construction tags, never returned as runtime node IDs. */
 #define VKRT_CPU_HANDLE_INVALID UINT32_MAX

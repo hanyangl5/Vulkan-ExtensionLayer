@@ -18,7 +18,7 @@ extern "C" {
 #endif
 
 /* Rewrite OpRayQuery*KHR in `user_words` into OpFunctionCall into the
- * software traversal supplied by `lib_words` (traversal/sw_ray_query.spv).
+ * software traversal supplied by `lib_words` (sw_ray_query.spv).
  *
  * On success returns 0 and hands back a malloc'd buffer the caller must
  * release with vkrt_spirv_lower_free(). On failure returns non-zero and
