@@ -425,6 +425,59 @@ const std::array<VkSpecializationMapEntry, 3> spec_map = {{{11, offsetof(SpecDat
                                                            {13, offsetof(SpecData, wide), sizeof(provided.wide)}}};
 const VkSpecializationInfo specialization = {uint32_t(spec_map.size()), spec_map.data(), sizeof(provided), &provided};
 
+Words WithAggregateIdentityCopies(const Words &source) {
+    Words result(source.begin(), source.begin() + 5);
+    uint32_t aggregate = 0, duplicate = result[3]++, loaded = result[3]++, copied = result[3]++;
+    bool tested = false;
+    for (size_t p = 5; p < source.size(); p += source[p] >> 16) {
+        uint32_t length = source[p] >> 16;
+        auto op = spv::Op(source[p] & 0xffff);
+        size_t start = result.size();
+        result.insert(result.end(), source.begin() + p, source.begin() + p + length);
+        if (op == spv::OpTypeStruct && !aggregate) {
+            aggregate = source[p + 1];
+            result.insert(result.end(), source.begin() + p, source.begin() + p + length);
+            result[start + length + 1] = duplicate;
+        } else if (op == spv::OpLoad && source[p + 1] == aggregate && !tested) {
+            result[start + 2] = loaded;
+            result.insert(result.end(), {(4u << 16) | spv::OpCopyLogical, duplicate, copied, loaded,
+                                         (4u << 16) | spv::OpCopyLogical, aggregate, source[p + 2], copied});
+            tested = true;
+        }
+    }
+    Require(tested, "aggregate-copy regression did not modify its source load");
+    return result;
+}
+
+Words WithShaderCallMemoryBarriers(const Words &source) {
+    Words result(source.begin(), source.begin() + 5);
+    uint32_t word_type = 0, scope = 0, semantics = result[3]++;
+    bool constants = false, tested = false;
+    for (size_t p = 5; p < source.size(); p += source[p] >> 16) {
+        uint32_t length = source[p] >> 16;
+        auto op = spv::Op(source[p] & 0xffff);
+        if (op == spv::OpTypeInt && source[p + 2] == 32 && !source[p + 3]) word_type = source[p + 1];
+        // Reuse the source's ordinary numeric 6, which also participates in
+        // output indexing. Scope lowering must not alter that constant's value.
+        if (op == spv::OpConstant && source[p + 1] == word_type && length == 4 && source[p + 3] == spv::ScopeShaderCallKHR)
+            scope = source[p + 2];
+        if (op == spv::OpFunction && !constants) {
+            Require(word_type && scope, "memory-scope regression source lacks uint32 constant 6");
+            result.insert(result.end(), {(4u << 16) | spv::OpConstant, word_type, semantics,
+                                         uint32_t(spv::MemorySemanticsAcquireReleaseMask | spv::MemorySemanticsUniformMemoryMask)});
+            constants = true;
+        }
+        if (op == spv::OpExecuteCallableKHR) {
+            result.insert(result.end(), {(3u << 16) | spv::OpMemoryBarrier, scope, semantics});
+            tested = true;
+        }
+        result.insert(result.end(), source.begin() + p, source.begin() + p + length);
+        if (op == spv::OpExecuteCallableKHR) result.insert(result.end(), {(3u << 16) | spv::OpMemoryBarrier, scope, semantics});
+    }
+    Require(tested, "memory-scope regression lacks callable suspension");
+    return result;
+}
+
 void CPUChecks(const TypedContinuationProgram &caller, const TypedContinuationProgram &callee) {
     Require(NamedConstant(caller.source, "flag_spec") == 1 && NamedConstant(caller.source, "small_spec") == 19 &&
                 NamedConstant(caller.source, "wide_spec") == UINT64_C(0x100000007),
@@ -444,6 +497,9 @@ void CPUChecks(const TypedContinuationProgram &caller, const TypedContinuationPr
     auto scheduler = CompileGLSL(Scheduler(caller, callee), VK_SHADER_STAGE_COMPUTE_BIT);
     CheckNative(LinkTypedPipelineProgram(scheduler, {caller, callee}));
     CheckNative(LinkTypedPipelineProgram(scheduler, {stripped, callee}));
+    auto aggregate_copies = CompileTypedPipelineStage(WithShaderCallMemoryBarriers(WithAggregateIdentityCopies(Caller())), "main",
+                                                      VK_SHADER_STAGE_RAYGEN_BIT_KHR, nullptr, "vel_rt_stage_0");
+    CheckNative(LinkTypedPipelineProgram(scheduler, {aggregate_copies, callee}));
     auto preserve = CompileTypedPipelineStage(WithMode(Caller(), spv::ExecutionModeDenormPreserve, spv::CapabilityDenormPreserve),
                                               "main", VK_SHADER_STAGE_RAYGEN_BIT_KHR, nullptr, "vel_rt_stage_0");
     auto flush =
@@ -522,7 +578,7 @@ uint32_t FloatBits(float value) {
 
 bool GPUExecution(const VkSpecializationInfo *info, bool strip_names) {
     constexpr uint32_t count = 7;
-    auto source = strip_names ? StripNames(Caller()) : Caller();
+    auto source = strip_names ? StripNames(WithShaderCallMemoryBarriers(WithAggregateIdentityCopies(Caller()))) : Caller();
     auto caller = CompileTypedPipelineStage(source, "main", VK_SHADER_STAGE_RAYGEN_BIT_KHR, info, "vel_rt_stage_0");
     auto callee =
         CompileTypedPipelineStage(StripNames(Callee()), "main", VK_SHADER_STAGE_CALLABLE_BIT_KHR, nullptr, "vel_rt_stage_1");

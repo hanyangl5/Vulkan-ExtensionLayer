@@ -73,7 +73,7 @@ struct vkrt_saved_push {
    struct vkrt_saved_push *next;
    VkPipelineLayout layout;
    VkShaderStageFlags stages;
-   uint32_t offset, size;
+   uint32_t offset, size, bank;
    uint8_t bytes[];
 };
 
@@ -88,7 +88,46 @@ struct vkrt_cmd_buffer_data {
 
     /* Saved application state so our builder binds can be undone. */
     VkPipeline bound_compute_pipeline;
+    VkShaderEXT bound_compute_shader;
+    bool compute_shader_object;
 };
+
+static inline void vkrt_replay_compute_binding(struct vkrt_cmd_buffer_data *cb) {
+    struct vkrt_device_data *dev = cb->device_data;
+    if (cb->compute_shader_object) {
+        const VkShaderStageFlagBits stage = VK_SHADER_STAGE_COMPUTE_BIT;
+        if (dev->vtable.CmdBindShadersEXT)
+            dev->vtable.CmdBindShadersEXT(cb->cmd, 1, &stage, &cb->bound_compute_shader);
+        else
+            cb->record_result = VK_ERROR_FEATURE_NOT_PRESENT;
+    } else if (cb->bound_compute_pipeline) {
+        dev->vtable.CmdBindPipeline(cb->cmd, VK_PIPELINE_BIND_POINT_COMPUTE, cb->bound_compute_pipeline);
+    }
+}
+
+/* Internal compute work uses bank zero. Replay original application updates in
+ * order, including maintenance6 and nonzero NV banks, with their original stage
+ * masks so a later graphics-only update is never replaced by older bytes. */
+static inline void vkrt_replay_push_constants(struct vkrt_cmd_buffer_data *cb) {
+    struct vkrt_device_data *dev = cb->device_data;
+    for (const struct vkrt_saved_push *push = cb->push_head; push; push = push->next) {
+        if (!push->bank) {
+            dev->vtable.CmdPushConstants(cb->cmd, push->layout, push->stages, push->offset, push->size, push->bytes);
+            continue;
+        }
+#ifdef VK_NV_push_constant_bank
+        if (dev->vtable.CmdPushConstants2) {
+            VkPushConstantBankInfoNV bank = {VK_STRUCTURE_TYPE_PUSH_CONSTANT_BANK_INFO_NV, NULL, push->bank};
+            VkPushConstantsInfo info = {
+                VK_STRUCTURE_TYPE_PUSH_CONSTANTS_INFO, &bank, push->layout, push->stages, push->offset, push->size, push->bytes};
+            dev->vtable.CmdPushConstants2(cb->cmd, &info);
+            continue;
+        }
+#endif
+        cb->record_result = VK_ERROR_FEATURE_NOT_PRESENT;
+        return;
+    }
+}
 
 /* ------------------------------------------------------------------ */
 /* Shader-module metadata produced by the SPIR-V rewrite               */

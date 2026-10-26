@@ -19,11 +19,20 @@ static VKAPI_ATTR void VKAPI_CALL GetPhysicalDeviceFeatures2(VkPhysicalDevice ph
             ((VkPhysicalDeviceRayQueryFeaturesKHR *)p)->rayQuery = VK_FALSE;
         if (p->sType == VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_FEATURES_KHR)
             ((VkPhysicalDeviceRayTracingPipelineFeaturesKHR *)p)->rayTracingPipeline = VK_FALSE;
+        if (p->sType == VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PER_STAGE_DESCRIPTOR_SET_FEATURES_NV) {
+            VkPhysicalDevicePerStageDescriptorSetFeaturesNV *per_stage = (void *)p;
+            per_stage->perStageDescriptorSet = per_stage->dynamicPipelineLayout = VK_FALSE;
+        }
     }
     if (queried) inst->vtable.GetPhysicalDeviceFeatures2(physical, features);
     for (VkBaseOutStructure *p = features->pNext; p; p = p->pNext) {
         size_t offset, bytes;
         if (vkrt_unsupported_rt_feature_range(p->sType, &offset, &bytes)) memset((char *)p + offset, 0, bytes);
+        /* A flat compute module cannot preserve independent per-stage binding
+         * namespaces. The neighboring dynamicPipelineLayout feature has its
+         * own implementation and must retain native truth. */
+        if (p->sType == VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PER_STAGE_DESCRIPTOR_SET_FEATURES_NV)
+            ((VkPhysicalDevicePerStageDescriptorSetFeaturesNV *)p)->perStageDescriptorSet = VK_FALSE;
     }
 }
 

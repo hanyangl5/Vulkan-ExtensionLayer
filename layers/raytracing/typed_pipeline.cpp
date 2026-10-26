@@ -42,7 +42,11 @@ void Validate(const Words &words, spv_target_env environment) {
     tools.SetMessageConsumer([&](spv_message_level_t, const char *, const spv_position_t &, const char *message) {
         error += std::string(message) + "\n";
     });
-    bool valid = tools.Validate(words);
+    // Scalar layout is an explicit native prerequisite of the typed backend.
+    // In particular, physical shader-record pointers retain source byte offsets.
+    spvtools::ValidatorOptions validation;
+    validation.SetScalarBlockLayout(true);
+    bool valid = tools.Validate(words.data(), words.size(), validation);
     Require(valid, error);
 }
 std::string String(const Words &words, size_t begin, size_t end) {
@@ -66,7 +70,12 @@ Words Specialize(const Words &source, const VkSpecializationInfo *info) {
     spvtools::Optimizer flatten(SPV_ENV_VULKAN_1_3);
     flatten.RegisterPass(spvtools::CreateFlattenDecorationPass());
     Words normalized;
-    Require(flatten.Run(source.data(), source.size(), &normalized), "specialization decoration normalization failed");
+    spvtools::ValidatorOptions validation;
+    validation.SetScalarBlockLayout(true);
+    spvtools::OptimizerOptions optimizer_options;
+    optimizer_options.set_validator_options(validation);
+    Require(flatten.Run(source.data(), source.size(), &normalized, optimizer_options),
+            "specialization decoration normalization failed");
     std::map<uint32_t, uint32_t> widths, constants, spec_ids;
     for (size_t p = 5; p < normalized.size(); p += normalized[p] >> 16) {
         auto op = spv::Op(normalized[p] & 0xffff);
@@ -106,7 +115,7 @@ Words Specialize(const Words &source, const VkSpecializationInfo *info) {
     optimizer.RegisterPass(spvtools::CreateFreezeSpecConstantValuePass());
     optimizer.RegisterPass(spvtools::CreateFoldSpecConstantOpAndCompositePass());
     Words result;
-    bool specialized = optimizer.Run(normalized.data(), normalized.size(), &result);
+    bool specialized = optimizer.Run(normalized.data(), normalized.size(), &result, optimizer_options);
     Require(specialized, "specialization failed: " + error);
     return result;
 }
@@ -324,6 +333,53 @@ Words LinkTypedPipelineProgram(const Words &scheduler, const std::vector<TypedCo
     spvtools::OptimizerOptions optimizer_options;
     optimizer_options.set_run_validator(false);
     Require(optimizer.Run(result.data(), result.size(), &cleaned, optimizer_options), "linked stage cleanup failed");
+    // Linking and duplicate elimination can unify structurally equal aggregate
+    // types. OpCopyLogical requires different type IDs; its value-preserving
+    // conversion becomes OpCopyObject when both IDs now name the same type.
+    struct Metadata {
+        std::unordered_map<uint32_t, uint32_t> result_types;
+        std::unordered_map<uint32_t, std::pair<uint32_t, uint32_t>> constants;
+        std::vector<size_t> scope_operands;
+        size_t offset = 5;
+    } metadata;
+    auto collect_type = [](void *user, const spv_parsed_instruction_t *instruction) {
+        auto &data = *static_cast<Metadata *>(user);
+        if (instruction->result_id && instruction->type_id) data.result_types.emplace(instruction->result_id, instruction->type_id);
+        if (instruction->opcode == spv::OpConstant && instruction->num_words == 4)
+            data.constants.emplace(instruction->result_id, std::make_pair(instruction->type_id, instruction->words[3]));
+        for (uint32_t i = 0; i < instruction->num_operands; ++i)
+            if (instruction->operands[i].type == SPV_OPERAND_TYPE_SCOPE_ID)
+                data.scope_operands.push_back(data.offset + instruction->operands[i].offset);
+        data.offset += instruction->num_words;
+        return SPV_SUCCESS;
+    };
+    Require(spvBinaryParse(context.CContext(), &metadata, cleaned.data(), cleaned.size(), nullptr, collect_type, nullptr) ==
+                SPV_SUCCESS,
+            "linked type parse failed");
+    for (size_t p = 5; p < cleaned.size(); p += cleaned[p] >> 16) {
+        if (spv::Op(cleaned[p] & 0xffff) == spv::OpCopyLogical && metadata.result_types.at(cleaned[p + 3]) == cleaned[p + 1])
+            cleaned[p] = (cleaned[p] & 0xffff0000u) | spv::OpCopyObject;
+    }
+    // One native invocation executes its entire logical shader-call tree.
+    // Device scope conservatively includes that tree and retains the original
+    // acquire/release memory semantics. Invocation scope cannot do so: Vulkan
+    // requires Relaxed semantics for an Invocation-scoped memory barrier. The
+    // backend already requires native device-scope memory-model support. Rewrite
+    // only parsed scope operands: numeric 6 can also be ordinary source data.
+    Words scope_constants;
+    std::map<uint32_t, uint32_t> device_scopes;
+    for (size_t operand : metadata.scope_operands) {
+        auto constant = metadata.constants.find(cleaned[operand]);
+        if (constant == metadata.constants.end() || constant->second.second != spv::ScopeShaderCallKHR) continue;
+        uint32_t type = constant->second.first;
+        auto found = device_scopes.find(type);
+        if (found == device_scopes.end()) {
+            uint32_t id = cleaned[3]++;
+            found = device_scopes.emplace(type, id).first;
+            Emit(scope_constants, spv::OpConstant, {type, id, spv::ScopeDevice});
+        }
+        cleaned[operand] = found->second;
+    }
     std::vector<uint32_t> globals;
     bool in_function = false;
     uint32_t entry_count = 0;
@@ -333,8 +389,13 @@ Words LinkTypedPipelineProgram(const Words &scheduler, const std::vector<TypedCo
         if (op == spv::OpVariable && !in_function) globals.push_back(cleaned[p + 2]);
     }
     result.assign(cleaned.begin(), cleaned.begin() + 5);
+    bool inserted_scopes = false;
     for (size_t p = 5; p < cleaned.size(); p += cleaned[p] >> 16) {
         uint32_t length = cleaned[p] >> 16;
+        if (!inserted_scopes && spv::Op(cleaned[p] & 0xffff) == spv::OpFunction) {
+            result.insert(result.end(), scope_constants.begin(), scope_constants.end());
+            inserted_scopes = true;
+        }
         if (spv::Op(cleaned[p] & 0xffff) == spv::OpEntryPoint) {
             Require(++entry_count == 1, "scheduler must have one compute entry point");
             Require(cleaned[p + 1] == spv::ExecutionModelGLCompute, "scheduler entry is not compute");

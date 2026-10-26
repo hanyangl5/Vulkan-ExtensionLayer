@@ -158,10 +158,8 @@ static void record(struct vkrt_device_data *dev, struct vkrt_cmd_buffer_data *cb
     dev->vtable.CmdPushConstants(cb->cmd, state->layout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(args), &args);
     dev->vtable.CmdDispatch(cb->cmd, (uint32_t)groups, 1, 1);
     barrier(dev, cb->cmd);
-    if (cb->bound_compute_pipeline)
-        dev->vtable.CmdBindPipeline(cb->cmd, VK_PIPELINE_BIND_POINT_COMPUTE, cb->bound_compute_pipeline);
-    for (struct vkrt_saved_push *push = cb->push_head; push; push = push->next)
-        dev->vtable.CmdPushConstants(cb->cmd, push->layout, push->stages, push->offset, push->size, push->bytes);
+    vkrt_replay_compute_binding(cb);
+    vkrt_replay_push_constants(cb);
 }
 void vkrt_cmd_serialize_as(struct vkrt_device_data *dev, VkCommandBuffer command,
                            const VkCopyAccelerationStructureToMemoryInfoKHR *info) {

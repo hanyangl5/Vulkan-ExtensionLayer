@@ -136,6 +136,12 @@ VkResult vkrt_create_device_with_features(struct vkrt_instance_data *inst,
     if (!inst || !ci || !create || !device || (ci->enabledExtensionCount && !ci->ppEnabledExtensionNames))
         return VK_ERROR_INITIALIZATION_FAILED;
     bool uses_virtual_rt = vkrt_device_uses_virtual_rt(ci);
+    if (uses_virtual_rt) {
+        for (const VkBaseInStructure *p = ci->pNext; p; p = p->pNext)
+            if (p->sType == VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PER_STAGE_DESCRIPTOR_SET_FEATURES_NV &&
+                ((const VkPhysicalDevicePerStageDescriptorSetFeaturesNV *)p)->perStageDescriptorSet)
+                return VK_ERROR_FEATURE_NOT_PRESENT;
+    }
     for (uint32_t i = 0; i < ci->enabledExtensionCount; ++i) {
         const char *name = ci->ppEnabledExtensionNames[i];
         if (vkrt_incompatible_device_extension(name)) return VK_ERROR_FEATURE_NOT_PRESENT;

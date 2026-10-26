@@ -109,6 +109,8 @@ struct TypedContinuationProgram {
     uint64_t frame_stride_bytes = 0, max_invocations64 = 0;
     uint32_t system_header_bytes = 0, control_byte_offset = 0;
     bool uses_app_push_constants = false, uses_shader_record = false;
+    uint64_t resource_snapshot_bytes = 0;
+    uint32_t resource_snapshot_fields = 0;
     uint32_t frame_stride_words, control_word, state_count, max_invocations;
 };
 // In physical mode all FunctionFrame slot offsets, invocation-variable offsets
@@ -126,9 +128,12 @@ struct TypedContinuationProgram {
 // Helpers are inlined before analysis. Logical local access-chain/copy aliases,
 // numeric/composite ALU, push constants, ordinary buffer resources, and launch
 // ID/size inputs are supported. Native image/sampler values and image texel
-// pointers retain source SSA identity within a source state; image atomics
-// retain their original scope and memory semantics. Opaque values and image
-// pointers crossing a state boundary still require explicit provenance support.
+// pointers use traditional descriptor provenance across state boundaries.
+// Dynamic selectors, texel coordinates and sample numbers are captured with
+// typed codecs at their original definitions, independently for each result.
+// Only stable descriptor identities are reconstructed; image reads and atomic
+// effects retain their original source positions, scopes and memory semantics.
+// Opaque Phi/Select and nontraditional descriptor handles remain unsupported.
 // The current backend accepts Logical GLSL450 only; VulkanMemoryModel and
 // physical-storage-buffer addressing require explicit scheduler/frame support.
 //

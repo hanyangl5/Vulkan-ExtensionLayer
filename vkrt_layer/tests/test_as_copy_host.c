@@ -70,8 +70,9 @@ struct saved_push {
     struct vkrt_saved_push *next;
     VkPipelineLayout layout;
     VkShaderStageFlags stages;
-    uint32_t offset, size, bytes[1];
+    uint32_t offset, size, bank, bytes[1];
 };
+_Static_assert(offsetof(struct saved_push, bytes) == offsetof(struct vkrt_saved_push, bytes), "saved push ABI");
 static struct saved_push second = {
     .layout = H(VkPipelineLayout, 52), .stages = VK_SHADER_STAGE_FRAGMENT_BIT, .offset = 16, .size = 4, .bytes = {72}};
 static struct saved_push first = {.next = (struct vkrt_saved_push *)&second,

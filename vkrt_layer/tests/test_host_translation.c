@@ -108,8 +108,7 @@ static void buffer_usages(void) {
     REQUIRE(vkrt_CreateBuffer(device, &info, &allocator, &buffer) == VK_SUCCESS);
     REQUIRE(registry_creates == 1);
     info.usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT;
-    expected_usage =
-        VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+    expected_usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT;
     REQUIRE(vkrt_CreateBuffer(device, &info, &allocator, &buffer) == VK_SUCCESS);
 
     VkBaseInStructure suffix_node = {.sType = VK_STRUCTURE_TYPE_MAX_ENUM};

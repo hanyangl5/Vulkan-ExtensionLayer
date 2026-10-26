@@ -203,6 +203,79 @@ void Replace(std::string &source, const std::string &before, const std::string &
     Require(offset != std::string::npos, "Regression source fragment missing");
     source.replace(offset, before.size(), after);
 }
+void LargeDescriptorResourceTypes() {
+    // A full native storage-buffer budget is a descriptor declaration, not a
+    // million-element value to spill into each invocation's continuation frame.
+    const char *source = R"spv(
+OpCapability Shader
+OpCapability RayTracingKHR
+OpCapability StorageBufferArrayDynamicIndexing
+OpExtension "SPV_KHR_ray_tracing"
+OpMemoryModel Logical GLSL450
+OpEntryPoint RayGenerationKHR %main "main" %scenes %buffers %payload
+OpDecorate %scenes DescriptorSet 31
+OpDecorate %scenes Binding 0
+OpDecorate %buffers DescriptorSet 31
+OpDecorate %buffers Binding 1
+OpDecorate %block Block
+OpMemberDecorate %block 0 Offset 0
+OpDecorate %payload Location 0
+%void = OpTypeVoid
+%uint = OpTypeInt 32 0
+%float = OpTypeFloat 32
+%vec3 = OpTypeVector %float 3
+%zero = OpConstant %uint 0
+%one = OpConstant %uint 1
+%mask = OpConstant %uint 255
+%sixteen = OpConstant %uint 16
+%last_scene = OpConstant %uint 15
+%count = OpConstant %uint 1048544
+%last = OpConstant %uint 1048543
+%fzero = OpConstant %float 0
+%fone = OpConstant %float 1
+%origin = OpConstantComposite %vec3 %fzero %fzero %fzero
+%direction = OpConstantComposite %vec3 %fzero %fzero %fone
+%as = OpTypeAccelerationStructureKHR
+%as_array = OpTypeArray %as %sixteen
+%as_array_ptr = OpTypePointer UniformConstant %as_array
+%as_ptr = OpTypePointer UniformConstant %as
+%block = OpTypeStruct %uint
+%blocks = OpTypeArray %block %count
+%blocks_ptr = OpTypePointer StorageBuffer %blocks
+%word_ptr = OpTypePointer StorageBuffer %uint
+%payload_ptr = OpTypePointer RayPayloadKHR %uint
+%scenes = OpVariable %as_array_ptr UniformConstant
+%buffers = OpVariable %blocks_ptr StorageBuffer
+%payload = OpVariable %payload_ptr RayPayloadKHR
+%fn = OpTypeFunction %void
+%main = OpFunction %void None %fn
+%entry = OpLabel
+%scene_ptr = OpAccessChain %as_ptr %scenes %last_scene
+%scene = OpLoad %as %scene_ptr
+OpStore %payload %one
+OpTraceRayKHR %scene %one %mask %zero %zero %zero %origin %fzero %direction %fone %payload
+%word = OpAccessChain %word_ptr %buffers %last %zero
+%result = OpLoad %uint %payload
+OpStore %word %result
+OpReturn
+OpFunctionEnd
+)spv";
+    auto program = CompileTypedContinuationSteps(Source(source), "main", spv::ExecutionModelRayGenerationKHR);
+    spvtools::SpirvTools tools(SPV_ENV_VULKAN_1_3);
+    Require(tools.Validate(program.spirv), "Large resource declaration failed generated-module validation");
+    Require(program.spirv.size() < 15000, "Resource descriptor array was expanded into per-element code");
+    for (const auto &type : program.frames.types)
+        Require(type.size < 4096, "Resource descriptor array was included in continuation value layouts");
+    std::map<uint32_t, uint32_t> constants;
+    bool full_array = false;
+    for (size_t p = 5; p < program.spirv.size(); p += program.spirv[p] >> 16) {
+        const auto op = program.spirv[p] & 65535;
+        if (op == spv::OpConstant && (program.spirv[p] >> 16) == 4) constants[program.spirv[p + 2]] = program.spirv[p + 3];
+        if (op == spv::OpTypeArray) full_array |= constants[program.spirv[p + 3]] == 1048544;
+    }
+    Require(full_array && program.acceleration_structure_descriptors.size() == 1,
+            "Full SSBO array or AS descriptor interface was discarded");
+}
 void ResourceValueTypes() {
     // SPIR-V1.4 permits a source Function pointer to the same explicitly laid
     // out structure used by a buffer. The newer emitted module must split
@@ -323,13 +396,7 @@ OpFunctionEnd
     check(late, spv::ExecutionModelIntersectionKHR);
     std::string crossing = image;
     Replace(crossing, "OpImageWrite", "OpBranch %next\n%next = OpLabel\nOpImageWrite");
-    bool rejected = false;
-    try {
-        CompileTypedContinuationSteps(Source(crossing), "main", spv::ExecutionModelRayGenerationKHR);
-    } catch (const std::exception &e) {
-        rejected = std::string(e.what()).find("opaque resource SSA crosses") != std::string::npos;
-    }
-    Require(rejected, "Cross-state opaque resource was silently spilled or reloaded");
+    check(crossing, spv::ExecutionModelRayGenerationKHR);
 
     std::string atomic = image;
     Replace(atomic, "%image_pointer = OpTypePointer", "%texel_pointer = OpTypePointer Image %i32\n%image_pointer = OpTypePointer");
@@ -366,7 +433,7 @@ OpFunctionEnd
         }
         Require(texels == expected_texels && minima == 1 && stores == 1 && barriers == 1,
                 "Image texel pointer/atomic side effects duplicated or lost");
-        if (expected_texels == 2) {
+        if (expected_texels == 2 && !program.frames.functions.at(0).suspensions.empty()) {
             uint32_t atomic_value = 0;
             for (size_t p = 5; p < program.source.size(); p += program.source[p] >> 16)
                 if ((program.source[p] & 65535) == spv::OpAtomicSMin) atomic_value = program.source[p + 2];
@@ -387,15 +454,56 @@ OpFunctionEnd
             "%reported = OpReportIntersectionKHR %bool %fone %uzero\n"
             "%later_texel = OpImageTexelPointer %texel_pointer %image %coord %uzero\nOpAtomicStore %later_texel");
     atomic_check(live_atomic, spv::ExecutionModelIntersectionKHR, 2);
+    std::string live_texel = atomic;
+    Replace(live_texel, "RayGenerationKHR %main", "IntersectionKHR %main");
+    Replace(live_texel, "OpAtomicStore %texel", "%reported = OpReportIntersectionKHR %bool %fone %uzero\nOpAtomicStore %texel");
+    atomic_check(live_texel, spv::ExecutionModelIntersectionKHR, 2);
+    // A selector is source data, not a rematerializable load. Both a texel
+    // pointer and its copy must snapshot that data before its backing changes.
+    std::string dynamic_texel = live_texel;
+    Replace(dynamic_texel, "%fn = OpTypeFunction", "%local_pointer = OpTypePointer Function %i32\n%fn = OpTypeFunction");
+    Replace(dynamic_texel, "%entry = OpLabel",
+            "%entry = OpLabel\n%selector_storage = OpVariable %local_pointer Function %one\n"
+            "%selector = OpLoad %i32 %selector_storage\n"
+            "%dynamic_coord = OpCompositeConstruct %v3i %selector %selector %selector");
+    Replace(dynamic_texel, "%image %coord %uzero", "%image %dynamic_coord %uzero");
+    Replace(dynamic_texel, "%prior = OpAtomicSMin",
+            "%saved_texel = OpCopyObject %texel_pointer %texel\nOpStore %selector_storage %zero\n%prior = OpAtomicSMin");
+    Replace(dynamic_texel, "OpAtomicStore %texel", "OpAtomicStore %saved_texel");
+    atomic_check(dynamic_texel, spv::ExecutionModelIntersectionKHR, 2);
+    auto dynamic_program = CompileTypedContinuationSteps(Source(dynamic_texel), "main", spv::ExecutionModelIntersectionKHR);
+    Require(dynamic_program.resource_snapshot_fields == 2 && dynamic_program.resource_snapshot_bytes == 24,
+            "Dynamic texel coordinates/copy have no independent typed snapshots");
+    std::string dynamic_descriptor = dynamic_texel;
+    Replace(dynamic_descriptor, "OpCapability RayTracingKHR",
+            "OpCapability RayTracingKHR\nOpCapability StorageImageArrayDynamicIndexing");
+    Replace(dynamic_descriptor, "%image_pointer = OpTypePointer UniformConstant %image_type",
+            "%descriptor_count = OpConstant %u32 2\n%image_array = OpTypeArray %image_type %descriptor_count\n"
+            "%array_pointer = OpTypePointer UniformConstant %image_array\n"
+            "%image_pointer = OpTypePointer UniformConstant %image_type");
+    Replace(dynamic_descriptor, "%image = OpVariable %image_pointer", "%image = OpVariable %array_pointer");
+    Replace(dynamic_descriptor, "%texel = OpImageTexelPointer",
+            "%selected_image = OpAccessChain %image_pointer %image %selector\n%texel = OpImageTexelPointer");
+    Replace(dynamic_descriptor, "%texel_pointer %image %dynamic_coord", "%texel_pointer %selected_image %dynamic_coord");
+    atomic_check(dynamic_descriptor, spv::ExecutionModelIntersectionKHR, 2);
+    auto selected_program = CompileTypedContinuationSteps(Source(dynamic_descriptor), "main", spv::ExecutionModelIntersectionKHR);
+    Require(selected_program.resource_snapshot_fields == 5 && selected_program.resource_snapshot_bytes == 36,
+            "Descriptor index was not captured independently through texel/copy provenance");
+    auto dynamic_source = Source(dynamic_descriptor);
+    auto physical_program =
+        CompileTypedPipelineStage(dynamic_source, "main", VK_SHADER_STAGE_INTERSECTION_BIT_KHR, nullptr, "snapshot_bda");
+    TypedContinuationCompileOptions private_options;
+    private_options.transport = TypedFrameTransport::PrivateArray;
+    private_options.private_frame_words = physical_program.frame_stride_words;
+    auto private_program = CompileTypedPipelineStage(dynamic_source, "main", VK_SHADER_STAGE_INTERSECTION_BIT_KHR, nullptr,
+                                                     "snapshot_private", private_options);
+    Require(physical_program.resource_snapshot_fields == 5 && private_program.resource_snapshot_fields == 5 &&
+                physical_program.frame_stride_bytes == private_program.frame_stride_bytes &&
+                physical_program.control_byte_offset == private_program.control_byte_offset,
+            "BDA and PrivateArray resource snapshots disagree on the checked stage-frame ABI");
     std::string crossing_pointer = atomic;
     Replace(crossing_pointer, "%prior = OpAtomicSMin", "OpBranch %next\n%next = OpLabel\n%prior = OpAtomicSMin");
-    rejected = false;
-    try {
-        CompileTypedContinuationSteps(Source(crossing_pointer), "main", spv::ExecutionModelRayGenerationKHR);
-    } catch (const std::exception &e) {
-        rejected = std::string(e.what()).find("image texel pointer crosses") != std::string::npos;
-    }
-    Require(rejected, "Cross-state image texel pointer was silently recreated");
+    atomic_check(crossing_pointer, spv::ExecutionModelRayGenerationKHR, 2);
 }
 void ExactCtsImageAtomicStage() {
     spvtools::SpirvTools source_tools(SPV_ENV_VULKAN_1_3);
@@ -558,6 +666,7 @@ void VerifyPayload(const uint32_t *value, const uint32_t *array, uint32_t result
 int main() {
     try {
         BoundariesAndSourcePreservation();
+        LargeDescriptorResourceTypes();
         ResourceValueTypes();
         OpaqueResourceBoundaries();
         ExactCtsImageAtomicStage();

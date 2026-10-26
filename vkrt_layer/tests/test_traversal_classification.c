@@ -208,10 +208,10 @@ int main(int argc, char **argv) {
     VkQueue queue;
     vkGetDeviceQueue(device, family, 0, &queue);
 
-    enum { CASE_COUNT = 32 };
+    enum { CASE_COUNT = 32, OUTPUT_COUNT = CASE_COUNT + 1 };
     const uint32_t tlas_size = 768;
     struct buffer nodes = make_buffer(512), tlas = make_buffer(tlas_size);
-    struct buffer cases = make_buffer(CASE_COUNT * 16), output = make_buffer(CASE_COUNT * 16);
+    struct buffer cases = make_buffer(CASE_COUNT * 16), output = make_buffer(OUTPUT_COUNT * 16);
     VelRtBvh4Header *blas_header = nodes.mapped, *tlas_header = tlas.mapped;
     *blas_header = (VelRtBvh4Header){.magic = VEL_RT_BVH4_MAGIC,
                                      .version = VEL_RT_BVH4_ABI_VERSION,
@@ -333,7 +333,7 @@ int main(int argc, char **argv) {
     VkDescriptorSet set;
     CHECK(vkAllocateDescriptorSets(device, &dai, &set));
     VkDescriptorBufferInfo buffer_infos[] = {
-        {tlas.handle, 0, tlas_size}, {output.handle, 0, CASE_COUNT * 16}, {cases.handle, 0, CASE_COUNT * 16}};
+        {tlas.handle, 0, tlas_size}, {output.handle, 0, OUTPUT_COUNT * 16}, {cases.handle, 0, CASE_COUNT * 16}};
     VkWriteDescriptorSet writes[3];
     for (uint32_t i = 0; i < 3; ++i)
         writes[i] = (VkWriteDescriptorSet){.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
@@ -369,6 +369,17 @@ int main(int argc, char **argv) {
     CHECK(vkQueueSubmit(queue, 1, &submit, VK_NULL_HANDLE));
     CHECK(vkQueueWaitIdle(queue));
     int failures = 0;
+    const uint32_t *compiled_abi = (const uint32_t *)output.mapped + CASE_COUNT * 4;
+    const uint32_t expected_abi[] = {VEL_RT_BVH4_ABI_VERSION, sizeof(VelRtBvh4Header), sizeof(VelRtBvh4Node),
+                                     sizeof(VelRtBvh4Instance)};
+    if (memcmp(compiled_abi, expected_abi, sizeof(expected_abi))) {
+        fprintf(stderr,
+                "compiled traversal shader ABI mismatch (stale SPIR-V or incompatible include): "
+                "got version/header/node/instance %u/%u/%u/%u, expected %u/%u/%u/%u\n",
+                compiled_abi[0], compiled_abi[1], compiled_abi[2], compiled_abi[3], expected_abi[0], expected_abi[1],
+                expected_abi[2], expected_abi[3]);
+        ++failures;
+    }
     for (uint32_t i = 0; i < 30; ++i) {
         uint32_t *row = (uint32_t *)output.mapped + i * 4;
         if (row[0] != expected[i][0] || row[1] != expected[i][1] || row[2] != 0x123456 || row[3] != 0x654321) {
@@ -402,7 +413,8 @@ int main(int argc, char **argv) {
     vkDestroyDevice(device, NULL);
     vkDestroyInstance(instance, NULL);
     printf(
-        "Traversal classification %s: 30 opacity/cull cases, SBT selectors, depth140/four-child walk, candidate resume (%d "
+        "Traversal classification %s: compiled ABI, 30 opacity/cull cases, SBT selectors, depth140/four-child walk, candidate "
+        "resume (%d "
         "failures)\n",
         failures ? "FAIL" : "PASS", failures);
     return failures ? 1 : 0;

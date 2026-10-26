@@ -22,6 +22,8 @@
 #include "vkrt_deferred.h"
 #include "vkrt_as_serialization.h"
 #include "vkrt_rtp.h"
+#include "vkrt_descriptor_layout.h"
+#include "vkrt_memory_queries.h"
 #include "vkrt_rt_capabilities.h"
 
 struct vkrt_global vkrt_global = VKRT_GLOBAL_INITIALIZER;
@@ -392,39 +394,29 @@ vkrt_CreateDescriptorSetLayout(VkDevice device,
    if (!data)
       return VK_ERROR_INITIALIZATION_FAILED;
 
-   bool rewrite = false;
    if (!data->as_registry) return data->vtable.CreateDescriptorSetLayout(device, pCreateInfo, pAllocator, pSetLayout);
-   for (uint32_t i = 0; i < pCreateInfo->bindingCount; i++) {
-       if (pCreateInfo->pBindings[i].descriptorType == VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR ||
-           (pCreateInfo->pBindings[i].stageFlags & VKRT_RTP_SHADER_STAGES)) {
-           rewrite = true;
-           break;
+   VkDescriptorSetLayoutCreateInfo native;
+   VkDescriptorSetLayoutBinding *bindings;
+   VkResult result = vkrt_prepare_descriptor_layout(true, pCreateInfo, &native, &bindings);
+   if (result != VK_SUCCESS) return result;
+   result = data->vtable.CreateDescriptorSetLayout(device, &native, pAllocator, pSetLayout);
+   free(bindings);
+   if (result == VK_SUCCESS) {
+       result = vkrt_rtp_track_descriptor_layout(data, *pSetLayout, pCreateInfo);
+       if (result != VK_SUCCESS) {
+           data->vtable.DestroyDescriptorSetLayout(device, *pSetLayout, pAllocator);
+           *pSetLayout = VK_NULL_HANDLE;
        }
    }
-   if (!rewrite)
-      return data->vtable.CreateDescriptorSetLayout(device, pCreateInfo,
-                                                    pAllocator, pSetLayout);
+   return result;
+}
 
-   /* Copy and swap the descriptor type in place so every downstream
-    * object (pipeline layout, descriptor set, update) agrees. */
-   VkDescriptorSetLayoutBinding *b =
-      (VkDescriptorSetLayoutBinding *)calloc(pCreateInfo->bindingCount,
-                                             sizeof(*b));
-   if (!b)
-      return VK_ERROR_OUT_OF_HOST_MEMORY;
-   for (uint32_t i = 0; i < pCreateInfo->bindingCount; i++) {
-      b[i] = pCreateInfo->pBindings[i];
-      b[i].stageFlags = vkrt_compute_shader_stages(b[i].stageFlags);
-      if (b[i].descriptorType == VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR)
-         b[i].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-   }
-
-   VkDescriptorSetLayoutCreateInfo local = *pCreateInfo;
-   local.pBindings = b;
-   VkResult r = data->vtable.CreateDescriptorSetLayout(device, &local,
-                                                       pAllocator, pSetLayout);
-   free(b);
-   return r;
+static VKAPI_ATTR void VKAPI_CALL vkrt_DestroyDescriptorSetLayout(VkDevice device, VkDescriptorSetLayout layout,
+                                                                  const VkAllocationCallbacks *allocator) {
+    struct vkrt_device_data *data = VKRT_FIND(struct vkrt_device_data, device);
+    if (!data) return;
+    vkrt_rtp_forget_descriptor_layout(data, layout);
+    data->vtable.DestroyDescriptorSetLayout(device, layout, allocator);
 }
 
 /* The set layout's AS bindings were rewritten to STORAGE_BUFFER, so the
@@ -440,59 +432,14 @@ vkrt_CreateDescriptorPool(VkDevice device,
    if (!data)
       return VK_ERROR_INITIALIZATION_FAILED;
 
-   bool rewrite = false;
-   for (uint32_t i = 0; i < pCreateInfo->poolSizeCount; i++) {
-      if (pCreateInfo->pPoolSizes[i].type ==
-          VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR) {
-         rewrite = true;
-         break;
-      }
-   }
-   if (!rewrite)
-      return data->vtable.CreateDescriptorPool(device, pCreateInfo,
-                                               pAllocator, pDescriptorPool);
-
-   /* Fold every AS pool size into STORAGE_BUFFER, merging duplicates. */
-   VkDescriptorPoolSize *sizes =
-      (VkDescriptorPoolSize *)calloc(pCreateInfo->poolSizeCount,
-                                     sizeof(*sizes));
-   if (!sizes)
-      return VK_ERROR_OUT_OF_HOST_MEMORY;
-
-   uint32_t n = 0;
-   uint32_t ssbo_extra = 0;
-   for (uint32_t i = 0; i < pCreateInfo->poolSizeCount; i++) {
-      VkDescriptorPoolSize s = pCreateInfo->pPoolSizes[i];
-      if (s.type == VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR) {
-         ssbo_extra += s.descriptorCount;
-         continue;
-      }
-      sizes[n++] = s;
-   }
-   if (ssbo_extra) {
-      /* Reuse an existing SSBO row if there is one. */
-      bool merged = false;
-      for (uint32_t i = 0; i < n; i++) {
-         if (sizes[i].type == VK_DESCRIPTOR_TYPE_STORAGE_BUFFER) {
-            sizes[i].descriptorCount += ssbo_extra;
-            merged = true;
-            break;
-         }
-      }
-      if (!merged) {
-         sizes[n].type  = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-         sizes[n].descriptorCount = ssbo_extra;
-         n++;
-      }
-   }
-
-   VkDescriptorPoolCreateInfo local = *pCreateInfo;
-   local.poolSizeCount = n;
-   local.pPoolSizes    = sizes;
-   VkResult r = data->vtable.CreateDescriptorPool(device, &local, pAllocator,
-                                                  pDescriptorPool);
+   if (!data->as_registry) return data->vtable.CreateDescriptorPool(device, pCreateInfo, pAllocator, pDescriptorPool);
+   VkDescriptorPoolCreateInfo native;
+   VkDescriptorPoolSize *sizes;
+   VkResult result = vkrt_prepare_descriptor_pool(true, pCreateInfo, &native, &sizes);
+   if (result != VK_SUCCESS) return result;
+   result = data->vtable.CreateDescriptorPool(device, &native, pAllocator, pDescriptorPool);
    free(sizes);
-   return r;
+   return result;
 }
 
 
@@ -664,6 +611,12 @@ vkrt_find_device_fn(const char *name)
 {
     PFN_vkVoidFunction command = vkrt_rtp_proc(name);
     if (command) return (void *)command;
+    command = vkrt_descriptor_layout_proc(name);
+    if (command) return (void *)command;
+    if (strncmp(name, "vkGetPhysicalDevice", strlen("vkGetPhysicalDevice"))) {
+        command = vkrt_memory_query_proc(name);
+        if (command) return (void *)command;
+    }
     command = vkrt_command_proc(name);
     if (command) return (void *)command;
     command = vkrt_sync_proc(name);
@@ -681,6 +634,7 @@ vkrt_find_device_fn(const char *name)
         {"vkCreateBuffer", (void *)vkrt_CreateBuffer},
         {"vkDestroyBuffer", (void *)vkrt_DestroyBuffer},
         {"vkCreateDescriptorSetLayout", (void *)vkrt_CreateDescriptorSetLayout},
+        {"vkDestroyDescriptorSetLayout", (void *)vkrt_DestroyDescriptorSetLayout},
         {"vkCreateDescriptorPool", (void *)vkrt_CreateDescriptorPool},
         {"vkCreateQueryPool", (void *)vkrt_CreateQueryPool},
         {"vkUpdateDescriptorSets", (void *)vkrt_UpdateDescriptorSets},
@@ -750,6 +704,8 @@ vkrt_GetInstanceProcAddr(VkInstance instance, const char *pName)
 
    PFN_vkVoidFunction discovery = vkrt_discovery_proc(pName);
    if (discovery) return discovery;
+   PFN_vkVoidFunction memory = vkrt_memory_query_proc(pName);
+   if (memory) return memory;
 
    if (instance == VK_NULL_HANDLE)
       return NULL;

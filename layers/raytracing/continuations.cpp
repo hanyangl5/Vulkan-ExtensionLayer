@@ -263,7 +263,12 @@ class FramePlanner {
                 } else {
                     bool supported = i.op == spv::OpCopyObject;
                     if (type.op == spv::OpTypePointer) {
-                        supported |= i.op == spv::OpAccessChain || i.op == spv::OpInBoundsAccessChain;
+                        // Image texel pointers transport descriptor identity,
+                        // coordinate and sample provenance, never pointer bits.
+                        // An executable backend must snapshot these operands
+                        // at definition, rather than replaying their producers.
+                        supported |=
+                            i.op == spv::OpAccessChain || i.op == spv::OpInBoundsAccessChain || i.op == spv::OpImageTexelPointer;
                     } else {
                         supported |= i.op == spv::OpSampledImage || i.op == spv::OpImage;
                         if (i.op == spv::OpLoad) {

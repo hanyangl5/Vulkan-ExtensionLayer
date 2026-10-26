@@ -179,6 +179,8 @@ static size_t bool_payload_size(VkStructureType type) {
                 runtimeDescriptorArray);
         PAYLOAD(VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VARIABLE_POINTERS_FEATURES, VkPhysicalDeviceVariablePointersFeatures,
                 variablePointers);
+        PAYLOAD(VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PER_STAGE_DESCRIPTOR_SET_FEATURES_NV,
+                VkPhysicalDevicePerStageDescriptorSetFeaturesNV, dynamicPipelineLayout);
         default:
             REQUIRE(false);
             return 0;
@@ -283,6 +285,9 @@ static VKAPI_ATTR VkResult VKAPI_CALL mock_create(VkPhysicalDevice p, const VkDe
                 REQUIRE(source && loader->function == source->function && loader->u.pLayerInfo == source->u.pLayerInfo);
                 break;
             }
+            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PER_STAGE_DESCRIPTOR_SET_FEATURES_NV:
+                EXPECT_NODE(VkPhysicalDevicePerStageDescriptorSetFeaturesNV, next, (void)0);
+                break;
             default:
                 REQUIRE(next == opaque_suffix);
                 break;
@@ -905,6 +910,42 @@ static void rejection(void) {
     REQUIRE(call(&basic) == VK_ERROR_FEATURE_NOT_PRESENT);
 }
 
+static void per_stage_descriptor_interaction(void) {
+    defaults();
+    VkPhysicalDeviceRayTracingPipelineFeaturesKHR rt = {
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_FEATURES_KHR, .rayTracingPipeline = VK_TRUE};
+    struct {
+        VkStructureType sType;
+        void *pNext;
+        uint64_t sentinel;
+    } suffix = {VK_STRUCTURE_TYPE_MAX_ENUM, NULL, UINT64_C(0xabcddcba01234567)};
+    VkPhysicalDevicePerStageDescriptorSetFeaturesNV per_stage = {
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PER_STAGE_DESCRIPTOR_SET_FEATURES_NV,
+        .pNext = &rt,
+        .perStageDescriptorSet = VK_TRUE,
+        .dynamicPipelineLayout = VK_TRUE};
+    rt.pNext = &suffix;
+    basic.pNext = &per_stage;
+    unsigned before = creates, query_count = queries;
+    VkPhysicalDevicePerStageDescriptorSetFeaturesNV saved = per_stage;
+    REQUIRE(call(&basic) == VK_ERROR_FEATURE_NOT_PRESENT && creates == before && queries == query_count);
+    REQUIRE(!memcmp(&per_stage, &saved, sizeof(saved)) && rt.pNext == &suffix);
+    per_stage.perStageDescriptorSet = VK_FALSE;
+    saved = per_stage;
+    expect_private_dynamic_indexing = true;
+    opaque_suffix = (const void *)&suffix;
+    REQUIRE(call(&basic) == VK_SUCCESS);
+    REQUIRE(!memcmp(&per_stage, &saved, sizeof(saved)) && suffix.sentinel == UINT64_C(0xabcddcba01234567));
+    /* An ordinary device keeps both unrelated native feature bits. */
+    defaults();
+    per_stage.perStageDescriptorSet = VK_TRUE;
+    per_stage.pNext = &suffix;
+    basic.pNext = &per_stage;
+    opaque_suffix = (const void *)&suffix;
+    REQUIRE(call_non_rt(&basic) == VK_SUCCESS);
+    REQUIRE(per_stage.perStageDescriptorSet && per_stage.dynamicPipelineLayout && per_stage.pNext == &suffix);
+}
+
 int main(void) {
     non_rt_boundary();
     virtual_requests();
@@ -914,6 +955,7 @@ int main(void) {
     descriptor_array_feature();
     builder_property_prerequisites();
     rejection();
+    per_stage_descriptor_interaction();
     printf("No-native-RT device creation boundary: %s (%u failures, %u creates, %u capability queries)\n",
            failures ? "FAIL" : "PASS", failures, creates, queries);
     return failures ? 1 : 0;

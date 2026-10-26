@@ -24,6 +24,7 @@ struct vkrt_instance_dispatch {
    PFN_vkGetPhysicalDeviceProperties2      GetPhysicalDeviceProperties2;
    PFN_vkGetPhysicalDeviceFeatures2        GetPhysicalDeviceFeatures2;
    PFN_vkGetPhysicalDeviceMemoryProperties GetPhysicalDeviceMemoryProperties;
+   PFN_vkGetPhysicalDeviceExternalBufferProperties GetPhysicalDeviceExternalBufferProperties;
    PFN_vkCreateDevice                      CreateDevice;
 };
 
@@ -62,8 +63,11 @@ struct vkrt_device_dispatch {
    PFN_vkBeginCommandBuffer                 BeginCommandBuffer;
    PFN_vkEndCommandBuffer                   EndCommandBuffer;
    PFN_vkCmdBindPipeline                    CmdBindPipeline;
+   PFN_vkCmdBindShadersEXT CmdBindShadersEXT;
    PFN_vkCmdBindDescriptorSets              CmdBindDescriptorSets;
+   PFN_vkCmdBindDescriptorSets2 CmdBindDescriptorSets2;
    PFN_vkCmdPushConstants                   CmdPushConstants;
+   PFN_vkCmdPushConstants2 CmdPushConstants2;
    PFN_vkCmdPipelineBarrier                 CmdPipelineBarrier;
    PFN_vkCmdPipelineBarrier2                CmdPipelineBarrier2;
    PFN_vkCmdSetEvent CmdSetEvent;
@@ -108,6 +112,8 @@ struct vkrt_device_dispatch {
    /* Memory / resource */
    PFN_vkGetBufferDeviceAddress             GetBufferDeviceAddress;
    PFN_vkGetBufferMemoryRequirements        GetBufferMemoryRequirements;
+   PFN_vkGetBufferMemoryRequirements2 GetBufferMemoryRequirements2;
+   PFN_vkGetDeviceBufferMemoryRequirements GetDeviceBufferMemoryRequirements;
    PFN_vkBindBufferMemory                   BindBufferMemory;
    PFN_vkMapMemory MapMemory;
    PFN_vkUnmapMemory UnmapMemory;
@@ -154,6 +160,10 @@ vkrt_instance_dispatch_load(struct vkrt_instance_dispatch *t,
    if (!t->GetPhysicalDeviceFeatures2)
       t->GetPhysicalDeviceFeatures2 = (PFN_vkGetPhysicalDeviceFeatures2)gipa(instance, "vkGetPhysicalDeviceFeatures2KHR");
    VKRT_LOAD_I(GetPhysicalDeviceMemoryProperties);
+   VKRT_LOAD_I(GetPhysicalDeviceExternalBufferProperties);
+   if (!t->GetPhysicalDeviceExternalBufferProperties)
+       t->GetPhysicalDeviceExternalBufferProperties =
+           (PFN_vkGetPhysicalDeviceExternalBufferProperties)gipa(instance, "vkGetPhysicalDeviceExternalBufferPropertiesKHR");
    VKRT_LOAD_I(CreateDevice);
 #undef VKRT_LOAD_I
 }
@@ -203,8 +213,14 @@ vkrt_device_dispatch_load(struct vkrt_device_dispatch *t,
    VKRT_LOAD_D(BeginCommandBuffer);
    VKRT_LOAD_D(EndCommandBuffer);
    VKRT_LOAD_D(CmdBindPipeline);
+   VKRT_LOAD_D(CmdBindShadersEXT);
    VKRT_LOAD_D(CmdBindDescriptorSets);
+   VKRT_LOAD_D(CmdBindDescriptorSets2);
+   if (!t->CmdBindDescriptorSets2)
+       t->CmdBindDescriptorSets2 = (PFN_vkCmdBindDescriptorSets2)gdpa(device, "vkCmdBindDescriptorSets2KHR");
    VKRT_LOAD_D(CmdPushConstants);
+   VKRT_LOAD_D(CmdPushConstants2);
+   if (!t->CmdPushConstants2) t->CmdPushConstants2 = (PFN_vkCmdPushConstants2)gdpa(device, "vkCmdPushConstants2KHR");
    VKRT_LOAD_D(CmdPipelineBarrier);
    VKRT_LOAD_D(CmdPipelineBarrier2);
    if (!t->CmdPipelineBarrier2) t->CmdPipelineBarrier2 = (PFN_vkCmdPipelineBarrier2)gdpa(device, "vkCmdPipelineBarrier2KHR");
@@ -253,6 +269,13 @@ vkrt_device_dispatch_load(struct vkrt_device_dispatch *t,
    /* GetBufferDeviceAddress is resolved above (KHR alias first); loading
     * it again under the core name would clobber the fallback with NULL. */
    VKRT_LOAD_D(GetBufferMemoryRequirements);
+   VKRT_LOAD_D(GetBufferMemoryRequirements2);
+   if (!t->GetBufferMemoryRequirements2)
+       t->GetBufferMemoryRequirements2 = (PFN_vkGetBufferMemoryRequirements2)gdpa(device, "vkGetBufferMemoryRequirements2KHR");
+   VKRT_LOAD_D(GetDeviceBufferMemoryRequirements);
+   if (!t->GetDeviceBufferMemoryRequirements)
+       t->GetDeviceBufferMemoryRequirements =
+           (PFN_vkGetDeviceBufferMemoryRequirements)gdpa(device, "vkGetDeviceBufferMemoryRequirementsKHR");
    VKRT_LOAD_D(BindBufferMemory);
    VKRT_LOAD_D(CreateAccelerationStructureKHR);
    VKRT_LOAD_D(DestroyAccelerationStructureKHR);

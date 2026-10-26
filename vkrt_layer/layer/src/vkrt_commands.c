@@ -1,6 +1,7 @@
 /* SPDX-License-Identifier: MIT */
 #include "vkrt_layer.h"
 #include "vkrt_rtp.h"
+#include "vkrt_rt_capabilities.h"
 
 static void reset_state(struct vkrt_cmd_buffer_data *cb)
 {
@@ -13,6 +14,8 @@ static void reset_state(struct vkrt_cmd_buffer_data *cb)
     }
    cb->push_head = cb->push_tail = NULL;
    cb->bound_compute_pipeline = VK_NULL_HANDLE;
+   cb->bound_compute_shader = VK_NULL_HANDLE;
+   cb->compute_shader_object = false;
    cb->record_result = VK_SUCCESS;
 }
 
@@ -130,8 +133,30 @@ static VKAPI_ATTR void VKAPI_CALL CmdBindPipeline(VkCommandBuffer cmd, VkPipelin
    struct vkrt_cmd_buffer_data *cb = VKRT_FIND(struct vkrt_cmd_buffer_data, cmd);
    if (!cb) return;
    if (vkrt_rtp_bind_pipeline(cb, point, pipeline)) return;
-   if (point == VK_PIPELINE_BIND_POINT_COMPUTE) cb->bound_compute_pipeline = pipeline;
+   if (point == VK_PIPELINE_BIND_POINT_COMPUTE) {
+       cb->bound_compute_pipeline = pipeline;
+       cb->bound_compute_shader = VK_NULL_HANDLE;
+       cb->compute_shader_object = false;
+   }
    cb->device_data->vtable.CmdBindPipeline(cmd, point, pipeline);
+}
+
+static VKAPI_ATTR void VKAPI_CALL CmdBindShadersEXT(VkCommandBuffer cmd, uint32_t count, const VkShaderStageFlagBits *stages,
+                                                    const VkShaderEXT *shaders) {
+    struct vkrt_cmd_buffer_data *cb = VKRT_FIND(struct vkrt_cmd_buffer_data, cmd);
+    if (!cb || cb->record_result != VK_SUCCESS) return;
+    if (!cb->device_data->vtable.CmdBindShadersEXT) {
+        cb->record_result = VK_ERROR_FEATURE_NOT_PRESENT;
+        return;
+    }
+    for (uint32_t i = 0; i < count; ++i) {
+        if (stages[i] == VK_SHADER_STAGE_COMPUTE_BIT) {
+            cb->bound_compute_pipeline = VK_NULL_HANDLE;
+            cb->bound_compute_shader = shaders ? shaders[i] : VK_NULL_HANDLE;
+            cb->compute_shader_object = true;
+        }
+    }
+    cb->device_data->vtable.CmdBindShadersEXT(cmd, count, stages, shaders);
 }
 
 static VKAPI_ATTR void VKAPI_CALL CmdPushConstants(VkCommandBuffer cmd, VkPipelineLayout layout,
@@ -139,6 +164,10 @@ static VKAPI_ATTR void VKAPI_CALL CmdPushConstants(VkCommandBuffer cmd, VkPipeli
 {
    struct vkrt_cmd_buffer_data *cb = VKRT_FIND(struct vkrt_cmd_buffer_data, cmd);
    if (!cb) return;
+   if (!cb->device_data->rtp) {
+       cb->device_data->vtable.CmdPushConstants(cmd, layout, stages, offset, size, values);
+       return;
+   }
    stages = vkrt_rtp_push(cb, layout, stages, offset, size, values);
    if (!stages || cb->record_result != VK_SUCCESS) return;
    layout = vkrt_rtp_native_layout(cb->device_data, layout);
@@ -155,6 +184,7 @@ static VKAPI_ATTR void VKAPI_CALL CmdPushConstants(VkCommandBuffer cmd, VkPipeli
            p->stages = stages;
            p->offset = offset;
            p->size = size;
+           p->bank = 0;
            memcpy(p->bytes, values, size);
            if (cb->push_tail)
                cb->push_tail->next = p;
@@ -166,12 +196,112 @@ static VKAPI_ATTR void VKAPI_CALL CmdPushConstants(VkCommandBuffer cmd, VkPipeli
    cb->device_data->vtable.CmdPushConstants(cmd, layout, stages, offset, size, values);
 }
 
+static VKAPI_ATTR void VKAPI_CALL CmdPushConstants2(VkCommandBuffer cmd, const VkPushConstantsInfo *info) {
+    struct vkrt_cmd_buffer_data *cb = VKRT_FIND(struct vkrt_cmd_buffer_data, cmd);
+    if (!cb || cb->record_result != VK_SUCCESS) return;
+    struct vkrt_device_data *dev = cb->device_data;
+    if (!dev->vtable.CmdPushConstants2) {
+        cb->record_result = VK_ERROR_FEATURE_NOT_PRESENT;
+        return;
+    }
+    if (!dev->rtp) {
+        dev->vtable.CmdPushConstants2(cmd, info);
+        return;
+    }
+
+    const VkPipelineLayoutCreateInfo *inline_layout = NULL;
+    uint32_t bank = 0;
+    for (const VkBaseInStructure *p = info->pNext; p; p = p->pNext) {
+        if (p->sType == VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO) inline_layout = (const VkPipelineLayoutCreateInfo *)p;
+#ifdef VK_NV_push_constant_bank
+        else if (p->sType == VK_STRUCTURE_TYPE_PUSH_CONSTANT_BANK_INFO_NV)
+            bank = ((const VkPushConstantBankInfoNV *)p)->bank;
+#endif
+        else {
+            cb->record_result = VK_ERROR_EXTENSION_NOT_PRESENT;
+            return;
+        }
+    }
+    /* Nonzero banks remain native state. The current typed RT system ABI
+     * transports bank zero only, and must not alias an explicit RT bank. ALL
+     * also names unrelated stages; updating another bank cannot change the
+     * existing bank-zero RT snapshots. RT shaders using banks fail compilation. */
+    if (bank && info->stageFlags != VK_SHADER_STAGE_ALL && (info->stageFlags & VKRT_RTP_SHADER_STAGES)) {
+        cb->record_result = VK_ERROR_FEATURE_NOT_PRESENT;
+        return;
+    }
+
+    VkPipelineLayout layout = info->layout;
+    PFN_vkDestroyPipelineLayout destroy = NULL;
+    if (!layout) {
+        if (!inline_layout) {
+            cb->record_result = VK_ERROR_INITIALIZATION_FAILED;
+            return;
+        }
+        VkPipelineLayoutCreateInfo create = *inline_layout;
+        create.pNext = NULL;
+        PFN_vkCreatePipelineLayout make = (PFN_vkCreatePipelineLayout)vkrt_rtp_proc("vkCreatePipelineLayout");
+        destroy = (PFN_vkDestroyPipelineLayout)vkrt_rtp_proc("vkDestroyPipelineLayout");
+        if (!make || !destroy) {
+            cb->record_result = VK_ERROR_FEATURE_NOT_PRESENT;
+            return;
+        }
+        VkResult result = make(dev->device, &create, NULL, &layout);
+        if (result != VK_SUCCESS) {
+            cb->record_result = result;
+            return;
+        }
+    }
+
+    if (!bank) {
+        CmdPushConstants(cmd, layout, info->stageFlags, info->offset, info->size, info->pValues);
+    } else {
+        /* Retain the compatible private layout even when the application used
+         * an inline layout. Its public temporary is never recorded downstream. */
+        vkrt_rtp_push(cb, layout, 0, 0, 0, NULL);
+        VkPipelineLayout native = vkrt_rtp_native_layout(dev, layout);
+        struct vkrt_saved_push *saved = malloc(sizeof(*saved) + info->size);
+        if (!saved)
+            cb->record_result = VK_ERROR_OUT_OF_HOST_MEMORY;
+        else if (cb->record_result != VK_SUCCESS)
+            free(saved);
+        else {
+            saved->next = NULL;
+            saved->layout = native;
+            saved->stages = info->stageFlags;
+            saved->offset = info->offset;
+            saved->size = info->size;
+            saved->bank = bank;
+            memcpy(saved->bytes, info->pValues, info->size);
+            if (cb->push_tail)
+                cb->push_tail->next = saved;
+            else
+                cb->push_head = saved;
+            cb->push_tail = saved;
+            /* Replay uses the same normalized bank operation. */
+#ifdef VK_NV_push_constant_bank
+            VkPushConstantBankInfoNV extension = {VK_STRUCTURE_TYPE_PUSH_CONSTANT_BANK_INFO_NV, NULL, bank};
+            VkPushConstantsInfo local = *info;
+            local.layout = native;
+            local.pNext = &extension;
+            dev->vtable.CmdPushConstants2(cmd, &local);
+#endif
+        }
+    }
+    if (destroy) destroy(dev->device, layout, NULL);
+}
+
 PFN_vkVoidFunction vkrt_command_proc(const char *name)
 {
 #define ENTRY(fn) if (strcmp(name, "vk" #fn) == 0) return (PFN_vkVoidFunction)fn
    ENTRY(AllocateCommandBuffers); ENTRY(FreeCommandBuffers); ENTRY(DestroyCommandPool);
    ENTRY(ResetCommandPool); ENTRY(BeginCommandBuffer); ENTRY(ResetCommandBuffer);
-   ENTRY(EndCommandBuffer); ENTRY(CmdBindPipeline); ENTRY(CmdPushConstants);
+   ENTRY(EndCommandBuffer);
+   ENTRY(CmdBindPipeline);
+   ENTRY(CmdBindShadersEXT);
+   ENTRY(CmdPushConstants);
+   ENTRY(CmdPushConstants2);
 #undef ENTRY
+   if (!strcmp(name, "vkCmdPushConstants2KHR")) return (PFN_vkVoidFunction)CmdPushConstants2;
    return NULL;
 }

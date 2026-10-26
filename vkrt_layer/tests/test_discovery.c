@@ -16,6 +16,7 @@ static unsigned failures, enumeration_calls, feature_queries;
 static const VkPhysicalDevice physical = HANDLE(VkPhysicalDevice, 7);
 static VkBool32 native_rt;
 static bool ignore_rt_features;
+static bool ignore_per_stage_features;
 static bool hide_pipeline_base;
 static VkResult enumeration_error;
 static bool grow_once, incomplete_fill;
@@ -111,6 +112,9 @@ static VKAPI_ATTR void VKAPI_CALL mock_features(VkPhysicalDevice p, VkPhysicalDe
         } else if (next->sType == VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_INDEXING_FEATURES) {
             VkPhysicalDeviceDescriptorIndexingFeatures *indexing = (void *)next;
             indexing->runtimeDescriptorArray = indexing->descriptorBindingPartiallyBound = VK_TRUE;
+        } else if (next->sType == VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PER_STAGE_DESCRIPTOR_SET_FEATURES_NV) {
+            VkPhysicalDevicePerStageDescriptorSetFeaturesNV *per_stage = (void *)next;
+            if (!ignore_per_stage_features) per_stage->perStageDescriptorSet = per_stage->dynamicPipelineLayout = VK_TRUE;
         }
 #ifdef VK_EXT_pipeline_library_group_handles
         else if (next->sType == VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PIPELINE_LIBRARY_GROUP_HANDLES_FEATURES_EXT) {
@@ -197,8 +201,10 @@ static void features(PFN_vkGetPhysicalDeviceFeatures2 query, struct vkrt_instanc
         void *pNext;
         uint64_t sentinel;
     } suffix = {.sType = VK_STRUCTURE_TYPE_MAX_ENUM, .sentinel = UINT64_C(0xabcdef0123456789)};
+    VkPhysicalDevicePerStageDescriptorSetFeaturesNV per_stage = {
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PER_STAGE_DESCRIPTOR_SET_FEATURES_NV, .pNext = &suffix};
     VkPhysicalDeviceRayTracingPipelineFeaturesKHR rtp = {
-        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_FEATURES_KHR, .pNext = &suffix};
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_FEATURES_KHR, .pNext = &per_stage};
     VkPhysicalDeviceAccelerationStructureFeaturesKHR as = {
         .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_FEATURES_KHR, .pNext = &rtp};
     VkPhysicalDeviceRayQueryFeaturesKHR rq = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_QUERY_FEATURES_KHR, .pNext = &as};
@@ -223,7 +229,9 @@ static void features(PFN_vkGetPhysicalDeviceFeatures2 query, struct vkrt_instanc
                 !rtp.rayTracingPipelineShaderGroupHandleCaptureReplayMixed && !rtp.rayTracingPipelineTraceRaysIndirect &&
                 !rtp.rayTraversalPrimitiveCulling);
         REQUIRE(indexing.runtimeDescriptorArray && indexing.descriptorBindingPartiallyBound);
-        REQUIRE(core.pNext == head && indexing.pNext == &rq && rq.pNext == &as && as.pNext == &rtp && rtp.pNext == &suffix);
+        REQUIRE(core.pNext == head && indexing.pNext == &rq && rq.pNext == &as && as.pNext == &rtp && rtp.pNext == &per_stage &&
+                per_stage.pNext == &suffix);
+        REQUIRE(!per_stage.perStageDescriptorSet && per_stage.dynamicPipelineLayout);
         REQUIRE(suffix.sentinel == UINT64_C(0xabcdef0123456789));
 #ifdef VK_EXT_pipeline_library_group_handles
         REQUIRE(groups.pNext == &indexing && !groups.pipelineLibraryGroupHandles);
@@ -238,14 +246,19 @@ static void features(PFN_vkGetPhysicalDeviceFeatures2 query, struct vkrt_instanc
     /* An old no-RT ICD can ignore those structs; stale caller bytes are not
      * native support and must not become an emulated base-feature claim. */
     ignore_rt_features = true;
+    ignore_per_stage_features = true;
     rq.rayQuery = as.accelerationStructure = rtp.rayTracingPipeline = VK_TRUE;
+    per_stage.perStageDescriptorSet = per_stage.dynamicPipelineLayout = VK_TRUE;
     query(physical, &core);
     REQUIRE(!rq.rayQuery && !as.accelerationStructure && !rtp.rayTracingPipeline);
+    REQUIRE(!per_stage.perStageDescriptorSet && !per_stage.dynamicPipelineLayout);
     instance->vtable.GetPhysicalDeviceFeatures2 = NULL;
     rq.rayQuery = as.accelerationStructure = rtp.rayTracingPipeline = VK_TRUE;
+    per_stage.perStageDescriptorSet = per_stage.dynamicPipelineLayout = VK_TRUE;
     unsigned before = feature_queries;
     query(physical, &core);
     REQUIRE(!rq.rayQuery && !as.accelerationStructure && !rtp.rayTracingPipeline && before == feature_queries);
+    REQUIRE(!per_stage.perStageDescriptorSet && !per_stage.dynamicPipelineLayout);
 }
 
 int main(void) {

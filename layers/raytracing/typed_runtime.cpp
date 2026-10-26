@@ -235,6 +235,7 @@ TypedRuntimeProgram BuildTypedRuntimeProgram(const std::vector<TypedContinuation
     out << Filter(kTypedRuntimeAbi) << Filter(kTypedRuntimeSystem) << Filter(kTypedRuntimeBvh4) << Filter(kTypedRuntimeAddress)
         << Filter(kTypedRuntimeTraversal, true);
     if (result.private_frame_words) out << "#define RT_PRIVATE_WORDS " << result.private_frame_words << "\n";
+    if (options.context_via_push_constants) out << "#define RT_CONTEXT_PUSH 1\n";
     out << "const uint rt_stage_count=" << stages.size() << "u;\nconst uint rt_group_count=" << groups.size()
         << "u;\nconst uint rt_max_depth=" << options.max_ray_recursion_depth << "u;\nconst uint rt_triangle_type=" << triangle_type
         << "u;\nconst uint64_t rt_pipeline_id=" << options.pipeline_identity
@@ -287,7 +288,11 @@ TypedRuntimeProgram BuildTypedRuntimeProgram(const std::vector<TypedContinuation
     });
     optimizer.RegisterPerformancePasses();
     W cleaned;
-    bool optimized = optimizer.Run(result.spirv.data(), result.spirv.size(), &cleaned);
+    spvtools::ValidatorOptions validation;
+    validation.SetScalarBlockLayout(true);
+    spvtools::OptimizerOptions cleanup_options;
+    cleanup_options.set_validator_options(validation);
+    bool optimized = optimizer.Run(result.spirv.data(), result.spirv.size(), &cleaned, cleanup_options);
     Need(optimized, "native runtime cleanup failed: " + cleanup_error);
     result.spirv = std::move(cleaned);
     for (uint32_t i = 0; i < groups.size(); ++i) {

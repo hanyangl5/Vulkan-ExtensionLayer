@@ -10,6 +10,7 @@
 #include <functional>
 #include <limits>
 #include <map>
+#include <memory>
 #include <set>
 #include <sstream>
 #include <stdexcept>
@@ -129,7 +130,7 @@ class Compiler {
         if (functions != 1 || blocks.empty()) Unsupported("reachable helper could not be inlined");
         for (const auto &[id, d] : definitions) {
             if (d->op == spv::OpTypeInt && d->words.at(2) == 32 && d->words.at(3) == 0) {
-                NeedType(id);
+                NeedValueType(id);
                 break;
             }
         }
@@ -157,7 +158,8 @@ class Compiler {
                 i.op != spv::OpInBoundsAccessChain && i.op != spv::OpCopyObject && i.op != spv::OpImageTexelPointer)
                 Unsupported("unsupported pointer provenance Op" + std::string(spvOpcodeString(i.op)) + " for ID " +
                             std::to_string(i.result));
-            NeedType(i.type);
+            NeedValueType(i.type);
+            if (i.op == spv::OpVariable && IsPersistentStorage(i.words.at(3))) NeedValueType(Def(i.type).words.at(3));
             for (auto id : i.uses) NeedGlobal(id);
         }
         for (const auto &i : parsed.instructions) {
@@ -228,6 +230,7 @@ class Compiler {
                 output.acceleration_structure_descriptors.push_back({id, resource_sets.at(id), resource_bindings.at(id)});
             }
         }
+        PlanResourceRecipes(persistent_size, preview.types);
         const auto bounds = PlanTypedContinuationFrameBounds(persistent_size);
         output.frame_stride_words = bounds.stride_words;
         output.max_invocations = bounds.max_invocations;
@@ -288,7 +291,9 @@ class Compiler {
         });
         auto assembled = tools.Assemble(assembly, &output.spirv);
         if (!assembled) Unsupported("generated assembly failed: " + error);
-        auto valid = tools.Validate(output.spirv);
+        spvtools::ValidatorOptions validation;
+        validation.SetScalarBlockLayout(true);
+        auto valid = tools.Validate(output.spirv.data(), output.spirv.size(), validation);
         if (!valid) Unsupported("generated SPIR-V failed validation: " + error);
         output.state_count = static_cast<uint32_t>(states.size());
         return std::move(output);
@@ -300,6 +305,22 @@ class Compiler {
         size_t begin, end;
         uint32_t number;
         const Instruction *resume = nullptr;
+    };
+    // Opaque handles have no portable representation. A recipe contains only
+    // a stable descriptor root and typed snapshots of its dynamic selectors.
+    // Each result owns independent snapshots, including copies of its parents'
+    // selectors: a loop can execute a parent definition again without changing
+    // an already captured child handle or image texel pointer.
+    struct RecipeNode {
+        uint32_t source = 0, type = 0, offset = 0;
+        std::vector<std::pair<uint32_t, std::shared_ptr<RecipeNode>>> operands;
+    };
+    struct RecipeCapture {
+        uint32_t type, offset, value, inherited_offset;
+    };
+    struct ResourceRecipe {
+        std::shared_ptr<RecipeNode> root;
+        std::vector<RecipeCapture> captures;
     };
     TypedContinuationProgram output;
     Parsed parsed;
@@ -326,6 +347,7 @@ class Compiler {
     std::map<uint32_t, std::string> constants;
     std::map<uint32_t, std::string> ephemeral_values;
     std::map<uint32_t, std::string> ephemeral_pointers;
+    std::map<uint32_t, ResourceRecipe> resource_recipes;
     std::set<uint64_t> wide_constants;
     std::vector<std::string> interfaces;
     std::ostringstream source_caps, imports, extensions, execution_modes, annotations, declarations, functions;
@@ -490,7 +512,13 @@ class Compiler {
     void NeedType(uint32_t id) {
         if (!id || !needed_types.insert(id).second) return;
         const auto &d = Def(id);
-        if (Layoutable(id)) value_types.insert(id);
+        // Scalar/vector declarations share the logical codec types. Aggregate
+        // resource declarations have their own native layouts and can contain
+        // millions of descriptors; merely reaching them through a pointer must
+        // never request a logical aggregate codec or unroll their elements.
+        if (d.op == spv::OpTypeBool || d.op == spv::OpTypeInt || d.op == spv::OpTypeFloat || d.op == spv::OpTypeVector ||
+            d.op == spv::OpTypeMatrix || d.op == spv::OpTypeAccelerationStructureKHR)
+            value_types.insert(id);
         for (auto child : d.uses) {
             const auto &v = Def(child);
             if ((v.op >= spv::OpTypeVoid && v.op <= spv::OpTypeForwardPointer) || v.op == spv::OpTypeAccelerationStructureKHR)
@@ -499,10 +527,21 @@ class Compiler {
                 NeedGlobal(child);
         }
     }
+    void NeedValueType(uint32_t id) {
+        if (!id) return;
+        NeedType(id);
+        // Concrete SSA values and persistent pointees need logical backing.
+        // PlanContinuationFrames recursively includes their aggregate children.
+        if (Layoutable(id)) value_types.insert(id);
+    }
     void NeedGlobal(uint32_t id) {
         const auto &d = Def(id);
         if (d.in_function || !globals.insert(id).second) return;
         NeedType(d.type);
+        if (d.op == spv::OpVariable && IsInvocationStorage(d.words.at(3)))
+            NeedValueType(Def(d.type).words.at(3));
+        else if (d.op == spv::OpUndef || (d.op >= spv::OpConstantTrue && d.op <= spv::OpConstantNull))
+            NeedValueType(d.type);
         for (auto child : d.uses) NeedGlobal(child);
     }
     std::string PointerType(uint32_t storage, const std::string &pointee) {
@@ -751,6 +790,117 @@ class Compiler {
         auto op = Def(type).op;
         return op == spv::OpTypeImage || op == spv::OpTypeSampler || op == spv::OpTypeSampledImage;
     }
+    bool ContainsNativeOpaque(uint32_t type) const {
+        if (Ephemeral(type)) return true;
+        const auto &d = Def(type);
+        return (d.op == spv::OpTypeArray || d.op == spv::OpTypeRuntimeArray) && ContainsNativeOpaque(d.words.at(2));
+    }
+    bool RecipeValue(uint32_t id) const {
+        const auto &d = Def(id);
+        if (Ephemeral(d.type)) return true;
+        if (!IsPointer(d.type)) return false;
+        const auto &p = Def(d.type);
+        return p.words.at(2) == spv::StorageClassImage ||
+               (p.words.at(2) == spv::StorageClassUniformConstant && ContainsNativeOpaque(p.words.at(3)));
+    }
+    void PlanResourceRecipes(uint64_t &size, const std::vector<ContinuationTypeLayout> &layouts) {
+        const auto begin = size;
+        auto allocate = [&](uint32_t type) {
+            const auto layout = std::find_if(layouts.begin(), layouts.end(), [&](const auto &l) { return l.type == type; });
+            if (layout == layouts.end()) Unsupported("resource provenance selector has no numeric typed layout");
+            size = (size + layout->alignment - 1) & ~uint64_t(layout->alignment - 1);
+            if (size > UINT32_MAX || layout->size > UINT32_MAX - size)
+                Unsupported("resource provenance snapshots exceed 32-bit frame indexing");
+            const auto offset = static_cast<uint32_t>(size);
+            size += layout->size;
+            ++output.resource_snapshot_fields;
+            return offset;
+        };
+        std::set<uint32_t> pending;
+        std::function<const ResourceRecipe &(uint32_t)> plan = [&](uint32_t id) -> const ResourceRecipe & {
+            auto found = resource_recipes.find(id);
+            if (found != resource_recipes.end()) return found->second;
+            if (!pending.insert(id).second)
+                Unsupported("cyclic opaque provenance requires an explicitly supported pointer representation");
+            const auto &d = Def(id);
+            ResourceRecipe recipe;
+            auto root = std::make_shared<RecipeNode>();
+            root->source = id;
+            recipe.root = root;
+            if (!d.in_function) {
+                if (d.op != spv::OpVariable || Storage(id) != spv::StorageClassUniformConstant)
+                    Unsupported("opaque resource provenance must originate in a traditional UniformConstant descriptor");
+            } else {
+                if (d.op != spv::OpAccessChain && d.op != spv::OpInBoundsAccessChain && d.op != spv::OpCopyObject &&
+                    d.op != spv::OpLoad && d.op != spv::OpSampledImage && d.op != spv::OpImage && d.op != spv::OpImageTexelPointer)
+                    Unsupported("unsupported opaque resource provenance Op" + std::string(spvOpcodeString(d.op)));
+                if (d.op == spv::OpLoad && (Storage(d.words.at(3)) != spv::StorageClassUniformConstant || d.words.size() != 4))
+                    Unsupported(
+                        "opaque resource loads require immutable traditional descriptor provenance without memory operands");
+                std::function<std::shared_ptr<RecipeNode>(const std::shared_ptr<RecipeNode> &)> clone = [&](const auto &node) {
+                    auto copy = std::make_shared<RecipeNode>();
+                    copy->source = node->source;
+                    copy->type = node->type;
+                    if (node->type) {
+                        copy->offset = allocate(node->type);
+                        recipe.captures.push_back({node->type, copy->offset, 0, node->offset});
+                    }
+                    for (const auto &[operand, child] : node->operands) copy->operands.push_back({operand, clone(child)});
+                    return copy;
+                };
+                for (auto operand : d.uses) {
+                    if (RecipeValue(operand)) {
+                        const auto &parent = plan(operand);
+                        root->operands.push_back({operand, clone(parent.root)});
+                    } else {
+                        const auto &value = Def(operand);
+                        auto child = std::make_shared<RecipeNode>();
+                        if (value.in_function) {
+                            if (!Layoutable(value.type)) Unsupported("resource provenance operand is not a numeric value");
+                            child->type = value.type;
+                            child->offset = allocate(value.type);
+                            recipe.captures.push_back({value.type, child->offset, operand, 0});
+                        } else
+                            child->source = operand;
+                        root->operands.push_back({operand, child});
+                    }
+                }
+            }
+            pending.erase(id);
+            return resource_recipes.emplace(id, std::move(recipe)).first->second;
+        };
+        for (const auto &i : parsed.instructions)
+            if (i.in_function && i.result && RecipeValue(i.result)) plan(i.result);
+        output.resource_snapshot_bytes = size - begin;
+    }
+    void CaptureRecipe(uint32_t id) {
+        const auto found = resource_recipes.find(id);
+        if (found == resource_recipes.end()) return;
+        for (const auto &field : found->second.captures) {
+            auto value = field.value ? Value(field.value)
+                                     : Op("OpFunctionCall " + Type(field.type) + " " + codecs.at(field.type).load + " %sc_base " +
+                                          Constant(field.inherited_offset));
+            Op("OpFunctionCall " + code.void_type + " " + codecs.at(field.type).store + " %sc_base " + Constant(field.offset) +
+               " " + value);
+        }
+    }
+    std::string RebuildRecipe(const std::shared_ptr<RecipeNode> &node) {
+        if (node->type)
+            return Op("OpFunctionCall " + Type(node->type) + " " + codecs.at(node->type).load + " %sc_base " +
+                      Constant(node->offset));
+        const auto &d = Def(node->source);
+        if (!d.in_function) return Global(node->source);
+        std::map<uint32_t, std::string> operands;
+        for (const auto &[id, child] : node->operands) operands[id] = RebuildRecipe(child);
+        const auto result = Fresh();
+        functions << Rewrite(d.text, [&](uint32_t id) {
+            if (id == d.result) return result;
+            if (id == d.type) return Type(id);
+            return operands.at(id);
+        }) << "\n";
+        DecorateResult(node->source, result, true);
+        return result;
+    }
     std::string Value(uint32_t id) {
         const auto &d = Def(id);
         if (IsPointer(d.type)) return RealPointer(id);
@@ -758,9 +908,10 @@ class Compiler {
         if (!d.result || !d.type || Def(d.type).op == spv::OpTypeVoid) Unsupported("non-value source operand");
         if (Ephemeral(d.type)) {
             auto found = ephemeral_values.find(id);
-            if (found == ephemeral_values.end())
-                Unsupported("opaque resource SSA crosses a source state boundary; explicit provenance rematerialization required");
-            return found->second;
+            if (found != ephemeral_values.end()) return found->second;
+            auto recipe = resource_recipes.find(id);
+            if (recipe == resource_recipes.end()) Unsupported("opaque resource has no proven descriptor identity");
+            return ephemeral_values[id] = RebuildRecipe(recipe->second.root);
         }
         auto result = Op("OpLoad " + Type(d.type) + " " + Register(id));
         DecorateResult(id, result, true);
@@ -818,11 +969,10 @@ class Compiler {
     std::string RealPointer(uint32_t id) {
         const auto &d = Def(id);
         if (IsPersistentStorage(Storage(id)) || SystemPointer(id)) Unsupported("persistent pointer used outside typed load/store");
-        if (Storage(id) == spv::StorageClassImage) {
+        if (resource_recipes.count(id)) {
             auto found = ephemeral_pointers.find(id);
             if (found != ephemeral_pointers.end()) return found->second;
-            if (d.op == spv::OpCopyObject) return RealPointer(d.words.at(3));
-            Unsupported("image texel pointer crosses a source state boundary; explicit provenance rematerialization required");
+            return ephemeral_pointers[id] = RebuildRecipe(resource_recipes.at(id).root);
         }
         if (!d.in_function && d.op == spv::OpVariable && PhysicalResourcePointer(id)) {
             auto offset =
@@ -1027,6 +1177,7 @@ class Compiler {
         if (result_type != Type(i.type)) result = Op("OpCopyLogical " + Type(i.type) + " " + result);
         DecorateResult(i.result, result);
         Save(i.result, result);
+        CaptureRecipe(i.result);
     }
     uint32_t ScalarAlignment(uint32_t type) const {
         const auto &d = Def(type);
@@ -1103,8 +1254,10 @@ class Compiler {
                 continue;
             }
             if (i.op == spv::OpAccessChain || i.op == spv::OpInBoundsAccessChain ||
-                (i.op == spv::OpCopyObject && IsPointer(i.type) && Def(i.type).words.at(2) != spv::StorageClassImage))
+                (i.op == spv::OpCopyObject && IsPointer(i.type) && Def(i.type).words.at(2) != spv::StorageClassImage)) {
+                CaptureRecipe(i.result);
                 continue;
+            }
             if (i.op == spv::OpImageTexelPointer || (i.op == spv::OpCopyObject && IsPointer(i.type))) {
                 auto result = Fresh();
                 functions << Rewrite(i.text, [&](uint32_t id) {
@@ -1114,6 +1267,7 @@ class Compiler {
                 }) << "\n";
                 DecorateResult(i.result, result);
                 ephemeral_pointers[i.result] = result;
+                CaptureRecipe(i.result);
                 continue;
             }
             if (i.op == spv::OpIgnoreIntersectionKHR || i.op == spv::OpTerminateRayKHR) {
@@ -1419,7 +1573,11 @@ TypedContinuationProgram CompileTypedContinuationSteps(const std::vector<uint32_
     optimizer.RegisterPass(spvtools::CreateEliminateDeadFunctionsPass());
     optimizer.RegisterPass(spvtools::CreateFlattenDecorationPass());
     std::vector<uint32_t> inlined;
-    if (!optimizer.Run(selected.data(), selected.size(), &inlined)) Unsupported("helper inlining failed: " + error);
+    spvtools::ValidatorOptions validation;
+    validation.SetScalarBlockLayout(true);
+    spvtools::OptimizerOptions optimization;
+    optimization.set_validator_options(validation);
+    if (!optimizer.Run(selected.data(), selected.size(), &inlined, optimization)) Unsupported("helper inlining failed: " + error);
     return Compiler(std::move(inlined), entry, execution_model, options).Run();
 }
 }  // namespace vel::rt

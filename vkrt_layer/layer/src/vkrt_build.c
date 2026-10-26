@@ -210,8 +210,6 @@ void vkrt_cmd_build_as(struct vkrt_device_data *dev, VkCommandBuffer cmd, uint32
       }
    }
    /* No descriptors or graphics state are touched by the BDA-only passes. */
-   if (cb->bound_compute_pipeline)
-      dev->vtable.CmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, cb->bound_compute_pipeline);
-   for (struct vkrt_saved_push *p = cb->push_head; p; p = p->next)
-      dev->vtable.CmdPushConstants(cmd, p->layout, p->stages, p->offset, p->size, p->bytes);
+   vkrt_replay_compute_binding(cb);
+   vkrt_replay_push_constants(cb);
 }

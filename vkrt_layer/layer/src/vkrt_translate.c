@@ -2,6 +2,7 @@
 #include "vkrt_layer.h"
 #include "vkrt_chain.h"
 #include "vkrt_as_registry.h"
+#include "vkrt_buffer_usage.h"
 
 VKAPI_ATTR VkResult VKAPI_CALL vkrt_CreateQueryPool(VkDevice device, const VkQueryPoolCreateInfo *info,
                                                     const VkAllocationCallbacks *allocator, VkQueryPool *pool) {
@@ -34,61 +35,17 @@ static VkResult track_as_buffer(struct vkrt_device_data *dev, VkResult result, V
     return result;
 }
 
-static VkBufferUsageFlags2KHR buffer_usage(VkBufferUsageFlags2KHR usage) {
-    /* The software builder and traversal access AS storage through ordinary
-     * storage buffers/BDA. Native AS usages are invalid on a no-RT ICD. */
-    usage &= ~((VkBufferUsageFlags2KHR)VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR |
-               VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR | VK_BUFFER_USAGE_SHADER_BINDING_TABLE_BIT_KHR);
-    return usage | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
-}
-
 VKAPI_ATTR VkResult VKAPI_CALL vkrt_CreateBuffer(VkDevice device, const VkBufferCreateInfo *info,
                                                  const VkAllocationCallbacks *allocator, VkBuffer *buffer) {
     struct vkrt_device_data *dev = VKRT_FIND(struct vkrt_device_data, device);
     if (!dev) return VK_ERROR_INITIALIZATION_FAILED;
     if (!dev->as_registry) return dev->vtable.CreateBuffer(device, info, allocator, buffer);
-    VkBufferCreateInfo local = *info;
-    local.usage = (VkBufferUsageFlags)buffer_usage(info->usage);
-    const VkBaseInStructure *existing = info->pNext;
-    while (existing && existing->sType != VK_STRUCTURE_TYPE_BUFFER_USAGE_FLAGS_2_CREATE_INFO_KHR) existing = existing->pNext;
-    if (!existing) {
-        VkResult result = dev->vtable.CreateBuffer(device, &local, allocator, buffer);
-        return track_as_buffer(dev, result, result == VK_SUCCESS ? *buffer : VK_NULL_HANDLE, info->size, info->usage, allocator,
-                               buffer);
-    }
-
-    /* Flags2 overrides VkBufferCreateInfo::usage. Clone its prefix and retain
-     * the opaque suffix without mutating or truncating the caller's chain. */
-    VkBufferUsageFlags2CreateInfoKHR usage2 = *(const VkBufferUsageFlags2CreateInfoKHR *)existing;
-    usage2.usage = buffer_usage(usage2.usage);
-    VkBaseOutStructure *head = NULL, **tail = &head;
-    VkResult result = VK_SUCCESS;
-    for (const VkBaseInStructure *p = info->pNext; p != existing; p = p->pNext) {
-        size_t size = vkrt_chain_size(p->sType);
-        if (!size) {
-            result = VK_ERROR_EXTENSION_NOT_PRESENT;
-            goto done;
-        }
-        VkBaseOutStructure *copy = malloc(size);
-        if (!copy) {
-            result = VK_ERROR_OUT_OF_HOST_MEMORY;
-            goto done;
-        }
-        memcpy(copy, p, size);
-        copy->pNext = NULL;
-        *tail = copy;
-        tail = &copy->pNext;
-    }
-    *tail = (VkBaseOutStructure *)&usage2;
-    local.pNext = head;
-    result = dev->vtable.CreateBuffer(device, &local, allocator, buffer);
-    result = track_as_buffer(dev, result, result == VK_SUCCESS ? *buffer : VK_NULL_HANDLE, info->size,
-                             ((const VkBufferUsageFlags2CreateInfoKHR *)existing)->usage, allocator, buffer);
-done:
-    while (head && head != (VkBaseOutStructure *)&usage2) {
-        VkBaseOutStructure *next = head->pNext;
-        free(head);
-        head = next;
+    struct vkrt_buffer_create_info local;
+    VkResult result = vkrt_buffer_create_info_translate(&local, info);
+    if (result == VK_SUCCESS) {
+        result = dev->vtable.CreateBuffer(device, &local.info, allocator, buffer);
+        result = track_as_buffer(dev, result, result == VK_SUCCESS ? *buffer : VK_NULL_HANDLE, info->size, local.original_usage,
+                                 allocator, buffer);
     }
     return result;
 }

@@ -9,6 +9,9 @@ namespace vel::rt {
 struct TypedRuntimeBuildOptions {
     uint32_t max_ray_recursion_depth = 1;
     uint64_t pipeline_identity = 1;
+    // A private compute layout supplies the immutable context through 8 push
+    // bytes. The default specialization route remains available to components.
+    bool context_via_push_constants = false;
 };
 struct TypedRuntimeProgram {
     std::vector<uint32_t> spirv;
@@ -42,7 +45,9 @@ uint64_t PlanTypedRuntimeArenaBytes(const std::vector<TypedContinuationProgram> 
 // Stages must be homogeneous PrivateArray (production) or BDA (component)
 // libraries from CompileTypedPipelineStage, with unique
 // exports. The result is one ordinary Vulkan compute program. Its private
-// uint32 specialization IDs0/1 contain the immutable context BDA, low then high.
+// uint32 specialization IDs0/1 contain the immutable context BDA by default.
+// context_via_push_constants instead uses an independent 8-byte compute push
+// range, allowing one native pipeline to execute different recorded contexts.
 // No application descriptor/push slot is reserved. SBT records use the returned
 // 32-byte opaque handles; user shader-record data immediately follows the handle.
 // PrivateArray keeps mutable scheduler/source state in native invocation-private

@@ -3,8 +3,15 @@
 // One invocation owns one checked BDA arena. Nodes are dynamically linked;
 // suspension, traversal and nested stage calls do not unroll the source CFG.
 layout(local_size_x = 1, local_size_y = 1, local_size_z = 1) in;
+#ifdef RT_CONTEXT_PUSH
+layout(push_constant, std430) uniform RtContextPush {
+    uint low;
+    uint high;
+} rt_context_push;
+#else
 layout(constant_id = 0) const uint rt_context_low = 0u;
 layout(constant_id = 1) const uint rt_context_high = 0u;
+#endif
 layout(buffer_reference, std430, buffer_reference_align = 4) buffer RtWords { uint w[]; };
 #ifdef RT_PRIVATE_WORDS
 uint vel_rt_private_frames[RT_PRIVATE_WORDS];
@@ -534,7 +541,11 @@ void rt_trace_step(uint64_t trace) {
     if (child != 0ul) rt_hit_system(child, trace, committed, kind, q.tclosest);
 }
 void main() {
+#ifdef RT_CONTEXT_PUSH
+    rt_ctx = uint64_t(rt_context_push.low) | (uint64_t(rt_context_push.high) << 32);
+#else
     rt_ctx = uint64_t(rt_context_low) | (uint64_t(rt_context_high) << 32);
+#endif
     rt_error = 0u;
     rt_top = 0ul;
     if (rt_ctx == 0ul || (rt_ctx & 7ul) != 0ul || rt_p(rt_ctx) != VEL_RT_RUNTIME_MAGIC ||

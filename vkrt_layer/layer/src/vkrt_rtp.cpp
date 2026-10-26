@@ -94,13 +94,33 @@ template <class H, class T>
 H Handle(T *p) {
     return (H)(uintptr_t)p;
 }
+struct DescriptorBinding {
+    uint32_t binding, count;
+    VkDescriptorType type;
+    VkShaderStageFlags stages;
+    VkDescriptorBindingFlags flags = 0;
+    std::vector<VkSampler> samplers;
+    std::vector<VkDescriptorType> mutable_types;
+    bool operator==(const DescriptorBinding &b) const {
+        return binding == b.binding && count == b.count && type == b.type && stages == b.stages && flags == b.flags &&
+               samplers == b.samplers && mutable_types == b.mutable_types;
+    }
+};
+struct DescriptorLayout {
+    VkDescriptorSetLayoutCreateFlags flags;
+    std::vector<DescriptorBinding> bindings;
+    bool known = true;
+    bool operator==(const DescriptorLayout &b) const { return known && b.known && flags == b.flags && bindings == b.bindings; }
+};
 struct Layout {
     vkrt_device_data *dev;
-    VkPipelineLayout native{};
-    std::vector<VkDescriptorSetLayout> sets;
+    VkPipelineLayout native{}, rt_native{};
+    std::vector<std::shared_ptr<const DescriptorLayout>> sets;
     std::vector<VkPushConstantRange> pushes;
+    bool independent_sets = false;
     uint32_t push_bytes = 0;
     ~Layout() {
+        if (rt_native) dev->vtable.DestroyPipelineLayout(dev->device, rt_native, nullptr);
         if (native) dev->vtable.DestroyPipelineLayout(dev->device, native, nullptr);
     }
 };
@@ -116,8 +136,14 @@ struct LayoutToken {
     LayoutToken(Allocator a, std::shared_ptr<Layout> v) : allocator(a), value(std::move(v)) {}
 };
 struct Variant {
+    vkrt_device_data *dev = nullptr;
     TypedRuntimeProgram program;
+    VkPipeline native{};
+    std::set<uint32_t> used_sets;
     uint64_t budget = 0;
+    ~Variant() {
+        if (native) dev->vtable.DestroyPipeline(dev->device, native, nullptr);
+    }
 };
 struct Pipeline {
     vkrt_device_data *dev;
@@ -130,7 +156,6 @@ struct Pipeline {
     uint64_t identity = 0;
     bool dynamic_stack = false;
     std::shared_ptr<Variant> initial;
-    std::set<uint32_t> used_sets;
     std::map<uint64_t, std::shared_ptr<Variant>> variants;
     std::mutex lock;
 };
@@ -153,10 +178,9 @@ struct Packet {
     VkDeviceMemory memory{};
     void *mapping = nullptr;
     VkDeviceAddress address = 0;
-    std::vector<VkPipeline> pipelines;
     std::shared_ptr<Pipeline> pipeline;
+    std::shared_ptr<Variant> variant;
     ~Packet() {
-        for (auto p : pipelines) dev->vtable.DestroyPipeline(dev->device, p, nullptr);
         if (mapping) dev->vtable.UnmapMemory(dev->device, memory);
         if (buffer) dev->vtable.DestroyBuffer(dev->device, buffer, nullptr);
         if (memory) dev->vtable.FreeMemory(dev->device, memory, nullptr);
@@ -171,6 +195,7 @@ struct vkrt_rtp_state {
     std::unordered_map<uint64_t, ShaderToken *> shaders;
     std::unordered_map<uint64_t, LayoutToken *> layouts;
     std::unordered_map<uint64_t, PipelineToken *> pipelines;
+    std::unordered_map<uint64_t, std::shared_ptr<const DescriptorLayout>> descriptor_layouts;
     std::atomic<uint64_t> next_identity{1};
     uint32_t max_push = 0, max_dispatch = 0;
     vkrt_rtp_state(Allocator a, vkrt_device_data *d) : allocator(a), dev(d) {}
@@ -219,12 +244,16 @@ Words ShaderWords(vkrt_device_data *d, VkShaderModule h) {
     return i->second->words;
 }
 bool Compatible(const Layout &a, const Layout &b, uint32_t last) {
-    if (a.pushes.size() != b.pushes.size() || a.sets.size() <= last || b.sets.size() <= last) return false;
+    if (a.pushes.size() != b.pushes.size() || a.sets.size() <= last || b.sets.size() <= last ||
+        a.independent_sets != b.independent_sets)
+        return false;
     for (size_t i = 0; i < a.pushes.size(); ++i)
         if (a.pushes[i].stageFlags != b.pushes[i].stageFlags || a.pushes[i].offset != b.pushes[i].offset ||
             a.pushes[i].size != b.pushes[i].size)
             return false;
-    return std::equal(a.sets.begin(), a.sets.begin() + last + 1, b.sets.begin());
+    for (uint32_t i = 0; i <= last; ++i)
+        if (a.sets[i] != b.sets[i] && (!a.sets[i] || !b.sets[i] || !(*a.sets[i] == *b.sets[i]))) return false;
+    return true;
 }
 bool PushCompatible(const Layout &a, const Layout &b) {
     if (a.pushes.size() != b.pushes.size()) return false;
@@ -247,13 +276,48 @@ std::shared_ptr<Variant> Build(Pipeline &p, uint64_t budget) {
         stages.push_back(CompileTypedPipelineStage(p.metadata[n].source, p.entries[n], p.kinds[n], nullptr,
                                                    "vel_rt_stage_" + std::to_string(n), config));
     auto v = std::make_shared<Variant>();
+    v->dev = p.dev;
     v->budget = budget;
-    v->program = BuildTypedRuntimeProgram(stages, p.groups, {p.depth, p.identity});
+    v->program = BuildTypedRuntimeProgram(stages, p.groups, {p.depth, p.identity, true});
+    const auto &words = v->program.spirv;
+    for (size_t word = 5; word < words.size(); word += words[word] >> 16)
+        if ((words[word] & 65535) == spv::OpDecorate && words[word + 2] == spv::DecorationDescriptorSet)
+            v->used_sets.insert(words[word + 3]);
+    VkShaderModuleCreateInfo sm{};
+    sm.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
+    sm.codeSize = v->program.spirv.size() * 4;
+    sm.pCode = v->program.spirv.data();
+    VkShaderModule shader{};
+    Check(p.dev->vtable.CreateShaderModule(p.dev->device, &sm, nullptr, &shader));
+    struct ModuleGuard {
+        vkrt_device_data *dev;
+        VkShaderModule shader;
+        ~ModuleGuard() { dev->vtable.DestroyShaderModule(dev->device, shader, nullptr); }
+    } module{p.dev, shader};
+    VkComputePipelineCreateInfo ci{};
+    ci.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
+    ci.stage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+    ci.stage.stage = VK_SHADER_STAGE_COMPUTE_BIT;
+    ci.stage.module = shader;
+    ci.stage.pName = "main";
+    ci.layout = p.layout->rt_native;
+    VkPipeline native{};
+    VkResult result = p.dev->vtable.CreateComputePipelinesInternal(p.dev->device, VK_NULL_HANDLE, 1, &ci, nullptr, &native);
+    if (result != VK_SUCCESS) {
+        if (native) p.dev->vtable.DestroyPipeline(p.dev->device, native, nullptr);
+        Check(result);
+    }
+    v->native = native;
+    Need(v->native != VK_NULL_HANDLE);
     p.variants.emplace(budget, v);
+    VKRT_LOG_DBG("typed RTP native variant created identity=%llu budget=%llu", (unsigned long long)p.identity,
+                 (unsigned long long)budget);
     return v;
 }
-void Bind(vkrt_device_data *d, VkCommandBuffer c, const Binding &b) {
-    d->vtable.CmdBindDescriptorSets(c, VK_PIPELINE_BIND_POINT_COMPUTE, b.native, b.first, uint32_t(b.sets.size()), b.sets.data(),
+void Bind(vkrt_device_data *d, VkCommandBuffer c, const Binding &b, bool rt = false) {
+    Need(!rt || b.owner);
+    VkPipelineLayout layout = rt ? b.owner->rt_native : b.native;
+    d->vtable.CmdBindDescriptorSets(c, VK_PIPELINE_BIND_POINT_COMPUTE, layout, b.first, uint32_t(b.sets.size()), b.sets.data(),
                                     uint32_t(b.offsets.size()), b.offsets.data());
 }
 void Allocate(Packet &p, uint64_t bytes) {
@@ -323,7 +387,19 @@ VKAPI_ATTR VkResult VKAPI_CALL CreatePipelineLayout(VkDevice device, const VkPip
         if (!d->rtp) return d->vtable.CreatePipelineLayout(device, ci, a, out);
         auto v = std::make_shared<Layout>();
         v->dev = d;
-        if (ci->setLayoutCount) v->sets.assign(ci->pSetLayouts, ci->pSetLayouts + ci->setLayoutCount);
+        v->independent_sets = (ci->flags & VK_PIPELINE_LAYOUT_CREATE_INDEPENDENT_SETS_BIT_EXT) != 0;
+        {
+            std::lock_guard<std::mutex> lock(d->rtp->lock);
+            for (uint32_t i = 0; i < ci->setLayoutCount; ++i) {
+                if (!ci->pSetLayouts[i]) {
+                    v->sets.push_back(nullptr);
+                    continue;
+                }
+                auto definition = d->rtp->descriptor_layouts.find(VKRT_HKEY(ci->pSetLayouts[i]));
+                Need(definition != d->rtp->descriptor_layouts.end());
+                v->sets.push_back(definition->second);
+            }
+        }
         if (ci->pushConstantRangeCount)
             v->pushes.assign(ci->pPushConstantRanges, ci->pPushConstantRanges + ci->pushConstantRangeCount);
         std::sort(v->pushes.begin(), v->pushes.end(), [](auto x, auto y) {
@@ -356,6 +432,17 @@ VKAPI_ATTR VkResult VKAPI_CALL CreatePipelineLayout(VkDevice device, const VkPip
         VkPipelineLayout native_layout{};
         Check(d->vtable.CreatePipelineLayout(device, &local, nullptr, &native_layout));
         v->native = native_layout;
+        // RT shader push constants are read through immutable BDA snapshots.
+        // This separate layout uses the native compute range for a recorded
+        // context pointer, independent of every application push range. Create
+        // it now, while the caller's descriptor-set layout handles are valid.
+        VkPushConstantRange context_range{VK_SHADER_STAGE_COMPUTE_BIT, 0, 8};
+        auto rt_layout = *ci;
+        rt_layout.pushConstantRangeCount = 1;
+        rt_layout.pPushConstantRanges = &context_range;
+        VkPipelineLayout native_rt{};
+        Check(d->vtable.CreatePipelineLayout(device, &rt_layout, nullptr, &native_rt));
+        v->rt_native = native_rt;
         auto token = Token<LayoutToken>(a, v);
         token->public_layout = public_layout;
         try {
@@ -469,10 +556,6 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateRayTracingPipelinesKHR(VkDevice device, VkD
                 }
                 uint64_t bytes = PlanTypedRuntimeArenaBytes(p->metadata, p->groups, p->depth);
                 p->initial = Build(*p, bytes);
-                const auto &native = p->initial->program.spirv;
-                for (size_t word = 5; word < native.size(); word += native[word] >> 16)
-                    if ((native[word] & 65535) == spv::OpDecorate && native[word + 2] == spv::DecorationDescriptorSet)
-                        p->used_sets.insert(native[word + 3]);
                 auto token = Token<PipelineToken>(a, p);
                 try {
                     std::lock_guard<std::mutex> lock(d->rtp->lock);
@@ -545,36 +628,92 @@ VKAPI_ATTR VkDeviceSize VKAPI_CALL GetRayTracingShaderGroupStackSizeKHR(VkDevice
     });
     return bytes;
 }
+void CaptureBindings(vkrt_cmd_buffer_data *cb, VkPipelineBindPoint point, const std::shared_ptr<Layout> &owner,
+                     VkPipelineLayout native, uint32_t first, uint32_t count, const VkDescriptorSet *sets, uint32_t dynamic_count,
+                     const uint32_t *offsets) {
+    if (!cb->device_data->rtp || (point != VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR && point != VK_PIPELINE_BIND_POINT_COMPUTE))
+        return;
+    Binding binding;
+    binding.owner = owner;
+    binding.native = native;
+    binding.first = first;
+    if (count) binding.sets.assign(sets, sets + count);
+    binding.live.resize(count, true);
+    if (dynamic_count) binding.offsets.assign(offsets, offsets + dynamic_count);
+    auto &state = State(cb);
+    auto &history = point == VK_PIPELINE_BIND_POINT_COMPUTE ? state.compute_bindings : state.rt_bindings;
+    for (auto &old : history)
+        for (size_t slot = 0; slot < old.live.size(); ++slot)
+            if (uint64_t(old.first) + slot >= first && uint64_t(old.first) + slot < uint64_t(first) + count) old.live[slot] = false;
+    history.push_back(std::move(binding));
+}
 VKAPI_ATTR void VKAPI_CALL CmdBindDescriptorSets(VkCommandBuffer command, VkPipelineBindPoint point, VkPipelineLayout layout,
                                                  uint32_t first, uint32_t count, const VkDescriptorSet *sets,
                                                  uint32_t dynamic_count, const uint32_t *offsets) {
     auto cb = VKRT_FIND(vkrt_cmd_buffer_data, command);
     if (!cb) return;
-    VkResult r = Guard([&] {
+    VkResult result = Guard([&] {
         auto d = cb->device_data;
-        auto ref = FindLayout(d, layout);
-        VkPipelineLayout native = ref ? ref->native : layout;
-        if (point == VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR || point == VK_PIPELINE_BIND_POINT_COMPUTE) {
-            Binding b;
-            b.owner = ref;
-            b.native = native;
-            b.first = first;
-            if (count) b.sets.assign(sets, sets + count);
-            b.live.resize(count, true);
-            if (dynamic_count) b.offsets.assign(offsets, offsets + dynamic_count);
-            auto &state = State(cb);
-            auto &history = point == VK_PIPELINE_BIND_POINT_COMPUTE ? state.compute_bindings : state.rt_bindings;
-            for (auto &old : history)
-                for (size_t slot = 0; slot < old.live.size(); ++slot)
-                    if (uint64_t(old.first) + slot >= first && uint64_t(old.first) + slot < uint64_t(first) + count)
-                        old.live[slot] = false;
-            history.push_back(std::move(b));
-        }
+        auto owner = FindLayout(d, layout);
+        VkPipelineLayout native = owner ? owner->native : layout;
+        CaptureBindings(cb, point, owner, native, first, count, sets, dynamic_count, offsets);
         if (point != VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR)
             d->vtable.CmdBindDescriptorSets(command, point, native, first, count, sets, dynamic_count, offsets);
         return VK_SUCCESS;
     });
-    if (r != VK_SUCCESS) cb->record_result = r;
+    if (result != VK_SUCCESS) cb->record_result = result;
+}
+VKAPI_ATTR void VKAPI_CALL CmdBindDescriptorSets2(VkCommandBuffer command, const VkBindDescriptorSetsInfo *info) {
+    auto cb = VKRT_FIND(vkrt_cmd_buffer_data, command);
+    if (!cb) return;
+    VkResult result = Guard([&] {
+        auto d = cb->device_data;
+        Need(d->vtable.CmdBindDescriptorSets2 != nullptr);
+        if (!d->rtp) {
+            d->vtable.CmdBindDescriptorSets2(command, info);
+            return VK_SUCCESS;
+        }
+        Need(info && info->sType == VK_STRUCTURE_TYPE_BIND_DESCRIPTOR_SETS_INFO);
+        const VkPipelineLayoutCreateInfo *inline_layout = nullptr;
+        for (auto next = static_cast<const VkBaseInStructure *>(info->pNext); next; next = next->pNext) {
+            Need(next->sType == VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO && !inline_layout);
+            inline_layout = reinterpret_cast<const VkPipelineLayoutCreateInfo *>(next);
+        }
+        VkPipelineLayout layout = info->layout;
+        struct TemporaryLayout {
+            VkDevice device;
+            VkPipelineLayout handle{};
+            ~TemporaryLayout() {
+                if (handle) DestroyPipelineLayout(device, handle, nullptr);
+            }
+        } temporary{d->device};
+        if (!layout) {
+            Need(inline_layout != nullptr);
+            auto ci = *inline_layout;
+            ci.pNext = nullptr;
+            Check(CreatePipelineLayout(d->device, &ci, nullptr, &temporary.handle));
+            layout = temporary.handle;
+        }
+        auto owner = FindLayout(d, layout);
+        Need(owner != nullptr);
+        bool all = info->stageFlags == VK_SHADER_STAGE_ALL;
+        if (all || (info->stageFlags & rt_bits))
+            CaptureBindings(cb, VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR, owner, owner->native, info->firstSet,
+                            info->descriptorSetCount, info->pDescriptorSets, info->dynamicOffsetCount, info->pDynamicOffsets);
+        if (all || (info->stageFlags & VK_SHADER_STAGE_COMPUTE_BIT))
+            CaptureBindings(cb, VK_PIPELINE_BIND_POINT_COMPUTE, owner, owner->native, info->firstSet, info->descriptorSetCount,
+                            info->pDescriptorSets, info->dynamicOffsetCount, info->pDynamicOffsets);
+        auto native = *info;
+        // ALL is a valid special enum, rather than every undefined flag bit.
+        // Preserve it as for legacy ALL push constants. Explicit RT stages
+        // are consumed, and unrelated native bind points are forwarded once.
+        native.stageFlags = all ? VK_SHADER_STAGE_ALL : info->stageFlags & ~rt_bits;
+        native.layout = owner->native;
+        native.pNext = nullptr;
+        if (native.stageFlags) d->vtable.CmdBindDescriptorSets2(command, &native);
+        return VK_SUCCESS;
+    });
+    if (result != VK_SUCCESS) cb->record_result = result;
 }
 VKAPI_ATTR void VKAPI_CALL CmdSetRayTracingPipelineStackSizeKHR(VkCommandBuffer command, uint32_t size) {
     auto cb = VKRT_FIND(vkrt_cmd_buffer_data, command);
@@ -612,6 +751,7 @@ VKAPI_ATTR void VKAPI_CALL CmdTraceRaysKHR(VkCommandBuffer command, const VkStri
         auto packet = std::make_unique<Packet>();
         packet->dev = d;
         packet->pipeline = p;
+        packet->variant = v;
         Allocate(*packet, bytes);
         uint64_t payload = table + p->metadata.size() * 8;
         for (size_t s = 0; s < p->metadata.size(); ++s) {
@@ -625,17 +765,6 @@ VKAPI_ATTR void VKAPI_CALL CmdTraceRaysKHR(VkCommandBuffer command, const VkStri
                 std::memcpy((uint8_t *)packet->mapping + payload + s * push_size, i->second.data(),
                             std::min(size_t(push_size), i->second.size()));
         }
-        VkShaderModuleCreateInfo sm{};
-        sm.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
-        sm.codeSize = v->program.spirv.size() * 4;
-        sm.pCode = v->program.spirv.data();
-        VkShaderModule shader{};
-        Check(d->vtable.CreateShaderModule(d->device, &sm, nullptr, &shader));
-        struct ModuleGuard {
-            vkrt_device_data *d;
-            VkShaderModule s;
-            ~ModuleGuard() { d->vtable.DestroyShaderModule(d->device, s, nullptr); }
-        } module{d, shader};
         for (uint64_t chunk = 0, base = 0; chunk < chunks; ++chunk) {
             uint64_t count = std::min(uint64_t(d->rtp->max_dispatch), total - base), offset = chunk * VEL_RT_RUNTIME_CONTEXT_BYTES;
             Write(*packet, offset + VEL_RT_RUN_MAGIC, uint32_t(VEL_RT_RUNTIME_MAGIC));
@@ -657,26 +786,6 @@ VKAPI_ATTR void VKAPI_CALL CmdTraceRaysKHR(VkCommandBuffer command, const VkStri
                 Write(*packet, offset + starts[i] + 8, i == 0 ? regions[i]->size : regions[i]->stride);
                 Write(*packet, offset + starts[i] + 16, regions[i]->size);
             }
-            uint64_t root = packet->address + offset;
-            uint32_t words[] = {uint32_t(root), uint32_t(root >> 32)};
-            VkSpecializationMapEntry entries[] = {{0, 0, 4}, {1, 4, 4}};
-            VkSpecializationInfo spec{2, entries, sizeof(words), words};
-            VkComputePipelineCreateInfo ci{};
-            ci.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
-            ci.stage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-            ci.stage.stage = VK_SHADER_STAGE_COMPUTE_BIT;
-            ci.stage.module = shader;
-            ci.stage.pName = "main";
-            ci.stage.pSpecializationInfo = &spec;
-            ci.layout = p->layout->native;
-            VkPipeline native{};
-            Check(d->vtable.CreateComputePipelinesInternal(d->device, VK_NULL_HANDLE, 1, &ci, nullptr, &native));
-            try {
-                packet->pipelines.push_back(native);
-            } catch (...) {
-                d->vtable.DestroyPipeline(d->device, native, nullptr);
-                throw;
-            }
             base += count;
         }
         // Preserve packet ownership before recording commands which reference it.
@@ -685,23 +794,24 @@ VKAPI_ATTR void VKAPI_CALL CmdTraceRaysKHR(VkCommandBuffer command, const VkStri
         for (const auto &b : state.rt_bindings) {
             uint32_t last = UINT32_MAX;
             for (uint32_t s = 0; s < b.live.size(); ++s)
-                if (b.live[s] && p->used_sets.count(b.first + s)) last = s;
+                if (b.live[s] && v->used_sets.count(b.first + s)) last = s;
             if (last == UINT32_MAX) continue;
             if (b.owner) Need(Compatible(*b.owner, *p->layout, b.first + last));
-            Bind(d, command, b);
+            Bind(d, command, b, true);
         }
         uint64_t remaining = total;
-        for (auto native : owned->pipelines) {
+        d->vtable.CmdBindPipeline(command, VK_PIPELINE_BIND_POINT_COMPUTE, v->native);
+        for (uint64_t chunk = 0; chunk < chunks; ++chunk) {
             uint32_t count = uint32_t(std::min(remaining, uint64_t(d->rtp->max_dispatch)));
-            d->vtable.CmdBindPipeline(command, VK_PIPELINE_BIND_POINT_COMPUTE, native);
+            uint64_t root = owned->address + chunk * VEL_RT_RUNTIME_CONTEXT_BYTES;
+            const uint32_t words[] = {uint32_t(root), uint32_t(root >> 32)};
+            d->vtable.CmdPushConstants(command, p->layout->rt_native, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(words), words);
             d->vtable.CmdDispatch(command, count, 1, 1);
             remaining -= count;
         }
-        if (cb->bound_compute_pipeline)
-            d->vtable.CmdBindPipeline(command, VK_PIPELINE_BIND_POINT_COMPUTE, cb->bound_compute_pipeline);
+        vkrt_replay_compute_binding(cb);
         for (const auto &b : state.compute_bindings) Bind(d, command, b);
-        for (auto push = cb->push_head; push; push = push->next)
-            d->vtable.CmdPushConstants(command, push->layout, push->stages, push->offset, push->size, push->bytes);
+        vkrt_replay_push_constants(cb);
         return VK_SUCCESS;
     });
     if (r != VK_SUCCESS) cb->record_result = r;
@@ -744,26 +854,92 @@ extern "C" void vkrt_rtp_finish(vkrt_device_data *dev) {
     a.free(s);
     dev->rtp = nullptr;
 }
+extern "C" VkResult vkrt_rtp_track_descriptor_layout(vkrt_device_data *dev, VkDescriptorSetLayout layout,
+                                                     const VkDescriptorSetLayoutCreateInfo *info) {
+    return Guard([&] {
+        if (!dev->rtp) return VK_SUCCESS;
+        auto value = std::make_shared<DescriptorLayout>();
+        value->flags = info->flags;
+        const VkDescriptorSetLayoutBindingFlagsCreateInfo *flags = nullptr;
+        const VkMutableDescriptorTypeCreateInfoEXT *mutable_info = nullptr;
+        for (auto next = static_cast<const VkBaseInStructure *>(info->pNext); next; next = next->pNext) {
+            if (next->sType == VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_BINDING_FLAGS_CREATE_INFO)
+                flags = reinterpret_cast<const VkDescriptorSetLayoutBindingFlagsCreateInfo *>(next);
+            else if (next->sType == VK_STRUCTURE_TYPE_MUTABLE_DESCRIPTOR_TYPE_CREATE_INFO_EXT)
+                mutable_info = reinterpret_cast<const VkMutableDescriptorTypeCreateInfoEXT *>(next);
+            else
+                // Preserve ordinary native creation of future extensions. An
+                // unrecognized definition can only prove identity with its own
+                // retained snapshot, never with another unknown definition.
+                value->known = false;
+        }
+        for (uint32_t i = 0; i < info->bindingCount; ++i) {
+            const auto &source = info->pBindings[i];
+            DescriptorBinding binding{source.binding, source.descriptorCount, source.descriptorType, source.stageFlags, 0, {}, {}};
+            if (flags && i < flags->bindingCount) binding.flags = flags->pBindingFlags[i];
+            if (source.descriptorCount && source.pImmutableSamplers &&
+                (source.descriptorType == VK_DESCRIPTOR_TYPE_SAMPLER ||
+                 source.descriptorType == VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER))
+                binding.samplers.assign(source.pImmutableSamplers, source.pImmutableSamplers + source.descriptorCount);
+            if (source.descriptorType == VK_DESCRIPTOR_TYPE_MUTABLE_EXT && mutable_info &&
+                i < mutable_info->mutableDescriptorTypeListCount) {
+                const auto &types = mutable_info->pMutableDescriptorTypeLists[i];
+                if (types.descriptorTypeCount)
+                    binding.mutable_types.assign(types.pDescriptorTypes, types.pDescriptorTypes + types.descriptorTypeCount);
+                std::sort(binding.mutable_types.begin(), binding.mutable_types.end());
+            }
+            value->bindings.push_back(std::move(binding));
+        }
+        std::sort(value->bindings.begin(), value->bindings.end(),
+                  [](const auto &a, const auto &b) { return std::tie(a.binding, a.stages) < std::tie(b.binding, b.stages); });
+        std::lock_guard<std::mutex> lock(dev->rtp->lock);
+        dev->rtp->descriptor_layouts[VKRT_HKEY(layout)] = std::move(value);
+        return VK_SUCCESS;
+    });
+}
+extern "C" void vkrt_rtp_forget_descriptor_layout(vkrt_device_data *dev, VkDescriptorSetLayout layout) {
+    Guard([&] {
+        if (dev->rtp) {
+            std::lock_guard<std::mutex> lock(dev->rtp->lock);
+            dev->rtp->descriptor_layouts.erase(VKRT_HKEY(layout));
+        }
+        return VK_SUCCESS;
+    });
+}
+extern "C" bool vkrt_rtp_layout_compatible(vkrt_device_data *dev, VkPipelineLayout a, VkPipelineLayout b, uint32_t last_set) {
+    bool result = false;
+    Guard([&] {
+        auto first = FindLayout(dev, a), second = FindLayout(dev, b);
+        result = first && second && Compatible(*first, *second, last_set);
+        return VK_SUCCESS;
+    });
+    return result;
+}
 extern "C" VkResult vkrt_rtp_create_shader(vkrt_device_data *dev, const VkShaderModuleCreateInfo *ci,
                                            const VkAllocationCallbacks *a, VkShaderModule *out, bool *handled) {
     *handled = false;
     return Guard([&] {
         if (!dev->rtp) return VK_SUCCESS;
         Need(ci && ci->pCode && ci->codeSize >= 20 && !(ci->codeSize & 3));
-        bool rt = false;
+        bool rt = false, banked = false;
         for (size_t p = 5; p < ci->codeSize / 4;) {
             uint32_t n = ci->pCode[p] >> 16;
             Need(n && n <= ci->codeSize / 4 - p);
-            if ((ci->pCode[p] & 65535) == spv::OpEntryPoint) {
+            uint32_t op = ci->pCode[p] & 65535;
+            if (op == spv::OpEntryPoint) {
                 uint32_t model = ci->pCode[p + 1];
                 rt |= model >= spv::ExecutionModelRayGenerationKHR && model <= spv::ExecutionModelCallableKHR;
             }
+            // SPV_NV_push_constant_bank: the runtime's source snapshots use
+            // bank zero only. Never silently flatten another source bank.
+            banked |= op == spv::OpCapability && n >= 2 && ci->pCode[p + 1] == 5423;
+            banked |= op == spv::OpDecorate && n >= 3 && ci->pCode[p + 2] == 5397;
             p += n;
         }
         if (!rt) return VK_SUCCESS;
         *handled = true;
         *out = VK_NULL_HANDLE;
-        Need(!ci->pNext && !ci->flags);
+        Need(!ci->pNext && !ci->flags && !banked);
         auto token = Token<ShaderToken>(a, Words(ci->pCode, ci->pCode + ci->codeSize / 4));
         try {
             std::lock_guard<std::mutex> lock(dev->rtp->lock);
@@ -849,6 +1025,8 @@ extern "C" PFN_vkVoidFunction vkrt_rtp_proc(const char *name) {
     ENTRY(GetRayTracingShaderGroupHandlesKHR);
     ENTRY(GetRayTracingShaderGroupStackSizeKHR);
     ENTRY(CmdBindDescriptorSets);
+    ENTRY(CmdBindDescriptorSets2);
+    if (!std::strcmp(name, "vkCmdBindDescriptorSets2KHR")) return (PFN_vkVoidFunction)CmdBindDescriptorSets2;
     ENTRY(CmdSetRayTracingPipelineStackSizeKHR);
     ENTRY(CmdTraceRaysKHR);
 #undef ENTRY

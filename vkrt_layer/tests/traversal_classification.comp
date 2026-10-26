@@ -14,6 +14,11 @@ layout(push_constant, scalar) uniform Push { uint64_t nodes; uint64_t tlas; uint
 void main()
 {
    uint index = gl_GlobalInvocationID.x;
+   /* Compare the compiled shader ABI with the host fixture ABI independently
+    * of traversal results. A stale include used to look like two empty trees. */
+   if (index == 0u)
+      result.values[32] = uvec4(VEL_RT_BVH4_ABI_VERSION, VEL_RT_BVH4_HEADER_SIZE,
+                                VEL_RT_BVH4_NODE_SIZE, VEL_RT_BVH4_INSTANCE_SIZE);
    if (index >= 30u) {
       sw_ray_query_state q;
       q.as_address = index == 30u ? pc.deep_tlas : pc.resume_tlas;

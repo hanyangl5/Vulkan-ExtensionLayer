@@ -99,8 +99,6 @@ void vkrt_cmd_copy_as(struct vkrt_device_data *dev, VkCommandBuffer command, con
     dev->vtable.CmdDispatch(command, (uint32_t)groups, 1, 1);
     copy_barrier(dev, command);
     /* Descriptors and graphics pipeline state were never changed. */
-    if (cb->bound_compute_pipeline)
-        dev->vtable.CmdBindPipeline(command, VK_PIPELINE_BIND_POINT_COMPUTE, cb->bound_compute_pipeline);
-    for (struct vkrt_saved_push *push = cb->push_head; push; push = push->next)
-        dev->vtable.CmdPushConstants(command, push->layout, push->stages, push->offset, push->size, push->bytes);
+    vkrt_replay_compute_binding(cb);
+    vkrt_replay_push_constants(cb);
 }
