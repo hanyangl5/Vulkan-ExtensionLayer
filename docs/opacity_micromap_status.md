@@ -5,12 +5,13 @@ SPDX-License-Identifier: Apache-2.0
 
 # Software opacity micromap implementation status
 
-Updated 2026-10-26. The active goal is the complete native-RT EXT implementation
+Updated 2026-10-27. The active goal is the complete native-RT EXT implementation
 in [the specification](opacity_micromap_layer.md), following
 [the implementation plan](opacity_micromap_plan.md). No full milestone is complete.
-No emulated extension, feature or Vulkan entry point is advertised by this checkpoint.
-The second implementation checkpoint adds device-side storage/lookup and compiler
-preparation; the complete application-facing adapter remains in progress.
+An experimental loader now connects public build/copy operations to the device
+backend. Default operation remains native pass-through. The layer does not add
+OMM discovery to devices without native OMM while the full consumer contract is
+unfinished. The complete application-facing adapter remains in progress.
 
 ## Workspace and separation
 
@@ -32,13 +33,16 @@ there is no `vkrt_layer` hierarchy or fallback build dependency.
 | Native RQ mechanism proof | Actual native BLAS/TLAS builds and traversal; transparent filtering, opaque auto-confirm, logical culling, unknown/force-two-state, ordinary triangles and AABB candidates |
 | Native RTP mechanism proof | Native TraceRay, injected Any-Hit, procedural Intersection guarding, payload/attributes, Ignore/Terminate and legal zero triangle hit groups |
 | Query compiler preparation | SPIR-V shadow state for query objects, fixed arrays/structs and function parameters; logical flags saved at initialization and restored by getter rewriting |
+| Automatic RQ consumer | Typed parallel state, inline Proceed filtering and flags/AABB getter restoration; explicit metadata/classifier bridge remains required |
+| Experimental public API | Public create/destroy/sizes/build/clone/compact, buffer translation, compute/push restoration and sync translation; mandatory queries/serialization remain open |
 
 The CPU evaluator reports 396,693 checks and the storage suite reports 786 checks.
 Storage tests include truncated and corrupted blobs, size overflow, source-input
 mutation/release, canonical padding and round trips. Planner arithmetic limits
 are not advertised device limits. The internal storage blob is not the Vulkan
-public serialization envelope. Object tracking and the public micromap commands
-are still required.
+public serialization envelope. The experimental device adapter now tracks
+objects and connects public build/copy commands; mandatory query and serialization
+operations remain required.
 
 Device build now runs two GPU phases: validate and plan records, then encode
 payload words in parallel with an intervening compute dependency. Twenty-five
@@ -87,6 +91,21 @@ and replacements. Opacity-culling guards execute before application Intersection
 side effects. Its explicit BDA context uses one launch and trace depth; it does
 not establish general SBT/context transport, nested traces or callable behavior.
 
+The automatic consumer transform now replaces ordinary source Proceed operations
+with inline filtering, keeping query pointers out of new function calls. Twelve
+valid graph variants and negative cases pass 116 checks. Actual GPU execution
+passes 1,020 dispatches/2,040 traces, including two independent queries, arrays,
+helpers, reinitialization, first-hit and AABB behavior. EXT declarations are
+removed before execution on a logical device without native micromap enabled.
+Its fixture callback consumes encoded CPU-oracle decisions; this does not prove
+automatic AS provenance or the production packed-data classifier bridge.
+
+The loader/device checkpoint and its actual public API tests are documented in
+[the 2026-10-27 report](omm_layer_api_2026-10-27.md). Explicit experimental mode
+currently admits device-operation tests without RQ/RTP features; it rejects
+consumer-enabled device creation and software AS builds until the bridge exists.
+These gates are incomplete implementation, not a smaller final goal.
+
 Independent query graph tests pass 720 checks across 15 valid graph shapes and
 four Vulkan-prohibited pointer graphs. Coverage includes Function/Private mixed
 structs and nested arrays, helper signatures, signed flags, vertex, fragment and
@@ -98,9 +117,10 @@ compiler preparation without accepting that invalid frontend output.
 
 ## Verification and external CTS
 
-Standalone CMake build with LLVM 20.1.3 and Vulkan SDK 1.4.357.0 passes all nine
-integrated CTest targets. Parent VEL configuration builds the new targets and
-passes four offline targets; the host-only configuration passes two without
+Standalone CMake build with LLVM 20.1.3 and Vulkan SDK 1.4.357.0 passes fifteen
+component CTests. The public loader test separately passes 54 checks with
+validation above and below the layer. Parent VEL configuration builds the new
+targets and passes eight offline targets; the host-only configuration passes two without
 Vulkan dependencies. The native GPU proofs pass with `VK_LAYER_KHRONOS_validation` and
 `VK_LAYER_VALIDATE_SYNC=1`, with no validation or synchronization diagnostics.
 The generated SPIR-V is checked with the SDK validator.
@@ -125,16 +145,20 @@ evidence location and reproduction are in
 [the CTS inventory](omm_cts_inventory_2026-10-26.md).
 
 The current RTX 3080 driver exposes native OMM with subdivision limits 12 for both
-formats. A forced-emulation development selector will therefore be necessary to
-separate software results from native pass-through.
+formats. `VK_VEL_OMM_EXPERIMENTAL_SOFTWARE=1` explicitly selects the incomplete
+development backend when the EXT extension is enabled. The mode is captured at
+instance creation. Its software API fixture checks canonical storage magic to
+confirm emulation. Newly run native-through-layer CTS retains the 8 Pass/2 Fail
+baseline. Three software CTS admission probes terminate at device creation with
+`VK_ERROR_FEATURE_NOT_PRESENT`; there are no software CTS qualification passes.
 
 ## Open milestone gates
 
 - [ ] M0: automatic AS provenance, resource limits, complete query state,
   procedural side effects, zero/null hit groups, native RTP context/SBT transport.
-- [ ] M1: device object/storage API, public build recording/state preservation,
-  complete association and input-lifetime/synchronization proof. Component GPU
-  build and lookup now pass their isolated matrices.
+- [ ] M1: complete device object/storage API and association/lifetime proof.
+  Public build/copy recording, state restoration and component GPU build/lookup
+  now pass their scoped matrices; complete public lifecycle coverage remains open.
 - [ ] M2: native AS sidecars and general RQ SPIR-V instrumentation.
 - [ ] M3: native RTP instrumentation, pipeline libraries, shader records,
   recursion/callables, indirect and GPU-generated SBTs.
@@ -160,8 +184,13 @@ $env:VK_LAYER_PATH = 'C:/VulkanSDK/1.4.357.0/Bin'
 Remove-Item Env:VK_LAYER_ENABLES -ErrorAction SilentlyContinue
 $env:VK_LAYER_VALIDATE_SYNC = '1'
 $env:VK_LOADER_LAYERS_DISABLE = '~implicit~'
-ctest --test-dir build-omm --output-on-failure
+ctest --test-dir build-omm -LE loader --output-on-failure
 ```
+
+See the loader report for the explicit software API test environment. Running all
+tests without that opt-in makes the loader target skip; it must not be counted as
+a software pass. The current embedded kernels require Vulkan 1.2/SPIR-V 1.5;
+qualifying a lower extension-only environment remains open.
 
 Use `-DOMM_BUILD_NATIVE_PROOFS=OFF` for the host-only core without Vulkan SDK/GPU
 dependencies. The parent VEL configuration can opt in with

@@ -1,0 +1,773 @@
+{
+  "SPDX-FileCopyrightText": "2026 The Khronos Group Inc.",
+  "SPDX-License-Identifier": "CC-BY-4.0",
+  "schema_version": 1,
+  "date": "2026-10-27",
+  "source_base_commit": "5486eff550001ced5c792551b3b624cfde63ab27",
+  "source_state": "Experimental public layer and automatic query consumer after base commit; exact worktree bytes hashed below.",
+  "routing": {
+    "default": "Native pass-through; no new software OMM discovery on devices without native OMM.",
+    "experimental_selector": "VK_VEL_OMM_EXPERIMENTAL_SOFTWARE=1 at instance creation",
+    "experimental_admission": "EXT device operations only; RQ/RTP features and all AS builds reject until the metadata/compiler bridge exists.",
+    "complete_milestone": false
+  },
+  "validation_environment": {
+    "VK_INSTANCE_LAYERS": "VK_LAYER_KHRONOS_validation",
+    "VK_LAYER_PATH": "C:/VulkanSDK/1.4.357.0/Bin",
+    "VK_LAYER_VALIDATE_SYNC": "1",
+    "VK_LOADER_LAYERS_DISABLE": "~implicit~",
+    "VK_LAYER_ENABLES": "unset",
+    "public_loader": "Both above and below VVL; add the generated layer path and experimental selector. Exact external CTS environments are in each summary.json."
+  },
+  "results": {
+    "standalone_non_loader_ctest": {
+      "pass": 15,
+      "fail": 0,
+      "skip": 0
+    },
+    "public_api_above_vvl": {
+      "checks": 54,
+      "fail": 0,
+      "validation_errors": 0,
+      "warnings": 0
+    },
+    "public_api_below_vvl": {
+      "checks": 54,
+      "fail": 0,
+      "validation_errors": 0,
+      "warnings": 0
+    },
+    "parent_offline_ctest": {
+      "pass": 8,
+      "fail": 0
+    },
+    "device_backend_gpu_checks": 25,
+    "command_state_checks": 55,
+    "synchronization_checks": 296,
+    "loader_registry_checks": 61,
+    "query_consumer_host_checks": 116,
+    "query_graph_checks": 720,
+    "query_consumer_gpu_dispatches": 1020,
+    "query_consumer_gpu_traces": 2040,
+    "query_classifier_fixture": "Encoded CPU-oracle decisions; not the production packed-data/AS-sidecar bridge."
+  },
+  "external_cts": {
+    "source_revision": "d18e4c68543103371715845cd914c71e5859963e",
+    "executable": {
+      "path": "D:/Codes/VK-GL-CTS/build/external/vulkancts/modules/vulkan/Release/deqp-vk.exe",
+      "bytes": 63076864,
+      "sha256": "8cf824c598181ef43ccd74d67acce89c9cc6fc47029a164440f0b0ea74af0380"
+    },
+    "native_pass_through": {
+      "pass": 8,
+      "fail": 2,
+      "summary": "build-omm-cts-evidence/layer-native-final/summary.json",
+      "failures": [
+        "dEQP-VK.ray_tracing_pipeline.opacity_micromap.ext.query.compacted_size",
+        "dEQP-VK.ray_tracing_pipeline.opacity_micromap.ext.query.serialization_size"
+      ],
+      "cause": "Both query-pool size tests return native VK_ERROR_UNKNOWN, matching driver-only baseline; unresolved."
+    },
+    "experimental_software": {
+      "pass": 0,
+      "cts_results": 0,
+      "early_process_failures": 3,
+      "raw_runner_status": {
+        "Crash": 3
+      },
+      "summary": "build-omm-cts-evidence/layer-software-admission/summary.json",
+      "cause": "CTS fatal exit after vkCreateDevice returns VK_ERROR_FEATURE_NOT_PRESENT at the incomplete consumer gate; not an observed GPU fault, NotSupported, or a passing result."
+    },
+    "retained_failed_attempts": [
+      "layer-native-control: numeric manifest implementation_version made the loader skip the layer.",
+      "layer-native-control-manifest-fix: POSIX DLL path on Windows produced loader error 87 and misleading instance OOM.",
+      "Public layer fixture before explicitly enabling maintenance4 produced six lifetime VUIDs; valid rerun kept separately."
+    ]
+  },
+  "limitations": [
+    "Automatic descriptor/integer AS provenance and GPU-generated TLAS instance normalization remain required.",
+    "Per-AS metadata, packed-data classifier injection, AS clone/update/lifetime and public query/serialization are incomplete.",
+    "Native RTP remains a manually supplied single-launch mechanism proof; general SBT/nested/callable/indirect transport is open.",
+    "Current experimental kernels require Vulkan 1.2; lower extension-only environments remain open.",
+    "Word padding aliasing/sparse/external cases, full application resource budgets, hidden-sidecar sync scopes, maintenance9 and the complete queue matrix remain unqualified.",
+    "Current consumer and AS-build rejection gates are temporary incompleteness, not a narrowed final contract."
+  ],
+  "sources": [
+    {
+      "path": "CMakeLists.txt",
+      "bytes": 3889,
+      "sha256": "3f2f59011f34f7463aaed6ef74e1d642b019d9d63ee93f6879ca8750ab953519"
+    },
+    {
+      "path": "layers/raytracing/CMakeLists.txt",
+      "bytes": 396,
+      "sha256": "b1a69daf4f0b72128791e7d9f0b6b62f27f8d20250e9137de0663a461a943935"
+    },
+    {
+      "path": "layers/raytracing/omm/CMakeLists.txt",
+      "bytes": 12626,
+      "sha256": "5f6ddeaf9813fff14da13081772c19309b806832787e63596b83902cf6812d65"
+    },
+    {
+      "path": "layers/raytracing/omm/embed_kernels.cmake",
+      "bytes": 701,
+      "sha256": "805b5d936cf7d81e858c4c0dc3e3530ccdb46026c367d74e9339a1a5b24b0d52"
+    },
+    {
+      "path": "layers/raytracing/omm/omm_build.comp",
+      "bytes": 8735,
+      "sha256": "30f0a7093ac9bfbb275b9032172327e727619af12ee5a78cd5be6eab0d8aca12"
+    },
+    {
+      "path": "layers/raytracing/omm/omm_command_state.cpp",
+      "bytes": 3599,
+      "sha256": "8f5c68795b5a3a5c2a8d14a8ac627554da75f00e825cf6949f6b372877ed5bd9"
+    },
+    {
+      "path": "layers/raytracing/omm/omm_command_state.h",
+      "bytes": 2479,
+      "sha256": "c1b131056f930326e94bb64b760f12148a83a5e1e05a3844c445be131b20871a"
+    },
+    {
+      "path": "layers/raytracing/omm/omm_copy.comp",
+      "bytes": 2263,
+      "sha256": "f7a111390fa8f174cdf682a669eb6edba7265718a8da8615eb78bd3187d485ec"
+    },
+    {
+      "path": "layers/raytracing/omm/omm_device.cpp",
+      "bytes": 23018,
+      "sha256": "d26befb190ea75c8d4681e8d2056b2e393ef19d68e969fa47a24b3b5a0a8d2d5"
+    },
+    {
+      "path": "layers/raytracing/omm/omm_device.h",
+      "bytes": 3367,
+      "sha256": "9c29a6659623d7da3d30ec8ff96908203e0ca5752c0ee066aeccf238d577820c"
+    },
+    {
+      "path": "layers/raytracing/omm/omm_layer.cpp",
+      "bytes": 54787,
+      "sha256": "63bc18e2d916bc40f69b8ee1795c0271d27a4f0475c29cbd6ff713884abc25ec"
+    },
+    {
+      "path": "layers/raytracing/omm/omm_layer.def",
+      "bytes": 216,
+      "sha256": "25147d8cf117f8d559270cfd725fd9ab917769d88157b3a81d204a8d56a88ac1"
+    },
+    {
+      "path": "layers/raytracing/omm/omm_lookup.glsl",
+      "bytes": 8733,
+      "sha256": "0c78323325873e3594a7e7f86bf13b9e104f792fec7e197e74676202f18076fd"
+    },
+    {
+      "path": "layers/raytracing/omm/omm_opacity.cpp",
+      "bytes": 7863,
+      "sha256": "c305be71f81e92a76f1be4368691937ad41328c209cd6ac53f1ebee4d82b6d1e"
+    },
+    {
+      "path": "layers/raytracing/omm/omm_opacity.glsl",
+      "bytes": 1409,
+      "sha256": "730a10bb160fd3cbef92ecc1795ca5518bb4f3f6eef9a1cb862f8a6a773aab12"
+    },
+    {
+      "path": "layers/raytracing/omm/omm_opacity.h",
+      "bytes": 3599,
+      "sha256": "8ebe544b5baf09eec55d799e1c3883453da6bca6e870c7360d75a5d372ee301f"
+    },
+    {
+      "path": "layers/raytracing/omm/omm_query_rewrite.cpp",
+      "bytes": 33505,
+      "sha256": "383584e066d3d09d44c5e383975b99099615a4505150900578ae9b3476f2e250"
+    },
+    {
+      "path": "layers/raytracing/omm/omm_query_rewrite.h",
+      "bytes": 3451,
+      "sha256": "48aaf1d4564514091a295329861b73a5ee3d7e39d840b64ef2f14922ce1ab1d6"
+    },
+    {
+      "path": "layers/raytracing/omm/omm_storage.cpp",
+      "bytes": 12151,
+      "sha256": "80ac0ae5fb70e7b64a0b4f8222599f7d3d0ab9295f4715bebc61ff094dfb502b"
+    },
+    {
+      "path": "layers/raytracing/omm/omm_storage.h",
+      "bytes": 2788,
+      "sha256": "7726e19868238919852fff50381672b541a8231ee4c3ac5eb917540663649c29"
+    },
+    {
+      "path": "layers/raytracing/omm/omm_sync.cpp",
+      "bytes": 7245,
+      "sha256": "9fb226ba208d8e85207a547cafebf6bf0e706f926a6f503eb4f81672a8ef11e1"
+    },
+    {
+      "path": "layers/raytracing/omm/omm_sync.h",
+      "bytes": 2584,
+      "sha256": "58ca2524b432429d55aa543b01a8ed209df02b84c3aaac3b5eb426341db18e9c"
+    },
+    {
+      "path": "layers/raytracing/omm/tests/gpu_build_generate.comp",
+      "bytes": 2231,
+      "sha256": "e5e5ead12d1ead327d45fff0ab1be57400c8a2ed615492017d6c64a8db7703be"
+    },
+    {
+      "path": "layers/raytracing/omm/tests/gpu_lookup.comp",
+      "bytes": 1634,
+      "sha256": "0e1d81cf6f7d0898036e9ec68f65b14d3ba4a7a0e6d3fc5913fb3a0ccc39bde2"
+    },
+    {
+      "path": "layers/raytracing/omm/tests/layer_state.comp",
+      "bytes": 881,
+      "sha256": "b06861a2cee5f5e886d1699f1c4371f3c341b51c898c609bb6ff156b39c6b006"
+    },
+    {
+      "path": "layers/raytracing/omm/tests/native_fixture.h",
+      "bytes": 15423,
+      "sha256": "09e7f69fe0d2fd3b05ceaa21fe967f10904dccec7c88b2b1a5dae54f02a2ed68"
+    },
+    {
+      "path": "layers/raytracing/omm/tests/native_pipeline.glsl",
+      "bytes": 1508,
+      "sha256": "9042756a56ecee494bf1c5591ffed74968712ad51260dab8cf74fd91c4453ead"
+    },
+    {
+      "path": "layers/raytracing/omm/tests/native_pipeline.rahit",
+      "bytes": 925,
+      "sha256": "b2fd9db654589d368b04b14295e4b26f53f33368055493c288722bf5abb359d3"
+    },
+    {
+      "path": "layers/raytracing/omm/tests/native_pipeline.rchit",
+      "bytes": 559,
+      "sha256": "e9332abf43e43658fd8f57db3ec67903af64ba6a782be3609fc681a294396c06"
+    },
+    {
+      "path": "layers/raytracing/omm/tests/native_pipeline.rgen",
+      "bytes": 1202,
+      "sha256": "8b857d76ad04d0e4295e6fa309af554f4951ecb39a78ae99adb04f2863d50ee9"
+    },
+    {
+      "path": "layers/raytracing/omm/tests/native_pipeline.rint",
+      "bytes": 740,
+      "sha256": "dbedc268e96bcc5a7b0c84e5ee90852736955c0286d5a9af620e038493e91d28"
+    },
+    {
+      "path": "layers/raytracing/omm/tests/native_pipeline.rmiss",
+      "bytes": 322,
+      "sha256": "5a19f40960a4775249ac38a9737167ee2042a7eb030d57256da64d90c4a657ea"
+    },
+    {
+      "path": "layers/raytracing/omm/tests/native_query.comp",
+      "bytes": 4790,
+      "sha256": "7049fcf510a35215d0cb72bf7e1651dd0bec097bdfcc0b2104a4b5e2c85e8db3"
+    },
+    {
+      "path": "layers/raytracing/omm/tests/query_state.comp",
+      "bytes": 1536,
+      "sha256": "d8015a1e3ce82ecb2abbfa7803c8f731f00c07ac4b6df10d6680355ac882f27f"
+    },
+    {
+      "path": "layers/raytracing/omm/tests/run_omm_cts.py",
+      "bytes": 6779,
+      "sha256": "4870e12dee17e87cc841fa2460dbf7ece0562d922228b093d3e2c25c768c5ece"
+    },
+    {
+      "path": "layers/raytracing/omm/tests/test_omm_command_state.cpp",
+      "bytes": 17224,
+      "sha256": "7afafc329157b817dbc561e0381ae23902b7b16cbc6bd6f5ccedf33b27cc72fc"
+    },
+    {
+      "path": "layers/raytracing/omm/tests/test_omm_device.cpp",
+      "bytes": 18863,
+      "sha256": "8ad5e4025abc8b9a80c08bca5961d4f2f3fc28702ac78061307a1428588326c6"
+    },
+    {
+      "path": "layers/raytracing/omm/tests/test_omm_gpu_build.cpp",
+      "bytes": 14702,
+      "sha256": "c0cf17967644d1855cc1e65362b8bff3edeabd5b198e52767efeb7f1797f31d4"
+    },
+    {
+      "path": "layers/raytracing/omm/tests/test_omm_gpu_lookup.cpp",
+      "bytes": 20192,
+      "sha256": "5e084c7c0fce35e093cd47577fcab0b8adf627d0279916bff2bd07540c88ef3c"
+    },
+    {
+      "path": "layers/raytracing/omm/tests/test_omm_layer.cpp",
+      "bytes": 25028,
+      "sha256": "fbd53855c5952df1b507b1c1d697cf11e62b06f3cd737dd3d33fc8d8f58ca76b"
+    },
+    {
+      "path": "layers/raytracing/omm/tests/test_omm_layer_registry.cpp",
+      "bytes": 9932,
+      "sha256": "c0491f3a0e614a2d5e7dfb14688462adfa9982692a9079b692fc303f88d57243"
+    },
+    {
+      "path": "layers/raytracing/omm/tests/test_omm_native_pipeline.cpp",
+      "bytes": 20865,
+      "sha256": "2b25d7e5808dd3434358285a0632fc9d00d1812c90ee2b693960ee46abaa9b05"
+    },
+    {
+      "path": "layers/raytracing/omm/tests/test_omm_native_query.cpp",
+      "bytes": 21254,
+      "sha256": "275e01be27be4069afc470e0a1080cc0aa0cf31946c8b67b07af74f2b0596f91"
+    },
+    {
+      "path": "layers/raytracing/omm/tests/test_omm_opacity.cpp",
+      "bytes": 16747,
+      "sha256": "17d1c2cf78249d2c54c1fd4c570f6b2269062e1fc4537f078ab13272170c84f5"
+    },
+    {
+      "path": "layers/raytracing/omm/tests/test_omm_query_graph.cpp",
+      "bytes": 25752,
+      "sha256": "5e6fbfb30394f11b91b8a35459fa710a0e9cc952f925ea6325d6380e9f68a179"
+    },
+    {
+      "path": "layers/raytracing/omm/tests/test_omm_query_proceed.cpp",
+      "bytes": 36117,
+      "sha256": "331233ac25db08e9948600b6fc8306d52c6d2296543639fddc4883cef6544cad"
+    },
+    {
+      "path": "layers/raytracing/omm/tests/test_omm_query_rewrite.cpp",
+      "bytes": 9281,
+      "sha256": "d171333a55e0232e4a78e8f33c740893394f2e8e9eb8884b298f5ca50f224ef4"
+    },
+    {
+      "path": "layers/raytracing/omm/tests/test_omm_storage.cpp",
+      "bytes": 12932,
+      "sha256": "ff3e44748ca68df454d455a2e3c7771fe6c1eb5af4a1c060a77972820e9a1e4e"
+    },
+    {
+      "path": "layers/raytracing/omm/tests/test_omm_sync.cpp",
+      "bytes": 20531,
+      "sha256": "b8ac9e3148bbf2ecdf0991bae3265728bc6ddb967977a2108b7d54d251aa0b23"
+    }
+  ],
+  "artifacts": [
+    {
+      "path": "build-omm/omm/gpu_build_generate.comp.spv",
+      "bytes": 7096,
+      "sha256": "ae4c2c0800c9d830589fb4e7a2cec33ff25aefa4e15300885d8ba3ef6989367a"
+    },
+    {
+      "path": "build-omm/omm/gpu_lookup.comp.spv",
+      "bytes": 25588,
+      "sha256": "0a1966ce50d637f5dc4fa4ec0206305de817bd3138b5ec3a363de9994ff91d88"
+    },
+    {
+      "path": "build-omm/omm/layer_state.comp.spv",
+      "bytes": 1620,
+      "sha256": "5b34184accbfcb334bb8a2f5bf17334394f44c8a443e2845240543eb1d8ffd8c"
+    },
+    {
+      "path": "build-omm/omm/layers/VkLayer_VEL_opacity_micromap.dll",
+      "bytes": 307712,
+      "sha256": "347a770ac296d605d71971f8eefd737615a35f9eee44a50efab1bf09841d6664"
+    },
+    {
+      "path": "build-omm/omm/layers/VkLayer_VEL_opacity_micromap.json",
+      "bytes": 326,
+      "sha256": "b3896749f46eb8bb445c92ee7bbcd4ce1dc26ff839a945cb155c80411cb842b0"
+    },
+    {
+      "path": "build-omm/omm/native_pipeline.rahit.spv",
+      "bytes": 7500,
+      "sha256": "b683ac6818f5df09745f970d5866d8511bfceed26034dcc63c2619c0dbc61446"
+    },
+    {
+      "path": "build-omm/omm/native_pipeline.rchit.spv",
+      "bytes": 3188,
+      "sha256": "07e506d868af14d1374de9dd7b651a979eef53f52f0cf86d2ac5131a95974074"
+    },
+    {
+      "path": "build-omm/omm/native_pipeline.rgen.spv",
+      "bytes": 4868,
+      "sha256": "63e4a79b5ee0c1273cf8a37839d1ddca343b5ea4e62393e2945f55c42e62f68f"
+    },
+    {
+      "path": "build-omm/omm/native_pipeline.rint.spv",
+      "bytes": 6680,
+      "sha256": "1f603a28f1abe8c1ef1aabe7d89d7b11f1f093f0d267829b7782a8a73fd54a6c"
+    },
+    {
+      "path": "build-omm/omm/native_pipeline.rmiss.spv",
+      "bytes": 2488,
+      "sha256": "2bb2f810856520304b9ca7216ee5d98baf566609c06c624b7bda9b80128d1e86"
+    },
+    {
+      "path": "build-omm/omm/native_query.comp.spv",
+      "bytes": 32028,
+      "sha256": "a2ea7e40890ad0900d24620241c19500f0d32db391a7e76b1f747637b61cbf55"
+    },
+    {
+      "path": "build-omm/omm/omm_build.comp.spv",
+      "bytes": 25400,
+      "sha256": "ead0fb559c825929f2e07183178079993f7af81a1b5155433fa4e4a5b9be7f02"
+    },
+    {
+      "path": "build-omm/omm/omm_copy.comp.spv",
+      "bytes": 7608,
+      "sha256": "a5e1c2eada0e974567ac54ea97576584ddd689257f5ef950e29489253755b61a"
+    },
+    {
+      "path": "build-omm/omm/omm_kernels.h",
+      "bytes": 107456,
+      "sha256": "712585f53133433e837c5428e110f2e97f14e651fd8909ce9a3a2585dd6099f5"
+    },
+    {
+      "path": "build-omm/omm/query_state.comp.spv",
+      "bytes": 2736,
+      "sha256": "172469229e888d4b429d0f01cde2e57f4591983031b3187690f833eb4061c0a2"
+    },
+    {
+      "path": "build-omm/omm/test_omm_command_state.exe",
+      "bytes": 37888,
+      "sha256": "e23dc433c8457fe2e1a668114baa8402f836c45c896eeaccba0703cd067f730b"
+    },
+    {
+      "path": "build-omm/omm/test_omm_device.exe",
+      "bytes": 79872,
+      "sha256": "35832dc9c02c9669dfb55af50e9a7150b429d02e77354ea91f7460a49cc5be09"
+    },
+    {
+      "path": "build-omm/omm/test_omm_gpu_build.exe",
+      "bytes": 53248,
+      "sha256": "d1081f6ea80ebc56edb06ef254d94161d568e878e954c961a5b2801411a66188"
+    },
+    {
+      "path": "build-omm/omm/test_omm_gpu_lookup.exe",
+      "bytes": 60928,
+      "sha256": "1c5a0ca4c83bd8c8bd688732eca7e8db661f6cb53a5c6416dc257f3dfb1e2f19"
+    },
+    {
+      "path": "build-omm/omm/test_omm_layer.exe",
+      "bytes": 61952,
+      "sha256": "0feb0c147ec7bc566cdfc88d425a164e8122ea79c49c9b397e7894013ca52fee"
+    },
+    {
+      "path": "build-omm/omm/test_omm_layer_registry.exe",
+      "bytes": 313856,
+      "sha256": "10df421a790352aa42f36275e742278ffc1d24b66a058ed9888a92e9d090a4ad"
+    },
+    {
+      "path": "build-omm/omm/test_omm_native_pipeline.exe",
+      "bytes": 51200,
+      "sha256": "66874327c8c45dda019b9474aaee74a69fce0bd309ccc5f8a670bcf5d12860bd"
+    },
+    {
+      "path": "build-omm/omm/test_omm_native_query.exe",
+      "bytes": 54272,
+      "sha256": "f4e8b91dce4d3f88232b14f6b5563077b3c9da09b48c48409f7d9b6cfeb0ed9b"
+    },
+    {
+      "path": "build-omm/omm/test_omm_opacity.exe",
+      "bytes": 25088,
+      "sha256": "4d2fc64c518653325d2000097eead5cf0a26df7ca2f97c7cfd79bb9dc2461569"
+    },
+    {
+      "path": "build-omm/omm/test_omm_query_graph.exe",
+      "bytes": 1951744,
+      "sha256": "d81d91a4033b396d978fd83292c342f7a373625641c56d407f40680434b1e841"
+    },
+    {
+      "path": "build-omm/omm/test_omm_query_proceed.exe",
+      "bytes": 1943552,
+      "sha256": "80434e839e47a9ee5de45d2d07050c4ca8a98b8512cf697b4cbf756cb9a518ce"
+    },
+    {
+      "path": "build-omm/omm/test_omm_query_rewrite.exe",
+      "bytes": 1856512,
+      "sha256": "d23aece5b7a721dc05d7819e7b93d37661f4499930c77fc2258778f0ec5ca2bf"
+    },
+    {
+      "path": "build-omm/omm/test_omm_storage.exe",
+      "bytes": 35840,
+      "sha256": "9c3df25d0e058cfa36eb8cde875d7eb391147c1c1be9035eb528354ba3e62f06"
+    },
+    {
+      "path": "build-omm/omm/test_omm_sync.exe",
+      "bytes": 35328,
+      "sha256": "f0172f505239a9fc605bbd2314ab3cb4111e2b3a70fdfa878fae07b0cedb1aee"
+    },
+    {
+      "path": "build-omm/omm/vel_omm_commands.lib",
+      "bytes": 25658,
+      "sha256": "75924bdef1d3611ae38172556c06e213c72f6dde5a7554fd1fdadafbbf2daec1"
+    },
+    {
+      "path": "build-omm/omm/vel_omm_core.lib",
+      "bytes": 33576,
+      "sha256": "6e27ee7c67887c38f9fa9bd9e36168aa9141de1bca01c61ac60a7775b7949580"
+    },
+    {
+      "path": "build-omm/omm/vel_omm_device.lib",
+      "bytes": 24180,
+      "sha256": "41b8945159e5903dda77d2a2d112e1b1384a31c46207573e24b5c5cebb856e6a"
+    },
+    {
+      "path": "build-omm/omm/vel_omm_query_rewrite.lib",
+      "bytes": 695102,
+      "sha256": "13cf939cb913291be08edca0e10e72ee0ac33d31255ebaffb1bb4a71b0434cf8"
+    },
+    {
+      "path": "build-omm/omm/vel_omm_sync.lib",
+      "bytes": 37738,
+      "sha256": "bed53d25b9406f40893801b29d586908993f7261b21f73bc0811138adf454717"
+    },
+    {
+      "path": "build-omm/omm/VkLayer_VEL_opacity_micromap.lib",
+      "bytes": 2260,
+      "sha256": "009f26a37340edaa786875ad69bd45637cef659912825da1a21fa2253ea3c371"
+    }
+  ],
+  "evidence": [
+    {
+      "path": "build-omm/layer-components-final-vvl-sync.log",
+      "bytes": 2015,
+      "sha256": "c576507703fa40a377e96598fb0557c6f64f5cd860755bf1c5d21820c31e7d6f"
+    },
+    {
+      "path": "build-omm/public-layer-qualified-above.log",
+      "bytes": 509,
+      "sha256": "c947c25a83ac8a15a37c7bdc14c43e691d4f842ac37ede685c3f2b6b75b238a4"
+    },
+    {
+      "path": "build-omm/public-layer-qualified-below.log",
+      "bytes": 509,
+      "sha256": "c1049f439b15b73ee47ea1ba13c6e3a42425415d6d197f9a6b6419bf66962163"
+    },
+    {
+      "path": "build-omm/public-layer-qualified-below-details.log",
+      "bytes": 2307,
+      "sha256": "b0cd33b2f4677b0d944249e8c4540aebbc8bec0c446d7d5b04d9f2a5bfd06abf"
+    },
+    {
+      "path": "build-omm-cts-evidence/layer-native-control/summary.json",
+      "bytes": 15122,
+      "sha256": "d02184589fa6a0711e0aa0aac63adcdd65c21fb41327479a872290cd03cd5b4e"
+    },
+    {
+      "path": "build-omm-cts-evidence/layer-native-control-manifest-fix/summary.json",
+      "bytes": 15157,
+      "sha256": "30b5d1aa854c6fb30c03f82812175e52b96caf2dc659c698250e8edef421a203"
+    },
+    {
+      "path": "build-omm-cts-evidence/layer-native-control-path-fix/summary.json",
+      "bytes": 15047,
+      "sha256": "4916968c7301682b79703ff561d82e86fa6b03acd305075c57fdd94f9e1f9682"
+    },
+    {
+      "path": "build-omm-cts-evidence/layer-native-final/0001-9607468f29e7.qpa",
+      "bytes": 9288,
+      "sha256": "e54056e1f1a242737a4ed44ba8d46b1e9f536da5624ef502669e0d224dffd88a"
+    },
+    {
+      "path": "build-omm-cts-evidence/layer-native-final/0001-9607468f29e7.stdout.txt",
+      "bytes": 601,
+      "sha256": "0ad0268d15700d1b9762bb353562ce4714291c3b48ddd717b0744f076bd3aabd"
+    },
+    {
+      "path": "build-omm-cts-evidence/layer-native-final/0002-62255fc217a3.qpa",
+      "bytes": 9330,
+      "sha256": "722ef1cd687677d8b81591fa30b99b21f9fcbfb8430836721f5490c78ee58c7a"
+    },
+    {
+      "path": "build-omm-cts-evidence/layer-native-final/0002-62255fc217a3.stdout.txt",
+      "bytes": 615,
+      "sha256": "bea96de2c57ee45ea82800395232cd14566d3db027257eeae7b44c3df54a40ea"
+    },
+    {
+      "path": "build-omm-cts-evidence/layer-native-final/0003-fb835ab0dd03.qpa",
+      "bytes": 9248,
+      "sha256": "5719a0abe7807161281497b11232735eaaf6aad0f876671552987f6d563792e9"
+    },
+    {
+      "path": "build-omm-cts-evidence/layer-native-final/0003-fb835ab0dd03.stdout.txt",
+      "bytes": 595,
+      "sha256": "5486b6657508d46f4e7251df815d2870343ffbea1bdf7c8f4a4d16e0564f6e06"
+    },
+    {
+      "path": "build-omm-cts-evidence/layer-native-final/0004-d806801a74c9.qpa",
+      "bytes": 9215,
+      "sha256": "71a7d81ba117cdcb23b16d2e6ae0db340660f13ff44c39a20f9085022785e412"
+    },
+    {
+      "path": "build-omm-cts-evidence/layer-native-final/0004-d806801a74c9.stdout.txt",
+      "bytes": 584,
+      "sha256": "157786b1821c4c00137884f32b2e03f0baa5b6ed7364343db2d4270b490bb945"
+    },
+    {
+      "path": "build-omm-cts-evidence/layer-native-final/0005-927fdc40d4a8.qpa",
+      "bytes": 9198,
+      "sha256": "8c793639156dc985b62b30d18d1b118ce418b0660b2ce9a4455bbfbccbba22c5"
+    },
+    {
+      "path": "build-omm-cts-evidence/layer-native-final/0005-927fdc40d4a8.stdout.txt",
+      "bytes": 571,
+      "sha256": "3962f1975f6898f6fd843a8f6d35e5739aff510c9e17fa383542498c52a103bb"
+    },
+    {
+      "path": "build-omm-cts-evidence/layer-native-final/0006-38865ac57c20.qpa",
+      "bytes": 9204,
+      "sha256": "43a5e55a8e9047191d849a75110d3b747740fa127da7bcee4a906f6fd032c26c"
+    },
+    {
+      "path": "build-omm-cts-evidence/layer-native-final/0006-38865ac57c20.stdout.txt",
+      "bytes": 573,
+      "sha256": "a8d4bdd7a194ee30befceeb779268a293f58c304f29fa29956ce48c08046fc32"
+    },
+    {
+      "path": "build-omm-cts-evidence/layer-native-final/0007-00666b7486be.qpa",
+      "bytes": 14673,
+      "sha256": "371cded2cc72be13d7df3d36455a5d36d50328ef5de67b662829d3d139408197"
+    },
+    {
+      "path": "build-omm-cts-evidence/layer-native-final/0007-00666b7486be.stdout.txt",
+      "bytes": 600,
+      "sha256": "911e4a8c179e26dd9a4bc3b81e2e4eaac86006fe2c9f06ccba87928aa4f6520a"
+    },
+    {
+      "path": "build-omm-cts-evidence/layer-native-final/0008-2c43918a1ba0.qpa",
+      "bytes": 14529,
+      "sha256": "a8d313ac03f09184d7b659c93f54cf177f9f8937baeb35c3d15cf5bf11b5b558"
+    },
+    {
+      "path": "build-omm-cts-evidence/layer-native-final/0008-2c43918a1ba0.stdout.txt",
+      "bytes": 590,
+      "sha256": "78cd3d66fbee42c900e0dadc9b7d1e669a1500869ee4cf3b0cedc41dd5bfa16b"
+    },
+    {
+      "path": "build-omm-cts-evidence/layer-native-final/0009-c585888dc0ff.qpa",
+      "bytes": 4180,
+      "sha256": "0d1f19e8445498e165ecd4fba90d57da4f54bdb4064cb18ef3190ba8c9b3e4fc"
+    },
+    {
+      "path": "build-omm-cts-evidence/layer-native-final/0009-c585888dc0ff.stdout.txt",
+      "bytes": 681,
+      "sha256": "391b4ed6c04b8e8e1c60182d32af00d4b9654ed5f2d4bd1d8db6a3e6d844f40a"
+    },
+    {
+      "path": "build-omm-cts-evidence/layer-native-final/0010-55cd57923a93.qpa",
+      "bytes": 4192,
+      "sha256": "63e45f7613403a5cad68c86aa61ad2508889ce77acbb77e328369f5c54a50189"
+    },
+    {
+      "path": "build-omm-cts-evidence/layer-native-final/0010-55cd57923a93.stdout.txt",
+      "bytes": 685,
+      "sha256": "5d23be071cdaa170673855ee6ad58361881cc2881b2ab7ebabb3a86047a0019e"
+    },
+    {
+      "path": "build-omm-cts-evidence/layer-native-final/layer_snapshot/VkLayer_VEL_opacity_micromap.dll",
+      "bytes": 307712,
+      "sha256": "347a770ac296d605d71971f8eefd737615a35f9eee44a50efab1bf09841d6664"
+    },
+    {
+      "path": "build-omm-cts-evidence/layer-native-final/layer_snapshot/VkLayer_VEL_opacity_micromap.json",
+      "bytes": 469,
+      "sha256": "f510fd87bd3f7a64b028a27bb10fb1a1ea318968689a12c76bae99b35b5bc01f"
+    },
+    {
+      "path": "build-omm-cts-evidence/layer-native-final/summary.json",
+      "bytes": 14926,
+      "sha256": "d3b3da6e8f6284b8d2ddf04f8b3dfafee8bf5d94faa39597dc348accfb3846ec"
+    },
+    {
+      "path": "build-omm-cts-evidence/layer-software-admission/0001-927fdc40d4a8.qpa",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "build-omm-cts-evidence/layer-software-admission/0001-927fdc40d4a8.stdout.txt",
+      "bytes": 219,
+      "sha256": "b0da685a531e1798158f70c620737a6b6c76e15a4a192506718419ce52e58c06"
+    },
+    {
+      "path": "build-omm-cts-evidence/layer-software-admission/0002-9607468f29e7.qpa",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "build-omm-cts-evidence/layer-software-admission/0002-9607468f29e7.stdout.txt",
+      "bytes": 219,
+      "sha256": "b0da685a531e1798158f70c620737a6b6c76e15a4a192506718419ce52e58c06"
+    },
+    {
+      "path": "build-omm-cts-evidence/layer-software-admission/0003-c585888dc0ff.qpa",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "build-omm-cts-evidence/layer-software-admission/0003-c585888dc0ff.stdout.txt",
+      "bytes": 219,
+      "sha256": "b0da685a531e1798158f70c620737a6b6c76e15a4a192506718419ce52e58c06"
+    },
+    {
+      "path": "build-omm-cts-evidence/layer-software-admission/layer_snapshot/VkLayer_VEL_opacity_micromap.dll",
+      "bytes": 307712,
+      "sha256": "347a770ac296d605d71971f8eefd737615a35f9eee44a50efab1bf09841d6664"
+    },
+    {
+      "path": "build-omm-cts-evidence/layer-software-admission/layer_snapshot/VkLayer_VEL_opacity_micromap.json",
+      "bytes": 475,
+      "sha256": "ddbfaf3cf43de4040c885507231c5acd7774006d103ac64c73976382256f2bf1"
+    },
+    {
+      "path": "build-omm-cts-evidence/layer-software-admission/summary.json",
+      "bytes": 5744,
+      "sha256": "d46652d439b7339ffdc30188967076a5aad70ed20f50b982f50cace10a9e7210"
+    },
+    {
+      "path": "build-omm-cts-evidence/native-baseline/summary.json",
+      "bytes": 33073,
+      "sha256": "ca1b7be52cbfa24c382125f2d8ec675ba6993f5e2fbfb11d91b88e4aac1891e3"
+    },
+    {
+      "path": "build-omm-layer-api/above-snapshot.log",
+      "bytes": 1218,
+      "sha256": "3f5b1c28f2da203877d33a30af6496d3851badbe62ffc171d825dac70ae93904"
+    },
+    {
+      "path": "build-omm-layer-api/below-snapshot.log",
+      "bytes": 1218,
+      "sha256": "3f5b1c28f2da203877d33a30af6496d3851badbe62ffc171d825dac70ae93904"
+    },
+    {
+      "path": "build-omm-layer-api/layer_snapshot/evidence.json",
+      "bytes": 623,
+      "sha256": "332a594a36630ab2b804488f5abad5627054607e1928cecaf1fe7b789e13ba08"
+    },
+    {
+      "path": "build-omm-parent/layer-offline-final.log",
+      "bytes": 1092,
+      "sha256": "2b1d7ecba8c50144ad4044ca264b9c9e85dec91464edd1bcf5b36699703e1199"
+    },
+    {
+      "path": "build-omm-query-proceed/final-legacy-graphs.log",
+      "bytes": 1361,
+      "sha256": "c362aec5ecd3f47d35a64d3fb1e2e3b10f282693e4831f58cf6cb70cffc8a948"
+    },
+    {
+      "path": "build-omm-query-proceed/final-native-vvl.log",
+      "bytes": 975,
+      "sha256": "7e9b8a26f5f61f61170dac959db1a54907aca85f15d35df6086878dae23a3cb1"
+    },
+    {
+      "path": "build-omm-registry/registry-first.log",
+      "bytes": 136,
+      "sha256": "2ac8d68a361a569de41ac59c14bd6da7122883939a2259b98d5957244acf4502"
+    },
+    {
+      "path": "build-omm-storage/device-backend-replay-vvl-sync.log",
+      "bytes": 136,
+      "sha256": "434fbd193c41e283827ccac4bd23239ae5f3f3873edca157e1d739f63d6c8af4"
+    }
+  ],
+  "validation_runtime": [
+    {
+      "path": "C:/VulkanSDK/1.4.357.0/Bin/VkLayer_khronos_validation.dll",
+      "bytes": 21681592,
+      "sha256": "9725ce7a9225f42f8961c433dacae4cc8fae3a16e95ef1d0a7c7e8bc09132c40"
+    },
+    {
+      "path": "C:/VulkanSDK/1.4.357.0/Bin/VkLayer_khronos_validation.json",
+      "bytes": 129847,
+      "sha256": "20d3ef44fe96aa41fceefab2308892f9d4b346d23eebfe8b5e1690715f23f472"
+    }
+  ]
+}

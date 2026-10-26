@@ -1,0 +1,7 @@
+; Copyright 2026 The Khronos Group Inc.
+; SPDX-License-Identifier: Apache-2.0
+LIBRARY VkLayer_VEL_opacity_micromap
+EXPORTS
+    vkGetInstanceProcAddr
+    vkGetDeviceProcAddr
+    vkNegotiateLoaderLayerInterfaceVersion

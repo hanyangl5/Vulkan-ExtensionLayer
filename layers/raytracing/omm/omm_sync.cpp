@@ -1,0 +1,138 @@
+// Copyright 2026 The Khronos Group Inc.
+// SPDX-License-Identifier: Apache-2.0
+#include "omm_sync.h"
+#include <limits>
+#include <new>
+#include <stdexcept>
+#include <type_traits>
+#include <utility>
+
+namespace vel::omm {
+static_assert(std::is_nothrow_move_assignable_v<TranslatedDependency>);
+static_assert(std::is_nothrow_move_assignable_v<TranslatedLegacyBarriers>);
+namespace {
+constexpr VkAccessFlags2 micromap_access = VK_ACCESS_2_MICROMAP_READ_BIT_EXT | VK_ACCESS_2_MICROMAP_WRITE_BIT_EXT;
+// A micromap read can originally target AS_BUILD. The translated ShaderRead
+// needs compute in its stage scope as well; keep native AS/unrelated stages.
+VkPipelineStageFlags2 barrier_stage(VkPipelineStageFlags2 stages, VkAccessFlags2 accesses) noexcept {
+    auto result = map_stage2(stages);
+    if ((accesses & micromap_access) && !(result & VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT))
+        result |= VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT;
+    return result;
+}
+template <typename Barrier>
+void translate(Barrier& barrier) noexcept {
+    barrier.srcStageMask = barrier_stage(barrier.srcStageMask, barrier.srcAccessMask);
+    barrier.dstStageMask = barrier_stage(barrier.dstStageMask, barrier.dstAccessMask);
+    barrier.srcAccessMask = map_access2(barrier.srcAccessMask);
+    barrier.dstAccessMask = map_access2(barrier.dstAccessMask);
+}
+template <typename T>
+bool valid_array(uint32_t count, const T* pointer) noexcept {
+    return count == 0 || pointer;
+}
+template <typename T>
+void copy_array(std::vector<T>& destination, uint32_t count, const T* source) {
+    if (count) destination.assign(source, source + count);
+}
+}  // namespace
+VkPipelineStageFlags2 map_stage2(VkPipelineStageFlags2 stages) noexcept {
+    const auto result = stages & ~VK_PIPELINE_STAGE_2_MICROMAP_BUILD_BIT_EXT;
+    return (stages & VK_PIPELINE_STAGE_2_MICROMAP_BUILD_BIT_EXT) ? result | VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT : result;
+}
+VkAccessFlags2 map_access2(VkAccessFlags2 accesses) noexcept {
+    auto result = accesses & ~micromap_access;
+    if (accesses & VK_ACCESS_2_MICROMAP_READ_BIT_EXT) result |= VK_ACCESS_2_SHADER_READ_BIT;
+    if (accesses & VK_ACCESS_2_MICROMAP_WRITE_BIT_EXT) result |= VK_ACCESS_2_SHADER_WRITE_BIT;
+    return result;
+}
+VkPipelineStageFlags map_stage(VkPipelineStageFlags stages) noexcept {
+    static_assert(VK_PIPELINE_STAGE_2_MICROMAP_BUILD_BIT_EXT <= std::numeric_limits<VkPipelineStageFlags>::max());
+    const auto micromap = static_cast<VkPipelineStageFlags>(VK_PIPELINE_STAGE_2_MICROMAP_BUILD_BIT_EXT);
+    const auto result = stages & ~micromap;
+    return (stages & micromap) ? result | VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT : result;
+}
+VkAccessFlags map_access(VkAccessFlags accesses) noexcept { return accesses; }
+TranslatedDependency::TranslatedDependency() noexcept { source_.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO; }
+VkResult TranslatedDependency::assign(const VkDependencyInfo& source) noexcept {
+    if (!valid_array(source.memoryBarrierCount, source.pMemoryBarriers) ||
+        !valid_array(source.bufferMemoryBarrierCount, source.pBufferMemoryBarriers) ||
+        !valid_array(source.imageMemoryBarrierCount, source.pImageMemoryBarriers))
+        return VK_ERROR_INITIALIZATION_FAILED;
+    try {
+        TranslatedDependency next;
+        next.source_ = source;
+        copy_array(next.memory_, source.memoryBarrierCount, source.pMemoryBarriers);
+        copy_array(next.buffers_, source.bufferMemoryBarrierCount, source.pBufferMemoryBarriers);
+        copy_array(next.images_, source.imageMemoryBarrierCount, source.pImageMemoryBarriers);
+        for (auto& barrier : next.memory_) translate(barrier);
+        for (auto& barrier : next.buffers_) translate(barrier);
+        for (auto& barrier : next.images_) translate(barrier);
+        // Raw original array pointers are never exposed by view().
+        next.source_.pMemoryBarriers = nullptr;
+        next.source_.pBufferMemoryBarriers = nullptr;
+        next.source_.pImageMemoryBarriers = nullptr;
+        *this = std::move(next);
+        return VK_SUCCESS;
+    } catch (const std::bad_alloc&) {
+        return VK_ERROR_OUT_OF_HOST_MEMORY;
+    } catch (const std::length_error&) {
+        return VK_ERROR_OUT_OF_HOST_MEMORY;
+    }
+}
+VkDependencyInfo TranslatedDependency::view() const noexcept {
+    auto result = source_;
+    result.memoryBarrierCount = static_cast<uint32_t>(memory_.size());
+    result.bufferMemoryBarrierCount = static_cast<uint32_t>(buffers_.size());
+    result.imageMemoryBarrierCount = static_cast<uint32_t>(images_.size());
+    result.pMemoryBarriers = memory_.empty() ? nullptr : memory_.data();
+    result.pBufferMemoryBarriers = buffers_.empty() ? nullptr : buffers_.data();
+    result.pImageMemoryBarriers = images_.empty() ? nullptr : images_.data();
+    return result;
+}
+VkResult TranslatedLegacyBarriers::assign(VkPipelineStageFlags source_stages, VkPipelineStageFlags destination_stages,
+                                          VkDependencyFlags flags, uint32_t memory_count, const VkMemoryBarrier* memory,
+                                          uint32_t buffer_count, const VkBufferMemoryBarrier* buffers, uint32_t image_count,
+                                          const VkImageMemoryBarrier* images) noexcept {
+    if (!valid_array(memory_count, memory) || !valid_array(buffer_count, buffers) || !valid_array(image_count, images))
+        return VK_ERROR_INITIALIZATION_FAILED;
+    try {
+        TranslatedLegacyBarriers next;
+        next.source_stages_ = map_stage(source_stages);
+        next.destination_stages_ = map_stage(destination_stages);
+        next.flags_ = flags;
+        copy_array(next.memory_, memory_count, memory);
+        copy_array(next.buffers_, buffer_count, buffers);
+        copy_array(next.images_, image_count, images);
+        for (auto& barrier : next.memory_) {
+            barrier.srcAccessMask = map_access(barrier.srcAccessMask);
+            barrier.dstAccessMask = map_access(barrier.dstAccessMask);
+        }
+        for (auto& barrier : next.buffers_) {
+            barrier.srcAccessMask = map_access(barrier.srcAccessMask);
+            barrier.dstAccessMask = map_access(barrier.dstAccessMask);
+        }
+        for (auto& barrier : next.images_) {
+            barrier.srcAccessMask = map_access(barrier.srcAccessMask);
+            barrier.dstAccessMask = map_access(barrier.dstAccessMask);
+        }
+        *this = std::move(next);
+        return VK_SUCCESS;
+    } catch (const std::bad_alloc&) {
+        return VK_ERROR_OUT_OF_HOST_MEMORY;
+    } catch (const std::length_error&) {
+        return VK_ERROR_OUT_OF_HOST_MEMORY;
+    }
+}
+LegacyBarrierView TranslatedLegacyBarriers::view() const noexcept {
+    return {source_stages_,
+            destination_stages_,
+            flags_,
+            static_cast<uint32_t>(memory_.size()),
+            memory_.empty() ? nullptr : memory_.data(),
+            static_cast<uint32_t>(buffers_.size()),
+            buffers_.empty() ? nullptr : buffers_.data(),
+            static_cast<uint32_t>(images_.size()),
+            images_.empty() ? nullptr : images_.data()};
+}
+}  // namespace vel::omm

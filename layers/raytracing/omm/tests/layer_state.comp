@@ -1,0 +1,17 @@
+// Copyright 2026 The Khronos Group Inc.
+// SPDX-License-Identifier: Apache-2.0
+#version 460
+#extension GL_EXT_buffer_reference2 : require
+#extension GL_EXT_shader_explicit_arithmetic_types_int64 : require
+layout(local_size_x=1) in;
+layout(buffer_reference,std430,buffer_reference_align=4) buffer Results { uint values[]; };
+layout(constant_id=0) const uint64_t OutputAddress=uint64_t(0);
+layout(constant_id=1) const uint OutputIndex=0;
+layout(push_constant,std430) uniform Constants { uint values[32]; } pc;
+void main() {
+    uint value=0x9e3779b9u;
+    for (uint i=0; i<32; ++i) value=((value<<5)|(value>>27)) ^ (pc.values[i]+i*0x45d9f3bu);
+    // Output address/index are specialization constants, so a broken PC restore
+    // changes only the result, never turns an internal build address into a write.
+    Results(OutputAddress).values[OutputIndex]=value;
+}

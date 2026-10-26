@@ -1,0 +1,16 @@
+# Copyright 2026 The Khronos Group Inc.
+# SPDX-License-Identifier: Apache-2.0
+file(WRITE "${OUTPUT}" "// Generated from validated SPIR-V.\n#pragma once\n#include <cstdint>\n")
+foreach(kernel build copy)
+    file(READ "${INPUT_${kernel}}" bytes HEX)
+    string(REGEX MATCHALL "........" words "${bytes}")
+    file(APPEND "${OUTPUT}" "inline constexpr uint32_t vel_omm_${kernel}_spv[] = {\n")
+    foreach(word ${words})
+        string(SUBSTRING ${word} 6 2 a)
+        string(SUBSTRING ${word} 4 2 b)
+        string(SUBSTRING ${word} 2 2 c)
+        string(SUBSTRING ${word} 0 2 d)
+        file(APPEND "${OUTPUT}" "0x${a}${b}${c}${d},\n")
+    endforeach()
+    file(APPEND "${OUTPUT}" "};\n")
+endforeach()

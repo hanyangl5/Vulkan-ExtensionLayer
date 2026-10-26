@@ -1,0 +1,7 @@
+# Copyright 2026 The Khronos Group Inc.
+# SPDX-License-Identifier: Apache-2.0
+# External CTS d18e4c68543103371715845cd914c71e5859963e.
+# Development admission probes: these are not expected software qualification passes.
+dEQP-VK.ray_query.opacity_micromap.ext.copy.clone.2.level_1
+dEQP-VK.ray_query.opacity_micromap.ext.render.compute_shader.no_flags.map_value.2.level_1
+dEQP-VK.ray_tracing_pipeline.opacity_micromap.ext.query.compacted_size

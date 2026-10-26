@@ -1,0 +1,37 @@
+// Copyright 2026 The Khronos Group Inc.
+// SPDX-License-Identifier: Apache-2.0
+#version 460
+#extension GL_EXT_buffer_reference2 : require
+#extension GL_EXT_shader_explicit_arithmetic_types_int64 : require
+
+// Copies the canonical active span read from the GPU header, independent of
+// CPU recording order, previous builds, object over-allocation, or CB replay.
+layout(local_size_x = 64) in;
+layout(buffer_reference, std430, buffer_reference_align = 4) readonly buffer Source { uint words[]; };
+layout(buffer_reference, std430, buffer_reference_align = 4) buffer Destination { uint words[]; };
+layout(push_constant, std430) uniform Copy {
+    uint64_t source;
+    uint64_t destination;
+    uint64_t sourceCapacity;
+    uint64_t destinationCapacity;
+} copy;
+
+uint get32(uint64_t offset) { return Source(copy.source + offset).words[0]; }
+uint64_t get64(uint64_t offset) { return uint64_t(get32(offset)) | (uint64_t(get32(offset + 4ul)) << 32u); }
+
+void main() {
+    const uint64_t maximum = 0xfffffffffffffffful;
+    if (gl_GlobalInvocationID.y != 0u || gl_GlobalInvocationID.z != 0u || copy.source == 0ul || copy.destination == 0ul ||
+        (copy.source & 3ul) != 0ul || (copy.destination & 3ul) != 0ul || copy.sourceCapacity < 64ul ||
+        copy.destinationCapacity < 64ul || copy.sourceCapacity > maximum - copy.source ||
+        copy.destinationCapacity > maximum - copy.destination) return;
+    if (get32(0ul) != 0x4f4c4556u || get32(4ul) != 0x00004d4du || get32(8ul) != 1u || get32(12ul) != 64u ||
+        get64(32ul) != 64ul || get64(48ul) != 0ul || get64(56ul) != 0ul) return;
+    uint64_t activeSize = get64(16ul), count = get64(24ul);
+    if (activeSize < 64ul || (activeSize & 15ul) != 0ul || activeSize > copy.sourceCapacity || activeSize > copy.destinationCapacity ||
+        count > (maximum - 79ul) / 24ul || get64(40ul) != ((64ul + count * 24ul + 15ul) & ~15ul) ||
+        get64(40ul) > activeSize || (copy.source < copy.destination + activeSize && copy.destination < copy.source + activeSize)) return;
+    uint64_t step = uint64_t(gl_NumWorkGroups.x) * 64ul;
+    for (uint64_t word = uint64_t(gl_GlobalInvocationID.x); word < (activeSize >> 2u); word += step)
+        Destination(copy.destination + word * 4ul).words[0] = get32(word * 4ul);
+}
