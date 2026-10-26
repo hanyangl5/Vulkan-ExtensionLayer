@@ -45,6 +45,8 @@ add_library(${VKRT_LAYER_NAME} SHARED
    src/vkrt_spirv_ids.cpp
    src/vkrt_virtual_as.c
    src/vkrt_as_registry.c
+   src/vkrt_as_copy.c
+   src/vkrt_deferred.c
    src/vkrt_build.c
    src/vkrt_features.c
    src/vkrt_discovery.c
@@ -52,6 +54,18 @@ add_library(${VKRT_LAYER_NAME} SHARED
    src/vkrt_commands.c
    src/vkrt_sync.c
 )
+
+# The canonical AS/RQ layer and future RTP scheduling use the same typed SPIR-V
+# compiler. This target has no SPIRV-Cross/GLSL regex or legacy builder runtime.
+set(VKRT_TYPED_SOURCE ${CMAKE_CURRENT_SOURCE_DIR}/../../layers/raytracing)
+add_library(vkrt_typed_compiler STATIC
+   ${VKRT_TYPED_SOURCE}/continuations.cpp ${VKRT_TYPED_SOURCE}/frame_emitter.cpp
+   ${VKRT_TYPED_SOURCE}/state_compiler.cpp ${VKRT_TYPED_SOURCE}/typed_pipeline.cpp)
+target_include_directories(vkrt_typed_compiler PUBLIC ${VKRT_TYPED_SOURCE} ${Vulkan_INCLUDE_DIRS} ${VKRT_SPIRV_HEADERS_INCLUDE_DIR})
+target_link_libraries(vkrt_typed_compiler PUBLIC ${VKRT_SPIRV_LIBRARIES})
+target_compile_features(vkrt_typed_compiler PUBLIC cxx_std_17)
+set_target_properties(vkrt_typed_compiler PROPERTIES POSITION_INDEPENDENT_CODE ON)
+target_link_libraries(${VKRT_LAYER_NAME} PRIVATE vkrt_typed_compiler)
 
 # Traversal function library: compiled from GLSL to SPIR-V and embedded
 # into shader modules at vkCreateShaderModule time.
@@ -103,6 +117,7 @@ set(VKRT_BVH_SHADER_SOURCES
    bvh/leaf.comp
    bvh/leaf_bvh4.comp
    bvh/vkrt_bvh4_prepare.comp
+   bvh/vkrt_bvh4_copy.comp
    ../../layers/common/rt_fallback/bvh4_mesa_encode.comp
    bvh/id_prefix_sum.comp
    bvh/morton_sort.comp
@@ -141,6 +156,7 @@ foreach(_vkrt_bvh_src IN LISTS VKRT_BVH_SHADER_SOURCES)
          ${CMAKE_CURRENT_SOURCE_DIR}/bvh/vk_bvh_helpers.h
          ${CMAKE_CURRENT_SOURCE_DIR}/bvh/leaf.h
          ${VKRT_COMMON_BVH4}/as_address.glsl
+         ${VKRT_COMMON_BVH4}/bvh4_abi.glsl
          ${CMAKE_CURRENT_SOURCE_DIR}/bvh/pair_triangles.h
          ${CMAKE_CURRENT_SOURCE_DIR}/embed_spv.cmake
       COMMENT "Compiling GPU BVH builder ${_vkrt_bvh_name}"
@@ -327,6 +343,11 @@ target_link_libraries(test_gpu_build PRIVATE vkrt_cpu_bvh ${Vulkan_LIBRARIES})
 set_target_properties(test_gpu_build PROPERTIES C_STANDARD 11)
 add_dependencies(test_gpu_build vkrt_test_rq_spv)
 
+add_executable(test_as_copy ../tests/test_as_copy.c)
+target_link_libraries(test_as_copy PRIVATE vkrt_cpu_bvh ${Vulkan_LIBRARIES})
+set_target_properties(test_as_copy PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED ON)
+add_dependencies(test_as_copy vkrt_test_rq_spv)
+
 set(VKRT_TEST_GETTER_SPV ${CMAKE_CURRENT_BINARY_DIR}/rq_sbt_offset.spv)
 add_custom_command(
    OUTPUT ${VKRT_TEST_GETTER_SPV}
@@ -347,6 +368,13 @@ if(BUILD_TESTING)
    target_include_directories(probe_bda_alignment PRIVATE ${Vulkan_INCLUDE_DIRS})
    target_link_libraries(probe_bda_alignment PRIVATE ${Vulkan_LIBRARIES})
    set_target_properties(probe_bda_alignment PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED ON)
+   add_executable(test_deferred_device ../tests/test_deferred_device.c)
+   target_include_directories(test_deferred_device PRIVATE ${Vulkan_INCLUDE_DIRS})
+   target_link_libraries(test_deferred_device PRIVATE ${Vulkan_LIBRARIES})
+   set_target_properties(test_deferred_device PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED ON)
+   add_test(NAME vkrt.deferred_device COMMAND test_deferred_device)
+   set_tests_properties(vkrt.deferred_device PROPERTIES
+      ENVIRONMENT "VK_LAYER_PATH=${CMAKE_BINARY_DIR}/layers;VK_INSTANCE_LAYERS=" LABELS "gpu;no_native_rt" TIMEOUT 60)
    set(VKRT_CLASSIFICATION_SPV ${CMAKE_CURRENT_BINARY_DIR}/traversal_classification.spv)
    add_custom_command(
       OUTPUT ${VKRT_CLASSIFICATION_SPV}
@@ -425,6 +453,19 @@ if(BUILD_TESTING)
    set_target_properties(test_as_registry PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED ON)
    add_test(NAME vkrt.as_registry COMMAND test_as_registry)
    set_tests_properties(vkrt.as_registry PROPERTIES LABELS "offline;no_native_rt;concurrency" TIMEOUT 60)
+   add_executable(test_deferred ../tests/test_deferred.c src/vkrt_deferred.c)
+   target_include_directories(test_deferred PRIVATE src ${CMAKE_CURRENT_BINARY_DIR} ${Vulkan_INCLUDE_DIRS})
+   target_link_libraries(test_deferred PRIVATE Threads::Threads)
+   set_target_properties(test_deferred PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED ON)
+   add_test(NAME vkrt.deferred COMMAND test_deferred)
+   set_tests_properties(vkrt.deferred PROPERTIES LABELS "offline;no_native_rt;concurrency" TIMEOUT 60)
+   add_executable(test_as_copy_host ../tests/test_as_copy_host.c src/vkrt_as_copy.c)
+   target_include_directories(test_as_copy_host PRIVATE src ${CMAKE_CURRENT_BINARY_DIR}/bvh ${VKRT_COMMON_BVH4} ${Vulkan_INCLUDE_DIRS})
+   target_link_libraries(test_as_copy_host PRIVATE Threads::Threads)
+   set_target_properties(test_as_copy_host PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED ON)
+   add_dependencies(test_as_copy_host vkrt_bvh_spv)
+   add_test(NAME vkrt.as_copy_host COMMAND test_as_copy_host)
+   set_tests_properties(vkrt.as_copy_host PROPERTIES LABELS "offline;no_native_rt")
    add_test(NAME vkrt.spirv_ids COMMAND test_spirv_ids)
    set_tests_properties(vkrt.host_translation vkrt.spirv_ids PROPERTIES LABELS "offline")
    add_test(NAME vkrt.spirv_lower COMMAND test_spirv_lower
@@ -441,7 +482,8 @@ if(BUILD_TESTING)
    add_test(NAME vkrt.gpu_build.native COMMAND test_gpu_build)
    add_test(NAME vkrt.gpu_build.aligned_values COMMAND test_gpu_build --aligned-values)
    add_test(NAME vkrt.gpu_build.aligned_values.native COMMAND test_gpu_build --aligned-values)
-   set_tests_properties(vkrt.cpu_fixture vkrt.gpu_build.software vkrt.gpu_build.aligned_values PROPERTIES
+   add_test(NAME vkrt.as_copy.software COMMAND test_as_copy)
+   set_tests_properties(vkrt.cpu_fixture vkrt.gpu_build.software vkrt.gpu_build.aligned_values vkrt.as_copy.software PROPERTIES
       ENVIRONMENT "VK_LAYER_PATH=${CMAKE_BINARY_DIR}/layers;VK_INSTANCE_LAYERS=VK_LAYER_VKRT_SOFTWARE_RAY_QUERY"
       LABELS "gpu" TIMEOUT 600)
    set_tests_properties(vkrt.gpu_build.native PROPERTIES ENVIRONMENT "VK_INSTANCE_LAYERS=" LABELS "gpu;native_rt" TIMEOUT 600)

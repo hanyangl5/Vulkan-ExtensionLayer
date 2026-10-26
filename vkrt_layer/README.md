@@ -56,7 +56,7 @@ $env:VK_INSTANCE_LAYERS='VK_LAYER_VKRT_SOFTWARE_RAY_QUERY'
 
 Disable other RT fallback layers before running. The GPU tests currently require native RT capability exposure and the software backend's real prerequisites: BDA, scalar block layout, shader int8/int16/int64, buffer 8/16-bit access, the Vulkan memory model with device scope, SSBO dynamic/nonuniform indexing, variablePointersStorageBuffer and a compatible HOST_VISIBLE | HOST_COHERENT memory type for private resolver buffers. The [AS address ABI](../layers/common/rt_fallback/AS_ADDRESS_ABI.md) explains public values, physical roots and publication lifetime.
 
-CTest currently defines twelve offline tests and six GPU tests. The `cpu_fixture` test uploads a CPU-built fixture but still executes a shader on the GPU. Native GPU tests disable this layer; software AS tests enable it through their CTest environment. `gpu_build.aligned_values` binds output buffers at their smallest legal nonzero memory offset and checks GENERIC AS aliases, relative offsets, GPU builds and query results. The `no_native_rt` traversal test executes production helpers on ordinary compute without enabling native RT or the fallback layer; it validates those helpers, not a complete no-RT AS/layer path.
+CTest currently defines fourteen offline tests and eight GPU tests. The `cpu_fixture` test uploads a CPU-built fixture but still executes a shader on the GPU. Native GPU tests disable this layer; software AS tests enable it through their CTest environment. `gpu_build.aligned_values` checks legal AS suballocations and GENERIC values. `as_copy.software` builds, clones and compacts unmapped device-local BLAS/TLAS storage, including copies beyond the first dispatch stride. The `no_native_rt` traversal test executes production helpers on ordinary compute without enabling native RT or the fallback layer; it validates those helpers, not a complete no-RT AS/layer path.
 
 ```sh
 # All tests, including software and native GPU execution:
@@ -81,17 +81,18 @@ The optional sample launches `sample ray_queries` after the tests. It is interac
 ## Implemented path and limits
 
 - GPU BUILD of triangle/AABB BLAS and instance TLAS through Mesa construction IR in application scratch, then direct GPU encoding to shared BVH4. Final AS storage contains only BVH4 header, nodes, leaves and parents; it preserves original IDs, full geometry flags, transforms and runtime BLAS addresses.
+- GPU CLONE/COMPACT reads execution-time BVH4 total_size, publishes the destination, copies with 64-bit strided addressing and restores application command state. COMPACT retains the same representation/size. Synchronous deferred operations are layer-owned and need no native RT extension.
 - Resumable software candidate/committed traversal, triangle confirmation, generated AABB intersections, and the getters currently mapped by `vkrt_spirv_lower.cpp`, including the base instance SBT-offset getter with candidate/committed selection.
 - AS descriptor/layout/pool translation and compute build-state restoration; dependencies translate barriers, submit, events, timestamps and render-pass masks.
 - Constant-space parent traversal visits all four child slots, preserves TLAS/BLAS cursors across candidate suspension, and has no fixed-stack overflow truncation. GPU regression covers depth140 and Confirm-driven pruning.
 - Value-preserving AS lowering reads lifetime-owned address cells, retains scalar/array selection and integer conversion, and stores a separate root in each query. Supported helper/Phi and NonUniform paths have compile/CTS evidence. Each cell still consumes an SSBO descriptor and an allocation; full layout/budget transparency is not proven.
-- RT pipeline shaders, SBT dispatch, UPDATE/refit, AS copy/compaction/serialization, indirect builds, micromaps, and motion geometry are not implemented. PLOC/HPLOC sources are not active runtime backends.
-- AABB opacity applies ray/instance/geometry precedence through the shared opacity helper. Some unsupported commands only log an error; unsupported host AS paths are not fully intercepted. Do not treat an unimplemented API as a supported no-op.
+- Production RT pipeline shaders/SBT dispatch, UPDATE/refit, AS property queries/serialization, indirect builds, micromaps and motion geometry remain incomplete. Typed BDA stage compilation/linking is built as a shared backend component; canonical RTP API integration is still pending. PLOC/HPLOC sources are not active runtime backends.
+- AABB opacity applies ray/instance/geometry precedence through the shared opacity helper. Unsupported command stubs mark recording failed; unsupported AS query pools are rejected before downstream creation. Optional host AS paths are not fully intercepted.
 - Builds require a compute-capable queue outside a render pass. Node-address and dispatch limits constrain build size. Multi-queue ownership and cross-vendor execution have not been comprehensively validated.
 
 See [STATUS.md](STATUS.md) for the original test records and known issues, [IR_CONTRACT_V2.md](IR_CONTRACT_V2.md) for construction IR, [the shared ABI](../layers/common/rt_fallback/bvh4_abi.h) for runtime layout, and [the original design](rayquery_software_rt_layer_design.md) for the implementation milestones. Historical test results are retained as evidence for their original revisions; importing the patch into VEL is not a new GPU validation result.
 
-Actual external CTS on RTX3080 now exercises shared BVH4 with Khronos validation; see the [current checkpoint](../docs/rt_cts_bvh4_2026-10-26.md). This is a selected development matrix, not full conformance or physical no-RT qualification.
+Actual external CTS on RTX3080 now exercises shared BVH4 and CLONE with Khronos validation: [54 pass, 2 retained failures](../docs/rt_cts_copy_pipeline_2026-10-26.md). This is a selected development matrix, not full conformance or physical no-RT qualification.
 
 ## Source provenance
 

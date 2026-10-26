@@ -87,6 +87,10 @@ struct ContinuationFrameOptions {
     // A source-CFG state compiler also needs local backing for a shader that
     // returns without suspending (for example a closest-hit/callable callee).
     bool persistent_function_storage = false;
+    bool physical_frame_addresses = false;
+    // Reserved transport/system bytes before all function/SSA slots. Slot
+    // offsets and FunctionFrame::size include this prefix; type layouts do not.
+    uint32_t prefix_bytes = 0;
 };
 struct ContinuationFrames {
     ContinuationAnalysis analysis;

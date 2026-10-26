@@ -3,6 +3,26 @@
 #include "vkrt_chain.h"
 #include "vkrt_as_registry.h"
 
+VKAPI_ATTR VkResult VKAPI_CALL vkrt_CreateQueryPool(VkDevice device, const VkQueryPoolCreateInfo *info,
+                                                    const VkAllocationCallbacks *allocator, VkQueryPool *pool) {
+    struct vkrt_device_data *dev = VKRT_FIND(struct vkrt_device_data, device);
+    if (!dev) return VK_ERROR_INITIALIZATION_FAILED;
+    switch (info->queryType) {
+        case VK_QUERY_TYPE_ACCELERATION_STRUCTURE_COMPACTED_SIZE_KHR:
+        case VK_QUERY_TYPE_ACCELERATION_STRUCTURE_SERIALIZATION_SIZE_KHR:
+        case VK_QUERY_TYPE_ACCELERATION_STRUCTURE_SIZE_KHR:
+        case VK_QUERY_TYPE_ACCELERATION_STRUCTURE_SERIALIZATION_BOTTOM_LEVEL_POINTERS_KHR:
+            /* These values cannot be passed to an ICD whose AS extension was
+             * consumed by this layer. Full GPU query storage/publication is
+             * mandatory work still pending; do not create a native RT pool. */
+            *pool = VK_NULL_HANDLE;
+            VKRT_LOG_ERR("AS property query pools require software query storage and result publication");
+            return VK_ERROR_FEATURE_NOT_PRESENT;
+        default:
+            return dev->vtable.CreateQueryPool(device, info, allocator, pool);
+    }
+}
+
 static VkResult track_as_buffer(struct vkrt_device_data *dev, VkResult result, VkBuffer buffer, VkDeviceSize size,
                                 VkBufferUsageFlags2KHR usage, const VkAllocationCallbacks *allocator, VkBuffer *out) {
     if (result != VK_SUCCESS || !(usage & VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR)) return result;
@@ -26,6 +46,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkrt_CreateBuffer(VkDevice device, const VkBuffer
                                                  const VkAllocationCallbacks *allocator, VkBuffer *buffer) {
     struct vkrt_device_data *dev = VKRT_FIND(struct vkrt_device_data, device);
     if (!dev) return VK_ERROR_INITIALIZATION_FAILED;
+    if (!dev->as_registry) return dev->vtable.CreateBuffer(device, info, allocator, buffer);
     VkBufferCreateInfo local = *info;
     local.usage = (VkBufferUsageFlags)buffer_usage(info->usage);
     const VkBaseInStructure *existing = info->pNext;
@@ -156,6 +177,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkrt_AllocateMemory(VkDevice device,
 {
    struct vkrt_device_data *dev = VKRT_FIND(struct vkrt_device_data, device);
    if (!dev) return VK_ERROR_INITIALIZATION_FAILED;
+   if (!dev->as_registry) return dev->vtable.AllocateMemory(device, info, allocator, memory);
    const VkBaseInStructure *existing = info->pNext;
    while (existing && existing->sType != VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_FLAGS_INFO)
       existing = existing->pNext;

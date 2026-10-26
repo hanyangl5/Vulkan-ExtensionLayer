@@ -311,6 +311,7 @@ run_ray(VkAccelerationStructureKHR tlas, const float origin[3],
         const float dir[3], float tmin, float tmax,
         uint32_t flags, uint32_t mask, struct out_block *out)
 {
+#ifndef VKRT_TEST_FIXTURE_ONLY
     /* This fixture uploads private AS bytes instead of recording a legal
      * Vulkan build. Publish its root address explicitly before shader use. */
     PFN_vkGetAccelerationStructureDeviceAddressKHR get_address =
@@ -321,199 +322,204 @@ run_ray(VkAccelerationStructureKHR tlas, const float origin[3],
         fprintf(stderr, "fixture AS address is unavailable\n");
         exit(1);
     }
-   memset(out, 0, sizeof(*out));
-   out->primitive_index = 0xFFFFFFFFu;
-   out->t = -1.0f;
+#endif
+    memset(out, 0, sizeof(*out));
+    out->primitive_index = 0xFFFFFFFFu;
+    out->t = -1.0f;
 
-   struct gpu_buf outbuf;
-   buf_create(sizeof(*out),
-              VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
-              VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
-              VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
-              VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, &outbuf);
+    struct gpu_buf outbuf;
+    buf_create(sizeof(*out), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
+               VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, &outbuf);
 
-   /* --- descriptor set layout: AS + storage buffer ---------------- */
-   VkDescriptorSetLayoutBinding b[2] = {
-      { .binding = 0,
-        .descriptorType = VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR,
-        .descriptorCount = 1,
-        .stageFlags = VK_SHADER_STAGE_COMPUTE_BIT },
-      { .binding = 1,
-        .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-        .descriptorCount = 1,
-        .stageFlags = VK_SHADER_STAGE_COMPUTE_BIT },
-   };
-   VkDescriptorSetLayoutCreateInfo dslci = {
-      .sType        = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
-      .bindingCount = 2,
-      .pBindings    = b,
-   };
-   VkDescriptorSetLayout dsl;
-   CHECK(vkCreateDescriptorSetLayout(g_dev, &dslci, NULL, &dsl));
+    /* --- descriptor set layout: AS + storage buffer ---------------- */
+    VkDescriptorSetLayoutBinding b[2] = {
+        {.binding = 0,
+         .descriptorType = VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR,
+         .descriptorCount = 1,
+         .stageFlags = VK_SHADER_STAGE_COMPUTE_BIT},
+        {.binding = 1,
+         .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+         .descriptorCount = 1,
+         .stageFlags = VK_SHADER_STAGE_COMPUTE_BIT},
+    };
+    VkDescriptorSetLayoutCreateInfo dslci = {
+        .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
+        .bindingCount = 2,
+        .pBindings = b,
+    };
+    VkDescriptorSetLayout dsl;
+    CHECK(vkCreateDescriptorSetLayout(g_dev, &dslci, NULL, &dsl));
 
-   VkPushConstantRange pcr = {
-      .stageFlags = VK_SHADER_STAGE_COMPUTE_BIT,
-      .offset     = 0,
-      .size       = 48,
-   };
-   VkPipelineLayoutCreateInfo plci = {
-      .sType                  = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
-      .setLayoutCount         = 1,
-      .pSetLayouts            = &dsl,
-      .pushConstantRangeCount = 1,
-      .pPushConstantRanges    = &pcr,
-   };
-   VkPipelineLayout pl;
-   CHECK(vkCreatePipelineLayout(g_dev, &plci, NULL, &pl));
+    VkPushConstantRange pcr = {
+        .stageFlags = VK_SHADER_STAGE_COMPUTE_BIT,
+        .offset = 0,
+        .size = 48,
+    };
+    VkPipelineLayoutCreateInfo plci = {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
+        .setLayoutCount = 1,
+        .pSetLayouts = &dsl,
+        .pushConstantRangeCount = 1,
+        .pPushConstantRanges = &pcr,
+    };
+    VkPipelineLayout pl;
+    CHECK(vkCreatePipelineLayout(g_dev, &plci, NULL, &pl));
 
-   /* --- pipeline -------------------------------------------------- */
-   size_t words = 0;
-   uint32_t *spv = read_spv("rq_test.comp.spv", &words);
-   VkShaderModuleCreateInfo smci = {
-      .sType    = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO,
-      .codeSize = words * 4,
-      .pCode    = spv,
-   };
-   VkShaderModule sm;
-   CHECK(vkCreateShaderModule(g_dev, &smci, NULL, &sm));
-   free(spv);
+    /* --- pipeline -------------------------------------------------- */
+    size_t words = 0;
+    uint32_t *spv = read_spv("rq_test.comp.spv", &words);
+    VkShaderModuleCreateInfo smci = {
+        .sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO,
+        .codeSize = words * 4,
+        .pCode = spv,
+    };
+    VkShaderModule sm;
+    CHECK(vkCreateShaderModule(g_dev, &smci, NULL, &sm));
+    free(spv);
 
-   VkComputePipelineCreateInfo cpci = {
-      .sType  = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO,
-      .stage  = { .sType  = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
-                  .stage  = VK_SHADER_STAGE_COMPUTE_BIT,
+    VkComputePipelineCreateInfo cpci = {
+        .sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO,
+        .stage = {.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
+                  .stage = VK_SHADER_STAGE_COMPUTE_BIT,
                   .module = sm,
-                  .pName  = "main" },
-      .layout = pl,
-   };
-   VkPipeline pipe;
-   CHECK(vkCreateComputePipelines(g_dev, VK_NULL_HANDLE, 1, &cpci, NULL, &pipe));
+                  .pName = "main"},
+        .layout = pl,
+    };
+    VkPipeline pipe;
+    CHECK(vkCreateComputePipelines(g_dev, VK_NULL_HANDLE, 1, &cpci, NULL, &pipe));
 
-   /* --- descriptor set -------------------------------------------- */
-   VkDescriptorPoolSize sizes[2] = {
-      { VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR, 1 },
-      { VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1 },
-   };
-   VkDescriptorPoolCreateInfo dpci = {
-      .sType         = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
-      .maxSets       = 1,
-      .poolSizeCount = 2,
-      .pPoolSizes    = sizes,
-   };
-   VkDescriptorPool dp;
-   CHECK(vkCreateDescriptorPool(g_dev, &dpci, NULL, &dp));
+    /* --- descriptor set -------------------------------------------- */
+    VkDescriptorPoolSize sizes[2] = {
+        {VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR, 1},
+        {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1},
+    };
+    VkDescriptorPoolCreateInfo dpci = {
+        .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
+        .maxSets = 1,
+        .poolSizeCount = 2,
+        .pPoolSizes = sizes,
+    };
+    VkDescriptorPool dp;
+    CHECK(vkCreateDescriptorPool(g_dev, &dpci, NULL, &dp));
 
-   VkDescriptorSetAllocateInfo dsai = {
-      .sType              = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
-      .descriptorPool     = dp,
-      .descriptorSetCount = 1,
-      .pSetLayouts        = &dsl,
-   };
-   VkDescriptorSet ds;
-   CHECK(vkAllocateDescriptorSets(g_dev, &dsai, &ds));
+    VkDescriptorSetAllocateInfo dsai = {
+        .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
+        .descriptorPool = dp,
+        .descriptorSetCount = 1,
+        .pSetLayouts = &dsl,
+    };
+    VkDescriptorSet ds;
+    CHECK(vkAllocateDescriptorSets(g_dev, &dsai, &ds));
 
-   VkWriteDescriptorSetAccelerationStructureKHR as_write = {
-      .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET_ACCELERATION_STRUCTURE_KHR,
-      .accelerationStructureCount = 1,
-      .pAccelerationStructures = &tlas,
-   };
-   VkDescriptorBufferInfo bi = { .buffer = outbuf.buf, .offset = 0, .range = VK_WHOLE_SIZE };
-   VkWriteDescriptorSet w[2] = {
-      { .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-        .pNext = &as_write,
-        .dstSet = ds, .dstBinding = 0, .descriptorCount = 1,
-        .descriptorType = VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR },
-      { .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-        .dstSet = ds, .dstBinding = 1, .descriptorCount = 1,
-        .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-        .pBufferInfo = &bi },
-   };
-   vkUpdateDescriptorSets(g_dev, 2, w, 0, NULL);
+    VkWriteDescriptorSetAccelerationStructureKHR as_write = {
+        .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET_ACCELERATION_STRUCTURE_KHR,
+        .accelerationStructureCount = 1,
+        .pAccelerationStructures = &tlas,
+    };
+    VkDescriptorBufferInfo bi = {.buffer = outbuf.buf, .offset = 0, .range = VK_WHOLE_SIZE};
+    VkWriteDescriptorSet w[2] = {
+        {.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+         .pNext = &as_write,
+         .dstSet = ds,
+         .dstBinding = 0,
+         .descriptorCount = 1,
+         .descriptorType = VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR},
+        {.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+         .dstSet = ds,
+         .dstBinding = 1,
+         .descriptorCount = 1,
+         .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+         .pBufferInfo = &bi},
+    };
+    vkUpdateDescriptorSets(g_dev, 2, w, 0, NULL);
 
-   /* --- record + submit ------------------------------------------- */
-   struct {
-      float    origin[3], tmin;
-      float    dir[3],   tmax;
-      uint32_t flags, mask;
-   } push;
-   memcpy(push.origin, origin, 12);
-   memcpy(push.dir, dir, 12);
-   push.tmin = tmin; push.tmax = tmax;
-   push.flags = flags; push.mask = mask;
+    /* --- record + submit ------------------------------------------- */
+    struct {
+        float origin[3], tmin;
+        float dir[3], tmax;
+        uint32_t flags, mask;
+    } push;
+    memcpy(push.origin, origin, 12);
+    memcpy(push.dir, dir, 12);
+    push.tmin = tmin;
+    push.tmax = tmax;
+    push.flags = flags;
+    push.mask = mask;
 
-   VkCommandBufferAllocateInfo cbai = {
-      .sType              = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
-      .commandPool        = g_pool,
-      .level              = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
-      .commandBufferCount = 1,
-   };
-   VkCommandBuffer cb;
-   CHECK(vkAllocateCommandBuffers(g_dev, &cbai, &cb));
+    VkCommandBufferAllocateInfo cbai = {
+        .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
+        .commandPool = g_pool,
+        .level = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
+        .commandBufferCount = 1,
+    };
+    VkCommandBuffer cb;
+    CHECK(vkAllocateCommandBuffers(g_dev, &cbai, &cb));
 
-   VkCommandBufferBeginInfo begin = {
-      .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
-      .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
-   };
-   CHECK(vkBeginCommandBuffer(cb, &begin));
-   vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_COMPUTE, pipe);
-   vkCmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_COMPUTE, pl, 0, 1, &ds, 0, NULL);
-   vkCmdPushConstants(cb, pl, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(push), &push);
-   if (g_before_dispatch) g_before_dispatch(cb);
-   vkCmdDispatch(cb, 1, 1, 1);
-   VkMemoryBarrier host_barrier = {.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER,
-      .srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT | VK_ACCESS_ACCELERATION_STRUCTURE_WRITE_BIT_KHR,
-      .dstAccessMask = VK_ACCESS_HOST_READ_BIT};
-   vkCmdPipelineBarrier(cb, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, VK_PIPELINE_STAGE_HOST_BIT,
-      0, 1, &host_barrier, 0, NULL, 0, NULL);
-   CHECK(vkEndCommandBuffer(cb));
+    VkCommandBufferBeginInfo begin = {
+        .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
+        .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
+    };
+    CHECK(vkBeginCommandBuffer(cb, &begin));
+    vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_COMPUTE, pipe);
+    vkCmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_COMPUTE, pl, 0, 1, &ds, 0, NULL);
+    vkCmdPushConstants(cb, pl, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(push), &push);
+    if (g_before_dispatch) g_before_dispatch(cb);
+    vkCmdDispatch(cb, 1, 1, 1);
+    VkMemoryBarrier host_barrier = {.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER,
+                                    .srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT | VK_ACCESS_ACCELERATION_STRUCTURE_WRITE_BIT_KHR,
+                                    .dstAccessMask = VK_ACCESS_HOST_READ_BIT};
+    vkCmdPipelineBarrier(cb, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, VK_PIPELINE_STAGE_HOST_BIT, 0, 1, &host_barrier, 0, NULL, 0, NULL);
+    CHECK(vkEndCommandBuffer(cb));
 
-   VkSubmitInfo sub = {
-      .sType              = VK_STRUCTURE_TYPE_SUBMIT_INFO,
-      .commandBufferCount = 1,
-      .pCommandBuffers    = &cb,
-   };
-   VkPipelineStageFlags wait_stage = VK_PIPELINE_STAGE_ACCELERATION_STRUCTURE_BUILD_BIT_KHR;
-   if (g_submit_wait) {
-      sub.waitSemaphoreCount = 1;
-      sub.pWaitSemaphores = &g_submit_wait;
-      sub.pWaitDstStageMask = &wait_stage;
-   }
-   if (g_submit_sync2) {
-      VkCommandBufferSubmitInfo command = {.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO, .commandBuffer = cb};
-      VkSemaphoreSubmitInfo wait = {.sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO,
-         .semaphore = g_submit_wait, .stageMask = VK_PIPELINE_STAGE_2_ACCELERATION_STRUCTURE_BUILD_BIT_KHR};
-      VkSubmitInfo2 submit = {.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO_2,
-         .commandBufferInfoCount = 1, .pCommandBufferInfos = &command,
-         .waitSemaphoreInfoCount = g_submit_wait ? 1 : 0, .pWaitSemaphoreInfos = &wait};
-      PFN_vkQueueSubmit2 submit2 = (void *)vkGetDeviceProcAddr(g_dev, "vkQueueSubmit2KHR");
-      CHECK(submit2(g_queue, 1, &submit, VK_NULL_HANDLE));
-   } else CHECK(vkQueueSubmit(g_queue, 1, &sub, VK_NULL_HANDLE));
-   CHECK(vkQueueWaitIdle(g_queue));
-   if (g_submit_wait) vkDestroySemaphore(g_dev, g_submit_wait, NULL);
-   if (g_prebuild_cb) vkFreeCommandBuffers(g_dev, g_pool, 1, &g_prebuild_cb);
-   g_submit_wait = VK_NULL_HANDLE;
-   g_prebuild_cb = VK_NULL_HANDLE;
+    VkSubmitInfo sub = {
+        .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
+        .commandBufferCount = 1,
+        .pCommandBuffers = &cb,
+    };
+    VkPipelineStageFlags wait_stage = VK_PIPELINE_STAGE_ACCELERATION_STRUCTURE_BUILD_BIT_KHR;
+    if (g_submit_wait) {
+        sub.waitSemaphoreCount = 1;
+        sub.pWaitSemaphores = &g_submit_wait;
+        sub.pWaitDstStageMask = &wait_stage;
+    }
+    if (g_submit_sync2) {
+        VkCommandBufferSubmitInfo command = {.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO, .commandBuffer = cb};
+        VkSemaphoreSubmitInfo wait = {.sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO,
+                                      .semaphore = g_submit_wait,
+                                      .stageMask = VK_PIPELINE_STAGE_2_ACCELERATION_STRUCTURE_BUILD_BIT_KHR};
+        VkSubmitInfo2 submit = {.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO_2,
+                                .commandBufferInfoCount = 1,
+                                .pCommandBufferInfos = &command,
+                                .waitSemaphoreInfoCount = g_submit_wait ? 1 : 0,
+                                .pWaitSemaphoreInfos = &wait};
+        PFN_vkQueueSubmit2 submit2 = (void *)vkGetDeviceProcAddr(g_dev, "vkQueueSubmit2KHR");
+        CHECK(submit2(g_queue, 1, &submit, VK_NULL_HANDLE));
+    } else
+        CHECK(vkQueueSubmit(g_queue, 1, &sub, VK_NULL_HANDLE));
+    CHECK(vkQueueWaitIdle(g_queue));
+    if (g_submit_wait) vkDestroySemaphore(g_dev, g_submit_wait, NULL);
+    if (g_prebuild_cb) vkFreeCommandBuffers(g_dev, g_pool, 1, &g_prebuild_cb);
+    g_submit_wait = VK_NULL_HANDLE;
+    g_prebuild_cb = VK_NULL_HANDLE;
 
-   printf("  readback mapped=%p size=%llu\n", outbuf.mapped,
-          (unsigned long long)outbuf.size);
-   if (outbuf.mapped) {
-      const uint32_t *w = (const uint32_t *)outbuf.mapped;
-      printf("  raw: %08x %08x %08x %08x %08x %08x %08x %08x %08x\n",
-             w[0], w[1], w[2], w[3], w[4], w[5], w[6], w[7], w[8]);
-   }
-   memcpy(out, outbuf.mapped, sizeof(*out));
-   if (out->getter_errors) {
-      printf("FAIL: object-ray/matrix getters disagree (%u)\n", out->getter_errors);
-      ++g_fail;
-   }
+    printf("  readback mapped=%p size=%llu\n", outbuf.mapped, (unsigned long long)outbuf.size);
+    if (outbuf.mapped) {
+        const uint32_t *w = (const uint32_t *)outbuf.mapped;
+        printf("  raw: %08x %08x %08x %08x %08x %08x %08x %08x %08x\n", w[0], w[1], w[2], w[3], w[4], w[5], w[6], w[7], w[8]);
+    }
+    memcpy(out, outbuf.mapped, sizeof(*out));
+    if (out->getter_errors) {
+        printf("FAIL: object-ray/matrix getters disagree (%u)\n", out->getter_errors);
+        ++g_fail;
+    }
 
-   vkFreeCommandBuffers(g_dev, g_pool, 1, &cb);
-   vkDestroyPipeline(g_dev, pipe, NULL);
-   vkDestroyShaderModule(g_dev, sm, NULL);
-   vkDestroyDescriptorPool(g_dev, dp, NULL);
-   vkDestroyPipelineLayout(g_dev, pl, NULL);
-   vkDestroyDescriptorSetLayout(g_dev, dsl, NULL);
-   buf_destroy(&outbuf);
+    vkFreeCommandBuffers(g_dev, g_pool, 1, &cb);
+    vkDestroyPipeline(g_dev, pipe, NULL);
+    vkDestroyShaderModule(g_dev, sm, NULL);
+    vkDestroyDescriptorPool(g_dev, dp, NULL);
+    vkDestroyPipelineLayout(g_dev, pl, NULL);
+    vkDestroyDescriptorSetLayout(g_dev, dsl, NULL);
+    buf_destroy(&outbuf);
 }
 
 /* ------------------------------------------------------------------ */

@@ -35,6 +35,9 @@ service or imply that an external scheduler is running.
 - [x] Resolve aligned opaque AS values for legal 16-byte buffer suballocations, including GENERIC aliases/offsets.
 - [x] Expand actual RQ CTS to 46 cases with validation and matching native controls.
 - [x] Emit actual source TraceRay/Callable requests and execute typed cross-stage payload/callable/attribute backing.
+- [x] Implement shared-BVH4 GPU CLONE/COMPACT and expand real CTS to 54 passes with two retained mandatory-operation failures.
+- [x] Provide synchronous owned deferred operations without GPU backend prerequisites for unrelated devices.
+- [x] Execute descriptor-free BDA system frames and linked typed stages with GPU-only call scheduling in one dispatch.
 - [ ] M0: complete all capability, no-native-RT, resource ABI, and continuation proofs.
 - [ ] M1: integrate Mesa builders, GPU BVH4 encoding/refit, and shared AS objects.
 - [ ] M2: complete Ray Query lowering and state semantics.
@@ -49,11 +52,12 @@ Component checkmarks do not complete M0/M1/M2 or the full goal.
 | Component | Implemented and tested | Remaining boundary |
 | --- | --- | --- |
 | [Portable BVH4 components](../layers/common/rt_fallback/README.md) | Checked reference/CPU adapter; generic BDA hierarchy encoder; direct default Mesa GPU IR adaptation/record emission with compact active leaves, full flags and explicit TLAS relocation; actual LBVH build-to-encode in one command buffer | Four-child GPU collapse, broader builder variants/large construction IDs, numerical qualification, RTP/object integration, refit |
-| Typed continuation frames | Checked 64-bit planning; typed codecs and suspension-live SSA spill/restore; real source block/switch/Phi/TraceRay/Callable/Report continuations; persistent locals and typed payload/callable/attribute backing across compiled stages | Production scheduling/traversal/SBT/builtins, pointer parameter/Phi provenance, specialization, descriptor/layout budgets and full production integration |
-| RQ host translation | Consume AS/RQ device requirements; translate resource/synchronization masks; lifetime-owned AS address cells with allocator/flush/failure handling and enabled-queue-family sharing; private SSBO indexing/variable-pointer prerequisites | Complete emulation capability/limit reporting on no-RT ICDs, deferred operations, buffer-requirement query paths, full-layout descriptor transport and shared-layer object model |
+| Typed continuation frames | Typed CFG/continuations; persistent invocation backing; BDA library export with system builtin/push/record state; default/provided specialization and one-dispatch GPU stage linkage | Production scheduling/traversal/SBT/API integration, pointer Phi/select/physical-source provenance, conflicting per-stage FP modes and complete descriptor/layout budgets |
+| RQ host translation | Consume AS/RQ device requirements; translate resource/synchronization masks; lifetime-owned AS address cells with allocator/flush/failure handling and enabled-queue-family sharing; private SSBO indexing/variable-pointer prerequisites | Complete emulation capability/limit reporting on no-RT ICDs, buffer-requirement query paths, full-layout descriptor transport and shared-layer object model |
+| AS copy and host-operation dependency | Execution-time GPU CLONE/COMPACT from shared total_size; destination publication, strided 64-bit copy, state replay; fully owned synchronous deferred operations and no-RT device passthrough | AS property query storage/publication, actual serialization/compatibility, refit and final unified RTP object model |
 | RQ compiler compatibility | Actual per-query AS roots from scalar/array descriptors and integer conversions; helper/value/Phi flow; direct/grouped NonUniform propagation; preserve application workgroup/specialization metadata and remove native RT declarations | Full resource-limit transparency, complete opcode/stage coverage and unified RTP traversal |
 | RTP API compatibility | Preserve registry-known device pNext structures including Vulkan 1.4; inject storage16 prerequisites without duplicate aggregates; accept empty dynamic-state lists; generate absolute multi-config-aware manifests | Typed compiler/runtime, arbitrary payloads, complete pipeline options/mandatory API and shared backend integration |
-| Base RQ SBT offset | Lower opcode 6021; select candidate/committed instance; return only the low 24 offset bits; retain helper in the library | Shared BVH4 traversal and broader getter coverage remain open |
+| Base RQ SBT offset | Lower opcode 6021; select candidate/committed instance; return only the low 24 offset bits; shared-BVH4 helper and CTS evidence | Complete required getter/stage coverage and unified RTP consumption remain open |
 | AABB opacity | Apply the existing ray-over-instance-over-geometry precedence before opacity culling and expose the correct candidate opacity | Does not complete all RQ traversal or no-native-RT layer behavior |
 
 The BVH4 planner covers allocations larger than 4 GiB and the mandatory
@@ -287,7 +291,41 @@ validation: the previous 40 rerun after this change plus six new GENERIC
 triangle/AABB combinations. Matching native controls pass all 46 (the original
 40 retain their previous controls). See [the new evidence report](rt_cts_aligned_as_2026-10-26.md).
 Full application descriptor/allocation budgets, optional capture/replay,
-mandatory Copy/update/serialization and physical no-RT qualification stay open.
+mandatory query/update/serialization and physical no-RT qualification stay open.
+
+The next [AS-copy/BDA-stage checkpoint](rt_cts_copy_pipeline_2026-10-26.md) reruns
+all 46 passing cases and adds eight passing CLONE cases. Its complete measured
+matrix is **54 pass, 2 fail**; all ten new native operation controls pass.
+The retained compaction/serialization failures expose AS property-query pools
+being forwarded without native AS enablement. A follow-up interception rejects
+these unimplemented pools before native creation: the two cases still fail,
+explicitly with FEATURE_NOT_PRESENT and zero validation errors. Unsupported
+command stubs now fail recording instead of logging and appearing successful.
+GPU COMPACT itself preserves the valid representation/size and passes direct
+public API execution; the compaction CTS path still requires property queries.
+
+The unmapped device-local copy fixture covers 4,097 triangles, copying beyond
+the first dispatch stride, BLAS/TLAS clone/compact chains, transformed getters
+and source-object destruction. Application-facing and downstream validation
+pass. Synchronous deferred operations have allocator/concurrency/ASan evidence.
+A public API1.0 device with only the Deferred extension and zero enabled features
+now creates successfully, exercises all five operations and ordinary buffer/
+memory creation with validation in both layer orders. Ordinary devices skip AS
+backend initialization, feature injection, BDA resource augmentation and RQ rewrite.
+
+Typed BDA libraries export `void stage(uint64 frameBDA)` and share a pinned
+256-byte system prefix. Tests execute all 17 requested RT builtins/transforms,
+shader-record reads, source push snapshots without native push ranges, late
+completion and any-hit terminal dispositions. Global pool addressing uses checked
+64-bit math; per-source-frame layout still has a documented <4-GiB boundary.
+The new linker applies specialization and resolves real stage libraries into
+one native compute module. One dispatch performs 21 GPU-scheduled callable
+invocations with late typed writes, alias/SSA preservation and source side effects;
+no host coordinates requests between stages. Default/provided specialization,
+stripped source names, malformed interfaces and conflicting FP modes are tested.
+The standalone RTP suite passes **16/16**, with the six typed checks **6/6 under
+validation**. These components do not complete canonical RTP API/SBT/traversal
+integration or prove complete AS-descriptor/multi-stage resource budgets.
 
 ## Next work
 
@@ -298,16 +336,16 @@ Run M0 proof work in parallel with shared-backend construction:
    same-buffer differences are now implemented and tested. Complete one
    capability/device/object translation path for genuinely no-RT
    drivers. Device stripping and buffer/barrier/submit/event/timestamp/render-pass
-   masks are now tested; truthful no-RT base discovery/limits, deferred operations
-   and buffer-requirement/external-buffer queries remain open.
+   masks and synchronous deferred operations are now tested; truthful no-RT base
+   discovery/limits and buffer-requirement/external-buffer queries remain open.
 2. Extend value-preserving RQ lowering beyond the now-passing AS array/helper
    CTS slice and the now-integrated shared BVH4 representation to complete
    opcode/stage semantics and full resource budgets. A bounded fast traversal
    path can be added ahead of the proven constant-space parent-walk path.
    Address-cell transport still consumes an SSBO per AS descriptor
    and an allocation per AS; it does not prove full application resource budgets.
-3. Integrate the actual typed TraceRay/Callable/Report compiler and persistent
-   invocation backing with production pipeline creation, shader/SBT selection,
+3. Integrate the typed BDA stage compiler/linker and persistent system/invocation
+   backing with production pipeline creation, shader/SBT selection,
    builtins and traversal scheduling. Address invocation-private storage,
    pointer parameters/Phi provenance, specialization and full argument/return
    ABI before claiming the full
@@ -316,8 +354,11 @@ Run M0 proof work in parallel with shared-backend construction:
    production integration is now tested. Implement four-child GPU collapse/refit
    and qualify numerical cases and large construction IDs. Wire PLOC/HPLOC only
    with complete host contracts. M1 remains incomplete.
-5. Expand the [external CTS matrix](rt_cts_aligned_as_2026-10-26.md), including
-   new supported configurations and validation. Retain historical failures and
+5. Implement full AS property queries and serialization to address the two
+   measured [external CTS failures](rt_cts_copy_pipeline_2026-10-26.md). Use
+   execution-time GPU sizes and per-submission host publication; do not invent
+   serialization sizes or rely on unproven coherent-memory polling. Expand
+   configurations and validation. Retain historical failures and
    investigate the old unexplained startup crash if it recurs. Do not erase
    failures or count skips as passes.
 6. Qualify the complete capability profile and threading/queue-family behavior

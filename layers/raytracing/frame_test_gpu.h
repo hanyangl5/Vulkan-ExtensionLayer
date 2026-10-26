@@ -17,8 +17,12 @@ struct GPU {
     VkShaderModule shader{};
     VkDescriptorSet set{};
     uint32_t *mapped = nullptr;
+    VkDeviceAddress address = 0;
+    bool specialized_context = false;
     bool Init(const std::vector<uint32_t> &code, uint32_t bytes, VkDeviceSize second_binding_offset = VK_WHOLE_SIZE,
-              bool wide_features = true, VkDeviceSize frame_binding_bytes = VK_WHOLE_SIZE) {
+              bool wide_features = true, VkDeviceSize frame_binding_bytes = VK_WHOLE_SIZE,
+              VkDeviceSize context_offset = VK_WHOLE_SIZE) {
+        specialized_context = context_offset != VK_WHOLE_SIZE;
         VkApplicationInfo app{VK_STRUCTURE_TYPE_APPLICATION_INFO};
         app.apiVersion = VK_API_VERSION_1_3;
         VkInstanceCreateInfo ci{VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO};
@@ -35,6 +39,7 @@ struct GPU {
         VkPhysicalDeviceVulkan12Features v12{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES};
         VkPhysicalDeviceFeatures2 features{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2, &v12};
         vkGetPhysicalDeviceFeatures2(physical, &features);
+        if (specialized_context && (!v12.bufferDeviceAddress || !features.features.shaderInt64)) return false;
         if (wide_features && !(v12.shaderFloat16 && v12.shaderInt8 && features.features.shaderFloat64 &&
                                features.features.shaderInt64 && features.features.shaderInt16))
             return false;
@@ -51,8 +56,10 @@ struct GPU {
         qi.pQueuePriorities = &priority;
         v12 = {VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES};
         v12.shaderFloat16 = v12.shaderInt8 = wide_features;
+        v12.bufferDeviceAddress = specialized_context;
         VkPhysicalDeviceFeatures enabled{};
         enabled.shaderFloat64 = enabled.shaderInt64 = enabled.shaderInt16 = wide_features;
+        if (specialized_context) enabled.shaderInt64 = VK_TRUE;
         VkDeviceCreateInfo dc{VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO, &v12};
         dc.queueCreateInfoCount = 1;
         dc.pQueueCreateInfos = &qi;
@@ -61,7 +68,7 @@ struct GPU {
         vkGetDeviceQueue(device, family, 0, &queue);
         VkBufferCreateInfo bc{VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO};
         bc.size = bytes;
-        bc.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
+        bc.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | (specialized_context ? VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT : 0);
         Check(vkCreateBuffer(device, &bc, nullptr, &buffer));
         VkMemoryRequirements requirements;
         vkGetBufferMemoryRequirements(device, buffer, &requirements);
@@ -78,12 +85,21 @@ struct GPU {
         }
         Require(memory_type < properties.memoryTypeCount, "No coherent host-visible frame memory");
         VkMemoryAllocateInfo allocation{VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO};
+        VkMemoryAllocateFlagsInfo allocation_flags{VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_FLAGS_INFO};
+        allocation_flags.flags = VK_MEMORY_ALLOCATE_DEVICE_ADDRESS_BIT;
+        if (specialized_context) allocation.pNext = &allocation_flags;
         allocation.allocationSize = requirements.size;
         allocation.memoryTypeIndex = memory_type;
         Check(vkAllocateMemory(device, &allocation, nullptr, &memory));
         Check(vkBindBufferMemory(device, buffer, memory, 0));
         Check(vkMapMemory(device, memory, 0, bytes, 0, reinterpret_cast<void **>(&mapped)));
         std::memset(mapped, 0xcd, bytes);
+        if (specialized_context) {
+            VkBufferDeviceAddressInfo info{VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO};
+            info.buffer = buffer;
+            address = vkGetBufferDeviceAddress(device, &info);
+            Require(address != 0, "No BDA for typed frame test buffer");
+        }
         uint32_t binding_count = second_binding_offset == VK_WHOLE_SIZE ? 1 : 2;
         VkDescriptorSetLayoutBinding bindings[] = {{0, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, VK_SHADER_STAGE_COMPUTE_BIT},
                                                    {1, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, VK_SHADER_STAGE_COMPUTE_BIT}};
@@ -118,7 +134,7 @@ struct GPU {
         VkPipelineLayoutCreateInfo lc{VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO};
         lc.setLayoutCount = 1;
         lc.pSetLayouts = &set_layout;
-        lc.pushConstantRangeCount = 1;
+        lc.pushConstantRangeCount = specialized_context ? 0 : 1;
         lc.pPushConstantRanges = &range;
         Check(vkCreatePipelineLayout(device, &lc, nullptr, &layout));
         VkShaderModuleCreateInfo sm{VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO};
@@ -130,6 +146,11 @@ struct GPU {
         cp.stage.stage = VK_SHADER_STAGE_COMPUTE_BIT;
         cp.stage.module = shader;
         cp.stage.pName = "main";
+        uint64_t context_address = address + (specialized_context ? context_offset : 0);
+        uint32_t root_words[] = {uint32_t(context_address), uint32_t(context_address >> 32)};
+        VkSpecializationMapEntry root_entries[] = {{0, 0, 4}, {1, 4, 4}};
+        VkSpecializationInfo specialization{2, root_entries, sizeof(root_words), root_words};
+        if (specialized_context) cp.stage.pSpecializationInfo = &specialization;
         cp.layout = layout;
         Check(vkCreateComputePipelines(device, VK_NULL_HANDLE, 1, &cp, nullptr, &pipeline));
         VkCommandPoolCreateInfo command_pool{VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO};
@@ -154,7 +175,7 @@ struct GPU {
         vkCmdBindPipeline(command, VK_PIPELINE_BIND_POINT_COMPUTE, pipeline);
         vkCmdBindDescriptorSets(command, VK_PIPELINE_BIND_POINT_COMPUTE, layout, 0, 1, &set, 0, nullptr);
         const uint32_t push[] = {phase, limit};
-        vkCmdPushConstants(command, layout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(push), push);
+        if (!specialized_context) vkCmdPushConstants(command, layout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(push), push);
         vkCmdDispatch(command, invocations, 1, 1);
         VkMemoryBarrier barrier{VK_STRUCTURE_TYPE_MEMORY_BARRIER};
         barrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;

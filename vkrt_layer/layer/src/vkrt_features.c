@@ -44,13 +44,91 @@ static bool augmented_feature(VkStructureType type) {
     }
 }
 
+bool vkrt_device_uses_virtual_rt(const VkDeviceCreateInfo *info) {
+    for (uint32_t i = 0; info->ppEnabledExtensionNames && i < info->enabledExtensionCount; ++i)
+        if (!strcmp(info->ppEnabledExtensionNames[i], VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME) ||
+            !strcmp(info->ppEnabledExtensionNames[i], VK_KHR_RAY_QUERY_EXTENSION_NAME))
+            return true;
+    for (const VkBaseInStructure *p = info->pNext; p; p = p->pNext) {
+        if (p->sType == VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_FEATURES_KHR &&
+            ((const VkPhysicalDeviceAccelerationStructureFeaturesKHR *)p)->accelerationStructure)
+            return true;
+        if (p->sType == VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_QUERY_FEATURES_KHR &&
+            ((const VkPhysicalDeviceRayQueryFeaturesKHR *)p)->rayQuery)
+            return true;
+    }
+    return false;
+}
+
+/* Ordinary devices and the CPU-only deferred dependency must not inherit the
+ * GPU backend's prerequisites. Only remove consumed feature nodes/names. */
+static VkResult create_without_rt(PFN_vkCreateDevice create, VkPhysicalDevice physical, const VkDeviceCreateInfo *info,
+                                  const VkAllocationCallbacks *allocator, VkDevice *device) {
+    const VkBaseInStructure *last = NULL;
+    bool uses_rt = false;
+    for (const VkBaseInStructure *p = info->pNext; p; p = p->pNext) {
+        bool remove;
+        VkResult result = virtual_feature(p, &remove, &uses_rt);
+        if (result != VK_SUCCESS) return result;
+        if (remove) last = p;
+    }
+    const VkBaseInStructure *borrowed = last ? last->pNext : info->pNext;
+    VkBaseOutStructure *head = NULL, **tail = &head;
+    VkResult result = VK_SUCCESS;
+    for (const VkBaseInStructure *p = info->pNext; p != borrowed; p = p->pNext) {
+        bool remove;
+        result = virtual_feature(p, &remove, &uses_rt);
+        if (result != VK_SUCCESS) goto done;
+        if (remove) continue;
+        size_t size = vkrt_chain_size(p->sType);
+        if (!size) {
+            result = VK_ERROR_EXTENSION_NOT_PRESENT;
+            goto done;
+        }
+        VkBaseOutStructure *copy = malloc(size);
+        if (!copy) {
+            result = VK_ERROR_OUT_OF_HOST_MEMORY;
+            goto done;
+        }
+        memcpy(copy, p, size);
+        copy->pNext = NULL;
+        *tail = copy;
+        tail = &copy->pNext;
+    }
+    *tail = (VkBaseOutStructure *)borrowed;
+    const char **extensions = NULL;
+    if (info->enabledExtensionCount) {
+        extensions = malloc((size_t)info->enabledExtensionCount * sizeof(*extensions));
+        if (!extensions) {
+            result = VK_ERROR_OUT_OF_HOST_MEMORY;
+            goto done;
+        }
+    }
+    VkDeviceCreateInfo local = *info;
+    local.pNext = head;
+    local.ppEnabledExtensionNames = extensions;
+    local.enabledExtensionCount = 0;
+    for (uint32_t i = 0; i < info->enabledExtensionCount; ++i)
+        if (strcmp(info->ppEnabledExtensionNames[i], VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME))
+            extensions[local.enabledExtensionCount++] = info->ppEnabledExtensionNames[i];
+    result = create(physical, &local, allocator, device);
+    free(extensions);
+done:
+    while (head && head != (const VkBaseOutStructure *)borrowed) {
+        VkBaseOutStructure *next = head->pNext;
+        free(head);
+        head = next;
+    }
+    return result;
+}
+
 VkResult vkrt_create_device_with_features(struct vkrt_instance_data *inst,
    VkPhysicalDevice physical, PFN_vkCreateDevice create,
    const VkDeviceCreateInfo *ci, const VkAllocationCallbacks *alloc, VkDevice *device)
 {
     if (!inst || !ci || !create || !device || (ci->enabledExtensionCount && !ci->ppEnabledExtensionNames))
         return VK_ERROR_INITIALIZATION_FAILED;
-    bool uses_virtual_rt = false;
+    bool uses_virtual_rt = vkrt_device_uses_virtual_rt(ci);
     for (uint32_t i = 0; i < ci->enabledExtensionCount; ++i) {
         const char *name = ci->ppEnabledExtensionNames[i];
         if (vkrt_incompatible_device_extension(name)) return VK_ERROR_FEATURE_NOT_PRESENT;
@@ -67,6 +145,7 @@ VkResult vkrt_create_device_with_features(struct vkrt_instance_data *inst,
         if (check != VK_SUCCESS) return check;
         if (remove || augmented_feature(p->sType)) last_change = p;
     }
+    if (!uses_virtual_rt) return create_without_rt(create, physical, ci, alloc, device);
     const VkBaseInStructure *borrowed = last_change ? last_change->pNext : ci->pNext;
     VkPhysicalDeviceBufferDeviceAddressFeatures bda = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_BUFFER_DEVICE_ADDRESS_FEATURES};
     VkPhysicalDeviceVulkanMemoryModelFeatures memory = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_MEMORY_MODEL_FEATURES,
@@ -233,7 +312,7 @@ VkResult vkrt_create_device_with_features(struct vkrt_instance_data *inst,
    for (uint32_t i = 0; i < ci->enabledExtensionCount; ++i) {
        const char *name = ci->ppEnabledExtensionNames[i];
        if (!strcmp(name, VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME) || !strcmp(name, VK_KHR_RAY_QUERY_EXTENSION_NAME) ||
-           (uses_virtual_rt && !strcmp(name, VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME)))
+           !strcmp(name, VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME))
            continue;
        extensions[local.enabledExtensionCount++] = name;
    }

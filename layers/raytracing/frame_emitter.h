@@ -22,16 +22,20 @@ struct ContinuationSuspensionCodec {
 struct ContinuationFrameCodecs {
     ContinuationFrames plan;
     // Append these sections in SPIR-V logical order. The generated component
-    // owns %<prefix>memory, a uint StorageBuffer runtime array at set/binding.
+    // owns %<prefix>memory, a uint StorageBuffer runtime array at set/binding
+    // in default mode. In physical mode memory is empty and base_type is
+    // uint64; word access uses PhysicalStorageBuffer pointers with Aligned4.
     // It contains no entry point, RT capability, source names, or source code.
     std::string capabilities, annotations, declarations, functions;
-    std::string word_type, bool_type, void_type, memory, word_pointer_type, word_pair_type;
+    std::string word_type, bool_type, void_type, memory, word_pointer_type, word_pair_type, base_type, step_signature;
     std::vector<ContinuationTypeCodec> types;
     std::vector<ContinuationSuspensionCodec> suspensions;
 };
 
 // Emit typed frame load/store functions from the validated frame plan. Each
-// function takes (uint base_word, uint byte_offset [, typed value]). Offsets are
+// function takes (base_type base, uint byte_offset [, typed value]). Default
+// base is a uint word index; physical mode uses a direct uint64 byte address.
+// Offsets are
 // relative to the invocation frame, whose base/stride must be word-aligned;
 // each typed offset must satisfy the corresponding planned type alignment.
 // Scalars are encoded little-endian; bool is normalized to 0/1; aggregates are

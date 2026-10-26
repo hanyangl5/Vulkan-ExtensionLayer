@@ -18,6 +18,8 @@
 
 #include "vkrt_layer.h"
 #include "vkrt_as_registry.h"
+#include "vkrt_as_copy.h"
+#include "vkrt_deferred.h"
 
 struct vkrt_global vkrt_global = VKRT_GLOBAL_INITIALIZER;
 
@@ -206,7 +208,16 @@ vkrt_CreateDevice(VkPhysicalDevice physicalDevice,
    data->device           = *pDevice;
    data->physical_device  = physicalDevice;
    data->instance_data    = inst_data;
+#ifdef _WIN32
    vkrt_mutex_init(&data->command_buffers_lock);
+#else
+   if (pthread_mutex_init(&data->command_buffers_lock, NULL) != 0) {
+       data->vtable.DestroyDevice(*pDevice, pAllocator);
+       *pDevice = VK_NULL_HANDLE;
+       free(data);
+       return VK_ERROR_OUT_OF_HOST_MEMORY;
+   }
+#endif
    result = vkrt_device_queue_families_init(data, pCreateInfo, pAllocator);
    if (result != VK_SUCCESS) {
        data->vtable.DestroyDevice(*pDevice, pAllocator);
@@ -214,17 +225,17 @@ vkrt_CreateDevice(VkPhysicalDevice physicalDevice,
        vkrt_free_device_data(data);
        return result;
    }
-   result = vkrt_as_registry_init(data, pAllocator);
-   if (result != VK_SUCCESS) {
-       data->vtable.DestroyDevice(*pDevice, pAllocator);
-       *pDevice = VK_NULL_HANDLE;
-       vkrt_free_device_data(data);
-       return result;
+   result = vkrt_deferred_init(data, pAllocator);
+   if (result == VK_SUCCESS && vkrt_device_uses_virtual_rt(pCreateInfo)) {
+       result = vkrt_as_registry_init(data, pAllocator);
+       if (result == VK_SUCCESS) result = vkrt_build_init(data);
+       if (result == VK_SUCCESS) result = vkrt_as_copy_init(data);
    }
-   result = vkrt_build_init(data);
    if (result != VK_SUCCESS) {
       VKRT_LOG_ERR("GPU BVH pipeline initialization failed: %d", result);
       vkrt_build_finish(data);
+      vkrt_as_copy_finish(data);
+      vkrt_deferred_finish(data);
       vkrt_as_registry_finish(data);
       data->vtable.DestroyDevice(*pDevice, pAllocator);
       *pDevice = VK_NULL_HANDLE;
@@ -259,6 +270,8 @@ vkrt_DestroyDevice(VkDevice device, const VkAllocationCallbacks *pAllocator)
       return;
 
    vkrt_commands_finish(data);
+   vkrt_as_copy_finish(data);
+   vkrt_deferred_finish(data);
    vkrt_build_finish(data);
    vkrt_as_registry_finish(data);
    data->vtable.DestroyDevice(device, pAllocator);
@@ -546,16 +559,20 @@ vkrt_CmdBuildAccelerationStructuresKHR(
 /* v1 explicitly rejects: indirect build, copy, compact, serialize,
  * deserialize, update. Fail-fast rather than forwarding (doc section 7).
  * Each stub keeps a full parameter list so it still matches its PFN_. */
-#define VKRT_REJECT_CMD(name, ...)                                             \
-   static VKAPI_ATTR void VKAPI_CALL vkrt_##name(__VA_ARGS__)                   \
-   {                                                                           \
-      VKRT_LOG_ERR(#name " is not supported by the software ray-query layer "  \
-                         "(v1; see design doc section 2/7)");                  \
-   }
+#define VKRT_REJECT_CMD(name, ...)                                                                   \
+    static VKAPI_ATTR void VKAPI_CALL vkrt_##name(__VA_ARGS__) {                                     \
+        VKRT_LOG_ERR(#name                                                                           \
+                     " is not supported by the software ray-query layer "                            \
+                     "(v1; see design doc section 2/7)");                                            \
+        struct vkrt_cmd_buffer_data *cb = VKRT_FIND(struct vkrt_cmd_buffer_data, commandBuffer);     \
+        if (cb && cb->record_result == VK_SUCCESS) cb->record_result = VK_ERROR_FEATURE_NOT_PRESENT; \
+    }
 
-VKRT_REJECT_CMD(CmdCopyAccelerationStructureKHR,
-                VkCommandBuffer commandBuffer,
-                const VkCopyAccelerationStructureInfoKHR *pInfo)
+static VKAPI_ATTR void VKAPI_CALL vkrt_CmdCopyAccelerationStructureKHR(VkCommandBuffer commandBuffer,
+                                                                       const VkCopyAccelerationStructureInfoKHR *info) {
+    struct vkrt_cmd_buffer_data *cb = VKRT_FIND(struct vkrt_cmd_buffer_data, commandBuffer);
+    if (cb) vkrt_cmd_copy_as(cb->device_data, commandBuffer, info);
+}
 VKRT_REJECT_CMD(CmdCopyAccelerationStructureToMemoryKHR,
                 VkCommandBuffer commandBuffer,
                 const VkCopyAccelerationStructureToMemoryInfoKHR *pInfo)
@@ -607,6 +624,8 @@ vkrt_CmdTraceRaysKHR(VkCommandBuffer commandBuffer,
 {
    VKRT_LOG_ERR("vkCmdTraceRaysKHR is not supported: this layer implements "
                 "VK_KHR_ray_query only (design doc section 2)");
+   struct vkrt_cmd_buffer_data *cb = VKRT_FIND(struct vkrt_cmd_buffer_data, commandBuffer);
+   if (cb && cb->record_result == VK_SUCCESS) cb->record_result = VK_ERROR_FEATURE_NOT_PRESENT;
 }
 
 /* ================================================================== */
@@ -623,6 +642,8 @@ vkrt_find_device_fn(const char *name)
    if (command) return (void *)command;
    command = vkrt_sync_proc(name);
    if (command) return (void *)command;
+   command = vkrt_deferred_proc(name);
+   if (command) return (void *)command;
    static const struct {
       const char *name;
       void       *ptr;
@@ -635,6 +656,7 @@ vkrt_find_device_fn(const char *name)
        {"vkDestroyBuffer", (void *)vkrt_DestroyBuffer},
        {"vkCreateDescriptorSetLayout", (void *)vkrt_CreateDescriptorSetLayout},
        {"vkCreateDescriptorPool", (void *)vkrt_CreateDescriptorPool},
+       {"vkCreateQueryPool", (void *)vkrt_CreateQueryPool},
        {"vkUpdateDescriptorSets", (void *)vkrt_UpdateDescriptorSets},
        {"vkAllocateMemory", (void *)vkrt_AllocateMemory},
        {"vkCreateAccelerationStructureKHR", (void *)vkrt_CreateAccelerationStructureKHR},

@@ -12,7 +12,7 @@
             ++failures;                                          \
         }                                                        \
     } while (0)
-static unsigned failures, creates, queries;
+static unsigned failures, creates, queries, property_queries;
 static unsigned missing_capability;
 static uint32_t driver_api;
 static const VkPhysicalDevice physical = HANDLE(VkPhysicalDevice, 7);
@@ -31,8 +31,8 @@ static const VkBaseInStructure *find_original(VkStructureType type) {
     return NULL;
 }
 
-/* This boundary has no RT extensions or features. The query writes unrelated
- * supported options as true to catch accidental enabling from query results. */
+/* Private GPU-capability query for virtual RT. Unrelated supported options
+ * are true to catch accidental enabling from query results. */
 static VKAPI_ATTR void VKAPI_CALL mock_features(VkPhysicalDevice p, VkPhysicalDeviceFeatures2 *features) {
     REQUIRE(p == physical);
     ++queries;
@@ -108,6 +108,7 @@ static VKAPI_ATTR void VKAPI_CALL mock_features(VkPhysicalDevice p, VkPhysicalDe
 
 static VKAPI_ATTR void VKAPI_CALL mock_properties(VkPhysicalDevice p, VkPhysicalDeviceProperties *properties) {
     REQUIRE(p == physical);
+    ++property_queries;
     memset(properties, 0, sizeof(*properties));
     properties->apiVersion = driver_api;
 }
@@ -266,6 +267,49 @@ static VKAPI_ATTR VkResult VKAPI_CALL mock_create(VkPhysicalDevice p, const VkDe
 }
 #undef EXPECT_NODE
 
+static bool virtual_node(VkStructureType type) {
+    return type == VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_FEATURES_KHR ||
+           type == VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_QUERY_FEATURES_KHR ||
+           type == VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_FEATURES_KHR;
+}
+
+/* An independent ordinary-device boundary: no backend feature augmentation,
+ * no capability query, and no alteration of native feature payloads/order. */
+static VKAPI_ATTR VkResult VKAPI_CALL mock_non_rt_create(VkPhysicalDevice p, const VkDeviceCreateInfo *info,
+                                                         const VkAllocationCallbacks *callbacks, VkDevice *device) {
+    REQUIRE(p == physical && callbacks == expected_allocator);
+    ++creates;
+    REQUIRE(info->flags == original->flags && info->queueCreateInfoCount == original->queueCreateInfoCount);
+    REQUIRE(info->pQueueCreateInfos == original->pQueueCreateInfos && info->ppEnabledLayerNames == original->ppEnabledLayerNames);
+    REQUIRE(info->enabledLayerCount == original->enabledLayerCount && info->pEnabledFeatures == original->pEnabledFeatures);
+    REQUIRE(info->enabledExtensionCount == expected_extension_count);
+    for (uint32_t i = 0; i < info->enabledExtensionCount && i < expected_extension_count; ++i)
+        REQUIRE(!strcmp(info->ppEnabledExtensionNames[i], expected_extensions[i]));
+    const VkBaseInStructure *expected = original->pNext;
+    for (const VkBaseInStructure *actual = info->pNext; actual; actual = actual->pNext) {
+        while (expected && virtual_node(expected->sType)) expected = expected->pNext;
+        REQUIRE(expected && actual->sType == expected->sType);
+        if (!expected || actual->sType != expected->sType) break;
+        if (actual->sType == VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2) {
+            REQUIRE(!memcmp(&((const VkPhysicalDeviceFeatures2 *)actual)->features,
+                            &((const VkPhysicalDeviceFeatures2 *)expected)->features, sizeof(VkPhysicalDeviceFeatures)));
+        } else if (actual->sType == VK_STRUCTURE_TYPE_LOADER_DEVICE_CREATE_INFO) {
+            const VkLayerDeviceCreateInfo *a = (const void *)actual, *e = (const void *)expected;
+            REQUIRE(a->function == e->function && a->u.pLayerInfo == e->u.pLayerInfo);
+        } else if (actual->sType == VK_STRUCTURE_TYPE_MAX_ENUM) {
+            REQUIRE(actual == expected && actual == opaque_suffix);
+        } else {
+            REQUIRE(!memcmp((const char *)actual + sizeof(VkBaseInStructure), (const char *)expected + sizeof(VkBaseInStructure),
+                            bool_payload_size(actual->sType)));
+        }
+        expected = expected->pNext;
+    }
+    while (expected && virtual_node(expected->sType)) expected = expected->pNext;
+    REQUIRE(!expected);
+    if (downstream_result == VK_SUCCESS) *device = created_device;
+    return downstream_result;
+}
+
 static struct vkrt_instance_data instance;
 static VkDeviceCreateInfo basic;
 static VkAllocationCallbacks allocator;
@@ -275,6 +319,17 @@ static VkResult call(const VkDeviceCreateInfo *info) {
     expected_allocator = &allocator;
     VkDevice device = VK_NULL_HANDLE;
     VkResult result = vkrt_create_device_with_features(&instance, physical, mock_create, info, &allocator, &device);
+    if (result == VK_SUCCESS) REQUIRE(device == created_device);
+    return result;
+}
+
+static VkResult call_non_rt(const VkDeviceCreateInfo *info) {
+    original = info;
+    expected_allocator = &allocator;
+    unsigned before_queries = queries, before_properties = property_queries;
+    VkDevice device = VK_NULL_HANDLE;
+    VkResult result = vkrt_create_device_with_features(&instance, physical, mock_non_rt_create, info, &allocator, &device);
+    REQUIRE(queries == before_queries && property_queries == before_properties);
     if (result == VK_SUCCESS) REQUIRE(device == created_device);
     return result;
 }
@@ -291,6 +346,92 @@ static void defaults(void) {
     missing_capability = 0;
     downstream_result = VK_SUCCESS;
     expect_private_dynamic_indexing = false;
+}
+
+static void non_rt_boundary(void) {
+    defaults();
+    VkPhysicalDeviceFeatures core = {.samplerAnisotropy = VK_TRUE, .shaderFloat64 = VK_TRUE};
+    VkPhysicalDeviceFeatures saved_core = core;
+    const char *extensions[] = {"VK_KHR_swapchain", VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME, "VK_EXT_robustness2",
+                                VK_KHR_BUFFER_DEVICE_ADDRESS_EXTENSION_NAME};
+    expected_extensions[0] = extensions[0];
+    expected_extensions[1] = extensions[2];
+    expected_extensions[2] = extensions[3];
+    expected_extension_count = 3;
+    basic.pEnabledFeatures = &core;
+    basic.ppEnabledExtensionNames = extensions;
+    basic.enabledExtensionCount = VKRT_ARRAY_SIZE(extensions);
+    VkDeviceCreateInfo saved_basic = basic;
+    for (missing_capability = 1; missing_capability <= 12; ++missing_capability) {
+        REQUIRE(call_non_rt(&basic) == VK_SUCCESS);
+        REQUIRE(!memcmp(&core, &saved_core, sizeof(core)) && !memcmp(&basic, &saved_basic, sizeof(basic)));
+    }
+
+    /* Missing GPU-query entry points cannot prevent the CPU-only path. */
+    instance.api_version = driver_api = VK_API_VERSION_1_0;
+    instance.vtable.GetPhysicalDeviceFeatures2 = NULL;
+    instance.vtable.GetPhysicalDeviceProperties = NULL;
+    REQUIRE(call_non_rt(&basic) == VK_SUCCESS);
+    basic.enabledExtensionCount = 0;
+    basic.ppEnabledExtensionNames = NULL;
+    expected_extension_count = 0;
+    REQUIRE(call_non_rt(&basic) == VK_SUCCESS);
+    const char *deferred = VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME;
+    basic.enabledExtensionCount = 1;
+    basic.ppEnabledExtensionNames = &deferred;
+    REQUIRE(call_non_rt(&basic) == VK_SUCCESS);
+
+    /* Native feature chains remain byte-identical even when consumed false
+     * RT nodes occur between them. An opaque unmodified suffix stays borrowed. */
+    instance.api_version = driver_api = VK_API_VERSION_1_2;
+    struct {
+        VkStructureType sType;
+        const void *pNext;
+        uint64_t values[2];
+    } suffix = {.sType = VK_STRUCTURE_TYPE_MAX_ENUM, .values = {0x0123456789abcdefull, 0xfedcba9876543210ull}};
+    opaque_suffix = (const void *)&suffix;
+    VkPhysicalDeviceVulkan12Features v12 = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES,
+                                            .pNext = &suffix,
+                                            .timelineSemaphore = VK_TRUE,
+                                            .shaderBufferInt64Atomics = VK_TRUE};
+    VkPhysicalDeviceVulkan11Features v11 = {
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_FEATURES, .pNext = &v12, .multiview = VK_TRUE};
+    VkPhysicalDeviceRayTracingPipelineFeaturesKHR rtp = {
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_FEATURES_KHR, .pNext = &v11};
+    VkPhysicalDeviceRayQueryFeaturesKHR query = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_QUERY_FEATURES_KHR, .pNext = &rtp};
+    VkPhysicalDeviceAccelerationStructureFeaturesKHR as = {
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_FEATURES_KHR, .pNext = &query};
+    VkPhysicalDeviceFeatures2 core2 = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2,
+                                       .pNext = &as,
+                                       .features = {.geometryShader = VK_TRUE, .shaderFloat64 = VK_TRUE}};
+    VkLayerDeviceLink link = {0};
+    VkLayerDeviceCreateInfo loader = {.sType = VK_STRUCTURE_TYPE_LOADER_DEVICE_CREATE_INFO,
+                                      .pNext = &core2,
+                                      .function = VK_LAYER_LINK_INFO,
+                                      .u.pLayerInfo = &link};
+    basic.pEnabledFeatures = NULL;
+    basic.pNext = &loader;
+    VkPhysicalDeviceVulkan12Features saved12 = v12;
+    VkPhysicalDeviceVulkan11Features saved11 = v11;
+    VkPhysicalDeviceFeatures2 saved2 = core2;
+    VkPhysicalDeviceAccelerationStructureFeaturesKHR saved_as = as;
+    VkPhysicalDeviceRayQueryFeaturesKHR saved_query = query;
+    VkPhysicalDeviceRayTracingPipelineFeaturesKHR saved_rtp = rtp;
+    VkLayerDeviceCreateInfo saved_loader = loader;
+    REQUIRE(call_non_rt(&basic) == VK_SUCCESS);
+    REQUIRE(!memcmp(&v12, &saved12, sizeof(v12)) && !memcmp(&v11, &saved11, sizeof(v11)));
+    REQUIRE(!memcmp(&core2, &saved2, sizeof(core2)) && !memcmp(&loader, &saved_loader, sizeof(loader)));
+    REQUIRE(!memcmp(&as, &saved_as, sizeof(as)) && !memcmp(&query, &saved_query, sizeof(query)));
+    REQUIRE(!memcmp(&rtp, &saved_rtp, sizeof(rtp)) && suffix.values[0] == 0x0123456789abcdefull);
+
+    VkPhysicalDeviceBufferDeviceAddressFeatures native_bda = {
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_BUFFER_DEVICE_ADDRESS_FEATURES, .pNext = &suffix};
+    basic.pNext = &native_bda;
+    basic.pEnabledFeatures = &core;
+    REQUIRE(call_non_rt(&basic) == VK_SUCCESS);
+    REQUIRE(!native_bda.bufferDeviceAddress && native_bda.pNext == &suffix);
+    downstream_result = VK_ERROR_DEVICE_LOST;
+    REQUIRE(call_non_rt(&basic) == VK_ERROR_DEVICE_LOST);
 }
 
 static void virtual_requests(void) {
@@ -346,16 +487,15 @@ static void virtual_requests(void) {
     as.pNext = &query;
     query.pNext = &rtp;
     basic.pNext = &as;
-    REQUIRE(call(&basic) == VK_SUCCESS);
+    REQUIRE(call_non_rt(&basic) == VK_SUCCESS);
 
-    /* Deferred operations without emulated AS/RQ remain a native request. */
+    /* Synchronous deferred operations are layer-owned even without AS/RQ. */
     const char *deferred[] = {VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME};
     basic.pNext = NULL;
     basic.enabledExtensionCount = 1;
     basic.ppEnabledExtensionNames = deferred;
-    expected_extensions[0] = deferred[0];
-    expected_extension_count = 1;
-    REQUIRE(call(&basic) == VK_SUCCESS);
+    expected_extension_count = 0;
+    REQUIRE(call_non_rt(&basic) == VK_SUCCESS);
 }
 
 static void aggregate_and_individual_features(void) {
@@ -395,8 +535,8 @@ static void aggregate_and_individual_features(void) {
         .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_8BIT_STORAGE_FEATURES, .pNext = &int8, .storagePushConstant8 = VK_TRUE};
     VkPhysicalDevice16BitStorageFeatures storage16 = {
         .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_16BIT_STORAGE_FEATURES, .pNext = &storage8, .storageInputOutput16 = VK_TRUE};
-    core.pNext = &storage16;
-    expect_private_dynamic_indexing = false;
+    core.pNext = &query;
+    query.pNext = &storage16;
     REQUIRE(call(&basic) == VK_SUCCESS);
     REQUIRE(!bda.bufferDeviceAddress && bda.bufferDeviceAddressCaptureReplay);
     REQUIRE(!memory.vulkanMemoryModel && memory.vulkanMemoryModelAvailabilityVisibilityChains);
@@ -405,16 +545,21 @@ static void aggregate_and_individual_features(void) {
 
 static void versions_and_opaque_chains(void) {
     defaults();
+    const char *query_extension = VK_KHR_RAY_QUERY_EXTENSION_NAME;
+    basic.ppEnabledExtensionNames = &query_extension;
+    basic.enabledExtensionCount = 1;
+    expect_private_dynamic_indexing = true;
     static const char *required[] = {VK_KHR_16BIT_STORAGE_EXTENSION_NAME,       VK_KHR_8BIT_STORAGE_EXTENSION_NAME,
                                      VK_KHR_SHADER_FLOAT16_INT8_EXTENSION_NAME, VK_EXT_SCALAR_BLOCK_LAYOUT_EXTENSION_NAME,
-                                     VK_KHR_VULKAN_MEMORY_MODEL_EXTENSION_NAME, VK_KHR_BUFFER_DEVICE_ADDRESS_EXTENSION_NAME};
+                                     VK_KHR_VULKAN_MEMORY_MODEL_EXTENSION_NAME, VK_KHR_BUFFER_DEVICE_ADDRESS_EXTENSION_NAME,
+                                     VK_KHR_VARIABLE_POINTERS_EXTENSION_NAME,   VK_EXT_DESCRIPTOR_INDEXING_EXTENSION_NAME};
     for (uint32_t instance_api = 0; instance_api < 3; ++instance_api) {
         for (uint32_t device_api = 0; device_api < 3; ++device_api) {
             instance.api_version = VK_MAKE_VERSION(1, instance_api, 0);
             driver_api = VK_MAKE_VERSION(1, device_api, 0);
             expected_extension_count = 0;
             for (uint32_t i = 0; i < VKRT_ARRAY_SIZE(required); ++i)
-                if (instance_api < (i ? 2u : 1u) || device_api < (i ? 2u : 1u))
+                if (instance_api < (i == 0 || i == 6 ? 1u : 2u) || device_api < (i == 0 || i == 6 ? 1u : 2u))
                     expected_extensions[expected_extension_count++] = required[i];
             REQUIRE(call(&basic) == VK_SUCCESS);
         }
@@ -422,13 +567,14 @@ static void versions_and_opaque_chains(void) {
     /* A requested alias is not duplicated when private requirements add it. */
     instance.api_version = VK_API_VERSION_1_0;
     driver_api = VK_API_VERSION_1_2;
-    const char *extensions[] = {required[5], "VK_KHR_swapchain"};
+    const char *extensions[] = {required[5], "VK_KHR_swapchain", VK_KHR_RAY_QUERY_EXTENSION_NAME};
     basic.ppEnabledExtensionNames = extensions;
-    basic.enabledExtensionCount = 2;
+    basic.enabledExtensionCount = 3;
     expected_extensions[0] = required[5];
     expected_extensions[1] = extensions[1];
-    for (uint32_t i = 0; i < 5; ++i) expected_extensions[2 + i] = required[i];
-    expected_extension_count = 7;
+    expected_extension_count = 2;
+    for (uint32_t i = 0; i < VKRT_ARRAY_SIZE(required); ++i)
+        if (i != 5) expected_extensions[expected_extension_count++] = required[i];
     REQUIRE(call(&basic) == VK_SUCCESS);
 
     defaults();
@@ -446,7 +592,7 @@ static void versions_and_opaque_chains(void) {
     REQUIRE(query.pNext == &suffix && suffix.payload[0] == 0x123456789abcdef0ull);
     basic.pNext = &suffix;
     expect_private_dynamic_indexing = false;
-    REQUIRE(call(&basic) == VK_SUCCESS);
+    REQUIRE(call_non_rt(&basic) == VK_SUCCESS);
     suffix.pNext = &query;
     query.pNext = NULL;
     unsigned before = creates;
@@ -460,7 +606,7 @@ static void descriptor_array_feature(void) {
     basic.pEnabledFeatures = &core;
     /* A non-RT request neither requires nor privately enables this feature. */
     missing_capability = 10;
-    REQUIRE(call(&basic) == VK_SUCCESS);
+    REQUIRE(call_non_rt(&basic) == VK_SUCCESS);
     REQUIRE(!core.shaderStorageBufferArrayDynamicIndexing);
 
     const char *extension = VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME;
@@ -558,6 +704,10 @@ static void descriptor_array_feature(void) {
 
 static void rejection(void) {
     defaults();
+    const char *rt_extension = VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME;
+    basic.ppEnabledExtensionNames = &rt_extension;
+    basic.enabledExtensionCount = 1;
+    expect_private_dynamic_indexing = true;
     for (missing_capability = 1; missing_capability <= 9; ++missing_capability) {
         unsigned before = creates;
         REQUIRE(call(&basic) == VK_ERROR_FEATURE_NOT_PRESENT && creates == before);
@@ -617,10 +767,13 @@ static void rejection(void) {
     }
     defaults();
     instance.vtable.GetPhysicalDeviceFeatures2 = NULL;
+    basic.ppEnabledExtensionNames = &rt_extension;
+    basic.enabledExtensionCount = 1;
     REQUIRE(call(&basic) == VK_ERROR_FEATURE_NOT_PRESENT);
 }
 
 int main(void) {
+    non_rt_boundary();
     virtual_requests();
     aggregate_and_individual_features();
     versions_and_opaque_chains();

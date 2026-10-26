@@ -18,6 +18,7 @@ static VkBool32 native_rt;
 static bool ignore_rt_features;
 static VkResult enumeration_error;
 static bool grow_once, incomplete_fill;
+static bool hide_deferred;
 static const char *last_layer;
 static const char *native_names[] = {VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME,
                                      VK_KHR_RAY_QUERY_EXTENSION_NAME,
@@ -64,6 +65,7 @@ static VKAPI_ATTR VkResult VKAPI_CALL mock_enumerate(VkPhysicalDevice p, const c
     uint32_t total = (uint32_t)VKRT_ARRAY_SIZE(native_names);
     uint32_t start = native_rt ? 0 : 2;
     total -= start;
+    if (hide_deferred) --total;
     if (!properties) {
         *count = total;
         return VK_SUCCESS;
@@ -75,9 +77,10 @@ static VKAPI_ATTR VkResult VKAPI_CALL mock_enumerate(VkPhysicalDevice p, const c
     }
     uint32_t capacity = *count;
     *count = capacity < total ? capacity : total;
-    for (uint32_t i = 0; i < *count; ++i) {
-        strcpy(properties[i].extensionName, native_names[i + start]);
-        properties[i].specVersion = 100 + i + start;
+    for (uint32_t i = start, out = 0; out < *count; ++i) {
+        if (hide_deferred && !strcmp(native_names[i], VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME)) continue;
+        strcpy(properties[out].extensionName, native_names[i]);
+        properties[out++].specVersion = 100 + i;
     }
     return capacity < total ? VK_INCOMPLETE : VK_SUCCESS;
 }
@@ -132,7 +135,9 @@ static void enumeration(PFN_vkEnumerateDeviceExtensionProperties enumerate) {
                 REQUIRE(!strcmp(output[i].extensionName, visible_names[i + start]));
                 uint32_t native_index = 0;
                 while (strcmp(native_names[native_index], visible_names[i + start])) ++native_index;
-                REQUIRE(output[i].specVersion == 100 + native_index);
+                REQUIRE(output[i].specVersion == (!strcmp(output[i].extensionName, VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME)
+                                                      ? VK_KHR_DEFERRED_HOST_OPERATIONS_SPEC_VERSION
+                                                      : 100 + native_index));
             }
             REQUIRE(!memcmp(output + count, saved + count, (8 - count) * sizeof(output[0])));
         }
@@ -157,8 +162,27 @@ static void enumeration(PFN_vkEnumerateDeviceExtensionProperties enumerate) {
     REQUIRE(enumerate(physical, "missing_layer", &count, NULL) == VK_ERROR_LAYER_NOT_PRESENT);
     unsigned before = enumeration_calls;
     count = 42;
-    REQUIRE(enumerate(VK_NULL_HANDLE, "VK_LAYER_VKRT_SOFTWARE_RAY_QUERY", &count, NULL) == VK_SUCCESS && count == 0);
+    REQUIRE(enumerate(VK_NULL_HANDLE, "VK_LAYER_VKRT_SOFTWARE_RAY_QUERY", &count, NULL) == VK_SUCCESS && count == 1);
+    count = 0;
+    REQUIRE(enumerate(physical, "VK_LAYER_VKRT_SOFTWARE_RAY_QUERY", &count, &property) == VK_INCOMPLETE && count == 0);
+    count = 1;
+    REQUIRE(enumerate(physical, "VK_LAYER_VKRT_SOFTWARE_RAY_QUERY", &count, &property) == VK_SUCCESS && count == 1);
+    REQUIRE(!strcmp(property.extensionName, VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME));
+    REQUIRE(property.specVersion == VK_KHR_DEFERRED_HOST_OPERATIONS_SPEC_VERSION);
     REQUIRE(enumeration_calls == before);
+    /* A driver with no deferred extension still exposes the layer's complete
+     * synchronous implementation, appended once to its native extensions. */
+    hide_deferred = true;
+    for (unsigned rt = 0; rt < 2; ++rt) {
+        native_rt = rt;
+        VkExtensionProperties output[8];
+        count = 8;
+        REQUIRE(enumerate(physical, NULL, &count, output) == VK_SUCCESS);
+        REQUIRE(count == VKRT_ARRAY_SIZE(visible_names) - (rt ? 0 : 2));
+        REQUIRE(!strcmp(output[count - 1].extensionName, VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME));
+        REQUIRE(output[count - 1].specVersion == VK_KHR_DEFERRED_HOST_OPERATIONS_SPEC_VERSION);
+    }
+    hide_deferred = false;
 }
 
 static void features(PFN_vkGetPhysicalDeviceFeatures2 query, struct vkrt_instance_data *instance) {

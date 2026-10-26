@@ -2,10 +2,18 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 #include "continuations.h"
+#include "typed_system_abi.h"
 
 namespace vel::rt {
 inline constexpr uint32_t kTypedContinuationControlWords = 32;
-enum class TypedContinuationRequestKind : uint32_t { None = 0, TraceRay = 1, ReportIntersection = 2, ExecuteCallable = 3 };
+enum class TypedContinuationRequestKind : uint32_t {
+    None = 0,
+    TraceRay = 1,
+    ReportIntersection = 2,
+    ExecuteCallable = 3,
+    IgnoreIntersection = 4,
+    TerminateRay = 5
+};
 // Shared fixed-word request transport. Float arguments are IEEE float32 bits;
 // ASLow/ASHigh form the actual uint64 opaque software AS value; registry
 // resolution is required before physical BVH access. Data references are relative
@@ -55,6 +63,25 @@ struct TypedAccelerationStructureDescriptor {
     // The application binding/array selection is retained; pipeline layout
     // integration must translate descriptor type to STORAGE_BUFFER.
 };
+enum class TypedFrameTransport { StorageBuffer, PhysicalAddress };
+struct TypedContinuationCompileOptions {
+    TypedFrameTransport transport = TypedFrameTransport::StorageBuffer;
+    uint32_t frame_descriptor_set = 0, frame_binding = 0;
+    // false emits a SPIR-V1.5 Linkage library, with one exported
+    // void step(uint64 frameBDA), rather than a compute entry point.
+    bool emit_compute_entry = true;
+    std::string step_export_name;
+    // Standalone BDA wrapper only: specialization values supply the low/high
+    // uint32 words of an immutable per-dispatch context address.
+    uint32_t context_root_low_spec_id = 0, context_root_high_spec_id = 1;
+};
+struct TypedBuiltinVariable {
+    uint32_t variable, type, builtin, byte_offset, byte_size;
+};
+struct TypedRequiredExecutionMode {
+    uint32_t mode;
+    std::vector<uint32_t> operands;  // literal operands, not module IDs
+};
 struct TypedContinuationFrameBounds {
     uint32_t stride_words, max_invocations;
 };
@@ -68,8 +95,25 @@ struct TypedContinuationProgram {
     ContinuationFrames frames;
     std::vector<TypedInvocationVariable> invocation_variables;
     std::vector<TypedAccelerationStructureDescriptor> acceleration_structure_descriptors;
+    std::vector<TypedBuiltinVariable> builtin_variables;
+    std::vector<TypedRequiredExecutionMode> required_execution_modes;
+    TypedFrameTransport transport = TypedFrameTransport::StorageBuffer;
+    std::string step_export_name;
+    // BDA pool addressing/counts are uint64. The legacy max_invocations field
+    // below constrains only the default SSBO wrapper. Each individual source
+    // frame remains checked below4GiB; global pools have no such32-bit ceiling.
+    uint64_t frame_stride_bytes = 0, max_invocations64 = 0;
+    uint32_t system_header_bytes = 0, control_byte_offset = 0;
+    bool uses_app_push_constants = false, uses_shader_record = false;
     uint32_t frame_stride_words, control_word, state_count, max_invocations;
 };
+// In physical mode all FunctionFrame slot offsets, invocation-variable offsets
+// and control offsets include VEL_RT_SYSTEM_BYTES. Type member offsets remain
+// relative to their own value. Builtins read real fields from that system
+// prefix; push constants and shader records use the addresses stored there.
+// Library exports have no context/root globals and take frameBDA directly.
+// IgnoreIntersection/TerminateRay finish the stage with pending kinds4/5;
+// payload writes remain in backing and there is no resumed result to inject.
 // Actual source CFG lowering, independent of the legacy GLSL compiler. Each
 // compute invocation resumes one frame, executes source blocks/parallel Phi
 // edges in a dynamic structured dispatcher, and runs until suspension/return.
@@ -101,4 +145,6 @@ struct TypedContinuationProgram {
 TypedContinuationProgram CompileTypedContinuationSteps(const std::vector<uint32_t> &source, const std::string &entry,
                                                        uint32_t execution_model, uint32_t frame_descriptor_set = 0,
                                                        uint32_t frame_binding = 0);
+TypedContinuationProgram CompileTypedContinuationSteps(const std::vector<uint32_t> &source, const std::string &entry,
+                                                       uint32_t execution_model, const TypedContinuationCompileOptions &options);
 }  // namespace vel::rt

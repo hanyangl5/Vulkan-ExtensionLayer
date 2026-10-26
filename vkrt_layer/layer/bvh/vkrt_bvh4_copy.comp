@@ -1,0 +1,38 @@
+/* SPDX-License-Identifier: MIT */
+#version 460
+#extension GL_EXT_buffer_reference : require
+#extension GL_EXT_scalar_block_layout : require
+#extension GL_EXT_shader_explicit_arithmetic_types_int64 : require
+#include "bvh4_abi.glsl"
+layout(local_size_x = 64) in;
+layout(buffer_reference, scalar, buffer_reference_align = 4) buffer Word { uint value; };
+layout(push_constant, scalar) uniform CopyArgs {
+    uint64_t source, destination, source_capacity, destination_capacity;
+    uint destination_type, reserved;
+}
+args;
+uint read32(uint64_t offset) { return Word(args.source + offset).value; }
+uint64_t read64(uint64_t offset) { return uint64_t(read32(offset)) | (uint64_t(read32(offset + 4ul)) << 32); }
+
+void main() {
+    /* Every invocation makes the same decision using only immutable source
+     * header and push data. No cross-workgroup destination-header race. */
+    uint64_t size = read64(uint64_t(VEL_RT_BVH4_HEADER_TOTAL_SIZE));
+    uint type = read32(8ul);
+    bool valid = read32(0ul) == VEL_RT_BVH4_MAGIC && read32(4ul) == VEL_RT_BVH4_ABI_VERSION &&
+                 (read32(12ul) & VEL_RT_BVH4_FLAG_INVALID) == 0u && type <= 1u &&
+                 (args.destination_type == 2u || args.destination_type == type) && size >= uint64_t(VEL_RT_BVH4_HEADER_SIZE) &&
+                 (size & 3ul) == 0ul && size <= args.source_capacity && size <= args.destination_capacity;
+    if (valid) valid = !(args.source < args.destination + size && args.destination < args.source + size);
+    if (!valid) {
+        if (gl_GlobalInvocationID.x == 0u) Word(args.destination + 12ul).value = VEL_RT_BVH4_FLAG_INVALID;
+        return;
+    }
+    uint64_t offset = uint64_t(gl_GlobalInvocationID.x) * 4ul;
+    uint64_t stride = uint64_t(gl_NumWorkGroups.x) * uint64_t(gl_WorkGroupSize.x) * 4ul;
+    while (offset < size) {
+        Word(args.destination + offset).value = read32(offset);
+        if (size - offset <= stride) break;
+        offset += stride;
+    }
+}

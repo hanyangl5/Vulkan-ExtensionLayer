@@ -21,7 +21,7 @@ void vkrt_as_registry_buffer_destroy(struct vkrt_device_data *dev, VkBuffer buff
     (void)buffer;
     ++registry_destroys;
 }
-static unsigned failures, updates, allocations, buffer_creates, barriers, barriers2, submits, submits2;
+static unsigned failures, updates, allocations, buffer_creates, barriers, barriers2, submits, submits2, query_creates;
 #define REQUIRE(x) do { if (!(x)) { fprintf(stderr, "FAIL line %d: %s\n", __LINE__, #x); ++failures; } } while (0)
 #define HANDLE(type, value) ((type)(uintptr_t)(value))
 static const VkDevice device = HANDLE(VkDevice, 1);
@@ -149,6 +149,39 @@ static void buffer_usages(void) {
     info.pNext = &unknown;
     REQUIRE(vkrt_CreateBuffer(device, &info, &allocator, &buffer) == VK_ERROR_EXTENSION_NOT_PRESENT);
     REQUIRE(buffer_creates == 6 && unknown.pNext == (const void *)&flags2);
+}
+
+static const VkQueryPoolCreateInfo *original_query;
+static const VkAllocationCallbacks *query_allocator;
+static VKAPI_ATTR VkResult VKAPI_CALL mock_query(VkDevice d, const VkQueryPoolCreateInfo *info,
+                                                 const VkAllocationCallbacks *allocator, VkQueryPool *pool) {
+    REQUIRE(d == device && info == original_query && allocator == query_allocator);
+    REQUIRE(info->queryType == VK_QUERY_TYPE_TIMESTAMP);
+    ++query_creates;
+    *pool = HANDLE(VkQueryPool, 72);
+    return VK_SUCCESS;
+}
+
+static void query_pools(void) {
+    VkAllocationCallbacks allocator = {0};
+    VkBaseInStructure suffix = {.sType = VK_STRUCTURE_TYPE_MAX_ENUM};
+    VkQueryPoolCreateInfo info = {
+        .sType = VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO, .pNext = &suffix, .queryType = VK_QUERY_TYPE_TIMESTAMP, .queryCount = 3};
+    original_query = &info;
+    query_allocator = &allocator;
+    VkQueryPool pool;
+    REQUIRE(vkrt_CreateQueryPool(device, &info, &allocator, &pool) == VK_SUCCESS);
+    REQUIRE(pool == HANDLE(VkQueryPool, 72) && query_creates == 1 && info.pNext == &suffix);
+    const VkQueryType types[] = {VK_QUERY_TYPE_ACCELERATION_STRUCTURE_COMPACTED_SIZE_KHR,
+                                 VK_QUERY_TYPE_ACCELERATION_STRUCTURE_SERIALIZATION_SIZE_KHR,
+                                 VK_QUERY_TYPE_ACCELERATION_STRUCTURE_SIZE_KHR,
+                                 VK_QUERY_TYPE_ACCELERATION_STRUCTURE_SERIALIZATION_BOTTOM_LEVEL_POINTERS_KHR};
+    for (unsigned i = 0; i < VKRT_ARRAY_SIZE(types); ++i) {
+        info.queryType = types[i];
+        pool = HANDLE(VkQueryPool, 99);
+        REQUIRE(vkrt_CreateQueryPool(device, &info, &allocator, &pool) == VK_ERROR_FEATURE_NOT_PRESENT);
+        REQUIRE(pool == VK_NULL_HANDLE && query_creates == 1 && info.pNext == &suffix);
+    }
 }
 
 static VKAPI_ATTR void VKAPI_CALL mock_barrier(VkCommandBuffer cmd, VkPipelineStageFlags src, VkPipelineStageFlags dst,
@@ -970,19 +1003,21 @@ static void memory_flags(void)
 
 int main(void)
 {
-   struct vkrt_device_data dev = {.device = device};
-   dev.vtable.UpdateDescriptorSets = mock_update;
-   dev.vtable.AllocateMemory = mock_allocate;
-   dev.vtable.CreateBuffer = mock_buffer;
-   dev.vtable.DestroyBuffer = mock_buffer_destroy;
-   vkrt_map_object(VKRT_HKEY(device), &dev);
-   descriptors();
-   memory_flags();
-   buffer_usages();
-   synchronization(&dev);
-   events_and_timestamps(&dev);
-   render_pass_dependencies(&dev);
-   sync_alias_loading();
-   printf("Host translation: %s (%u failures)\n", failures ? "FAIL" : "PASS", failures);
-   return failures ? 1 : 0;
+    struct vkrt_device_data dev = {.device = device, .as_registry = (struct vkrt_as_registry *)(uintptr_t)1};
+    dev.vtable.UpdateDescriptorSets = mock_update;
+    dev.vtable.AllocateMemory = mock_allocate;
+    dev.vtable.CreateBuffer = mock_buffer;
+    dev.vtable.DestroyBuffer = mock_buffer_destroy;
+    dev.vtable.CreateQueryPool = mock_query;
+    vkrt_map_object(VKRT_HKEY(device), &dev);
+    descriptors();
+    memory_flags();
+    buffer_usages();
+    query_pools();
+    synchronization(&dev);
+    events_and_timestamps(&dev);
+    render_pass_dependencies(&dev);
+    sync_alias_loading();
+    printf("Host translation: %s (%u failures)\n", failures ? "FAIL" : "PASS", failures);
+    return failures ? 1 : 0;
 }

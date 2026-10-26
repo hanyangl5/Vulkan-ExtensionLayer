@@ -47,6 +47,7 @@ struct vkrt_device_data {
    VkPhysicalDevice            physical_device;
    struct vkrt_instance_data  *instance_data;
    struct vkrt_as_registry *as_registry;
+   struct vkrt_deferred_state *deferred;
    /* Immutable enabled queue families. Hidden AS cells are shared across
     * every family the application can use, without exposed ownership state. */
    uint32_t queue_family_count;
@@ -59,6 +60,8 @@ struct vkrt_device_data {
    bool app_requested_ray_query;
    VkPipelineLayout            build_pipeline_layout;
    VkPipeline build_pipelines[9];
+   VkPipelineLayout copy_pipeline_layout;
+   VkPipeline copy_pipeline;
    uint32_t                    max_build_dispatch_x;
    struct vkrt_cmd_buffer_data *command_buffers;
    vkrt_mutex_t                command_buffers_lock;
@@ -108,6 +111,8 @@ extern struct vkrt_global vkrt_global;
 VKAPI_ATTR VkResult VKAPI_CALL vkrt_CreateBuffer(VkDevice device, const VkBufferCreateInfo *info,
                                                  const VkAllocationCallbacks *allocator, VkBuffer *buffer);
 VKAPI_ATTR void VKAPI_CALL vkrt_DestroyBuffer(VkDevice device, VkBuffer buffer, const VkAllocationCallbacks *allocator);
+VKAPI_ATTR VkResult VKAPI_CALL vkrt_CreateQueryPool(VkDevice device, const VkQueryPoolCreateInfo *info,
+                                                    const VkAllocationCallbacks *allocator, VkQueryPool *pool);
 VKAPI_ATTR void VKAPI_CALL vkrt_UpdateDescriptorSets(VkDevice device,
    uint32_t writeCount, const VkWriteDescriptorSet *writes,
    uint32_t copyCount, const VkCopyDescriptorSet *copies);
@@ -138,6 +143,7 @@ VkDeviceAddress vkrt_as_device_address(struct vkrt_device_data *dev,
 VkDeviceAddress vkrt_as_backing_address(struct vkrt_device_data *dev, VkAccelerationStructureKHR as);
 
 /* vkrt_build.c */
+bool vkrt_device_uses_virtual_rt(const VkDeviceCreateInfo *info);
 VkResult vkrt_create_device_with_features(struct vkrt_instance_data *inst,
    VkPhysicalDevice physical, PFN_vkCreateDevice create,
    const VkDeviceCreateInfo *ci, const VkAllocationCallbacks *alloc, VkDevice *device);

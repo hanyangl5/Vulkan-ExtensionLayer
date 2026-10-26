@@ -54,6 +54,11 @@ class Emitter {
               << ID("u32") << " = OpTypeInt 32 0\n"
               << ID("pair") << " = OpTypeVector " << ID("u32") << " 2\n";
         scalars["i32u"] = ID("u32");
+        output.base_type = output.plan.options.physical_frame_addresses ? Unsigned(64) : ID("u32");
+        if (output.plan.options.physical_frame_addresses) {
+            output.memory.clear();
+            caps.insert("PhysicalStorageBufferAddresses");
+        }
         type_symbols[0] = ID("void");
         Constant(0);
         Constant(1);
@@ -61,10 +66,12 @@ class Emitter {
         Constant(3);
         Constant(8);
         for (const auto &layout : output.plan.types) Type(layout.type);
+        output.step_signature = Signature("step_sig", ID("void"), {output.base_type});
         for (auto type : order) {
             auto symbol = Type(type);
-            load_signatures[type] = Signature("load_sig" + std::to_string(type), symbol, {ID("u32"), ID("u32")});
-            store_signatures[type] = Signature("store_sig" + std::to_string(type), ID("void"), {ID("u32"), ID("u32"), symbol});
+            load_signatures[type] = Signature("load_sig" + std::to_string(type), symbol, {output.base_type, ID("u32")});
+            store_signatures[type] =
+                Signature("store_sig" + std::to_string(type), ID("void"), {output.base_type, ID("u32"), symbol});
         }
         for (auto type : order) {
             EmitLoad(type);
@@ -75,15 +82,20 @@ class Emitter {
             for (const auto &site : frame.suspensions) EmitSuspension(frame, site);
         }
         std::ostringstream storage;
-        storage << ID("words") << " = OpTypeRuntimeArray " << ID("u32") << "\n"
-                << ID("buffer") << " = OpTypeStruct " << ID("words") << "\n"
-                << ID("buffer_ptr") << " = OpTypePointer StorageBuffer " << ID("buffer") << "\n"
-                << ID("word_ptr") << " = OpTypePointer StorageBuffer " << ID("u32") << "\n"
-                << output.memory << " = OpVariable " << ID("buffer_ptr") << " StorageBuffer\n";
+        if (output.plan.options.physical_frame_addresses) {
+            storage << ID("word_ptr") << " = OpTypePointer PhysicalStorageBuffer " << ID("u32") << "\n";
+        } else
+            storage << ID("words") << " = OpTypeRuntimeArray " << ID("u32") << "\n"
+                    << ID("buffer") << " = OpTypeStruct " << ID("words") << "\n"
+                    << ID("buffer_ptr") << " = OpTypePointer StorageBuffer " << ID("buffer") << "\n"
+                    << ID("word_ptr") << " = OpTypePointer StorageBuffer " << ID("u32") << "\n"
+                    << output.memory << " = OpVariable " << ID("buffer_ptr") << " StorageBuffer\n";
         for (const auto &cap : caps) output.capabilities += "OpCapability " + cap + "\n";
-        output.annotations = "OpDecorate " + ID("words") + " ArrayStride 4\nOpMemberDecorate " + ID("buffer") +
-                             " 0 Offset 0\nOpDecorate " + ID("buffer") + " Block\nOpDecorate " + output.memory + " DescriptorSet " +
-                             std::to_string(set) + "\nOpDecorate " + output.memory + " Binding " + std::to_string(binding) + "\n";
+        if (!output.plan.options.physical_frame_addresses)
+            output.annotations = "OpDecorate " + ID("words") + " ArrayStride 4\nOpMemberDecorate " + ID("buffer") +
+                                 " 0 Offset 0\nOpDecorate " + ID("buffer") + " Block\nOpDecorate " + output.memory +
+                                 " DescriptorSet " + std::to_string(set) + "\nOpDecorate " + output.memory + " Binding " +
+                                 std::to_string(binding) + "\n";
         output.declarations = types.str() + storage.str();
         output.functions = functions.str();
         return std::move(output);
@@ -220,24 +232,31 @@ class Emitter {
         return result;
     }
     std::string Pointer(const std::string &base, const std::string &offset) {
+        if (output.plan.options.physical_frame_addresses) {
+            auto aligned = Op("OpBitwiseAnd " + ID("u32") + " " + offset + " " + Constant(UINT32_MAX - 3u));
+            auto wide = Op("OpUConvert " + output.base_type + " " + aligned);
+            auto address = Op("OpIAdd " + output.base_type + " " + base + " " + wide);
+            return Op("OpConvertUToPtr " + ID("word_ptr") + " " + address);
+        }
         auto word = Op("OpShiftRightLogical " + ID("u32") + " " + offset + " " + Constant(2));
         word = Op("OpIAdd " + ID("u32") + " " + base + " " + word);
         return Op("OpAccessChain " + ID("word_ptr") + " " + output.memory + " " + Constant(0) + " " + word);
     }
+    std::string Alignment() const { return output.plan.options.physical_frame_addresses ? " Aligned 4" : ""; }
     std::string Shift(const std::string &offset) {
         auto byte = Op("OpBitwiseAnd " + ID("u32") + " " + offset + " " + Constant(3));
         return Op("OpIMul " + ID("u32") + " " + byte + " " + Constant(8));
     }
     void EmitLoad(uint32_t type) {
         functions << Load(type) << " = OpFunction " << Type(type) << " None " << LoadSignature(type) << "\n";
-        auto base = Op("OpFunctionParameter " + ID("u32"));
+        auto base = Op("OpFunctionParameter " + output.base_type);
         auto offset = Op("OpFunctionParameter " + ID("u32"));
         Op("OpLabel");
         auto op = definitions.at(type).op;
         std::string result;
         if (op == spv::OpTypeBool || op == spv::OpTypeInt || op == spv::OpTypeFloat || op == spv::OpTypeAccelerationStructureKHR) {
             auto ptr = Pointer(base, offset);
-            auto word = Op("OpLoad " + ID("u32") + " " + ptr);
+            auto word = Op("OpLoad " + ID("u32") + " " + ptr + Alignment());
             uint32_t width = op == spv::OpTypeBool                       ? 32
                              : op == spv::OpTypeAccelerationStructureKHR ? 64
                                                                          : definitions.at(type).words.at(2);
@@ -245,7 +264,7 @@ class Emitter {
                 result = Op("OpINotEqual " + ID("bool") + " " + word + " " + Constant(0));
             } else if (width == 64) {
                 auto next = Op("OpIAdd " + ID("u32") + " " + offset + " " + Constant(4));
-                auto hi = Op("OpLoad " + ID("u32") + " " + Pointer(base, next));
+                auto hi = Op("OpLoad " + ID("u32") + " " + Pointer(base, next) + Alignment());
                 auto pair = Op("OpCompositeConstruct " + ID("pair") + " " + word + " " + hi);
                 result = Op("OpBitcast " + Type(type) + " " + pair);
             } else {
@@ -269,7 +288,7 @@ class Emitter {
     }
     void EmitStore(uint32_t type) {
         functions << Store(type) << " = OpFunction " << ID("void") << " None " << StoreSignature(type) << "\n";
-        auto base = Op("OpFunctionParameter " + ID("u32"));
+        auto base = Op("OpFunctionParameter " + output.base_type);
         auto offset = Op("OpFunctionParameter " + ID("u32"));
         auto value = Op("OpFunctionParameter " + Type(type));
         Op("OpLabel");
@@ -283,10 +302,10 @@ class Emitter {
                 auto pair = Op("OpBitcast " + ID("pair") + " " + value);
                 auto lo = Op("OpCompositeExtract " + ID("u32") + " " + pair + " 0");
                 auto hi = Op("OpCompositeExtract " + ID("u32") + " " + pair + " 1");
-                functions << "OpStore " << ptr << " " << lo << "\n";
+                functions << "OpStore " << ptr << " " << lo << Alignment() << "\n";
                 auto next = Op("OpIAdd " + ID("u32") + " " + offset + " " + Constant(4));
                 auto next_ptr = Pointer(base, next);
-                functions << "OpStore " << next_ptr << " " << hi << "\n";
+                functions << "OpStore " << next_ptr << " " << hi << Alignment() << "\n";
             } else {
                 auto bits = value;
                 if (op == spv::OpTypeBool) {
@@ -297,11 +316,11 @@ class Emitter {
                     if (width < 32) bits = Op("OpUConvert " + ID("u32") + " " + bits);
                 }
                 if (width < 32) {
-                    auto previous = Op("OpLoad " + ID("u32") + " " + ptr);
+                    auto previous = Op("OpLoad " + ID("u32") + " " + ptr + Alignment());
                     bits = Op("OpBitFieldInsert " + ID("u32") + " " + previous + " " + bits + " " + Shift(offset) + " " +
                               Constant(width));
                 }
-                functions << "OpStore " << ptr << " " << bits << "\n";
+                functions << "OpStore " << ptr << " " << bits << Alignment() << "\n";
             }
         } else {
             uint32_t index = 0;
@@ -333,13 +352,13 @@ class Emitter {
             for (auto slot : slots) types << " " << Type(slot->type);
             types << "\n";
         }
-        std::vector<std::string> spill_parameters{ID("u32")};
+        std::vector<std::string> spill_parameters{output.base_type};
         for (auto slot : slots) spill_parameters.push_back(Type(slot->type));
         const auto spill_signature = Signature(suffix + "_spill_sig", ID("void"), spill_parameters);
-        const auto restore_signature = Signature(suffix + "_restore_sig", codec.restored_type, {ID("u32")});
+        const auto restore_signature = Signature(suffix + "_restore_sig", codec.restored_type, {output.base_type});
 
         functions << codec.spill << " = OpFunction " << ID("void") << " None " << spill_signature << "\n";
-        auto base = Op("OpFunctionParameter " + ID("u32"));
+        auto base = Op("OpFunctionParameter " + output.base_type);
         std::vector<std::string> parameters;
         for (auto slot : slots) parameters.push_back(Op("OpFunctionParameter " + Type(slot->type)));
         Op("OpLabel");
@@ -351,7 +370,7 @@ class Emitter {
         functions << "OpReturn\nOpFunctionEnd\n";
 
         functions << codec.restore << " = OpFunction " << codec.restored_type << " None " << restore_signature << "\n";
-        base = Op("OpFunctionParameter " + ID("u32"));
+        base = Op("OpFunctionParameter " + output.base_type);
         Op("OpLabel");
         if (slots.empty()) {
             functions << "OpReturn\n";

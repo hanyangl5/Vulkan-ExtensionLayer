@@ -189,6 +189,7 @@ vkrt_rewrite_shader_module(struct vkrt_device_data *dev,
    *uses_ray_query             = false;
    *uses_ray_tracing_pipeline  = false;
    *out_ci                     = *ci;
+   if (!dev->as_registry) return VK_SUCCESS;
 
    const uint32_t *words = ci->pCode;
    const size_t    count = ci->codeSize / 4;

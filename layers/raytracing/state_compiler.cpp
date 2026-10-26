@@ -76,9 +76,23 @@ std::string Rewrite(const std::string &text, const std::function<std::string(uin
 }
 class Compiler {
   public:
-    Compiler(std::vector<uint32_t> source, std::string entry, uint32_t model, uint32_t set, uint32_t binding)
-        : entry(std::move(entry)), model(model), set(set), binding(binding) {
+    Compiler(std::vector<uint32_t> source, std::string entry, uint32_t model, TypedContinuationCompileOptions config)
+        : entry(std::move(entry)),
+          model(model),
+          set(config.frame_descriptor_set),
+          binding(config.frame_binding),
+          config(std::move(config)) {
         output.source = std::move(source);
+        output.transport = this->config.transport;
+        output.step_export_name = this->config.step_export_name;
+        if (!this->config.emit_compute_entry && (!BDA() || this->config.step_export_name.empty()))
+            Unsupported("stage libraries require BDA transport and a nonempty export name");
+        if (!this->config.step_export_name.empty() &&
+            !std::all_of(this->config.step_export_name.begin(), this->config.step_export_name.end(),
+                         [](unsigned char c) { return std::isalnum(c) || c == '_'; }))
+            Unsupported("invalid stage export name");
+        if (BDA() && this->config.context_root_low_spec_id == this->config.context_root_high_spec_id)
+            Unsupported("BDA context root specialization IDs must differ");
         spvtools::SpirvTools tools(SPV_ENV_VULKAN_1_3);
         std::string assembly;
         if (!tools.Disassemble(output.source, &assembly, SPV_BINARY_TO_TEXT_OPTION_NO_HEADER))
@@ -125,7 +139,9 @@ class Compiler {
                 // when no source instruction reads them (notably attributes).
                 for (auto id : i.uses) {
                     const auto &d = Def(id);
-                    if (d.op == spv::OpVariable && IsInvocationStorage(d.words.at(3))) NeedGlobal(id);
+                    if (d.op == spv::OpVariable &&
+                        (IsInvocationStorage(d.words.at(3)) || (BDA() && d.words.at(3) == spv::StorageClassInput)))
+                        NeedGlobal(id);
                 }
             }
             if (i.op == spv::OpMemoryModel &&
@@ -163,11 +179,14 @@ class Compiler {
         }
         for (const auto &[resource, resource_set] : resource_sets) {
             auto source_binding = resource_bindings.find(resource);
-            if (source_binding != resource_bindings.end() && resource_set == set && source_binding->second == binding)
+            if (!BDA() && source_binding != resource_bindings.end() && resource_set == set && source_binding->second == binding)
                 Unsupported("frame descriptor binding collides with a live source resource");
         }
         std::vector<uint32_t> types(value_types.begin(), value_types.end());
         ContinuationFrameOptions options{true, true};
+        options.physical_frame_addresses = BDA();
+        options.prefix_bytes = BDA() ? VEL_RT_SYSTEM_BYTES : 0;
+        output.system_header_bytes = options.prefix_bytes;
         const auto preview = PlanContinuationFrames(output.source, this->entry, model, types, options);
         uint64_t persistent_size = 0;
         for (const auto &f : preview.functions) {
@@ -205,11 +224,15 @@ class Compiler {
         output.frame_stride_words = bounds.stride_words;
         output.max_invocations = bounds.max_invocations;
         output.control_word = static_cast<uint32_t>((persistent_size + 3) / 4);
+        output.control_byte_offset = output.control_word * 4;
+        output.frame_stride_bytes = uint64_t(output.frame_stride_words) * 4;
+        output.max_invocations64 = BDA() ? UINT64_MAX / output.frame_stride_bytes : output.max_invocations;
         for (const auto &variable : output.invocation_variables) invocation_variables[variable.variable] = &variable;
         code = EmitContinuationFrameCodecs(output.source, this->entry, model, set, binding, "sc_cf_", types, options);
         // Reuse the component's existing word pointer declaration rather than
         // emit an illegal duplicate non-aggregate SPIR-V pointer type.
-        pointer_types[std::to_string(spv::StorageClassStorageBuffer) + " " + code.word_type] = code.word_pointer_type;
+        pointer_types[std::to_string(BDA() ? spv::StorageClassPhysicalStorageBuffer : spv::StorageClassStorageBuffer) + " " +
+                      code.word_type] = code.word_pointer_type;
         output.frames = code.plan;
         for (const auto &c : code.types) codecs[c.type] = c;
         for (const auto &f : code.plan.functions) {
@@ -223,19 +246,29 @@ class Compiler {
             if (d.op == spv::OpTypeInt && d.words.at(2) == 32 && d.words.at(3) == 0) word_codec = &c;
         }
         if (!word_codec) Unsupported("missing uint32 request/control codec");
+        if (BDA()) CollectBuiltins();
         BuildStates();
     }
 
     TypedContinuationProgram Run() {
         EmitGlobals();
         EmitStep();
-        EmitKernel();
+        if (config.emit_compute_entry)
+            EmitKernel();
+        else {
+            EnsureCapability("Linkage");
+            annotations << "OpDecorate %sc_step LinkageAttributes \"" << config.step_export_name << "\" Export\n";
+        }
         std::string assembly = code.capabilities + source_caps.str() + extensions.str() + imports.str() +
-                               "OpMemoryModel Logical GLSL450\nOpEntryPoint GLCompute %sc_main \"main\" " + code.memory;
-        for (const auto &global : interfaces) assembly += " " + global;
-        assembly += "\nOpExecutionMode %sc_main LocalSize 1 1 1\n" + execution_modes.str() + code.annotations + annotations.str() +
-                    code.declarations + declarations.str() + code.functions + functions.str();
-        spvtools::SpirvTools tools(SPV_ENV_VULKAN_1_3);
+                               (BDA() ? "OpMemoryModel PhysicalStorageBuffer64 GLSL450\n" : "OpMemoryModel Logical GLSL450\n");
+        if (config.emit_compute_entry) {
+            assembly += "OpEntryPoint GLCompute %sc_main \"main\" " + code.memory;
+            for (const auto &global : interfaces) assembly += " " + global;
+            assembly += "\nOpExecutionMode %sc_main LocalSize 1 1 1\n" + execution_modes.str();
+        }
+        assembly +=
+            code.annotations + annotations.str() + code.declarations + declarations.str() + code.functions + functions.str();
+        spvtools::SpirvTools tools(config.emit_compute_entry ? SPV_ENV_VULKAN_1_3 : SPV_ENV_UNIVERSAL_1_5);
         std::string error;
         tools.SetMessageConsumer([&](spv_message_level_t, const char *, const spv_position_t &p, const char *message) {
             error += std::to_string(p.index) + ": " + message + "\n";
@@ -259,6 +292,7 @@ class Compiler {
     Parsed parsed;
     std::string entry;
     uint32_t model, set, binding, serial = 0;
+    TypedContinuationCompileOptions config;
     ContinuationFrameCodecs code;
     const FunctionFrame *frame = nullptr;
     const ContinuationTypeCodec *word_codec = nullptr;
@@ -269,15 +303,117 @@ class Compiler {
     std::map<uint32_t, ContinuationTypeCodec> codecs;
     std::map<uint32_t, const ContinuationFrameSlot *> slots;
     std::map<uint32_t, const TypedInvocationVariable *> invocation_variables;
+    std::map<uint32_t, const TypedBuiltinVariable *> builtin_variables;
     std::map<uint32_t, const ContinuationSuspensionCodec *> sites;
     std::map<uint32_t, uint32_t> first_state;
     std::map<uint32_t, std::string> cloned_types;
     std::map<std::string, std::string> pointer_types;
     std::map<uint32_t, std::string> descriptor_types;
     std::map<uint32_t, std::string> constants;
+    std::set<uint64_t> wide_constants;
     std::vector<std::string> interfaces;
     std::ostringstream source_caps, imports, extensions, execution_modes, annotations, declarations, functions;
     std::string gid, gid_type, group_count, pc_pointer;
+    bool BDA() const { return config.transport == TypedFrameTransport::PhysicalAddress; }
+    void CollectBuiltins() {
+        for (auto id : globals) {
+            const auto &variable = Def(id);
+            if (variable.op != spv::OpVariable || variable.words.at(3) != spv::StorageClassInput) continue;
+            uint32_t builtin = UINT32_MAX;
+            for (const auto &i : parsed.instructions)
+                if (i.op == spv::OpDecorate && i.words.at(1) == id && i.words.at(2) == spv::DecorationBuiltIn)
+                    builtin = i.words.at(3);
+            uint32_t offset = 0, size = 0;
+            switch (builtin) {
+                case spv::BuiltInLaunchIdKHR:
+                    offset = VEL_RT_SYS_LAUNCH_ID;
+                    size = 12;
+                    break;
+                case spv::BuiltInLaunchSizeKHR:
+                    offset = VEL_RT_SYS_LAUNCH_SIZE;
+                    size = 12;
+                    break;
+                case spv::BuiltInIncomingRayFlagsKHR:
+                    offset = VEL_RT_SYS_RAY_FLAGS;
+                    size = 4;
+                    break;
+                case spv::BuiltInWorldRayOriginKHR:
+                    offset = VEL_RT_SYS_WORLD_ORIGIN;
+                    size = 12;
+                    break;
+                case spv::BuiltInWorldRayDirectionKHR:
+                    offset = VEL_RT_SYS_WORLD_DIRECTION;
+                    size = 12;
+                    break;
+                case spv::BuiltInObjectRayOriginKHR:
+                    offset = VEL_RT_SYS_OBJECT_ORIGIN;
+                    size = 12;
+                    break;
+                case spv::BuiltInObjectRayDirectionKHR:
+                    offset = VEL_RT_SYS_OBJECT_DIRECTION;
+                    size = 12;
+                    break;
+                case spv::BuiltInRayTminKHR:
+                    offset = VEL_RT_SYS_TMIN;
+                    size = 4;
+                    break;
+                case spv::BuiltInRayTmaxKHR:
+                    offset = VEL_RT_SYS_TMAX;
+                    size = 4;
+                    break;
+                case spv::BuiltInInstanceCustomIndexKHR:
+                    offset = VEL_RT_SYS_INSTANCE_CUSTOM_INDEX;
+                    size = 4;
+                    break;
+                case spv::BuiltInInstanceId:
+                    offset = VEL_RT_SYS_INSTANCE_ID;
+                    size = 4;
+                    break;
+                case spv::BuiltInRayGeometryIndexKHR:
+                    offset = VEL_RT_SYS_GEOMETRY_INDEX;
+                    size = 4;
+                    break;
+                case spv::BuiltInPrimitiveId:
+                    offset = VEL_RT_SYS_PRIMITIVE_ID;
+                    size = 4;
+                    break;
+                case spv::BuiltInHitKindKHR:
+                    offset = VEL_RT_SYS_HIT_KIND;
+                    size = 4;
+                    break;
+                case spv::BuiltInObjectToWorldKHR:
+                    offset = VEL_RT_SYS_OBJECT_TO_WORLD;
+                    size = 48;
+                    break;
+                case spv::BuiltInWorldToObjectKHR:
+                    offset = VEL_RT_SYS_WORLD_TO_OBJECT;
+                    size = 48;
+                    break;
+                case spv::BuiltInCullMaskKHR:
+                    offset = VEL_RT_SYS_CULL_MASK;
+                    size = 4;
+                    break;
+                default:
+                    Unsupported("input builtin requires additional system-frame ABI support: " + std::to_string(builtin));
+            }
+            auto type = Def(variable.type).words.at(3);
+            if (Layout(type).size != size) Unsupported("builtin system-frame type size mismatch");
+            output.builtin_variables.push_back({id, type, builtin, offset, size});
+        }
+        for (const auto &variable : output.builtin_variables) builtin_variables[variable.variable] = &variable;
+    }
+    uint32_t PointerRoot(uint32_t id) const {
+        const auto &d = Def(id);
+        if (d.op == spv::OpVariable) return id;
+        if (d.op == spv::OpAccessChain || d.op == spv::OpInBoundsAccessChain || d.op == spv::OpCopyObject)
+            return PointerRoot(d.words.at(3));
+        Unsupported("unsupported pointer root provenance");
+    }
+    bool SystemPointer(uint32_t id) const { return BDA() && builtin_variables.count(PointerRoot(id)) != 0; }
+    bool PhysicalResourcePointer(uint32_t id) const {
+        auto storage = Storage(id);
+        return BDA() && (storage == spv::StorageClassPushConstant || storage == spv::StorageClassShaderRecordBufferKHR);
+    }
     static bool IsInvocationStorage(uint32_t storage) {
         return storage == spv::StorageClassRayPayloadKHR || storage == spv::StorageClassIncomingRayPayloadKHR ||
                storage == spv::StorageClassCallableDataKHR || storage == spv::StorageClassIncomingCallableDataKHR ||
@@ -312,6 +448,11 @@ class Compiler {
         declarations << name << " = OpConstant " << code.word_type << " " << value << "\n";
         constants[value] = name;
         return name;
+    }
+    std::string WideConstant(uint64_t value) {
+        auto key = "%sc_w" + std::to_string(value);
+        if (wide_constants.insert(value).second) declarations << key << " = OpConstant " << code.base_type << " " << value << "\n";
+        return key;
     }
     bool Layoutable(uint32_t id) const {
         const auto &d = Def(id);
@@ -350,11 +491,12 @@ class Compiler {
         auto found = pointer_types.find(key);
         if (found != pointer_types.end()) return found->second;
         auto id = Fresh();
-        const char *name = storage == spv::StorageClassFunction        ? "Function"
-                           : storage == spv::StorageClassInput         ? "Input"
-                           : storage == spv::StorageClassPushConstant  ? "PushConstant"
-                           : storage == spv::StorageClassStorageBuffer ? "StorageBuffer"
-                                                                       : nullptr;
+        const char *name = storage == spv::StorageClassFunction                ? "Function"
+                           : storage == spv::StorageClassInput                 ? "Input"
+                           : storage == spv::StorageClassPushConstant          ? "PushConstant"
+                           : storage == spv::StorageClassStorageBuffer         ? "StorageBuffer"
+                           : storage == spv::StorageClassPhysicalStorageBuffer ? "PhysicalStorageBuffer"
+                                                                               : nullptr;
         if (!name) Unsupported("pointer storage class " + std::to_string(storage));
         declarations << id << " = OpTypePointer " << name << " " << pointee << "\n";
         pointer_types[key] = id;
@@ -370,6 +512,9 @@ class Compiler {
         if (d.op == spv::OpTypePointer) {
             if (d.words.at(2) == spv::StorageClassUniformConstant && IsASDescriptor(d.words.at(3)))
                 return PointerType(spv::StorageClassStorageBuffer, DescriptorType(d.words.at(3)));
+            if (BDA() &&
+                (d.words.at(2) == spv::StorageClassPushConstant || d.words.at(2) == spv::StorageClassShaderRecordBufferKHR))
+                return PointerType(spv::StorageClassPhysicalStorageBuffer, Type(d.words.at(3)));
             return PointerType(d.words.at(2), Type(d.words.at(3)));
         }
         if (d.op != spv::OpTypeStruct && d.op != spv::OpTypeRuntimeArray)
@@ -430,9 +575,14 @@ class Compiler {
                 if (!((mode >= spv::ExecutionModeDenormPreserve && mode <= spv::ExecutionModeRoundingModeRTZ) ||
                       mode == spv::ExecutionModeFPFastMathDefault))
                     Unsupported("source execution mode requires scheduler support");
-                execution_modes << Rewrite(i.text, [&](uint32_t id) {
-                    return id == code.plan.analysis.entry ? "%sc_main" : Global(id);
-                }) << "\n";
+                if (!config.emit_compute_entry) {
+                    if (i.op == spv::OpExecutionModeId)
+                        Unsupported("stage-library execution-mode IDs require specialization/reconciliation");
+                    output.required_execution_modes.push_back({mode, {i.words.begin() + 3, i.words.end()}});
+                } else
+                    execution_modes << Rewrite(i.text, [&](uint32_t id) {
+                        return id == code.plan.analysis.entry ? "%sc_main" : Global(id);
+                    }) << "\n";
             }
             if (i.op == spv::OpCapability && i.words.at(1) != spv::CapabilityShader &&
                 i.text.find("OpCapability Ray") == std::string::npos) {
@@ -457,6 +607,15 @@ class Compiler {
                 Unsupported("specialization must run before state lowering");
             else if (i.op == spv::OpVariable) {
                 if (IsInvocationStorage(i.words.at(3))) continue;
+                if (BDA() && i.words.at(3) == spv::StorageClassInput) continue;
+                if (BDA() && i.words.at(3) == spv::StorageClassPushConstant) {
+                    output.uses_app_push_constants = true;
+                    continue;
+                }
+                if (BDA() && i.words.at(3) == spv::StorageClassShaderRecordBufferKHR) {
+                    output.uses_shader_record = true;
+                    continue;
+                }
                 if (i.words.at(3) == spv::StorageClassUniformConstant && IsASDescriptor(Def(i.type).words.at(3))) {
                     declarations << SourceID(i.result) << " = OpVariable " << Type(i.type) << " StorageBuffer\n";
                     interfaces.push_back(SourceID(i.result));
@@ -474,6 +633,10 @@ class Compiler {
             auto target = i.words.at(1);
             if (!globals.count(target) && !needed_types.count(target)) continue;
             if (invocation_variables.count(target)) continue;
+            if (BDA() && globals.count(target) && Def(target).op == spv::OpVariable &&
+                (Def(target).words.at(3) == spv::StorageClassInput || Def(target).words.at(3) == spv::StorageClassPushConstant ||
+                 Def(target).words.at(3) == spv::StorageClassShaderRecordBufferKHR))
+                continue;
             if (i.op == spv::OpDecorate && i.words.at(2) == spv::DecorationBuiltIn) {
                 auto builtin = i.words.at(3);
                 if (builtin == spv::BuiltInLaunchIdKHR) {
@@ -509,8 +672,8 @@ class Compiler {
     bool IsPointer(uint32_t type) const { return type && Def(type).op == spv::OpTypePointer; }
     std::string Value(uint32_t id) {
         const auto &d = Def(id);
-        if (!d.in_function) return Global(id);
         if (IsPointer(d.type)) return RealPointer(id);
+        if (!d.in_function) return Global(id);
         if (!d.result || !d.type || Def(d.type).op == spv::OpTypeVoid) Unsupported("non-value source operand");
         auto result = Op("OpLoad " + Type(d.type) + " " + Register(id));
         DecorateResult(id, result, true);
@@ -519,6 +682,8 @@ class Compiler {
     void Save(uint32_t id, const std::string &value) { functions << "OpStore " << Register(id) << " " << value << "\n"; }
     uint32_t Storage(uint32_t pointer) const { return Def(Def(pointer).type).words.at(2); }
     std::string Offset(uint32_t pointer) {
+        auto system = builtin_variables.find(pointer);
+        if (system != builtin_variables.end()) return Constant(system->second->byte_offset);
         auto invocation = invocation_variables.find(pointer);
         if (invocation != invocation_variables.end()) return Constant(static_cast<uint32_t>(invocation->second->offset));
         auto slot = slots.find(pointer);
@@ -560,7 +725,13 @@ class Compiler {
     }
     std::string RealPointer(uint32_t id) {
         const auto &d = Def(id);
-        if (IsPersistentStorage(Storage(id))) Unsupported("persistent pointer used outside typed load/store");
+        if (IsPersistentStorage(Storage(id)) || SystemPointer(id)) Unsupported("persistent pointer used outside typed load/store");
+        if (!d.in_function && d.op == spv::OpVariable && PhysicalResourcePointer(id)) {
+            auto offset =
+                Storage(id) == spv::StorageClassPushConstant ? VEL_RT_SYS_APP_PUSH_ADDRESS : VEL_RT_SYS_SHADER_RECORD_ADDRESS;
+            auto address = LoadAddress("%sc_base", offset);
+            return Op("OpConvertUToPtr " + Type(d.type) + " " + address);
+        }
         if (!d.in_function && d.op == spv::OpVariable) return Global(id);
         if (d.op == spv::OpCopyObject) {
             auto source = RealPointer(d.words.at(3));
@@ -590,6 +761,12 @@ class Compiler {
     std::string LoadWord(uint32_t relative) {
         return Op("OpFunctionCall " + code.word_type + " " + word_codec->load + " %sc_base " +
                   Constant((output.control_word + relative) * 4));
+    }
+    std::string LoadAddress(const std::string &base, uint32_t offset) {
+        auto low = Op("OpFunctionCall " + code.word_type + " " + word_codec->load + " " + base + " " + Constant(offset));
+        auto high = Op("OpFunctionCall " + code.word_type + " " + word_codec->load + " " + base + " " + Constant(offset + 4));
+        auto pair = Op("OpCompositeConstruct " + code.word_pair_type + " " + low + " " + high);
+        return Op("OpBitcast " + code.base_type + " " + pair);
     }
     void StoreWord(uint32_t relative, const std::string &value) {
         Op("OpFunctionCall " + code.void_type + " " + word_codec->store + " %sc_base " +
@@ -739,6 +916,9 @@ class Compiler {
             if (id == i.type) return Type(id);
             return loaded.at(id);
         });
+        if (i.op == spv::OpLoad && PhysicalResourcePointer(i.words.at(3))) text = AlignedMemory(text, i, i.type, 5);
+        if (i.op == spv::OpArrayLength && PhysicalResourcePointer(i.words.at(3)))
+            Unsupported("physical shader-record runtime-array length requires a record-size ABI");
         if (i.op == spv::OpConvertUToAccelerationStructureKHR) {
             auto name = text.find("OpConvertUToAccelerationStructureKHR");
             if (name == std::string::npos) Unsupported("missing AS conversion opcode");
@@ -747,6 +927,36 @@ class Compiler {
         functions << text << "\n";
         DecorateResult(i.result, result);
         Save(i.result, result);
+    }
+    uint32_t ScalarAlignment(uint32_t type) const {
+        const auto &d = Def(type);
+        if (d.op == spv::OpTypeInt || d.op == spv::OpTypeFloat) return d.words.at(2) / 8;
+        if (d.op == spv::OpTypeBool) return 4;
+        if (d.op == spv::OpTypeAccelerationStructureKHR) return 8;
+        if (d.op == spv::OpTypeVector || d.op == spv::OpTypeMatrix || d.op == spv::OpTypeArray || d.op == spv::OpTypeRuntimeArray)
+            return ScalarAlignment(d.words.at(2));
+        uint32_t alignment = 1;
+        if (d.op == spv::OpTypeStruct)
+            for (size_t n = 2; n < d.words.size(); ++n) alignment = std::max(alignment, ScalarAlignment(d.words[n]));
+        return alignment;
+    }
+    std::string AlignedMemory(const std::string &text, const Instruction &i, uint32_t type, size_t mask_token) const {
+        if (text.find("Aligned") != std::string::npos) return text;
+        std::istringstream stream(text);
+        std::vector<std::string> tokens;
+        std::string token;
+        while (stream >> token) tokens.push_back(token);
+        auto alignment = std::to_string(ScalarAlignment(type));
+        if (tokens.size() <= mask_token) {
+            tokens.push_back("Aligned");
+            tokens.push_back(alignment);
+        } else {
+            tokens[mask_token] = tokens[mask_token] == "None" ? "Aligned" : tokens[mask_token] + "|Aligned";
+            tokens.insert(tokens.begin() + mask_token + 1, alignment);
+        }
+        std::string result;
+        for (const auto &part : tokens) result += (result.empty() ? "" : " ") + part;
+        return result;
     }
     void Switch(const Instruction &i, uint32_t predecessor) {
         const auto &type = Def(Def(i.words.at(1)).type);
@@ -793,11 +1003,18 @@ class Compiler {
             if (i.op == spv::OpAccessChain || i.op == spv::OpInBoundsAccessChain ||
                 (i.op == spv::OpCopyObject && IsPointer(i.type)))
                 continue;
+            if (i.op == spv::OpIgnoreIntersectionKHR || i.op == spv::OpTerminateRayKHR) {
+                StoreWord(1, Constant(i.op == spv::OpIgnoreIntersectionKHR ? 4u : 5u));
+                StoreWord(2, Constant(0));
+                StoreWord(0, Constant(UINT32_MAX));
+                functions << "OpReturn\n";
+                return;
+            }
             if (i.op == spv::OpReportIntersectionKHR || i.op == spv::OpTraceRayKHR || i.op == spv::OpExecuteCallableKHR) {
                 Suspend(i, state.number + 1);
                 return;
             }
-            if (i.op == spv::OpLoad && IsPersistentStorage(Storage(i.words.at(3)))) {
+            if (i.op == spv::OpLoad && (IsPersistentStorage(Storage(i.words.at(3))) || SystemPointer(i.words.at(3)))) {
                 if (i.words.size() != 4) Unsupported("persistent local load memory operands");
                 auto address = Offset(i.words.at(3));
                 Save(i.result, Op("OpFunctionCall " + Type(i.type) + " " + codecs.at(i.type).load + " %sc_base " + address));
@@ -810,6 +1027,7 @@ class Compiler {
                        Value(i.words.at(2)));
                 } else {
                     auto text = Rewrite(i.text, [&](uint32_t id) { return Value(id); });
+                    if (PhysicalResourcePointer(i.words.at(1))) text = AlignedMemory(text, i, Def(i.words.at(2)).type, 3);
                     functions << text << "\n";
                 }
             } else if (i.op == spv::OpBranch) {
@@ -850,9 +1068,8 @@ class Compiler {
         Unsupported("source state has no terminator");
     }
     void EmitStep() {
-        declarations << "%sc_step_sig = OpTypeFunction " << code.void_type << " " << code.word_type << "\n";
-        functions << "%sc_step = OpFunction " << code.void_type << " None %sc_step_sig\n%sc_base = OpFunctionParameter "
-                  << code.word_type << "\n%sc_entry = OpLabel\n";
+        functions << "%sc_step = OpFunction " << code.void_type << " None " << code.step_signature
+                  << "\n%sc_base = OpFunctionParameter " << code.base_type << "\n%sc_entry = OpLabel\n";
         pc_pointer = "%sc_pc";
         auto pc_type = PointerType(spv::StorageClassFunction, code.word_type);
         functions << pc_pointer << " = OpVariable " << pc_type << " Function\n";
@@ -882,6 +1099,10 @@ class Compiler {
                   << "%sc_continue = OpLabel\nOpBranch %sc_loop\n%sc_loop_exit = OpLabel\nOpUnreachable\nOpFunctionEnd\n";
     }
     void EmitKernel() {
+        if (BDA()) {
+            EmitBDAKernel();
+            return;
+        }
         if (gid_type.empty()) {
             for (const auto &[id, codec] : codecs) {
                 const auto &d = Def(id);
@@ -942,6 +1163,90 @@ class Compiler {
         Op("OpFunctionCall " + code.void_type + " %sc_step " + base);
         functions << "OpReturn\nOpFunctionEnd\n";
     }
+    void EmitBDAKernel() {
+        for (const auto &[id, codec] : codecs) {
+            const auto &d = Def(id);
+            if (d.op == spv::OpTypeVector && d.words.at(3) == 3 && Type(d.words.at(2)) == code.word_type)
+                gid_type = codec.spirv_type;
+        }
+        if (gid_type.empty()) {
+            gid_type = "%sc_gid_type";
+            declarations << gid_type << " = OpTypeVector " << code.word_type << " 3\n";
+        }
+        auto pointer = PointerType(spv::StorageClassInput, gid_type);
+        gid = "%sc_gid";
+        group_count = "%sc_groups";
+        declarations << gid << " = OpVariable " << pointer << " Input\n"
+                     << group_count << " = OpVariable " << pointer << " Input\n"
+                     << "%sc_ctx_low = OpSpecConstant " << code.word_type << " 0\n%sc_ctx_high = OpSpecConstant " << code.word_type
+                     << " 0\n"
+                     << "%sc_main_sig = OpTypeFunction " << code.void_type << "\n%sc_product64 = OpTypeStruct " << code.base_type
+                     << " " << code.base_type << "\n";
+        annotations << "OpDecorate " << gid << " BuiltIn GlobalInvocationId\nOpDecorate " << group_count
+                    << " BuiltIn NumWorkgroups\n"
+                    << "OpDecorate %sc_ctx_low SpecId " << config.context_root_low_spec_id << "\nOpDecorate %sc_ctx_high SpecId "
+                    << config.context_root_high_spec_id << "\n";
+        interfaces.push_back(gid);
+        interfaces.push_back(group_count);
+        functions << "%sc_main = OpFunction " << code.void_type << " None %sc_main_sig\n%sc_main_entry = OpLabel\n";
+        auto pair = Op("OpCompositeConstruct " + code.word_pair_type + " %sc_ctx_low %sc_ctx_high");
+        auto root = Op("OpBitcast " + code.base_type + " " + pair);
+        auto is_null = Op("OpIEqual " + code.bool_type + " " + root + " " + WideConstant(0));
+        auto alignment = Op("OpBitwiseAnd " + code.base_type + " " + root + " " + WideConstant(7));
+        auto unaligned = Op("OpINotEqual " + code.bool_type + " " + alignment + " " + WideConstant(0));
+        auto invalid = Op("OpLogicalOr " + code.bool_type + " " + is_null + " " + unaligned);
+        functions << "OpSelectionMerge %sc_context_ready None\nOpBranchConditional " << invalid
+                  << " %sc_no_context %sc_context_ready\n"
+                  << "%sc_no_context = OpLabel\nOpReturn\n%sc_context_ready = OpLabel\n";
+        auto frames = LoadAddress(root, VEL_RT_CTX_FRAMES_ADDRESS);
+        auto stride = LoadAddress(root, VEL_RT_CTX_FRAME_STRIDE);
+        auto count = LoadAddress(root, VEL_RT_CTX_FRAME_COUNT);
+        auto offset = LoadAddress(root, VEL_RT_CTX_FRAME_OFFSET);
+        auto capacity = LoadAddress(root, VEL_RT_CTX_FRAME_CAPACITY);
+        auto driver_id = Op("OpLoad " + gid_type + " " + gid);
+        auto groups = Op("OpLoad " + gid_type + " " + group_count);
+        auto component = [&](const std::string &value, uint32_t n) {
+            auto word = Op("OpCompositeExtract " + code.word_type + " " + value + " " + std::to_string(n));
+            return Op("OpUConvert " + code.base_type + " " + word);
+        };
+        auto x = component(driver_id, 0), y = component(driver_id, 1), z = component(driver_id, 2);
+        auto width = component(groups, 0), height = component(groups, 1);
+        auto overflow = Op("OpULessThan " + code.bool_type + " " + stride + " " + WideConstant(output.frame_stride_bytes));
+        auto add_flag = [&](const std::string &flag) {
+            overflow = Op("OpLogicalOr " + code.bool_type + " " + overflow + " " + flag);
+        };
+        auto multiply = [&](const std::string &a, const std::string &b) {
+            auto product = Op("OpUMulExtended %sc_product64 " + a + " " + b);
+            auto low = Op("OpCompositeExtract " + code.base_type + " " + product + " 0");
+            auto high = Op("OpCompositeExtract " + code.base_type + " " + product + " 1");
+            add_flag(Op("OpINotEqual " + code.bool_type + " " + high + " " + WideConstant(0)));
+            return low;
+        };
+        auto add = [&](const std::string &a, const std::string &b) {
+            auto sum = Op("OpIAdd " + code.base_type + " " + a + " " + b);
+            add_flag(Op("OpULessThan " + code.bool_type + " " + sum + " " + a));
+            return sum;
+        };
+        auto yz = multiply(height, z);
+        yz = add(y, yz);
+        auto index = multiply(width, yz);
+        index = add(x, index);
+        add_flag(Op("OpUGreaterThanEqual " + code.bool_type + " " + index + " " + count));
+        auto byte_index = multiply(index, stride);
+        byte_index = add(offset, byte_index);
+        auto end = add(byte_index, WideConstant(output.frame_stride_bytes));
+        add_flag(Op("OpUGreaterThan " + code.bool_type + " " + end + " " + capacity));
+        auto frame = add(frames, byte_index);
+        auto frame_end = add(frame, WideConstant(output.frame_stride_bytes));
+        (void)frame_end;
+        auto frame_alignment = Op("OpBitwiseAnd " + code.base_type + " " + frame + " " + WideConstant(3));
+        add_flag(Op("OpINotEqual " + code.bool_type + " " + frame_alignment + " " + WideConstant(0)));
+        add_flag(Op("OpIEqual " + code.bool_type + " " + frames + " " + WideConstant(0)));
+        functions << "OpSelectionMerge %sc_bda_run None\nOpBranchConditional " << overflow << " %sc_bda_skip %sc_bda_run\n"
+                  << "%sc_bda_skip = OpLabel\nOpReturn\n%sc_bda_run = OpLabel\n";
+        Op("OpFunctionCall " + code.void_type + " %sc_step " + frame);
+        functions << "OpReturn\nOpFunctionEnd\n";
+    }
 };
 }  // namespace
 
@@ -957,6 +1262,13 @@ TypedContinuationFrameBounds PlanTypedContinuationFrameBounds(uint64_t payload_b
 TypedContinuationProgram CompileTypedContinuationSteps(const std::vector<uint32_t> &source, const std::string &entry,
                                                        uint32_t execution_model, uint32_t frame_descriptor_set,
                                                        uint32_t frame_binding) {
+    TypedContinuationCompileOptions options;
+    options.frame_descriptor_set = frame_descriptor_set;
+    options.frame_binding = frame_binding;
+    return CompileTypedContinuationSteps(source, entry, execution_model, options);
+}
+TypedContinuationProgram CompileTypedContinuationSteps(const std::vector<uint32_t> &source, const std::string &entry,
+                                                       uint32_t execution_model, const TypedContinuationCompileOptions &options) {
     // Validate before optimization; entry selection is validated again by the
     // continuation analysis after inlining. Inlining preserves source ALU/CFG
     // semantics and removes the need to pretend helper returns are RT returns.
@@ -986,6 +1298,6 @@ TypedContinuationProgram CompileTypedContinuationSteps(const std::vector<uint32_
     optimizer.RegisterPass(spvtools::CreateFlattenDecorationPass());
     std::vector<uint32_t> inlined;
     if (!optimizer.Run(selected.data(), selected.size(), &inlined)) Unsupported("helper inlining failed: " + error);
-    return Compiler(std::move(inlined), entry, execution_model, frame_descriptor_set, frame_binding).Run();
+    return Compiler(std::move(inlined), entry, execution_model, options).Run();
 }
 }  // namespace vel::rt

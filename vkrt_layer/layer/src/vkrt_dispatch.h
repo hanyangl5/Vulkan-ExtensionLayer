@@ -47,6 +47,7 @@ struct vkrt_device_dispatch {
    PFN_vkUpdateDescriptorSets               UpdateDescriptorSets;
    PFN_vkCreateDescriptorSetLayout          CreateDescriptorSetLayout;
    PFN_vkCreateDescriptorPool              CreateDescriptorPool;
+   PFN_vkCreateQueryPool CreateQueryPool;
    PFN_vkCreateGraphicsPipelines            CreateGraphicsPipelines;
    PFN_vkCreateComputePipelines             CreateComputePipelines;
    PFN_vkCreateRenderPass CreateRenderPass;
@@ -188,6 +189,7 @@ vkrt_device_dispatch_load(struct vkrt_device_dispatch *t,
    VKRT_LOAD_D(UpdateDescriptorSets);
    VKRT_LOAD_D(CreateDescriptorSetLayout);
    VKRT_LOAD_D(CreateDescriptorPool);
+   VKRT_LOAD_D(CreateQueryPool);
    VKRT_LOAD_D(CreateGraphicsPipelines);
    VKRT_LOAD_D(CreateComputePipelines);
    VKRT_LOAD_D(CreateRenderPass);

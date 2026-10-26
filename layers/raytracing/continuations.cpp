@@ -226,7 +226,7 @@ class FramePlanner {
     }
 
     FunctionFrame Plan(const FunctionContinuations &analysis) {
-        FunctionFrame frame{analysis.function, 0, 1, {}, {}};
+        FunctionFrame frame{analysis.function, options.prefix_bytes, 1, {}, {}};
         if (!analysis.can_suspend && !options.persistent_function_storage) return frame;
         RejectPrivateStorage(analysis.function);
         const auto &function = m.functions.at(analysis.function);

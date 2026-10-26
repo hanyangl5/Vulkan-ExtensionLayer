@@ -28,9 +28,17 @@ static VKAPI_ATTR void VKAPI_CALL GetPhysicalDeviceFeatures2(VkPhysicalDevice ph
 static VKAPI_ATTR VkResult VKAPI_CALL EnumerateDeviceExtensionProperties(VkPhysicalDevice physical, const char *layer,
                                                                          uint32_t *count, VkExtensionProperties *properties) {
     if (!count) return VK_ERROR_INITIALIZATION_FAILED;
-    /* No completed base emulation is advertised as a layer-provided extension. */
+    /* Deferred operations are completed synchronously and need no native RT.
+     * Base AS/RQ advertisement still waits for the complete mandatory path. */
     if (layer && !strcmp(layer, "VK_LAYER_VKRT_SOFTWARE_RAY_QUERY")) {
-        *count = 0;
+        if (!properties) {
+            *count = 1;
+            return VK_SUCCESS;
+        }
+        if (!*count) return VK_INCOMPLETE;
+        properties[0] =
+            (VkExtensionProperties){VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME, VK_KHR_DEFERRED_HOST_OPERATIONS_SPEC_VERSION};
+        *count = 1;
         return VK_SUCCESS;
     }
     struct vkrt_instance_data *inst = VKRT_FIND(struct vkrt_instance_data, physical);
@@ -58,9 +66,20 @@ static VKAPI_ATTR VkResult VKAPI_CALL EnumerateDeviceExtensionProperties(VkPhysi
 
     const uint32_t capacity = properties ? *count : 0;
     uint32_t visible = 0, written = 0;
+    bool deferred = false;
     for (uint32_t i = 0; i < native_count; ++i) {
         if (vkrt_incompatible_device_extension(native[i].extensionName)) continue;
+        if (!strcmp(native[i].extensionName, VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME)) {
+            deferred = true;
+            native[i].specVersion = VK_KHR_DEFERRED_HOST_OPERATIONS_SPEC_VERSION;
+        }
         if (properties && written < capacity) properties[written++] = native[i];
+        ++visible;
+    }
+    if (!deferred) {
+        if (properties && written < capacity)
+            properties[written++] = (VkExtensionProperties){VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME,
+                                                            VK_KHR_DEFERRED_HOST_OPERATIONS_SPEC_VERSION};
         ++visible;
     }
     free(native);
