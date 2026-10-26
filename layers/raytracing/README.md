@@ -111,9 +111,12 @@ shader stage. Canonical RTP links all six RT stages into a compute scheduler wit
 GPU SBT selection, nested traces and callables, invocation-private continuation
 storage, descriptor-backed opaque provenance, and cached native stack variants.
 The adapter restores application compute pipeline, descriptor, push, and
-shader-object state after internal work. Shader-object binaries retain source
-and specialization state and reconstruct against the destination device without
-transporting a resolver BDA.
+shader-object state after internal work. Shader-object binaries retain source,
+specialization and complete linked-group state. Ordinary groups transport their
+native binary; RQ groups reconstruct owned descriptor/sampler/push interfaces
+against the destination resolver, then use native BINARY creation. Selected
+null/different-layout, partial-batch and cross-device imports have external CTS
+and actual GPU evidence; complete optional-feature compatibility remains open.
 
 Evidence records retain the tested revision, device, commands, failures, and
 scope:

@@ -11,6 +11,7 @@
 
 #include <stddef.h>
 #include <stdint.h>
+#include <vulkan/vulkan.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -42,6 +43,16 @@ vkrt_spirv_lower_free(uint32_t *words);
 /* Validate a transported source module before turning opaque binary input
  * into native SPIR-V. Layout checks remain native feature-dependent. */
 int vkrt_spirv_validate_source(const uint32_t *words, size_t word_count);
+
+/* Validate the module after applying specialization and freezing constants.
+ * The input module and specialization bytes remain unchanged. Unsupported or
+ * invalid transported input returns INCOMPATIBLE_SHADER_BINARY_EXT; allocation
+ * failures return OUT_OF_HOST_MEMORY. Uses the same layout feature union as
+ * vkrt_spirv_validate_source(), not the destination logical device profile.
+ * Undefined arithmetic left unresolved by the SDK is preserved: success does
+ * not certify every specialized value or device-dependent shader limit. */
+VkResult vkrt_spirv_validate_specialized_source(const uint32_t *words, size_t word_count,
+                                                const VkSpecializationInfo *specialization);
 
 #ifdef __cplusplus
 } /* extern "C" */

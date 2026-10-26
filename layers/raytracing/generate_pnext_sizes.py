@@ -69,6 +69,35 @@ def main():
         + "   default: return 0;\n   }\n}\n#endif\n",
         encoding="utf-8",
     )
+    # Conversion recipes never contain an external-format chain, so 04061
+    # requires UNORM. Derive enum membership, channel substitution/precision
+    # and 420/422 swizzle constraints from the same selected SDK registry.
+    # Compressed precision is unspecified in vk.xml: 255 means present with
+    # unknown precision, not a guessed number of bits for narrow-range checks.
+    formats = {}
+    for fmt in root.findall("./formats/format"):
+        components = fmt.findall("component")
+        if not components or not all(c.get("numericFormat") == "UNORM" for c in components):
+            continue
+        if not re.search(r"\b" + re.escape(fmt.get("name")) + r"\s*=", core):
+            continue
+        bits = {c.get("name"): int(c.get("bits")) if c.get("bits", "").isdigit() else 255 for c in components}
+        key = (fmt.get("chroma") in {"420", "422"}, *(bits.get(c, 0) for c in "RGBA"))
+        formats.setdefault(key, []).append(fmt.get("name"))
+    if not formats:
+        raise ValueError("Vulkan registry/header mismatch: no UNORM format metadata")
+    version = re.search(r"#define\s+VK_HEADER_VERSION\s+(\d+)", core).group(1)
+    lines = [f"/* Generated from matching SDK vk.xml (header revision {version}); do not edit. */\n",
+             "#ifndef VKRT_YCBCR_FORMAT_METADATA_H\n#define VKRT_YCBCR_FORMAT_METADATA_H\n",
+             "struct vkrt_ycbcr_format_metadata { bool unorm, subsampled; uint8_t bits[4]; };\n",
+             "static inline struct vkrt_ycbcr_format_metadata vkrt_ycbcr_format_metadata(uint32_t format) {\n",
+             "    switch (format) {\n"]
+    for (subsampled, *bits), names in sorted(formats.items()):
+        lines.extend(f"    case {name}:\n" for name in sorted(names))
+        lines.append("        return (struct vkrt_ycbcr_format_metadata){true, "
+                     + ("true" if subsampled else "false") + ", {" + ", ".join(map(str, bits)) + "}};\n")
+    lines.extend(["    default: return (struct vkrt_ycbcr_format_metadata){0};\n", "    }\n}\n#endif\n"])
+    output.with_name("vkrt_ycbcr_format_metadata.h").write_text("".join(lines), encoding="utf-8")
 
 
 if __name__ == "__main__":

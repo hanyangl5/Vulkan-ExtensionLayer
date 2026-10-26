@@ -23,8 +23,9 @@ remains `1.3.275.0-1build1`. The corresponding
 [primary Vulkan header](https://github.com/KhronosGroup/Vulkan-Headers/blob/v1.3.275/include/vulkan/vulkan_core.h)
 has ShaderObject types/PFNs but lacks `VkCustomResolveCreateInfoEXT`.
 Custom-resolve declarations and encode/decode paths are therefore guarded by
-`VK_EXT_custom_resolve`; an unsupported custom-resolve source chain fails before
-native creation and an unsupported custom-resolve envelope is incompatible.
+`VK_EXT_custom_resolve`; an unsupported custom-resolve RQ reconstruction chain
+fails before native creation and its envelope is incompatible. Proven NoRT groups
+use the authoritative native-binary route, which does not reconstruct that chain.
 The new-SDK path is unchanged. The focused host test compiles and passes both
 with the current SDK and with this optional macro disabled; logs are
 `build-resource-profile/shader-binary-optional-host.log` and
@@ -38,193 +39,286 @@ This changes no current-SDK runtime behavior and needs no guessed header-version
 threshold. A symbol audit of the new module found no other unconditional Vulkan
 1.4 API dependencies; whole-layer Linux qualification remains separate.
 
-The implementation is in `layers/raytracing/src/vkrt_shader_objects.c` and uses
-`vkrt_rewrite_shader_module` for the same RQ lowering as shader modules. Shader
-handles remain native. This component does not qualify the complete RT backend,
-activate the resource-budget property planner, or establish complete M2/M4 support.
+The implementation is in `layers/raytracing/src/vkrt_shader_objects.c` and
+`vkrt_shader_interface.c`. Shader handles remain native. This is a component
+qualification, not complete M0/M2/M4 support or Vulkan conformance; the resource
+budget/property planner remains inactive.
 
-## Public source behavior
+## Current creation and transport paths
 
-On a virtual RT device, SPIR-V RQ source is lowered before native shader-object
-creation. Unsupported RT execution models/instructions fail before the native
-call. Explicit RT push-stage bits are stripped, RT-only ranges are omitted, and
-the special `VK_SHADER_STAGE_ALL` value remains intact. Ordinary source on an
-ordinary device reaches native creation through the original create-info array.
-The layer separately copies source metadata before that call. Every native
-creation retains the original batch size and shader allocator, native partial
-creation, result code, and native handle representation. Pre-native failures
-null every output handle. Borrowed arrays/chains are never modified.
+SOURCE-only calls retain native batching and the application's shader allocator.
+Ordinary SOURCE-only calls on ordinary devices forward the original create-info
+array. Virtual RT SOURCE calls use the common RQ lowerer and strip explicit RT
+push-stage bits, omit RT-only ranges, and preserve `VK_SHADER_STAGE_ALL`. Borrowed
+source, specialization data, arrays and chains are never modified.
 
-Binary reconstruction restores the original source entry point and specialization,
-including captured specialization data rather than a binary caller's changed
-value or null entry name. It uses the binary caller's stage, flags, next-stage,
-and descriptor/push-layout interface: the specification does not make all these
-members irrelevant for binary input. This is insufficient for arbitrary binary-call
-interfaces: see the CTS gap below. Subgroup-size and custom-resolve creation
-chains are serialized; unsupported semantic chains fail closed before creation.
-Descriptor-heap source serialization is not implemented.
+Every exported stage has a device-owned envelope. An originally linked stage
+stores the complete original linked SOURCE group, not merely its own module:
+TESE, for example, can depend on execution modes supplied by TESC. Each group
+member records source, entry name, specialization, flags and next-stage. Each
+exported envelope identifies which member's shader it represents.
 
-These decisions follow the conditional SPIR-V entry-point requirements and shader
-layout compatibility rules in
-[`VkShaderCreateInfoEXT`](https://docs.vulkan.org/refpages/latest/refpages/source/VkShaderCreateInfoEXT.html).
-In particular, descriptor layout objects need only survive the create command.
-The implementation retains no descriptor-layout handle for later source rebuilding.
+There are two deliberate import routes:
 
-## Versioned binary contract
+- When the complete original group has no AS/RQ/RT capability, extension,
+  execution model or instruction dependency, its source provenance is accompanied
+  by the target's authoritative native binary. Interface/pNext reconstruction
+  is unnecessary. This preserves native behavior for unused optional layouts,
+  samplers and creation metadata across logical feature profiles.
+- When any original peer depends on virtual RT, every peer carries a full
+  compilation-interface recipe. Imports rebuild destination-owned private
+  layouts/samplers/conversions, recompile the complete original SOURCE group,
+  rewrite RQ against the destination resolver, fetch the selected temporary
+  shader's native binary, and retire every returned temporary shader reference.
+  Temporary layouts/samplers are destroyed only afterward.
 
-Every successful source creation has a device-owned canonical SOURCE envelope.
-It stores original SPIR-V, entry name, specialization map/data and supported
-creation metadata. Its fixed-width little-endian format contains no pointers,
-callbacks, Vulkan object handles or resolver address. Imports decode every member,
-check lengths/overflow/checksum/format/identity, and validate embedded SPIR-V with
-SPIRV-Tools before making a native SPIR-V call. Validation uses the Vulkan 1.4
-grammar and permissive scalar, UBO-standard and workgroup-scalar layout options;
-it does not restrict compatible imports according to an instance API version.
+Both routes finish with native `codeType=BINARY`. The final create-info preserves
+its caller's flags, next-stage, pNext, specialization pointer and descriptor/push
+interface, apart from the existing virtual-profile RT push-stage translation.
+The temporary SOURCE compilation instead restores the original entry,
+specialization, flags, next-stage and supported semantic pNext. A call containing
+both SOURCE and BINARY inputs converts all prepared final elements to BINARY,
+so a final linked native batch cannot mix code types.
 
-All recognized imports reconstruct SPIR-V, including ordinary shaders in linked
-batches. Therefore a linked ordinary VERT plus RQ FRAG binary batch becomes a
-uniform native SPIR-V batch. There is no mixed SOURCE/opaque-native fallback.
-Unrecognized raw native binaries are incompatible on every logical profile.
+The final interface may legally be absent or different from the original SOURCE
+interface. Converting such input directly to native SPIR-V induced VUIDs 10383
+and 10384 in the previous implementation. Private original-interface compilation
+followed by native BINARY creation removes that new SOURCE-only requirement.
+See [`VkShaderCreateInfoEXT`](https://docs.vulkan.org/refpages/latest/refpages/source/VkShaderCreateInfoEXT.html).
 
-The advertised UUID is the first 128 bits of SHA-256 over a fixed namespace,
-native UUID, format version and physical backend-eligibility domain. It is
-independent of logical RT enablement. Native binary version ordering is retained.
-Changes breaking envelope compatibility must change the format/UUID domain.
-Repeated Get calls return identical bytes while the native handle is live. A
-short output buffer receives no bytes, reports size zero, and returns `VK_INCOMPLETE`.
-These behaviors implement the identity, version, cross-device and invariance
-requirements in
+A bad binary at index k preserves a valid independent prefix before k. If
+truncation breaks a linked group's logical next-stage topology (08409), the
+prefix retreats to that group's first member; the failed group and tail remain
+null. For example, `[COMP, VERT->GEOM, FRAG, badGEOM]` retains COMP without sending
+the illegal `[VERT->GEOM, FRAG]` chain downstream. A lone VERT prefix remains
+legal and is retained. Caller flags/nextStage are never rewritten to disguise
+the failure. The first null identifies the failed element or linked group,
+unless an earlier native error occurred; native partial results are retained.
+See [`vkCreateShadersEXT`](https://docs.vulkan.org/refpages/latest/refpages/source/vkCreateShadersEXT.html).
+If post-creation binary caching fails, its failed
+slot and tail are destroyed with the same shader allocator; earlier complete
+objects remain available. The outputs always contain null or valid handles.
+
+## Envelope and interface identities
+
+The final envelope format is **3**; its SHA-256-derived UUID domain changed from
+intermediate FORMAT2 snapshots when the interface environment header changed.
+Native `shaderBinaryVersion` ordering is retained. The UUID depends on native
+UUID, envelope format and physical backend eligibility, not logical RT enablement.
+Unknown raw native binaries are incompatible on every logical profile.
+
+The envelope uses explicit little-endian fields: a 128-byte header with total
+length, group count, selected target, optional native-binary length, identity and
+checksum; then 16-byte-aligned stage records with 96-byte metadata followed by
+SPIR-V, entry name, specialization map/data and any interface recipe. A proven
+NoRT group's native payload follows the group. RQ groups store no native payload
+containing the injected resolver address. Container fields and interface recipes
+contain no Vulkan handles, host pointers or allocation callbacks.
+
+The interface recipe is version **2**. Its 32-byte header stores source robustness
+mask at byte24 and source push translation policy at byte28. Binding definitions,
+immutable sampler creation data and YCbCr conversion definitions are copied while
+original objects are alive. AS descriptor types and RT descriptor stages follow
+the source layout's translation policy even on an ordinary destination device.
+Push translation strips RT bits instead of mapping them to compute.
+
+The importer checks arithmetic, lengths, padding, checksum, identities, entry
+name/model, original source fields, unique linked stages and next-stage topology.
+The real SPIRV-Tools validator checks source modules. RQ reconstruction also has
+an explicit specialized-source validation API, operating on a temporary copy.
+Its 44 real SDK checks include legal scalar/vector floating conversions and
+specialized invalid workgroup sizes; the base and getter lowerer regressions also
+pass. Logs are `build-source-layout/shader-format3-specialization-run.log` and
+`shader-format3-lowerer-{base,getter}.log`. Residual undefined integer expressions
+remain subject to the SDK validator's limits; this is not exhaustive malformed
+specialization certification. Original stored source and specialization are
+preserved for native compilation. Unused specialization IDs can have size zero;
+each map offset remains strictly below dataSize and its extent stays in bounds.
+
+Interface validation precedes materialization and rejects duplicate ordinary
+bindings, overlapping push stage masks and invalid sampler semantic combinations.
+YCbCr enum and format-component constraints use metadata generated from the
+matching `vk.xml`, alongside the existing pNext metadata. Enabled construction
+features and tracked scalar property limits are checked before
+private native creation. There is no silent removal of interface flags. Source
+stage/next-stage/creation-feature checks also run for every temporary peer.
+Complete per-format physical feature eligibility is still a qualification gap;
+this preflight is not exhaustive malformed-recipe certification.
+
+Repeated public Get calls return invariant bytes for a live handle. Short output
+buffers receive no bytes, size zero and `VK_INCOMPLETE`. The relevant guarantee is
 [Binary Shader Compatibility](https://docs.vulkan.org/spec/latest/chapters/shaders.html#shaders-objects-binary-compatibility).
 
-Physical eligibility here means shared lowering prerequisites, not full RT feature
-qualification. Every eligible ShaderObject-enabled logical device receives those
-private native prerequisites, even if the application enabled no public RT feature.
-An imported RQ envelope lazily creates that destination device's resolver under
-a state lock. The immutable public `virtual_rt` flag still controls public buffer,
-descriptor and memory translation. Ordinary devices without ShaderObject skip
-this state/backend setup. Other source feature restrictions remain applicable;
-for example, the normative shaderFloat64 rule concerns shader code, beyond the
-SPIR-V capability-specific condition in
-[Features](https://docs.vulkan.org/spec/latest/chapters/features.html).
+## Lifetime and profile boundaries
 
-## Lifetime and concurrency
-
-The cache state, canonical record and blob use DEVICE scope and the original
+Canonical cache state, records and bytes use DEVICE scope with the original
 DeviceCreate allocator, falling back to the original InstanceCreate allocator.
-The device allocator is captured even when maintenance9 permits zero queues.
-Native shader allocation callbacks pass through unchanged and are never retained
-by the shared cache. Equal native non-dispatchable handles can alias multiple
-live creations: reference counting preserves the first canonical byte string
-until the final alias disappears. Native Create/publication and native
-Destroy/cache-retirement are serialized to prevent a reused native handle from
-merging with a retired source record. Device destruction also releases remaining
-cache state. This follows the allocator hierarchy and lifetime rules in
-[Host Memory](https://docs.vulkan.org/spec/latest/chapters/memory.html#memory-host).
-Allocation callbacks cannot call Vulkan commands.
+Zero-queue maintenance9 devices still retain that owner. The layer never retains
+a shader's allocation callbacks in a shared canonical record. Native handles may
+alias: the first canonical bytes remain stable until the last reference retires.
+Native Create/publication and Destroy/retirement are serialized to avoid a reused
+handle merging with an old cache record. Temporary native aliases are destroyed
+directly once per returned reference and do not alter public cache refcounts.
+See [Host Memory](https://docs.vulkan.org/spec/latest/chapters/memory.html#memory-host).
 
-## Verification and limits
+The RTP descriptor-layout tracker also counts repeated native handle references.
+An intermediate Destroy no longer removes the definition needed by another live
+reference; existing pipeline layouts retain immutable snapshots through handle
+reuse. Public pipeline-layout aliases retain a stable canonical definition and
+one DEVICE-owned token/private owner per native creation. Native public
+Create/Destroy still receive the corresponding caller allocator; ordinary
+retirement does not dereference an earlier alias's expired callback context.
+Native creation/publication and destruction/retirement use the same mutex, and
+private owners retire after unlocking. The host regression covers callback
+context expiry, Device/Instance ownership, allocation failures and gated native
+handle reuse with zero outstanding references.
 
-The focused host and public GPU tests passed 5/5 before source-directory migration:
+Different public definitions collapsing to one translated native handle
+remain an unresolved public-identity problem. They do not retroactively change
+existing snapshots, and the tracker does not claim definition compatibility for
+an ambiguous descriptor-layout snapshot. Full public proxy identity remains
+future work for descriptor and pipeline layouts.
 
-- `vkrt.shader_objects`
-- `vkrt.shader_object_rq.software` and `.native`
-- `vkrt.shader_binary_profiles.software` and `.native`
+Eligible ShaderObject-enabled devices receive the common private lowering
+prerequisites even without public RT features. Imported RQ creates that device's
+resolver lazily under the state lock. The immutable public `virtual_rt` flag still
+controls public buffer/descriptor/memory translation; a lazy registry does not
+change the public device profile. Ordinary devices without ShaderObject retain
+their original setup path.
 
-The host spy covers partial native failure, pre-native failure, borrowed inputs,
-UUID SHA-256 vectors and a related-native-UUID/profile collision regression,
-short-buffer nonwrites, forged checksums with malformed source, raw binary
-rejection, device allocator OOM, instance fallback, alias allocator retirement
-and final cleanup. A subsequent Windows concurrency regression pauses native
-Destroy, starts replacement Create, verifies serialization, and checks the
-reused handle exports the replacement source. The address-cell host fixture
-also covers zero-queue allocator capture and OOM cleanup.
+RQ reconstruction remains bounded by destination construction and compilation
+profiles. Source-required robustness defaults are recorded and fail before native
+creation when the destination lacks those semantics. Optional full-subgroup and
+workgroup required-size reconstruction remains explicitly unsupported until its
+specialized LocalSize proof is complete. Unknown RQ creation chains and some
+optional interface constructions fail closed. Enabling every feature privately
+is not a general solution: robustness and update-after-bind constraints can
+conflict. Registry-mapped core and selected promoted peer capabilities are
+checked, as is actual-enabled maintenance4 for LocalSizeId. Other extension
+capabilities, per-operation/storage-class requirements and cross-build
+compiler-grammar identity remain qualification work. Source code feature
+restrictions, including shaderFloat64, also continue
+to apply as described in [Features](https://docs.vulkan.org/spec/latest/chapters/features.html).
 
-The RQ GPU fixture builds BLAS/TLAS through public commands and executes hit/miss
-outputs 107/207 from source and exported binaries, with mixed RT/compute and ALL
-push layouts. Two independent VkDevices are created; after A exports its shaders
-and is destroyed, B imports and executes against B's own AS/resolver context.
+## External CTS evidence
 
-The profile fixture exports on RT-enabled A and imports on ShaderObject-only B
-with no public AS/RQ/RTP features. RQ uses a runtime-disabled AS branch, so it
-never consumes an invalid cross-device AS value. It verifies original entry and
-specialization (41 + push 7 = 48 despite binary-call specialization 99), ordinary
-NoRT source/binary round trips, and linked ordinary VERT + RQ FRAG binary creation.
-Logs show distinct live resolver addresses, 74964992 and 171945984. Linked shaders
-are creation-tested, not rendered. A recomputed-checksum malformed source import
-returns incompatible without a native SPIR-V diagnostic.
+All runs use VK-GL-CTS revision `d18e4c68543103371715845cd914c71e5859963e`,
+the pinned local deqp-vk executable, SDK1.4.357 validation and isolated runner
+snapshots. Full QPA, stdout, environment, DLL hashes and statuses are retained.
+No failed/skipped case was filtered out.
 
-Both GPU fixtures passed again against the final migrated/formatted
-`build-raytracing-unified/layers` DLL with synchronization validation and
-validation above or below the layer. All four processes exited zero, with zero
-VUID/warning/error messages. Current logs and exit statuses are retained under
-`build-source-layout/`:
+The initial four-case native control passed4/4. The old source-only reconstruction
+passed2/4 and failed null/different layout with ten errors of VUID10383/10384 each;
+these are genuine internal SOURCE violations on valid outer BINARY calls.
+Evidence: `shader-binary-interface-{native,software}` under
+`build-rt-cts-evidence/`. Delivery snapshot `560d4f98...` retained those failures.
 
-- `shader-object-rq-above.log`, `shader-object-rq-below.log`
-- `shader-binary-profiles-above.log`, `shader-binary-profiles-below.log`
-- `shader-vvl-results.json`
+The expanded list `docs/rt_cts_shader_binary_extended_cases.txt` contains77 binary
+query cases,30 incompatible-binary cases and22 creation cases. Baseline commit
+`0902dfb` passed125/129 and failed4: the two layout cases plus
+`create.all.fail` and `create.all_with_mesh.fail`. Native passed129/129.
 
-Earlier build, host concurrency and GPU evidence remains under `build-resource-profile/`:
+The first full-group/native-binary bridge snapshot passed **129/129** with zero
+validation-error/warning cases, no skips, crashes, timeouts or missing results.
 
-- `shader-binary-final-build.log`, `shader-binary-final-tests.log`
-- `shader-binary-concurrency-host.log`
-- `shader-object-rq-final-above.log`, `shader-object-rq-final-below.log`
-- `shader-binary-profiles-final-above.log`, `shader-binary-profiles-final-below.log`
+| Snapshot | Pass | Fail | NS/crash/timeout/noresult |
+| --- | ---: | ---: | ---: |
+| Native control | 129 | 0 | 0 |
+| `0902dfb` old importer | 125 | 4 | 0 |
+| FORMAT2 bridge first snapshot | 129 | 0 | 0 |
+| FORMAT3 / IFv2 / final helper snapshot | 129 | 0 | 0 |
 
-External CTS source inspection identified an additional unresolved interface case:
-`dEQP-VK.shader_object.binary.query.comp.unlinked.shader_from_binary_null_layout`
-and `shader_from_binary_different_layout` in
-`external/vulkancts/modules/vulkan/shader_object/vktShaderObjectBinaryTests.cpp`
-deliberately import with absent or incompatible layouts. The outer BINARY call
-is not subject to SPIR-V-only descriptor/push-interface VUIDs
-10064/10065/10383/10384/10385. Reconstructing native SPIR-V with those incoming
-interfaces can therefore create a new native validation failure. Full binary
-qualification needs transport/reconstruction of the original compilation
-interface plus a native-binary bridge or equivalent layout treatment. The current
-envelope does not retain descriptor-layout definitions or immutable-sampler
-definitions, and no claim of complete binary compatibility is made. This source
-inspection is now confirmed by actual external CTS. The exact four-case list is
-`docs/rt_cts_shader_binary_cases.txt`, pinned to VK-GL-CTS
-`d18e4c68543103371715845cd914c71e5859963e`. Native controls with SDK validation
-passed 4/4, including null and different-layout imports. Software-RT using the
-final migrated/formatted DLL passed 2/4 and failed 2/4. Neither run had skips,
-crashes, timeouts or missing results:
+Evidence directories are `shader-binary-extended-native`,
+`shader-binary-extended-0902dfb`, `shader-binary-extended-v2-first` and
+`shader-binary-extended-format3-final` under `build-rt-cts-evidence/`.
+The first bridge DLL SHA-256 is
+`beb24834b4e02f183b7de3ebbcc627e2a6e6843a2274973fbf89c051de5d14e7`.
+Its `diagnostics-summary.json` records zero error/warning cases. This immutable
+snapshot predates the final FORMAT3/IFv2 environment header and specialization
+helper refinement. The final FORMAT3 DLL SHA-256 is
+`2247327289901ea3dfa8b40c52dfb0cb79fed640836f44e1e7db44094ada94bb`.
+Its fresh 129-case regression also has zero validation/performance warning or
+VUID/sync error cases. Loader GENERAL messages remain in the unfiltered QPA logs;
+the diagnostic summary states that distinction explicitly. Both snapshots and
+the original four failures remain available.
 
-| Suffix under `dEQP-VK.shader_object.binary.query.comp.unlinked` | Native | Software-RT |
-| --- | --- | --- |
-| `same_shader` | Pass | Pass |
-| `shader_from_binary` | Pass | Pass |
-| `shader_from_binary_null_layout` | Pass | Fail: 10 API usage errors, `codeType-10383` |
-| `shader_from_binary_different_layout` | Pass | Fail: 10 API usage errors, `codeType-10384` |
+## Focused functional evidence
 
-The two successful software cases emitted no validation errors. Each failed
-case emitted ten errors of its respective VUID before validation's duplicate
-message limit. These are real layer-induced native SPIR-V interface violations
-on valid BINARY inputs, not malformed caller input or native-driver failures.
-Complete QPA/stdout and reproducibility metadata remain in
-`build-rt-cts-evidence/shader-binary-interface-native/summary.json` and
-`build-rt-cts-evidence/shader-binary-interface-software/summary.json`. The tested
-software snapshot SHA-256 is
-`f3253f70c3208328036740c04e2b5d4a5e1f07cf3aaf9620b9ade5e5704266e2`.
+`test_shader_object_rq` GPU-builds BLAS/TLAS and executes hit/miss outputs107/207
+from source and binary, with mixed RT/compute and ALL pushes. Two independent
+VkDevices are alive concurrently; A exports and is destroyed before B imports
+and traverses B's own AS/resolver context.
 
-The next implementation step is to capture the original compilation interface
-while its public layouts and samplers are alive; serialize definitions rather
-than handles, including descriptor binding/immutable-sampler semantics and push
-ranges; reconstruct destination-owned private compilation layouts; then bridge
-to native binary creation or another equivalent path that preserves the outer
-BINARY caller's legal interface behavior. This needs coverage on ordinary
-ShaderObject-only devices as well as virtual RT devices. Keeping incoming
-layouts, comparing handle values, or merely rejecting these valid matching-UUID
-inputs cannot establish the required compatibility guarantee. The two failing
-CTS cases must pass with validation before binary compatibility is qualified.
+`test_shader_binary_profiles` imports RT-enabled A's RQ/ordinary binaries on a
+ShaderObject-only B with no public AS/RQ/RTP feature. It checks saved entry and
+specialization (41+push7=48 despite caller specialization99), native NoRT round
+trips, null/different binary interfaces with invariant Get, a good/bad/good batch
+whose successful prefix executes, full linked VERT+RQ FRAG recreation, and an
+originally linked VERT imported alone after source-device destruction. Its RQ
+branch is runtime-disabled during this profile test, avoiding foreign AS values.
+The new fixture's native VVL/sync control passed; both new layer GPU fixtures also
+passed VVL-below/sync validation in the first bridge build with zero diagnostics.
+Logs: `build-resource-profile/shader-binary-v2-{native,rq-below,profiles-below}.log`.
 
-These focused tests complement external CTS; they do not replace it. General
-optional shader-object interoperability (including descriptor heaps and other
-unsupported creation chains), exhaustive malformed-input coverage and dedicated
-concurrent lazy-registry initialization scheduling remain outside this evidence.
+The final FORMAT3 separate build also passes four fixture modes in both VVL
+orders with synchronization validation enabled: **8/8**, zero VUID, warning or
+sync diagnostics. These are RQ hit/miss, SPIR-V1.6 RQ hit/miss, cross-profile
+binary imports and immutable sampler reconstruction. The DLL SHA-256 is
+`2247327289901ea3dfa8b40c52dfb0cb79fed640836f44e1e7db44094ada94bb`;
+`build-source-layout/shader-format3-final-gpu-summary.json` records each mode's
+log path and result. The four focused host/lowerer tests also pass in this build
+(`shader-format3-final-host.log`).
 
-The final delivery rebuild after optional-header guards and the result-enum
-alias repeats the three RT smoke passes and the same two binary passes/two
-layout failures (5 pass, 2 fail overall). Its independent snapshot SHA-256 is
-`560d4f98108dd27b848429b79d89ce8d9b35381ec580ada861f81a162f79e0c3`. Raw evidence is in
-`build-rt-cts-evidence/unified-source-delivery-check/summary.json`; the rebuilt
-three focused host/GPU checks pass in `build-source-layout/shader-delivery-final.log`.
+The SPIR-V1.6 mode changes only the copied source header version and retains
+literal LocalSize. Its native VVL/sync control passes. Before the common lowerer
+fix, the same actual GPU fixture fails because final validation was hardcoded to
+Vulkan1.2/SPIR-V1.5; the retained failure is
+`shader-format2-spirv16-software-before-fix.log`. The lowerer now selects Vulkan1.3
+for a source/library version above1.5, preserving source instructions and using
+the legacy environment otherwise. The final mode executes source and binary
+hit/miss across independent devices in both VVL orders.
+
+The independent immutable-sampler fixture additionally samples a border-white
+texture and adds a push constant (expected262), after original sampler/layout and
+source device destruction. Parent integration records native and both VVL-order
+controls. It establishes real sampler-value/private-interface behavior, not just
+creation success. The independent final FORMAT3 run above repeats this behavior
+in both orders; logs are `shader-format3-final-immutable-{above,below}.log`.
+
+The real-interface-linked host fixture covers source/opaque groups, all-BINARY
+mixed batches, original linked peers, alias callbacks, temporary aliases,
+retirement concurrency, native partial failure, cache/prefix OOM and corruption.
+The refreshed FORMAT3 run records29 resealed negatives and50 allocator positions
+(11 failures/39 successes), with zero live native references. Input COMP/VERT/FRAG
+SPIR-V was separately checked with the real SDK validator. Unit rewriting remains
+an explicit spy; real RQ source execution is proved by the GPU cases.
+
+Earlier pre-migration/single-device evidence remains under
+`build-resource-profile/` and `build-source-layout/`. These tests and CTS slices
+are evidence for this implementation step, not a complete shader-object or RT
+conformance claim.
+
+## Final review follow-up
+
+The follow-up fixes descriptor/pipeline-layout native aliases, YCbCr recipe
+semantic preflight and invalid unordered linked-prefix truncation. Interface
+host checks now pass **6112** assertions. Pipeline-layout host tests balance
+10/10 Device and 2/2 Instance allocations, five failed-create/token paths and
+all native references, including gated handle reuse and expired public callback
+contexts. Linked-prefix checks retain the preceding independent COMP while
+returning a failed linked group as null; the legal lone-VERT prefix still passes.
+
+The post-alias DLL `6f4b7487...` passed **25/25 offline**, **7/7 GPU** (RTP,
+maintenance6, shader objects, derivatives and binary fixtures), and **15/15 CTS**.
+The final linked-prefix DLL SHA-256 is
+`0ce6d6ef9d5dc5e5ecca85c68cf4a6e5be14c207f3072cbe393286bd06c67249`.
+It passes **25/25 offline**, **2/2 cross-device/immutable GPU** and a fresh
+**15/15 external CTS** run with zero VUID/sync/validation/performance diagnostics.
+The fifteen cases contain the eight functional cases above, the four original
+failures and three RTP regressions; they overlap earlier selections.
+
+The raw runs are `shader-format3-final-checkpoint` and
+`shader-format3-linked-prefix-final` under `build-rt-cts-evidence/`. The
+[machine evidence](rt_shader_binary_v3_2026-10-26.json) binds each distinct
+snapshot to its source baseline, DLL, case list and raw-result hashes. Earlier
+129/129, 59/59, GPU controls and original failures remain separate records.

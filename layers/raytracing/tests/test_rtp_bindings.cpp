@@ -15,14 +15,21 @@ struct vkrt_global vkrt_global = VKRT_GLOBAL_INITIALIZER;
 #include <spirv-tools/libspirv.hpp>
 #include <string>
 #include <array>
+#include <atomic>
+#include <chrono>
+#include <condition_variable>
+#include <cstdlib>
 #include <map>
+#include <mutex>
 #include <set>
+#include <thread>
 #include <vector>
 #include <cstdio>
 #include <cstring>
 
 namespace {
-unsigned failures = 0, forwarded = 0, create_attempts = 0, fail_at = 0;
+std::atomic_uint failures{0};
+unsigned forwarded = 0, create_attempts = 0, fail_at = 0;
 #define CHECK(value)                                                 \
     do {                                                             \
         if (!(value)) {                                              \
@@ -46,10 +53,67 @@ const VkPhysicalDevice physical = Handle<VkPhysicalDevice>(3);
 struct NativeLayout {
     std::vector<VkDescriptorSetLayout> sets;
     std::vector<VkPushConstantRange> pushes;
+    unsigned references = 1;
 };
 std::map<VkPipelineLayout, NativeLayout> layouts;
 std::set<VkPipelineLayout> destroyed;
+std::mutex native_layout_lock;
 uintptr_t next_layout = 100;
+VkPipelineLayout alias_handle{};
+bool alias_private = false;
+struct CallbackOwner {
+    bool live = true, device = false;
+    int budget = -1;
+    unsigned allocations = 0, frees = 0, calls = 0;
+};
+std::mutex callback_lock;
+std::map<void *, CallbackOwner *> callback_allocations;
+VKAPI_ATTR void *VKAPI_CALL Allocate(void *user, size_t size, size_t, VkSystemAllocationScope scope) {
+    std::lock_guard<std::mutex> lock(callback_lock);
+    auto &owner = *static_cast<CallbackOwner *>(user);
+    CHECK(owner.live && scope == (owner.device ? VK_SYSTEM_ALLOCATION_SCOPE_DEVICE : VK_SYSTEM_ALLOCATION_SCOPE_OBJECT));
+    ++owner.calls;
+    if (!owner.budget) return nullptr;
+    if (owner.budget > 0) --owner.budget;
+    void *p = std::malloc(size);
+    if (p) {
+        ++owner.allocations;
+        CHECK(callback_allocations.emplace(p, &owner).second);
+    }
+    return p;
+}
+VKAPI_ATTR void VKAPI_CALL Free(void *user, void *memory) {
+    if (!memory) return;
+    std::lock_guard<std::mutex> lock(callback_lock);
+    auto &owner = *static_cast<CallbackOwner *>(user);
+    CHECK(owner.live);
+    ++owner.calls;
+    auto i = callback_allocations.find(memory);
+    CHECK(i != callback_allocations.end());
+    if (i != callback_allocations.end()) {
+        // Object callback contexts use compatible malloc/free implementations;
+        // DEVICE bookkeeping must retain its actual lifetime owner.
+        CHECK(owner.device == i->second->device && (!owner.device || &owner == i->second));
+        ++i->second->frees;
+        callback_allocations.erase(i);
+    }
+    std::free(memory);
+}
+VKAPI_ATTR void *VKAPI_CALL Reallocate(void *, void *, size_t, size_t, VkSystemAllocationScope) {
+    CHECK(false);  // This fixture does not require a native reallocation.
+    return nullptr;
+}
+VkAllocationCallbacks Callbacks(CallbackOwner &owner) {
+    VkAllocationCallbacks result{};
+    result.pUserData = &owner;
+    result.pfnAllocation = Allocate;
+    result.pfnReallocation = Reallocate;
+    result.pfnFree = Free;
+    return result;
+}
+std::mutex retirement_lock;
+std::condition_variable retirement_changed;
+bool gate_retirement = false, retirement_entered = false, release_retirement = false, creation_entered = false;
 VkShaderStageFlags expected_stages = 0;
 const VkBindDescriptorSetsInfo *passthrough = nullptr;
 VkBindDescriptorSetsInfo observed{};
@@ -100,7 +164,16 @@ VKAPI_ATTR void VKAPI_CALL Properties(VkPhysicalDevice p, VkPhysicalDeviceProper
 }
 VKAPI_ATTR VkResult VKAPI_CALL CreateLayout(VkDevice d, const VkPipelineLayoutCreateInfo *ci,
                                             const VkAllocationCallbacks *allocator, VkPipelineLayout *out) {
-    CHECK(d == device && !allocator && !ci->pNext);
+    {
+        std::lock_guard<std::mutex> lock(retirement_lock);
+        if (gate_retirement) {
+            creation_entered = true;
+            retirement_changed.notify_all();
+        }
+    }
+    std::lock_guard<std::mutex> lock(native_layout_lock);
+    CHECK(d == device && !ci->pNext);
+    if (allocator) CHECK(alias_handle && static_cast<CallbackOwner *>(allocator->pUserData)->live);
     *out = VK_NULL_HANDLE;
     if (++create_attempts == fail_at) return VK_ERROR_OUT_OF_HOST_MEMORY;
     NativeLayout value;
@@ -108,13 +181,37 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateLayout(VkDevice d, const VkPipelineLayoutCr
     if (ci->pushConstantRangeCount)
         value.pushes.assign(ci->pPushConstantRanges, ci->pPushConstantRanges + ci->pushConstantRangeCount);
     for (auto range : value.pushes) CHECK(range.stageFlags == VK_SHADER_STAGE_COMPUTE_BIT);
-    *out = Handle<VkPipelineLayout>(next_layout++);
-    CHECK(layouts.emplace(*out, std::move(value)).second);
+    *out = alias_handle && (alias_private || allocator) ? alias_handle : Handle<VkPipelineLayout>(next_layout++);
+    auto old = layouts.find(*out);
+    if (old != layouts.end()) {
+        CHECK(old->second.sets == value.sets && old->second.pushes.size() == value.pushes.size());
+        for (size_t i = 0; i < value.pushes.size() && i < old->second.pushes.size(); ++i)
+            CHECK(!std::memcmp(&old->second.pushes[i], &value.pushes[i], sizeof(VkPushConstantRange)));
+        ++old->second.references;
+    } else {
+        CHECK(layouts.emplace(*out, std::move(value)).second);
+        destroyed.erase(*out);  // A fully retired handle may be reused.
+    }
     return VK_SUCCESS;
 }
 VKAPI_ATTR void VKAPI_CALL DestroyLayout(VkDevice d, VkPipelineLayout layout, const VkAllocationCallbacks *allocator) {
-    CHECK(d == device && !allocator && layouts.erase(layout) == 1);
-    CHECK(destroyed.insert(layout).second);
+    {
+        std::unique_lock<std::mutex> lock(retirement_lock);
+        if (gate_retirement && allocator && layout == alias_handle) {
+            retirement_entered = true;
+            retirement_changed.notify_all();
+            CHECK(retirement_changed.wait_for(lock, std::chrono::seconds(5), [] { return release_retirement; }));
+        }
+    }
+    std::lock_guard<std::mutex> lock(native_layout_lock);
+    CHECK(d == device);
+    if (allocator) CHECK(static_cast<CallbackOwner *>(allocator->pUserData)->live);
+    auto old = layouts.find(layout);
+    CHECK(old != layouts.end() && old->second.references);
+    if (old != layouts.end() && --old->second.references == 0) {
+        layouts.erase(old);
+        CHECK(destroyed.insert(layout).second);
+    }
 }
 VKAPI_ATTR void VKAPI_CALL Bind2(VkCommandBuffer c, const VkBindDescriptorSetsInfo *info) {
     CHECK(c == command);
@@ -262,6 +359,9 @@ void DescriptorDefinitions() {
     definition.bindingCount = 1;
     definition.pBindings = &binding;
     auto track = [&](VkDescriptorSetLayout handle) {
+        // A changed definition here models a fresh native object reusing a
+        // retired handle, rather than another simultaneously live reference.
+        vkrt_rtp_forget_descriptor_layout(&dev, handle);
         CHECK(vkrt_rtp_track_descriptor_layout(&dev, handle, &definition) == VK_SUCCESS);
     };
     auto layout = [&](VkDescriptorSetLayout set, VkPipelineLayoutCreateFlags flags = 0) {
@@ -285,6 +385,25 @@ void DescriptorDefinitions() {
     track(b);
     auto first = keep(a), second = keep(b);
     CHECK(vkrt_rtp_layout_compatible(&dev, first, second, 0));
+    // An implementation may return the same non-dispatchable handle for two
+    // live creates. The first destruction must preserve the remaining alias,
+    // including the immutable identity held by already-created pipelines.
+    CHECK(vkrt_rtp_track_descriptor_layout(&dev, a, &definition) == VK_SUCCESS);
+    auto alias = keep(a);
+    vkrt_rtp_forget_descriptor_layout(&dev, a);
+    auto surviving = keep(a);
+    CHECK(vkrt_rtp_layout_compatible(&dev, first, alias, 0));
+    CHECK(vkrt_rtp_layout_compatible(&dev, first, surviving, 0));
+    // Distinct public definitions collapsing to one native handle stay
+    // successful, but cannot retroactively rewrite retained pipeline snapshots.
+    binding.descriptorCount = 5;
+    CHECK(vkrt_rtp_track_descriptor_layout(&dev, a, &definition) == VK_SUCCESS);
+    auto ambiguous = keep(a);
+    CHECK(!vkrt_rtp_layout_compatible(&dev, first, ambiguous, 0));
+    CHECK(vkrt_rtp_layout_compatible(&dev, first, second, 0));
+    vkrt_rtp_forget_descriptor_layout(&dev, a);
+    auto ambiguous_surviving = keep(a);
+    CHECK(vkrt_rtp_layout_compatible(&dev, ambiguous, ambiguous_surviving, 0));
     // Creation inputs and DSL handles can both disappear or be reused while
     // pipeline layouts retain their immutable definitions.
     binding.descriptorCount = 8;
@@ -343,6 +462,158 @@ void DescriptorDefinitions() {
     vkrt_rtp_forget_descriptor_layout(&dev, a);
     vkrt_rtp_forget_descriptor_layout(&dev, b);
     CHECK(layouts.empty());
+}
+unsigned NativeReferences() {
+    std::lock_guard<std::mutex> lock(native_layout_lock);
+    unsigned result = 0;
+    for (auto &entry : layouts) result += entry.second.references;
+    return result;
+}
+void PipelineLayoutAliases() {
+    CHECK(!dev.rtp && layouts.empty() && callback_allocations.empty());
+    auto make = (PFN_vkCreatePipelineLayout)vkrt_rtp_proc("vkCreatePipelineLayout");
+    auto destroy = (PFN_vkDestroyPipelineLayout)vkrt_rtp_proc("vkDestroyPipelineLayout");
+    CallbackOwner device_owner;
+    device_owner.device = true;
+    auto device_callbacks = Callbacks(device_owner);
+    CHECK(vkrt_rtp_init(&dev, &device_callbacks) == VK_SUCCESS);
+    const auto set = Handle<VkDescriptorSetLayout>(90000);
+    VkDescriptorSetLayoutCreateInfo empty{VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO};
+    CHECK(vkrt_rtp_track_descriptor_layout(&dev, set, &empty) == VK_SUCCESS);
+    VkPushConstantRange push{VK_SHADER_STAGE_COMPUTE_BIT, 0, 8};
+    VkPipelineLayoutCreateInfo ci{VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO};
+    ci.setLayoutCount = 1;
+    ci.pSetLayouts = &set;
+    ci.pushConstantRangeCount = 1;
+    ci.pPushConstantRanges = &push;
+    const auto saved = Snapshot(ci);
+    for (bool all_alias : {false, true}) {
+        CallbackOwner first, second;
+        auto a = Callbacks(first), b = Callbacks(second);
+        alias_handle = Handle<VkPipelineLayout>(100000 + all_alias);
+        alias_private = all_alias;
+        VkPipelineLayout h[2]{};
+        CHECK(make(device, &ci, &a, &h[0]) == VK_SUCCESS);
+        const auto canonical = vkrt_rtp_native_layout(&dev, h[0]);
+        CHECK(make(device, &ci, &b, &h[1]) == VK_SUCCESS && h[0] == h[1]);
+        CHECK(NativeReferences() == 6 && vkrt_rtp_native_layout(&dev, h[1]) == canonical);
+        CHECK(vkrt_rtp_layout_compatible(&dev, h[0], h[1], 0));
+        destroy(device, h[0], &a);
+        first.live = false;
+        CHECK(NativeReferences() == 3 && vkrt_rtp_native_layout(&dev, h[1]) == canonical);
+        CHECK(vkrt_rtp_layout_compatible(&dev, h[1], h[1], 0));
+        const uint32_t values[2]{};
+        CHECK(vkrt_rtp_push(&cb, h[1], VK_SHADER_STAGE_COMPUTE_BIT, 0, 8, values) == VK_SHADER_STAGE_COMPUTE_BIT);
+        destroy(device, h[1], &b);
+        second.live = false;
+        CHECK(!vkrt_rtp_layout_compatible(&dev, h[1], h[1], 0) && NativeReferences() == 2);
+        Reset();  // Recorded canonical owners must not use either dead OBJECT allocator.
+        CHECK(!first.calls && !second.calls && device_owner.allocations == device_owner.frees + 1);
+    }
+    CallbackOwner first, second;
+    auto a = Callbacks(first), b = Callbacks(second);
+    alias_handle = Handle<VkPipelineLayout>(100010);
+    alias_private = true;
+    VkPipelineLayout survivor{};
+    CHECK(make(device, &ci, &a, &survivor) == VK_SUCCESS);
+    unsigned fault_cases = 0;
+    for (unsigned step = 1; step <= 3; ++step) {
+        fail_at = create_attempts + step;
+        VkPipelineLayout rejected = Handle<VkPipelineLayout>(9);
+        CHECK(make(device, &ci, &b, &rejected) == VK_ERROR_OUT_OF_HOST_MEMORY && !rejected);
+        fail_at = 0;
+        CHECK(NativeReferences() == 3 && vkrt_rtp_layout_compatible(&dev, survivor, survivor, 0));
+        ++fault_cases;
+    }
+    device_owner.budget = 0;
+    VkPipelineLayout rejected = Handle<VkPipelineLayout>(9);
+    CHECK(make(device, &ci, &b, &rejected) == VK_ERROR_OUT_OF_HOST_MEMORY && !rejected);
+    device_owner.budget = -1;
+    CHECK(NativeReferences() == 3 && device_owner.allocations == device_owner.frees + 2);
+    ++fault_cases;
+    destroy(device, survivor, &a);
+    CHECK(!NativeReferences());
+    device_owner.budget = 0;
+    CHECK(make(device, &ci, &b, &rejected) == VK_ERROR_OUT_OF_HOST_MEMORY && !rejected && !NativeReferences());
+    device_owner.budget = -1;
+    ++fault_cases;
+
+    // A native last-reference destruction pauses before handle retirement.
+    // A concurrent public Create must not enter the native call until that
+    // destruction and the metadata retirement have completed together.
+    alias_private = false;
+    CHECK(make(device, &ci, &a, &survivor) == VK_SUCCESS);
+    const auto old_canonical = vkrt_rtp_native_layout(&dev, survivor);
+    {
+        std::lock_guard<std::mutex> lock(retirement_lock);
+        gate_retirement = true;
+        retirement_entered = release_retirement = creation_entered = false;
+    }
+    std::thread retiring([&] { destroy(device, survivor, &a); });
+    {
+        std::unique_lock<std::mutex> lock(retirement_lock);
+        CHECK(retirement_changed.wait_for(lock, std::chrono::seconds(5), [] { return retirement_entered; }));
+    }
+    VkPipelineLayout recreated{};
+    VkResult recreated_result = VK_ERROR_UNKNOWN;
+    bool started = false;
+    std::thread creating([&] {
+        {
+            std::lock_guard<std::mutex> lock(retirement_lock);
+            started = true;
+            retirement_changed.notify_all();
+        }
+        recreated_result = make(device, &ci, &b, &recreated);
+    });
+    {
+        std::unique_lock<std::mutex> lock(retirement_lock);
+        CHECK(retirement_changed.wait_for(lock, std::chrono::seconds(5), [&] { return started; }));
+        CHECK(!retirement_changed.wait_for(lock, std::chrono::milliseconds(100), [] { return creation_entered; }));
+        release_retirement = true;
+        retirement_changed.notify_all();
+    }
+    retiring.join();
+    creating.join();
+    gate_retirement = false;
+    first.live = false;
+    CHECK(recreated_result == VK_SUCCESS && recreated == survivor && NativeReferences() == 3);
+    CHECK(vkrt_rtp_native_layout(&dev, recreated) != old_canonical);
+    CHECK(vkrt_rtp_layout_compatible(&dev, recreated, recreated, 0));
+    destroy(device, recreated, &b);
+    CHECK(!NativeReferences());
+
+    // Teardown balances every still-live public/private reference, including
+    // three native creates returning the same numeric handle each time.
+    first.live = true;
+    alias_private = true;
+    CHECK(make(device, &ci, &a, &survivor) == VK_SUCCESS);
+    CHECK(make(device, &ci, &b, &recreated) == VK_SUCCESS && survivor == recreated);
+    CHECK(NativeReferences() == 6);
+    vkrt_rtp_finish(&dev);
+    CHECK(!NativeReferences() && callback_allocations.empty());
+    CHECK(device_owner.allocations == device_owner.frees && !first.calls && !second.calls);
+    device_owner.live = false;
+
+    CallbackOwner instance_owner;
+    instance_owner.device = true;
+    instance.has_allocator = true;
+    instance.allocator = Callbacks(instance_owner);
+    CHECK(vkrt_rtp_init(&dev, nullptr) == VK_SUCCESS);
+    CHECK(vkrt_rtp_track_descriptor_layout(&dev, set, &empty) == VK_SUCCESS);
+    CHECK(make(device, &ci, &a, &survivor) == VK_SUCCESS);
+    CHECK(make(device, &ci, &b, &recreated) == VK_SUCCESS);
+    CHECK(instance_owner.allocations == 2 && !instance_owner.frees);
+    vkrt_rtp_finish(&dev);
+    CHECK(instance_owner.allocations == instance_owner.frees && callback_allocations.empty() && !NativeReferences());
+    CHECK(!std::memcmp(&ci, saved.data(), sizeof(ci)) && !first.calls && !second.calls);
+    instance.has_allocator = false;
+    instance.allocator = {};
+    alias_handle = VK_NULL_HANDLE;
+    alias_private = false;
+    std::printf(
+        "PipelineLayout native aliases: DEVICE allocations %u/%u, INSTANCE fallback %u/%u, fault cases %u, native refs %u\n",
+        device_owner.allocations, device_owner.frees, instance_owner.allocations, instance_owner.frees, fault_cases,
+        NativeReferences());
 }
 }  // namespace
 extern "C" VkDeviceAddress vkrt_as_registry_address(vkrt_device_data *data) {
@@ -489,6 +760,7 @@ OpFunctionEnd
     Reset();
 
     vkrt_rtp_finish(&dev);
+    PipelineLayoutAliases();
     passthrough = &info;
     core(command, &info);
     CHECK(cb.record_result == VK_SUCCESS && forwarded == before + 1 && !cb.rtp && layouts.empty());

@@ -73,15 +73,19 @@ struct Allocator {
     }
 };
 template <class T, class... A>
-T *Token(const VkAllocationCallbacks *allocator, A &&...args) {
+T *ScopedToken(const VkAllocationCallbacks *allocator, VkSystemAllocationScope scope, A &&...args) {
     Allocator a(allocator);
-    void *p = a.allocate(sizeof(T), alignof(T), VK_SYSTEM_ALLOCATION_SCOPE_OBJECT);
+    void *p = a.allocate(sizeof(T), alignof(T), scope);
     try {
         return new (p) T(a, std::forward<A>(args)...);
     } catch (...) {
         a.free(p);
         throw;
     }
+}
+template <class T, class... A>
+T *Token(const VkAllocationCallbacks *allocator, A &&...args) {
+    return ScopedToken<T>(allocator, VK_SYSTEM_ALLOCATION_SCOPE_OBJECT, std::forward<A>(args)...);
 }
 template <class T>
 void FreeToken(T *p) {
@@ -112,6 +116,10 @@ struct DescriptorLayout {
     bool known = true;
     bool operator==(const DescriptorLayout &b) const { return known && b.known && flags == b.flags && bindings == b.bindings; }
 };
+struct DescriptorLayoutRecord {
+    std::shared_ptr<const DescriptorLayout> definition;
+    uint64_t references = 1;
+};
 struct Layout {
     vkrt_device_data *dev;
     VkPipelineLayout native{}, rt_native{};
@@ -131,9 +139,16 @@ struct ShaderToken {
 };
 struct LayoutToken {
     Allocator allocator;
+    Allocator public_allocator;
     std::shared_ptr<Layout> value;
     VkPipelineLayout public_layout{};
-    LayoutToken(Allocator a, std::shared_ptr<Layout> v) : allocator(a), value(std::move(v)) {}
+    LayoutToken *next = nullptr;
+    LayoutToken(Allocator owner, Allocator object, std::shared_ptr<Layout> v)
+        : allocator(owner), public_allocator(object), value(std::move(v)) {}
+};
+struct LayoutRecord {
+    std::shared_ptr<Layout> canonical;
+    LayoutToken *tokens = nullptr;
 };
 struct Variant {
     vkrt_device_data *dev = nullptr;
@@ -194,9 +209,9 @@ struct vkrt_rtp_state {
     vkrt_device_data *dev;
     std::mutex lock;
     std::unordered_map<uint64_t, ShaderToken *> shaders;
-    std::unordered_map<uint64_t, LayoutToken *> layouts;
+    std::unordered_map<uint64_t, LayoutRecord> layouts;
     std::unordered_map<uint64_t, PipelineToken *> pipelines;
-    std::unordered_map<uint64_t, std::shared_ptr<const DescriptorLayout>> descriptor_layouts;
+    std::unordered_map<uint64_t, DescriptorLayoutRecord> descriptor_layouts;
     std::atomic<uint64_t> next_identity{1};
     uint32_t max_push = 0, max_dispatch = 0;
     vkrt_rtp_state(Allocator a, vkrt_device_data *d) : allocator(a), dev(d) {}
@@ -225,7 +240,7 @@ std::shared_ptr<Layout> FindLayout(vkrt_device_data *d, VkPipelineLayout h) {
     if (!d->rtp) return {};
     std::lock_guard<std::mutex> lock(d->rtp->lock);
     auto i = d->rtp->layouts.find(VKRT_HKEY(h));
-    return i == d->rtp->layouts.end() ? nullptr : i->second->value;
+    return i == d->rtp->layouts.end() ? nullptr : i->second.canonical;
 }
 std::shared_ptr<Pipeline> FindPipeline(vkrt_device_data *d, VkPipeline h) {
     if (!d->rtp) return {};
@@ -400,7 +415,7 @@ VKAPI_ATTR VkResult VKAPI_CALL CreatePipelineLayout(VkDevice device, const VkPip
                 }
                 auto definition = d->rtp->descriptor_layouts.find(VKRT_HKEY(ci->pSetLayouts[i]));
                 Need(definition != d->rtp->descriptor_layouts.end());
-                v->sets.push_back(definition->second);
+                v->sets.push_back(definition->second.definition);
             }
         }
         if (ci->pushConstantRangeCount)
@@ -422,6 +437,10 @@ VKAPI_ATTR VkResult VKAPI_CALL CreatePipelineLayout(VkDevice device, const VkPip
         // consumer (templates, push descriptors, maintenance6, and others).
         // The independently allocated compatible copy outlives the public
         // object's callbacks when recorded CBs retain it.
+        // Serialize native public-handle creation/publication with retirement.
+        // v was declared before this lock, so its private native owners unwind
+        // only after unlocking if any later operation fails.
+        std::unique_lock<std::mutex> mutation(d->rtp->lock);
         VkPipelineLayout public_layout{};
         Check(d->vtable.CreatePipelineLayout(device, &local, a, &public_layout));
         struct PublicGuard {
@@ -446,11 +465,18 @@ VKAPI_ATTR VkResult VKAPI_CALL CreatePipelineLayout(VkDevice device, const VkPip
         VkPipelineLayout native_rt{};
         Check(d->vtable.CreatePipelineLayout(device, &rt_layout, nullptr, &native_rt));
         v->rt_native = native_rt;
-        auto token = Token<LayoutToken>(a, v);
+        // Alias bookkeeping can outlive any particular object's callbacks.
+        // Native public objects still use their caller's OBJECT allocator.
+        const VkAllocationCallbacks *owner = d->rtp->allocator.custom ? &d->rtp->allocator.callbacks : nullptr;
+        if (!owner && d->instance_data && d->instance_data->has_allocator) owner = &d->instance_data->allocator;
+        auto token = ScopedToken<LayoutToken>(owner, VK_SYSTEM_ALLOCATION_SCOPE_DEVICE, Allocator(a), v);
         token->public_layout = public_layout;
         try {
-            std::lock_guard<std::mutex> lock(d->rtp->lock);
-            d->rtp->layouts.emplace(VKRT_HKEY(public_layout), token);
+            auto result = d->rtp->layouts.emplace(VKRT_HKEY(public_layout), LayoutRecord{v, token});
+            if (!result.second) {
+                token->next = result.first->second.tokens;
+                result.first->second.tokens = token;
+            }
         } catch (...) {
             FreeToken(token);
             throw;
@@ -464,20 +490,26 @@ VKAPI_ATTR void VKAPI_CALL DestroyPipelineLayout(VkDevice device, VkPipelineLayo
     Guard([&] {
         auto d = Device(device);
         LayoutToken *token = nullptr;
+        std::shared_ptr<Layout> retired_canonical;
         if (d->rtp) {
             std::lock_guard<std::mutex> lock(d->rtp->lock);
             auto i = d->rtp->layouts.find(VKRT_HKEY(h));
             if (i != d->rtp->layouts.end()) {
-                token = i->second;
-                d->rtp->layouts.erase(i);
+                token = i->second.tokens;
+                i->second.tokens = token->next;
+                if (!i->second.tokens) {
+                    retired_canonical = std::move(i->second.canonical);
+                    d->rtp->layouts.erase(i);
+                }
             }
-        }
-        if (token) {
-            d->vtable.DestroyPipelineLayout(device, token->public_layout,
-                                            token->allocator.custom ? &token->allocator.callbacks : nullptr);
-            FreeToken(token);
+            // Compatibility is semantic, not callback-structure identity. Use
+            // this call's allocator; a previously retired alias's context may
+            // already be gone. Bookkeeping itself has DEVICE lifetime.
+            if (h) d->vtable.DestroyPipelineLayout(device, h, a);
         } else if (h)
             d->vtable.DestroyPipelineLayout(device, h, a);
+        // Private Layout destruction must not run under the metadata lock.
+        FreeToken(token);
         return VK_SUCCESS;
     });
 }
@@ -866,11 +898,14 @@ extern "C" void vkrt_rtp_finish(vkrt_device_data *dev) {
     auto s = dev->rtp;
     for (auto p : s->pipelines) FreeToken(p.second);
     for (auto p : s->shaders) FreeToken(p.second);
-    for (auto p : s->layouts) {
-        auto token = p.second;
-        dev->vtable.DestroyPipelineLayout(dev->device, token->public_layout,
-                                          token->allocator.custom ? &token->allocator.callbacks : nullptr);
-        FreeToken(token);
+    for (auto &p : s->layouts) {
+        for (auto token = p.second.tokens; token;) {
+            auto next = token->next;
+            dev->vtable.DestroyPipelineLayout(dev->device, token->public_layout,
+                                              token->public_allocator.custom ? &token->public_allocator.callbacks : nullptr);
+            FreeToken(token);
+            token = next;
+        }
     }
     Allocator a = s->allocator;
     s->~vkrt_rtp_state();
@@ -916,7 +951,21 @@ extern "C" VkResult vkrt_rtp_track_descriptor_layout(vkrt_device_data *dev, VkDe
         std::sort(value->bindings.begin(), value->bindings.end(),
                   [](const auto &a, const auto &b) { return std::tie(a.binding, a.stages) < std::tie(b.binding, b.stages); });
         std::lock_guard<std::mutex> lock(dev->rtp->lock);
-        dev->rtp->descriptor_layouts[VKRT_HKEY(layout)] = std::move(value);
+        auto old = dev->rtp->descriptor_layouts.find(VKRT_HKEY(layout));
+        if (old == dev->rtp->descriptor_layouts.end()) {
+            dev->rtp->descriptor_layouts.emplace(VKRT_HKEY(layout), DescriptorLayoutRecord{std::move(value), 1});
+        } else {
+            if (old->second.references == UINT64_MAX) return VK_ERROR_OUT_OF_HOST_MEMORY;
+            if (!(*old->second.definition == *value)) {
+                // Different public definitions may lower to the same native
+                // handle. Keep every existing pipeline snapshot immutable;
+                // this new snapshot cannot prove compatibility by definition.
+                // Distinguishing their public identities needs proxy handles.
+                value->known = false;
+                old->second.definition = std::move(value);
+            }
+            ++old->second.references;
+        }
         return VK_SUCCESS;
     });
 }
@@ -924,7 +973,8 @@ extern "C" void vkrt_rtp_forget_descriptor_layout(vkrt_device_data *dev, VkDescr
     Guard([&] {
         if (dev->rtp) {
             std::lock_guard<std::mutex> lock(dev->rtp->lock);
-            dev->rtp->descriptor_layouts.erase(VKRT_HKEY(layout));
+            auto old = dev->rtp->descriptor_layouts.find(VKRT_HKEY(layout));
+            if (old != dev->rtp->descriptor_layouts.end() && --old->second.references == 0) dev->rtp->descriptor_layouts.erase(old);
         }
         return VK_SUCCESS;
     });

@@ -19,6 +19,7 @@
 #include "vkrt_layer.h"
 #include "vkrt_query_pool.h"
 #include "vkrt_shader_objects.h"
+#include "vkrt_shader_interface.h"
 #include "vkrt_as_registry.h"
 #include "vkrt_as_copy.h"
 #include "vkrt_deferred.h"
@@ -261,6 +262,7 @@ vkrt_CreateDevice(VkPhysicalDevice physicalDevice,
            result = vkrt_query_device_init(data);
        }
    }
+   if (result == VK_SUCCESS) result = vkrt_shader_interface_init(data, pCreateInfo);
    if (result == VK_SUCCESS) result = vkrt_shader_objects_init(data);
    if (result != VK_SUCCESS) {
       VKRT_LOG_ERR("GPU BVH pipeline initialization failed: %d", result);
@@ -271,6 +273,7 @@ vkrt_CreateDevice(VkPhysicalDevice physicalDevice,
       vkrt_query_device_finish(data);
       vkrt_deferred_finish(data);
       vkrt_shader_objects_finish(data);
+      vkrt_shader_interface_finish(data);
       vkrt_as_registry_finish(data);
       data->vtable.DestroyDevice(*pDevice, pAllocator);
       *pDevice = VK_NULL_HANDLE;
@@ -312,6 +315,7 @@ vkrt_DestroyDevice(VkDevice device, const VkAllocationCallbacks *pAllocator)
    vkrt_deferred_finish(data);
    vkrt_build_finish(data);
    vkrt_shader_objects_finish(data);
+   vkrt_shader_interface_finish(data);
    vkrt_as_registry_finish(data);
    data->vtable.DestroyDevice(device, pAllocator);
    /* Remove device and queue aliases before releasing their shared owner. */
@@ -405,6 +409,60 @@ vkrt_DestroyShaderModule(VkDevice device, VkShaderModule shaderModule,
    data->vtable.DestroyShaderModule(device, shaderModule, pAllocator);
 }
 
+/* Immutable samplers and conversions are copied while their native objects are
+ * live. Metadata uses device ownership, independently of public object callbacks. */
+static VKAPI_ATTR VkResult VKAPI_CALL vkrt_CreateSampler(VkDevice device, const VkSamplerCreateInfo *info,
+                                                         const VkAllocationCallbacks *allocator, VkSampler *sampler) {
+    struct vkrt_device_data *data = VKRT_FIND(struct vkrt_device_data, device);
+    if (!data || !data->vtable.CreateSampler) return VK_ERROR_INITIALIZATION_FAILED;
+    vkrt_shader_interface_lock(data);
+    VkResult result = data->vtable.CreateSampler(device, info, allocator, sampler);
+    if (result == VK_SUCCESS) {
+        result = vkrt_shader_interface_track_sampler_locked(data, *sampler, info);
+        if (result != VK_SUCCESS) {
+            data->vtable.DestroySampler(device, *sampler, allocator);
+            *sampler = VK_NULL_HANDLE;
+        }
+    }
+    vkrt_shader_interface_unlock(data);
+    return result;
+}
+static VKAPI_ATTR void VKAPI_CALL vkrt_DestroySampler(VkDevice device, VkSampler sampler, const VkAllocationCallbacks *allocator) {
+    struct vkrt_device_data *data = VKRT_FIND(struct vkrt_device_data, device);
+    if (!data || !data->vtable.DestroySampler) return;
+    vkrt_shader_interface_lock(data);
+    data->vtable.DestroySampler(device, sampler, allocator);
+    vkrt_shader_interface_forget_sampler_locked(data, sampler);
+    vkrt_shader_interface_unlock(data);
+}
+static VKAPI_ATTR VkResult VKAPI_CALL vkrt_CreateSamplerYcbcrConversion(VkDevice device,
+                                                                        const VkSamplerYcbcrConversionCreateInfo *info,
+                                                                        const VkAllocationCallbacks *allocator,
+                                                                        VkSamplerYcbcrConversion *conversion) {
+    struct vkrt_device_data *data = VKRT_FIND(struct vkrt_device_data, device);
+    if (!data || !data->vtable.CreateSamplerYcbcrConversion) return VK_ERROR_FEATURE_NOT_PRESENT;
+    vkrt_shader_interface_lock(data);
+    VkResult result = data->vtable.CreateSamplerYcbcrConversion(device, info, allocator, conversion);
+    if (result == VK_SUCCESS) {
+        result = vkrt_shader_interface_track_conversion_locked(data, *conversion, info);
+        if (result != VK_SUCCESS) {
+            data->vtable.DestroySamplerYcbcrConversion(device, *conversion, allocator);
+            *conversion = VK_NULL_HANDLE;
+        }
+    }
+    vkrt_shader_interface_unlock(data);
+    return result;
+}
+static VKAPI_ATTR void VKAPI_CALL vkrt_DestroySamplerYcbcrConversion(VkDevice device, VkSamplerYcbcrConversion conversion,
+                                                                     const VkAllocationCallbacks *allocator) {
+    struct vkrt_device_data *data = VKRT_FIND(struct vkrt_device_data, device);
+    if (!data || !data->vtable.DestroySamplerYcbcrConversion) return;
+    vkrt_shader_interface_lock(data);
+    data->vtable.DestroySamplerYcbcrConversion(device, conversion, allocator);
+    vkrt_shader_interface_forget_conversion_locked(data, conversion);
+    vkrt_shader_interface_unlock(data);
+}
+
 /* ================================================================== */
 /* Descriptor rewrite (doc section 8)                                  */
 /*                                                                     */
@@ -423,20 +481,25 @@ vkrt_CreateDescriptorSetLayout(VkDevice device,
    if (!data)
       return VK_ERROR_INITIALIZATION_FAILED;
 
-   if (!data->virtual_rt) return data->vtable.CreateDescriptorSetLayout(device, pCreateInfo, pAllocator, pSetLayout);
    VkDescriptorSetLayoutCreateInfo native;
    VkDescriptorSetLayoutBinding *bindings;
-   VkResult result = vkrt_prepare_descriptor_layout(true, pCreateInfo, &native, &bindings);
+   VkResult result = vkrt_prepare_descriptor_layout(data->virtual_rt, pCreateInfo, &native, &bindings);
    if (result != VK_SUCCESS) return result;
-   result = data->vtable.CreateDescriptorSetLayout(device, &native, pAllocator, pSetLayout);
+   vkrt_shader_interface_lock(data);
+   result = data->vtable.CreateDescriptorSetLayout(device, data->virtual_rt ? &native : pCreateInfo, pAllocator, pSetLayout);
    free(bindings);
    if (result == VK_SUCCESS) {
-       result = vkrt_rtp_track_descriptor_layout(data, *pSetLayout, pCreateInfo);
+       result = vkrt_shader_interface_track_layout_locked(data, *pSetLayout, pCreateInfo);
+       if (result == VK_SUCCESS) {
+           result = vkrt_rtp_track_descriptor_layout(data, *pSetLayout, pCreateInfo);
+           if (result != VK_SUCCESS) vkrt_shader_interface_forget_layout_locked(data, *pSetLayout);
+       }
        if (result != VK_SUCCESS) {
            data->vtable.DestroyDescriptorSetLayout(device, *pSetLayout, pAllocator);
            *pSetLayout = VK_NULL_HANDLE;
        }
    }
+   vkrt_shader_interface_unlock(data);
    return result;
 }
 
@@ -444,8 +507,11 @@ static VKAPI_ATTR void VKAPI_CALL vkrt_DestroyDescriptorSetLayout(VkDevice devic
                                                                   const VkAllocationCallbacks *allocator) {
     struct vkrt_device_data *data = VKRT_FIND(struct vkrt_device_data, device);
     if (!data) return;
+    vkrt_shader_interface_lock(data);
     vkrt_rtp_forget_descriptor_layout(data, layout);
     data->vtable.DestroyDescriptorSetLayout(device, layout, allocator);
+    vkrt_shader_interface_forget_layout_locked(data, layout);
+    vkrt_shader_interface_unlock(data);
 }
 
 /* The set layout's AS bindings were rewritten to STORAGE_BUFFER, so the
@@ -621,6 +687,12 @@ vkrt_find_device_fn(const char *name)
         {"vkDestroyShaderModule", (void *)vkrt_DestroyShaderModule},
         {"vkCreateBuffer", (void *)vkrt_CreateBuffer},
         {"vkDestroyBuffer", (void *)vkrt_DestroyBuffer},
+        {"vkCreateSampler", (void *)vkrt_CreateSampler},
+        {"vkDestroySampler", (void *)vkrt_DestroySampler},
+        {"vkCreateSamplerYcbcrConversion", (void *)vkrt_CreateSamplerYcbcrConversion},
+        {"vkCreateSamplerYcbcrConversionKHR", (void *)vkrt_CreateSamplerYcbcrConversion},
+        {"vkDestroySamplerYcbcrConversion", (void *)vkrt_DestroySamplerYcbcrConversion},
+        {"vkDestroySamplerYcbcrConversionKHR", (void *)vkrt_DestroySamplerYcbcrConversion},
         {"vkCreateDescriptorSetLayout", (void *)vkrt_CreateDescriptorSetLayout},
         {"vkDestroyDescriptorSetLayout", (void *)vkrt_DestroyDescriptorSetLayout},
         {"vkCreateDescriptorPool", (void *)vkrt_CreateDescriptorPool},

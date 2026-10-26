@@ -1,0 +1,11 @@
+# Copyright 2026 The Khronos Group Inc.
+# SPDX-License-Identifier: Apache-2.0
+# Exact externalCTS d18e4c68543103371715845cd914c71e5859963e linked/unlinked binary execution.
+dEQP-VK.pipeline.shader_object_linked_binary.push_constant.graphics_pipeline.count_1_shader_vert_frag
+dEQP-VK.pipeline.shader_object_linked_binary.spec_constant.graphics.fragment.basic.bool
+dEQP-VK.pipeline.shader_object_linked_binary.descriptor_limits.fragment_shader.sampled_images_10
+dEQP-VK.pipeline.shader_object_linked_binary.early_destroy.cache_destroy_layout
+dEQP-VK.pipeline.shader_object_unlinked_binary.push_constant.graphics_pipeline.count_1_shader_vert_frag
+dEQP-VK.pipeline.shader_object_unlinked_binary.spec_constant.graphics.fragment.basic.bool
+dEQP-VK.pipeline.shader_object_unlinked_binary.descriptor_limits.fragment_shader.sampled_images_10
+dEQP-VK.pipeline.shader_object_unlinked_binary.early_destroy.cache_destroy_layout

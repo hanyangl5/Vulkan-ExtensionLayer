@@ -173,7 +173,7 @@ static bool check_signed_sbt_variant(const std::vector<uint32_t> &user, const st
         }
         i += len;
     }
-    spvtools::SpirvTools validator(SPV_ENV_VULKAN_1_2);
+    spvtools::SpirvTools validator(variant[1] > 0x00010500u ? SPV_ENV_VULKAN_1_3 : SPV_ENV_VULKAN_1_2);
     if (!validator.Validate(variant)) {
         std::fprintf(stderr, "FAIL: signed SBT-offset regression fixture is invalid\n");
         return false;
@@ -630,9 +630,278 @@ static bool check_as_context_literal(const std::vector<uint32_t> &user, const st
     return true;
 }
 
+static bool check_spirv16_variant(const std::vector<uint32_t> &user, const std::vector<uint32_t> &lib) {
+    const auto original = user;
+    std::vector<uint32_t> variant = user;
+    variant[1] = 0x00010600u;  // Upgrade only the header; preserve literal LocalSize.
+    const auto upgraded = variant;
+    spvtools::SpirvTools validator(SPV_ENV_VULKAN_1_3);
+    spvtools::ValidatorOptions options;
+    options.SetScalarBlockLayout(true);
+    if (!validator.Validate(variant.data(), variant.size(), options)) {
+        std::fprintf(stderr, "FAIL: SPIR-V 1.6 header-only regression input is invalid\n");
+        return false;
+    }
+    auto local_sizes = [](const std::vector<uint32_t> &words) {
+        std::vector<uint32_t> result;
+        for (size_t i = 5; i < words.size(); i += SPV_LEN(words[i]))
+            if (SPV_OP(words[i]) == 16 && SPV_LEN(words[i]) == 6 && words[i + 2] == 17)
+                result.insert(result.end(), words.begin() + i + 2, words.begin() + i + 6);
+        return result;
+    };
+    uint32_t *output = nullptr;
+    size_t count = 0;
+    char error[1024];
+    const int result =
+        vkrt_spirv_lower(variant.data(), variant.size(), lib.data(), lib.size(), &output, &count, error, sizeof(error));
+    if (result) {
+        std::fprintf(stderr, "FAIL: SPIR-V 1.6 lowering: %s\n", error);
+        return false;
+    }
+    const std::vector<uint32_t> lowered(output, output + count);
+    vkrt_spirv_lower_free(output);
+    const Counts after = classify(lowered), before = classify(variant);
+    if (lowered[1] != 0x00010600u || user != original || variant != upgraded ||
+        !validator.Validate(lowered.data(), lowered.size(), options) || after.op_ray_query || after.type_ray_query ||
+        after.type_as || after.rt_requirements || !after.op_function_call || local_sizes(variant).empty() ||
+        local_sizes(variant) != local_sizes(lowered) ||
+        count_calls_function_named(lowered, "sw_get_intersection_instance_sbt_offset") < before.op_sbt_offset ||
+        !calls_function_named(lowered, "sw_ray_query_initialize")) {
+        std::fprintf(stderr, "FAIL: SPIR-V 1.6 output version, query rewrite or literal LocalSize changed\n");
+        return false;
+    }
+    if (before.op_sbt_offset && !check_signed_sbt_variant(variant, lib)) return false;
+    std::printf("SPIR-V 1.6 header-only lowering +literal LocalSize +getter coverage PASS\n");
+    return true;
+}
+
+/* Opaque shader binaries transport source and specialization separately. A
+ * structurally valid source can become invalid only after specialization (for
+ * example, a zero workgroup dimension), so exercise the actual SDK optimizer
+ * and validator rather than the binary bridge's unit spies. */
+static bool check_specialized_source() {
+    spvtools::SpirvTools tools(SPV_ENV_VULKAN_1_4);
+    auto module = [&](const char *annotations, const char *declarations, const char *width = "%size", const char *capabilities = "",
+                      bool require_valid_source = true, const char *body = "") {
+        std::string source = std::string("OpCapability Shader\nOpCapability RayQueryKHR\n") + capabilities +
+                             "OpExtension \"SPV_KHR_ray_query\"\nOpMemoryModel Logical GLSL450\n"
+                             "OpEntryPoint GLCompute %main \"main\"\nOpExecutionModeId %main LocalSizeId " +
+                             width + " %one %one\n" + annotations +
+                             "%void = OpTypeVoid\n%uint = OpTypeInt 32 0\n%one = OpConstant %uint 1\n"
+                             "%zero = OpConstant %uint 0\n%rq = OpTypeRayQueryKHR\n%fn = OpTypeFunction %void\n" +
+                             declarations + "%main = OpFunction %void None %fn\n%entry = OpLabel\n" + body +
+                             "OpReturn\nOpFunctionEnd\n";
+        std::vector<uint32_t> words;
+        if (!tools.Assemble(source, &words) || (require_valid_source && !vkrt_spirv_validate_source(words.data(), words.size())))
+            words.clear();
+        return words;
+    };
+    unsigned checks = 0, failures = 0;
+    auto expect = [&](const char *label, const std::vector<uint32_t> &words, const VkSpecializationInfo *info, VkResult expected) {
+        ++checks;
+        const auto original = words;
+        std::vector<uint8_t> data;
+        if (info && info->pData && info->dataSize)
+            data.assign(static_cast<const uint8_t *>(info->pData), static_cast<const uint8_t *>(info->pData) + info->dataSize);
+        std::vector<VkSpecializationMapEntry> entries;
+        if (info && info->pMapEntries) entries.assign(info->pMapEntries, info->pMapEntries + info->mapEntryCount);
+        const VkResult actual = vkrt_spirv_validate_specialized_source(words.data(), words.size(), info);
+        if (words.empty() || actual != expected || words != original ||
+            (!data.empty() && std::memcmp(data.data(), info->pData, data.size())) ||
+            (!entries.empty() && std::memcmp(entries.data(), info->pMapEntries, entries.size() * sizeof(entries[0])))) {
+            std::fprintf(stderr, "FAIL: specialized source %s: got %d, expected %d (or caller input changed)\n", label, actual,
+                         expected);
+            ++failures;
+        }
+    };
+    const VkResult bad = VK_ERROR_INCOMPATIBLE_SHADER_BINARY_EXT;
+    const auto direct = module("OpDecorate %size SpecId 7\n", "%size = OpSpecConstant %uint 1\n");
+    expect("default LocalSizeId", direct, nullptr, VK_SUCCESS);
+    uint64_t value = 3;
+    VkSpecializationMapEntry map{7, 0, 4};
+    VkSpecializationInfo info{1, &map, sizeof(value), &value};
+    expect("nonzero LocalSizeId", direct, &info, VK_SUCCESS);
+    value = 0;
+    expect("specialized zero LocalSizeId", direct, &info, bad);
+    value = 1;
+    map.size = 1;
+    expect("declared uint wrong size", direct, &info, bad);
+    map.size = 0;
+    expect("declared uint zero size", direct, &info, bad);
+    map.size = 8;
+    expect("declared uint excess size", direct, &info, bad);
+    map = {999, 0, 0};
+    info.dataSize = 1;
+    expect("unused ID zero size", direct, &info, VK_SUCCESS);
+    map.offset = 1;
+    expect("unused offset equals data size", direct, &info, bad);
+    map.offset = UINT32_MAX;
+    expect("unused offset overflow", direct, &info, bad);
+    map = {999, 0, 2};
+    expect("unused range overflow", direct, &info, bad);
+    VkSpecializationMapEntry duplicates[2]{{999, 0, 0}, {999, 0, 0}};
+    info = {2, duplicates, 1, &value};
+    expect("duplicate unused IDs", direct, &info, bad);
+    info = {1, nullptr, sizeof(value), &value};
+    expect("missing map", direct, &info, bad);
+    info = {1, &map, sizeof(value), nullptr};
+    expect("missing data", direct, &info, bad);
+
+    const auto grouped = module("%group = OpDecorationGroup\nOpDecorate %group SpecId 7\nOpGroupDecorate %group %size\n",
+                                "%size = OpSpecConstant %uint 1\n");
+    map = {7, 0, 4};
+    info = {1, &map, sizeof(value), &value};
+    value = 1;
+    expect("grouped SpecId", grouped, &info, VK_SUCCESS);
+    value = 0;
+    expect("grouped SpecId zero", grouped, &info, bad);
+    const auto derived = module("OpDecorate %size SpecId 7\n",
+                                "%size = OpSpecConstant %uint 2\n%width = OpSpecConstantOp %uint ISub %size %one\n", "%width");
+    value = 2;
+    expect("derived LocalSizeId", derived, &info, VK_SUCCESS);
+    value = 1;
+    expect("derived zero LocalSizeId", derived, &info, bad);
+    const auto composite = module("OpDecorate %size SpecId 7\n",
+                                  "%pairtype = OpTypeVector %uint 2\n%size = OpSpecConstant %uint 1\n"
+                                  "%pair = OpSpecConstantComposite %pairtype %size %one\n"
+                                  "%width = OpSpecConstantOp %uint CompositeExtract %pair 0\n",
+                                  "%width");
+    expect("composite LocalSizeId", composite, &info, VK_SUCCESS);
+    value = 0;
+    expect("composite zero LocalSizeId", composite, &info, bad);
+    const auto boolean = module("OpDecorate %enabled SpecId 7\n",
+                                "%bool = OpTypeBool\n%enabled = OpSpecConstantFalse %bool\n"
+                                "%width = OpSpecConstantOp %uint Select %enabled %one %zero\n",
+                                "%width");
+    value = 0x100;
+    expect("noncanonical true VkBool32", boolean, &info, VK_SUCCESS);
+    value = 0;
+    expect("false VkBool32 zero LocalSizeId", boolean, &info, bad);
+    map.size = 1;
+    expect("boolean requires VkBool32", boolean, &info, bad);
+
+    const auto no_id = module("", "%size = OpSpecConstant %uint 1\n");
+    expect("undecorated scalar default frozen", no_id, nullptr, VK_SUCCESS);
+    const auto bad_default = module("", "%size = OpSpecConstant %uint 0\n");
+    expect("undecorated zero default rejected", bad_default, nullptr, bad);
+    const auto wide = module("OpDecorate %other SpecId 7\n",
+                             "%double = OpTypeFloat 64\n%other = OpSpecConstant %double 1\n%size = OpSpecConstant %uint 1\n",
+                             "%size", "OpCapability Float64\n");
+    value = UINT64_C(0x3ff0000000000000);
+    map.size = 8;
+    expect("float64 full bit pattern", wide, &info, VK_SUCCESS);
+    map.size = 4;
+    expect("float64 truncated map", wide, &info, bad);
+    const auto narrow = module("OpDecorate %other SpecId 7\n",
+                               "%int8 = OpTypeInt 8 1\n%other = OpSpecConstant %int8 -1\n"
+                               "%size = OpSpecConstant %uint 1\n",
+                               "%size", "OpCapability Int8\n");
+    value = 0xff;
+    map.size = 1;
+    expect("signed int8 literal normalization", narrow, &info, VK_SUCCESS);
+    const auto converted = module("OpDecorate %small SpecId 7\n",
+                                  "%int16 = OpTypeInt 16 1\n%int32 = OpTypeInt 32 1\n"
+                                  "%small = OpSpecConstant %int16 1\n%width = OpSpecConstantOp %int32 SConvert %small\n",
+                                  "%width", "OpCapability Int16\n");
+    value = 1;
+    map.size = 2;
+    expect("signed conversion LocalSizeId", converted, &info, VK_SUCCESS);
+    value = 0;
+    expect("signed conversion zero LocalSizeId", converted, &info, bad);
+    const auto float_conversion = module("OpDecorate %other SpecId 7\n",
+                                         "%double = OpTypeFloat 64\n%float = OpTypeFloat 32\n"
+                                         "%other = OpSpecConstant %double 1\n"
+                                         "%converted = OpSpecConstantOp %float FConvert %other\n"
+                                         "%size = OpSpecConstant %uint 1\n",
+                                         "%size", "OpCapability Float64\n");
+    value = UINT64_C(0x3ff0000000000000);
+    map.size = 8;
+    expect("floating conversion remains supported", float_conversion, &info, VK_SUCCESS);
+    const auto float_chain = module("OpDecorate %other SpecId 7\n",
+                                    "%double = OpTypeFloat 64\n%float = OpTypeFloat 32\n%half = OpTypeFloat 16\n"
+                                    "%other = OpSpecConstant %double 1\n%small = OpSpecConstantOp %half FConvert %other\n"
+                                    "%middle = OpSpecConstantOp %float FConvert %small\n"
+                                    "%converted = OpSpecConstantOp %double FConvert %middle\n"
+                                    "%size = OpSpecConstant %uint 1\n",
+                                    "%size", "OpCapability Float64\nOpCapability Float16\n");
+    expect("floating width conversion chain", float_chain, &info, VK_SUCCESS);
+    const auto float_vector = module("OpDecorate %other SpecId 7\n",
+                                     "%double = OpTypeFloat 64\n%float = OpTypeFloat 32\n"
+                                     "%v2d = OpTypeVector %double 2\n%v2f = OpTypeVector %float 2\n"
+                                     "%other = OpSpecConstant %double 1\n%pair = OpSpecConstantComposite %v2d %other %other\n"
+                                     "%converted = OpSpecConstantOp %v2f FConvert %pair\n"
+                                     "%quantized = OpSpecConstantOp %v2f QuantizeToF16 %converted\n"
+                                     "%shuffled = OpSpecConstantOp %v2f VectorShuffle %quantized %quantized 1 0\n"
+                                     "%size = OpSpecConstant %uint 1\n",
+                                     "%size", "OpCapability Float64\n");
+    expect("floating vector conversion quantize shuffle", float_vector, &info, VK_SUCCESS);
+    const auto mixed = module("OpDecorate %size SpecId 7\n",
+                              "%double = OpTypeFloat 64\n%float = OpTypeFloat 32\n"
+                              "%packtype = OpTypeStruct %float %uint\n%fp = OpSpecConstant %double 1\n"
+                              "%converted = OpSpecConstantOp %float FConvert %fp\n%size = OpSpecConstant %uint 1\n"
+                              "%pack = OpSpecConstantComposite %packtype %converted %size\n"
+                              "%width = OpSpecConstantOp %uint CompositeExtract %pack 1\n"
+                              "%array = OpTypeArray %uint %width\n",
+                              "%width", "OpCapability Float64\n");
+    value = 3;
+    map.size = 4;
+    expect("FP mixed composite preserves exact integer size", mixed, &info, VK_SUCCESS);
+    value = 0;
+    expect("FP mixed composite zero integer size rejected", mixed, &info, bad);
+    const auto converted_array = module("OpDecorate %small SpecId 7\n",
+                                        "%int16 = OpTypeInt 16 1\n%int32 = OpTypeInt 32 1\n"
+                                        "%small = OpSpecConstant %int16 1\n"
+                                        "%length = OpSpecConstantOp %int32 SConvert %small\n"
+                                        "%array = OpTypeArray %uint %length\n%size = OpSpecConstant %uint 1\n",
+                                        "%size", "OpCapability Int16\n");
+    value = 2;
+    map.size = 2;
+    expect("converted array length", converted_array, &info, VK_SUCCESS);
+    value = 0;
+    expect("converted zero array length", converted_array, &info, bad);
+    const auto divide_zero = module("OpDecorate %size SpecId 7\n",
+                                    "%size = OpSpecConstant %uint 1\n%undefined = OpSpecConstantOp %uint UDiv %size %zero\n");
+    value = 1;
+    map.size = 4;
+    expect("unused undefined specialization division", divide_zero, &info, VK_SUCCESS);
+    const auto overshift = module("OpDecorate %size SpecId 7\n",
+                                  "%bits = OpConstant %uint 32\n%size = OpSpecConstant %uint 1\n"
+                                  "%undefined = OpSpecConstantOp %uint ShiftLeftLogical %size %bits\n");
+    expect("unused undefined specialization shift", overshift, &info, VK_SUCCESS);
+    const auto used_undefined = module("OpDecorate %size SpecId 7\n",
+                                       "%size = OpSpecConstant %uint 1\n%undefined = OpSpecConstantOp %uint UDiv %size %zero\n",
+                                       "%size", "", true, "%used = OpIAdd %uint %undefined %one\n");
+    expect("undefined value consumed by ordinary shader", used_undefined, &info, VK_SUCCESS);
+    const auto used_float = module("OpDecorate %other SpecId 7\n",
+                                   "%double = OpTypeFloat 64\n%float = OpTypeFloat 32\n"
+                                   "%other = OpSpecConstant %double 1\n%converted = OpSpecConstantOp %float FConvert %other\n"
+                                   "%size = OpSpecConstant %uint 1\n",
+                                   "%size", "OpCapability Float64\n", true, "%used = OpFAdd %float %converted %converted\n");
+    value = UINT64_C(0x3ff0000000000000);
+    map.size = 8;
+    expect("floating conversion consumed by ordinary shader", used_float, &info, VK_SUCCESS);
+    const auto float_integer = module("",
+                                      "%float = OpTypeFloat 32\n%fp = OpSpecConstant %float 1\n"
+                                      "%size = OpSpecConstantOp %uint ConvertFToU %fp\n",
+                                      "%size", "", false);
+    expect("Kernel-only FP to integer specialization rejected", float_integer, nullptr, bad);
+    const auto float_bitcast = module("",
+                                      "%float = OpTypeFloat 32\n%fp = OpSpecConstant %float 1\n"
+                                      "%size = OpSpecConstantOp %uint Bitcast %fp\n",
+                                      "%size", "OpCapability Kernel\n", false);
+    expect("Kernel-only FP bitcast rejected in Vulkan", float_bitcast, nullptr, bad);
+    const VkSpecializationInfo empty{};
+    expect("empty specialization uses defaults", direct, &empty, VK_SUCCESS);
+    ++checks;
+    if (vkrt_spirv_validate_specialized_source(nullptr, 0, nullptr) != bad) ++failures;
+    std::printf("Specialized source validation: %u checks, %u failures\n", checks, failures);
+    return failures == 0;
+}
+
 int
 main(int argc, char **argv)
 {
+    if (argc == 2 && !std::strcmp(argv[1], "--validate-specialization")) return check_specialized_source() ? 0 : 1;
     if (argc != 4 && !(argc == 5 && !std::strcmp(argv[4], "--require-sbt-offset"))) {
         std::fprintf(stderr, "usage: %s <user.spv> <library.spv> <out.spv> [--require-sbt-offset]\n", argv[0]);
         return 2;
@@ -656,11 +925,13 @@ main(int argc, char **argv)
                before.op_function_call);
 
    int failures = 0;
+   if (!check_specialized_source()) failures++;
    if (!check_function_query_image(lib)) failures++;
    if (!check_as_operand_values(lib)) failures++;
    if (!check_as_runtime_nonuniform(lib)) failures++;
    if (!check_workgroup_metadata(lib)) failures++;
    if (!check_as_context_literal(user, lib)) failures++;
+   if (!check_spirv16_variant(user, lib)) failures++;
    if (argc == 5 && before.op_sbt_offset != 2) {
        std::printf("FAIL: getter fixture must contain both SBT-offset selectors (found %d)\n", before.op_sbt_offset);
        failures++;
@@ -691,6 +962,10 @@ main(int argc, char **argv)
 
    std::vector<uint32_t> lowered(out, out + out_n);
    Counts after = classify(lowered);
+   if (lowered[1] != (user[1] > lib[1] ? user[1] : lib[1])) {
+       std::fprintf(stderr, "FAIL: lowering changed the highest input SPIR-V version\n");
+       failures++;
+   }
    std::printf("output: OpRayQuery*=%d OpTypeRayQueryKHR=%d "
                "OpTypeAccelerationStructureKHR=%d OpFunctionCall=%d "
                "(%zu -> %zu words)\n",

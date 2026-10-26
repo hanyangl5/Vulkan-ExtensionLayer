@@ -52,6 +52,7 @@ layer uses one AS/RQ/RTP backend; pinned upstream references remain intact.
 - [x] Preserve traditional descriptor-backed opaque identities across suspension and compare descriptor layout definitions.
 - [x] Execute bounded public AS property-query publication and real CTS compaction/serialization paths.
 - [x] Back numeric module-Private state per logical RT invocation and execute the additional control-flow CTS slice.
+- [x] Preserve shader-object binary interfaces, linked peers, successful batch prefixes and legal SPIR-V 1.6 RQ inputs, with expanded external CTS.
 - [ ] M0: complete all capability, no-native-RT, resource ABI, and continuation proofs.
 - [ ] M1: integrate Mesa builders, GPU BVH4 encoding/refit, and shared AS objects.
 - [ ] M2: complete Ray Query lowering and state semantics.
@@ -404,6 +405,43 @@ passes its three RT smoke cases and two binary-interface controls, retaining the
 two known binary-interface failures. Simultaneous queries, generic stage
 scheduling and the complete M0–M5 criteria remain open.
 
+The subsequent [shader-object transport checkpoint](rt_shader_objects_2026-10-26.md)
+fixes the null/different-layout binary imports and two additional creation-batch
+failures. Proven ordinary groups retain native binaries; RQ groups preserve the
+complete original linked group and owned descriptor/sampler/push definitions,
+rebuild against the destination resolver, then perform the public native BINARY
+creation. Device-owned definitions survive original object destruction, and
+independent successful batch prefixes survive later failures. Source robustness,
+enabled features and specialized integer constraints are checked before replay.
+Legal SPIR-V 1.6 RQ modules now retain their version and literal workgroup size
+through the matching linker/validator environment.
+
+The external binary/create matrix improves from **125/129 to 129/129**, with
+**129/129** native controls. Eight additional functional CTS cases pass in both
+software and native modes; the FORMAT3 RQ/RTP regression passes **59/59**. The
+final separate-build fixtures pass eight actual GPU executions across both
+validation-layer orders with synchronization checks, including cross-device RQ,
+SPIR-V 1.6, linked cross-profile imports and immutable sampler values after source
+device destruction. Main integration passes **25 offline** and **14 selected
+host/GPU** tests. The [machine evidence](rt_shader_binary_v3_2026-10-26.json)
+retains exact snapshots and historical failures. These are distinct tested
+snapshots, not one aggregate conformance run.
+
+Final review also fixes descriptor/pipeline-layout native-alias retirement and
+guards unordered linked batches whose failure would otherwise produce invalid
+native topology. The exact final DLL passes **25/25 offline**, **2/2 binary GPU**
+and a fresh **15/15 external CTS** recheck. Its immediately preceding alias/recipe
+snapshot also passes **7/7 selected GPU** checks, including RTP derivatives and
+maintenance6. Both snapshots and their scopes are preserved in the same evidence
+record; the complete earlier 129-case matrix is not relabeled as this final DLL.
+
+Full binary compatibility remains open when an original RQ peer/interface needs
+features absent on the destination. Unknown extension chains, complete source
+environment constraints and private resource budgets still require qualification.
+The [context-free address candidate](rt_context_free_address_design.md) records
+one potential way to eliminate resolver-specialized replay; it is not adopted.
+The complete M0-M5 goal remains active.
+
 ## Next work
 
 Run M0 proof work in parallel with shared-backend construction:
@@ -430,10 +468,11 @@ Run M0 proof work in parallel with shared-backend construction:
    descriptor-buffer interoperability, and pipeline option/API coverage before
    claiming the full typed-continuation M0 proof. Cached native pipelines now
    use a separate internal context-push layout with public state replay.
-   Shader-object source envelopes now rebuild against destination device state,
-   but valid BINARY imports with null/different layouts still fail external CTS.
-   Preserve original descriptor/sampler/push interfaces and reconstruct the
-   destination compilation interface before claiming binary compatibility.
+   Shader-object binary imports now preserve original descriptor/sampler/push
+   interfaces and pass the null/different-layout CTS cases. Complete compatibility
+   when original RQ peers require unrelated optional features absent on the
+   destination; qualify unknown extension chains and the complete compiler
+   environment before claiming general binary compatibility.
 4. Extend the now-shared RQ/RTP builder, BVH4 traversal and AS object model.
    Implement four-child GPU collapse/refit and qualify numerical cases and large construction IDs. Wire PLOC/HPLOC only
    with complete host contracts. M1 remains incomplete.

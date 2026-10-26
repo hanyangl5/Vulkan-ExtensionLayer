@@ -54,6 +54,7 @@ struct vkrt_device_data {
    bool app_requested_shader_objects;
    bool shader_object_backend;
    struct vkrt_shader_object_state *shader_objects;
+   struct vkrt_shader_interface_state *shader_interfaces;
    struct vkrt_as_registry *as_registry;
    struct vkrt_deferred_state *deferred;
    struct vkrt_serialization_state *serialization;

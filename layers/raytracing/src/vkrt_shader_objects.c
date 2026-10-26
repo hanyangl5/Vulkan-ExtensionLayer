@@ -5,29 +5,31 @@
 #include "vkrt_rt_capabilities.h"
 #include "vkrt_as_registry.h"
 #include "vkrt_spirv_lower.h"
+#include "vkrt_shader_interface.h"
 
-/* The wire format contains no host pointers, Vulkan handles, or resolver BDA.
- * Source records are recompiled against the destination logical device. */
-enum { HEADER = 128, FORMAT = 1, SOURCE = 1 };
+/* Envelope fields and interface recipes contain no host pointers or handles.
+ * Only proven NoRT groups retain opaque native code; RQ groups rebuild source
+ * against the destination logical device instead of copying its resolver BDA. */
+enum { HEADER = 128, STAGE_HEADER = 96, FORMAT = 3, SOURCE = 1 };
+enum { W_TOTAL = 4, W_GROUP = 6, W_TARGET = 7, W_OPAQUE = 8, W_ELIGIBLE = 21, W_NATIVE_VERSION = 22, W_RQ = 23, W_HASH = 28 };
 enum {
-    W_TOTAL = 4,
-    W_CODE = 6,
-    W_NAME = 8,
-    W_MAPS = 9,
-    W_DATA = 10,
-    W_SUBGROUP = 12,
-    W_CUSTOM = 13,
-    W_CUSTOM_ENABLE = 14,
-    W_COLORS = 15,
-    W_DEPTH = 16,
-    W_STENCIL = 17,
-    W_STAGE = 18,
-    W_NEXT = 19,
-    W_FLAGS = 20,
-    W_ELIGIBLE = 21,
-    W_NATIVE_VERSION = 22,
-    W_RQ = 23,
-    W_HASH = 28
+    S_TOTAL = 0,
+    S_CODE = 2,
+    S_NAME = 4,
+    S_MAPS = 5,
+    S_DATA = 6,
+    S_INTERFACE = 8,
+    S_SUBGROUP = 10,
+    S_CUSTOM = 11,
+    S_CUSTOM_ENABLE = 12,
+    S_COLORS = 13,
+    S_DEPTH = 14,
+    S_STENCIL = 15,
+    S_STAGE = 16,
+    S_NEXT = 17,
+    S_FLAGS = 18,
+    S_RQ = 19,
+    S_REBUILDABLE = 20
 };
 struct shader_record {
     struct shader_record *next;
@@ -62,6 +64,7 @@ static void free_state(struct vkrt_shader_object_state *state) {
         free(state);
 }
 struct decoded {
+    VkShaderCreateInfoEXT info;
     VkSpecializationInfo specialization;
     VkSpecializationMapEntry *maps;
     VkPipelineShaderStageRequiredSubgroupSizeCreateInfo subgroup;
@@ -69,6 +72,18 @@ struct decoded {
     VkCustomResolveCreateInfoEXT custom;
 #endif
     VkFormat *colors;
+    const uint8_t *interface_bytes;
+    size_t interface_size;
+    struct vkrt_shader_interface *owned_interface;
+    void *rewritten;
+    VkPushConstantRange *ranges;
+};
+struct group {
+    uint32_t count, target;
+    struct decoded *stages;
+    const uint8_t *opaque;
+    size_t opaque_size;
+    bool rq;
 };
 static uint32_t word(const uint8_t *p, unsigned n) {
     p += n * 4;
@@ -149,13 +164,15 @@ static void uuid(const uint8_t native[VK_UUID_SIZE], bool eligible, uint8_t outp
     for (unsigned i = 0; i < 4; ++i)
         for (unsigned j = 0; j < 4; ++j) output[i * 4 + j] = (uint8_t)(first[i] >> (24 - j * 8));
 }
-static void header(struct vkrt_shader_object_state *state, uint8_t *p, unsigned kind, size_t size, size_t code) {
+static void header(struct vkrt_shader_object_state *state, uint8_t *p, size_t size, uint32_t count, uint32_t target, bool rq) {
     put(p, 0, 0x54524b56);
     put(p, 1, 0x31444853);
     put(p, 2, FORMAT);
-    put(p, 3, kind);
+    put(p, 3, SOURCE);
     put_wide(p, W_TOTAL, size);
-    put_wide(p, W_CODE, code);
+    put(p, W_GROUP, count);
+    put(p, W_TARGET, target);
+    put(p, W_RQ, rq);
     put(p, W_ELIGIBLE, state->eligible);
     put(p, W_NATIVE_VERSION, state->native.shaderBinaryVersion);
     memcpy(p + 24 * 4, state->uuid, VK_UUID_SIZE);
@@ -234,69 +251,250 @@ void vkrt_shader_objects_finish(struct vkrt_device_data *dev) {
     free_state(state);
     dev->shader_objects = NULL;
 }
+static bool rt_capability(uint32_t capability) {
+    switch (capability) {
+        case 4471:
+        case 4472:
+        case 4478:
+        case 4479: /* query / primitive culling / tracing */
+        case 5336:
+        case 5340:
+        case 5341:
+        case 5353: /* position fetch / NV / motion / provisional */
+        case 5381:
+        case 5383:
+        case 5388:
+        case 5391:
+        case 5409: /* micromaps / reorder / query position fetch */
+        case 5418:
+        case 5419:
+        case 5437:
+        case 6020:
+        case 6032: /* new geometry / cluster / cull mask / micromap mode */
+            return true;
+        default:
+            return false;
+    }
+}
+static bool rt_opcode(uint32_t op) {
+    return (op >= 4445 && op <= 4449) || (op >= 4472 && op <= 4479) || (op >= 5249 && op <= 5281) || (op >= 5304 && op <= 5341) ||
+           (op >= 5344 && op <= 5352) || (op >= 6016 && op <= 6032);
+}
 static bool rq_source(const VkShaderCreateInfoEXT *info) {
     const uint32_t *p = info->pCode;
     size_t count = info->codeSize / 4;
-    if (count < 5 || p[0] != 0x07230203) return false;
+    if (count < 5 || p[0] != 0x07230203) return true; /* not a proven portable source */
     for (size_t i = 5; i < count;) {
         uint32_t length = p[i] >> 16, op = p[i] & 65535;
-        if (!length || length > count - i) return false;
-        if (op == 4472 || op == 5341) return true; /* RayQuery / AS types */
+        if (!length || length > count - i) return true;
+        if (rt_opcode(op) || (op == 17 && length >= 2 && rt_capability(p[i + 1])) ||
+            (op == 15 && length >= 2 && p[i + 1] >= 5313 && p[i + 1] <= 5318))
+            return true;
+        if (op == 10 && length >= 2) {
+            const char *extension = (const char *)&p[i + 1];
+            size_t bytes = (size_t)(length - 1) * 4;
+            if (!memchr(extension, 0, bytes)) return true;
+            if (!strncmp(extension, "SPV_KHR_ray_", 12) || !strncmp(extension, "SPV_NV_ray_", 11) ||
+                strstr(extension, "shader_invocation_reorder") || strstr(extension, "micromap"))
+                return true;
+        }
         i += length;
     }
     return false;
 }
-static VkResult source_blob(struct vkrt_shader_object_state *state, struct shader_record *record, const VkShaderCreateInfoEXT *info,
-                            bool rq) {
+static bool matching_entry(const VkShaderCreateInfoEXT *info) {
+    uint32_t model;
+    switch (info->stage) {
+        case VK_SHADER_STAGE_VERTEX_BIT:
+            model = 0;
+            break;
+        case VK_SHADER_STAGE_TESSELLATION_CONTROL_BIT:
+            model = 1;
+            break;
+        case VK_SHADER_STAGE_TESSELLATION_EVALUATION_BIT:
+            model = 2;
+            break;
+        case VK_SHADER_STAGE_GEOMETRY_BIT:
+            model = 3;
+            break;
+        case VK_SHADER_STAGE_FRAGMENT_BIT:
+            model = 4;
+            break;
+        case VK_SHADER_STAGE_COMPUTE_BIT:
+            model = 5;
+            break;
+        case VK_SHADER_STAGE_TASK_BIT_EXT:
+            model = 5364;
+            break;
+        case VK_SHADER_STAGE_MESH_BIT_EXT:
+            model = 5365;
+            break;
+        default:
+            return false;
+    }
+    const uint32_t *p = info->pCode;
+    for (size_t i = 5, count = info->codeSize / 4; i < count;) {
+        uint32_t length = p[i] >> 16;
+        if (!length || length > count - i) return false;
+        if ((p[i] & 65535) == 15 && length >= 4 &&
+            (p[i + 1] == model || (model == 5364 && p[i + 1] == 5267) || (model == 5365 && p[i + 1] == 5268))) {
+            const char *name = (const char *)&p[i + 3];
+            if (memchr(name, 0, (size_t)(length - 3) * 4) && !strcmp(name, info->pName)) return true;
+        }
+        i += length;
+    }
+    return false;
+}
+static unsigned stage_order(VkShaderStageFlagBits stage) {
+    switch (stage) {
+        case VK_SHADER_STAGE_VERTEX_BIT:
+        case VK_SHADER_STAGE_TASK_BIT_EXT:
+            return 0;
+        case VK_SHADER_STAGE_TESSELLATION_CONTROL_BIT:
+        case VK_SHADER_STAGE_MESH_BIT_EXT:
+            return 1;
+        case VK_SHADER_STAGE_TESSELLATION_EVALUATION_BIT:
+            return 2;
+        case VK_SHADER_STAGE_GEOMETRY_BIT:
+            return 3;
+        case VK_SHADER_STAGE_FRAGMENT_BIT:
+            return 4;
+        default:
+            return 5;
+    }
+}
+static uint32_t linked_prefix(uint32_t count, const VkShaderCreateInfoEXT *infos) {
+    uint32_t first = count;
+    bool invalid = false;
+    for (uint32_t i = 0; i < count; ++i) {
+        if (!(infos[i].flags & VK_SHADER_CREATE_LINK_STAGE_BIT_EXT)) continue;
+        if (i < first) first = i;
+        unsigned order = stage_order(infos[i].stage), following = 6;
+        VkShaderStageFlags next = 0;
+        for (uint32_t j = 0; j < count; ++j) {
+            if (!(infos[j].flags & VK_SHADER_CREATE_LINK_STAGE_BIT_EXT)) continue;
+            unsigned candidate = stage_order(infos[j].stage);
+            if (candidate > order && candidate < following) {
+                following = candidate;
+                next = infos[j].stage;
+            }
+        }
+        if (next && infos[i].nextStage != next) invalid = true;
+    }
+    /* 08409 also applies to BINARY. An unordered prefix can retain a later
+     * peer but lose its predecessor, so that linked group cannot be created
+     * with its original nextStage values. Fail at its first member instead;
+     * do not rewrite caller flags/nextStage or discard earlier independent
+     * inputs. A lone remaining linked stage has no such adjacency constraint. */
+    return invalid ? first : count;
+}
+static bool valid_source_fields(const VkShaderCreateInfoEXT *info) {
+    VkShaderStageFlags next = 0;
+    switch (info->stage) {
+        case VK_SHADER_STAGE_VERTEX_BIT:
+            next = VK_SHADER_STAGE_TESSELLATION_CONTROL_BIT | VK_SHADER_STAGE_GEOMETRY_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
+            break;
+        case VK_SHADER_STAGE_TESSELLATION_CONTROL_BIT:
+            next = VK_SHADER_STAGE_TESSELLATION_EVALUATION_BIT;
+            break;
+        case VK_SHADER_STAGE_TESSELLATION_EVALUATION_BIT:
+            next = VK_SHADER_STAGE_GEOMETRY_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
+            break;
+        case VK_SHADER_STAGE_GEOMETRY_BIT:
+        case VK_SHADER_STAGE_MESH_BIT_EXT:
+            next = VK_SHADER_STAGE_FRAGMENT_BIT;
+            break;
+        case VK_SHADER_STAGE_TASK_BIT_EXT:
+            next = VK_SHADER_STAGE_MESH_BIT_EXT;
+            break;
+        case VK_SHADER_STAGE_FRAGMENT_BIT:
+        case VK_SHADER_STAGE_COMPUTE_BIT:
+            break;
+        default:
+            return false;
+    }
+    /* Wire v3 recognizes the flag set in Vulkan-Headers 1.4.357. Further
+     * flag semantics need a versioned recipe rather than invalid SPIR-V CI. */
+    if ((info->flags & ~UINT32_C(0x00049cff)) || (info->nextStage & ~next)) return false;
+    if (info->stage == VK_SHADER_STAGE_COMPUTE_BIT && (info->flags & (VK_SHADER_CREATE_LINK_STAGE_BIT_EXT | 0x00040000)))
+        return false;
+    if (info->stage != VK_SHADER_STAGE_COMPUTE_BIT && (info->flags & VK_SHADER_CREATE_DISPATCH_BASE_BIT_EXT)) return false;
+    if (info->stage != VK_SHADER_STAGE_MESH_BIT_EXT && (info->flags & VK_SHADER_CREATE_NO_TASK_SHADER_BIT_EXT)) return false;
+    if (info->stage != VK_SHADER_STAGE_FRAGMENT_BIT && (info->flags & 0x60)) return false;
+    if (info->stage != VK_SHADER_STAGE_COMPUTE_BIT && info->stage != VK_SHADER_STAGE_TASK_BIT_EXT &&
+        info->stage != VK_SHADER_STAGE_MESH_BIT_EXT && (info->flags & VK_SHADER_CREATE_REQUIRE_FULL_SUBGROUPS_BIT_EXT))
+        return false;
+    return true;
+}
+static bool aligned_size(size_t *size) { return add(size, (16 - (*size & 15)) & 15); }
+static bool same_group(const VkShaderCreateInfoEXT *infos, uint32_t target, uint32_t index) {
+    return target == index || ((infos[target].flags & VK_SHADER_CREATE_LINK_STAGE_BIT_EXT) &&
+                               (infos[index].flags & VK_SHADER_CREATE_LINK_STAGE_BIT_EXT));
+}
+static VkResult stage_blob(struct vkrt_device_data *dev, struct shader_record *record, const VkShaderCreateInfoEXT *info,
+                           bool rebuildable) {
     uint32_t subgroup = 0;
 #ifdef VK_EXT_custom_resolve
     const VkCustomResolveCreateInfoEXT *custom = NULL;
 #endif
-    for (const VkBaseInStructure *p = info->pNext; p; p = p->pNext) {
-        if (p->sType == VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_REQUIRED_SUBGROUP_SIZE_CREATE_INFO)
-            subgroup = ((const VkPipelineShaderStageRequiredSubgroupSizeCreateInfo *)p)->requiredSubgroupSize;
+    void *interface_bytes = NULL;
+    size_t interface_size = 0, colors = 0;
+    VkResult result = VK_SUCCESS;
+    if (rebuildable) {
+        for (const VkBaseInStructure *p = info->pNext; p; p = p->pNext) {
+            if (p->sType == VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_REQUIRED_SUBGROUP_SIZE_CREATE_INFO)
+                subgroup = ((const VkPipelineShaderStageRequiredSubgroupSizeCreateInfo *)p)->requiredSubgroupSize;
 #ifdef VK_EXT_custom_resolve
-        else if (p->sType == VK_STRUCTURE_TYPE_CUSTOM_RESOLVE_CREATE_INFO_EXT)
-            custom = (const void *)p;
+            else if (p->sType == VK_STRUCTURE_TYPE_CUSTOM_RESOLVE_CREATE_INFO_EXT)
+                custom = (const void *)p;
 #endif
-        else if (p->sType != VK_STRUCTURE_TYPE_VALIDATION_FEATURES_EXT)
-            return VK_ERROR_FEATURE_NOT_PRESENT;
+            else if (p->sType != VK_STRUCTURE_TYPE_VALIDATION_FEATURES_EXT)
+                return VK_ERROR_FEATURE_NOT_PRESENT;
+        }
+#ifdef VK_EXT_custom_resolve
+        colors = custom ? custom->colorAttachmentCount : 0;
+#endif
+        result = vkrt_shader_interface_capture(dev, info, &interface_bytes, &interface_size);
+        if (result != VK_SUCCESS) return result;
     }
     size_t names = strlen(info->pName) + 1, maps = info->pSpecializationInfo ? info->pSpecializationInfo->mapEntryCount : 0;
-    size_t data = info->pSpecializationInfo ? info->pSpecializationInfo->dataSize : 0, colors = 0;
-#ifdef VK_EXT_custom_resolve
-    colors = custom ? custom->colorAttachmentCount : 0;
-#endif
-    size_t size = HEADER;
+    size_t data = info->pSpecializationInfo ? info->pSpecializationInfo->dataSize : 0, size = STAGE_HEADER;
     if (names > UINT32_MAX || maps > SIZE_MAX / 16 || colors > SIZE_MAX / 4 || !add(&size, info->codeSize) || !add(&size, names) ||
-        !add(&size, maps * 16) || !add(&size, data) || !add(&size, colors * 4))
-        return VK_ERROR_OUT_OF_HOST_MEMORY;
+        !add(&size, maps * 16) || !add(&size, data) || !add(&size, colors * 4) || !add(&size, interface_size) ||
+        !aligned_size(&size)) {
+        result = VK_ERROR_OUT_OF_HOST_MEMORY;
+        goto done;
+    }
     record->blob = allocate(record, size);
-    if (!record->blob) return VK_ERROR_OUT_OF_HOST_MEMORY;
+    if (!record->blob) {
+        result = VK_ERROR_OUT_OF_HOST_MEMORY;
+        goto done;
+    }
     record->size = size;
-    memset(record->blob, 0, size);
     uint8_t *p = record->blob;
-    header(state, p, SOURCE, size, info->codeSize);
-    put(p, W_NAME, (uint32_t)names);
-    put(p, W_MAPS, (uint32_t)maps);
-    put_wide(p, W_DATA, data);
-    put(p, W_SUBGROUP, subgroup);
-#ifdef VK_EXT_custom_resolve
-    put(p, W_CUSTOM, custom != NULL);
-#endif
-    put(p, W_RQ, rq);
-    put(p, W_STAGE, info->stage);
-    put(p, W_NEXT, info->nextStage);
-    put(p, W_FLAGS, info->flags);
+    memset(p, 0, size);
+    put_wide(p, S_TOTAL, size);
+    put_wide(p, S_CODE, info->codeSize);
+    put(p, S_NAME, (uint32_t)names);
+    put(p, S_MAPS, (uint32_t)maps);
+    put_wide(p, S_DATA, data);
+    put_wide(p, S_INTERFACE, interface_size);
+    put(p, S_SUBGROUP, subgroup);
+    put(p, S_RQ, rq_source(info));
+    put(p, S_REBUILDABLE, rebuildable);
+    put(p, S_STAGE, info->stage);
+    put(p, S_NEXT, info->nextStage);
+    put(p, S_FLAGS, info->flags);
 #ifdef VK_EXT_custom_resolve
     if (custom) {
-        put(p, W_CUSTOM_ENABLE, custom->customResolve);
-        put(p, W_COLORS, (uint32_t)colors);
-        put(p, W_DEPTH, custom->depthAttachmentFormat);
-        put(p, W_STENCIL, custom->stencilAttachmentFormat);
+        put(p, S_CUSTOM, 1);
+        put(p, S_CUSTOM_ENABLE, custom->customResolve);
+        put(p, S_COLORS, (uint32_t)colors);
+        put(p, S_DEPTH, custom->depthAttachmentFormat);
+        put(p, S_STENCIL, custom->stencilAttachmentFormat);
     }
 #endif
-    size_t offset = HEADER;
+    size_t offset = STAGE_HEADER;
     memcpy(p + offset, info->pCode, info->codeSize);
     offset += info->codeSize;
     memcpy(p + offset, info->pName, names);
@@ -313,87 +511,212 @@ static VkResult source_blob(struct vkrt_shader_object_state *state, struct shade
 #ifdef VK_EXT_custom_resolve
     for (size_t i = 0; i < colors; ++i) put(p + offset, (unsigned)i, custom->pColorAttachmentFormats[i]);
 #endif
-    put_wide(p, W_HASH, checksum(p, size));
-    return VK_SUCCESS;
+    offset += colors * 4;
+    if (interface_size) memcpy(p + offset, interface_bytes, interface_size);
+done:
+    vkrt_shader_interface_free_bytes(dev, interface_bytes);
+    return result;
 }
-
-static bool envelope(const VkShaderCreateInfoEXT *info) {
-    return info->codeSize >= 8 && word(info->pCode, 0) == 0x54524b56 && word(info->pCode, 1) == 0x31444853;
-}
-static VkResult decode(struct vkrt_shader_object_state *state, const VkShaderCreateInfoEXT *info, struct shader_record *record,
-                       struct decoded *decoded, VkShaderCreateInfoEXT *native) {
-    const uint8_t *p = info->pCode;
-    size_t size = info->codeSize;
-    if (size < HEADER || word(p, 2) != FORMAT || wide(p, W_TOTAL) != size || wide(p, W_HASH) != checksum(p, size) ||
-        memcmp(p + 24 * 4, state->uuid, VK_UUID_SIZE) || word(p, W_NATIVE_VERSION) > state->native.shaderBinaryVersion ||
-        word(p, W_ELIGIBLE) != (uint32_t)state->eligible || word(p, 30) || word(p, 31))
-        return VK_ERROR_INCOMPATIBLE_SHADER_BINARY_EXT;
-    uint64_t code = wide(p, W_CODE), data = wide(p, W_DATA);
-    uint32_t names = word(p, W_NAME), maps = word(p, W_MAPS), colors = word(p, W_COLORS);
-    size_t expected = HEADER;
-    if (code > SIZE_MAX || data > SIZE_MAX || (uint64_t)maps * 16 > SIZE_MAX || (uint64_t)colors * 4 > SIZE_MAX ||
-        !add(&expected, (size_t)code) || !add(&expected, names) || !add(&expected, (size_t)maps * 16) ||
-        !add(&expected, (size_t)data) || !add(&expected, (size_t)colors * 4) || expected != size || !code)
-        return VK_ERROR_INCOMPATIBLE_SHADER_BINARY_EXT;
-    unsigned kind = word(p, 3);
-    if (kind == SOURCE) {
-        if (code < 20 || code % 4 || word(p + HEADER, 0) != 0x07230203 || !names || p[HEADER + (size_t)code + names - 1] ||
-            memchr(p + HEADER + (size_t)code, 0, names - 1) || word(p, W_STAGE) != (uint32_t)info->stage || word(p, W_RQ) > 1 ||
-            word(p, W_CUSTOM) > 1 || (!word(p, W_CUSTOM) && colors))
-            return VK_ERROR_INCOMPATIBLE_SHADER_BINARY_EXT;
-        if (!vkrt_spirv_validate_source((const uint32_t *)(p + HEADER), (size_t)code / 4))
-            return VK_ERROR_INCOMPATIBLE_SHADER_BINARY_EXT;
-#ifndef VK_EXT_custom_resolve
-        if (word(p, W_CUSTOM)) return VK_ERROR_INCOMPATIBLE_SHADER_BINARY_EXT;
-#endif
-        if (maps) {
-            decoded->maps = calloc(maps, sizeof(*decoded->maps));
-            if (!decoded->maps) return VK_ERROR_OUT_OF_HOST_MEMORY;
+static VkResult source_blob(struct vkrt_device_data *dev, struct vkrt_shader_object_state *state, uint32_t count,
+                            const VkShaderCreateInfoEXT *infos, uint32_t target, struct shader_record **stages,
+                            struct shader_record *record) {
+    uint32_t group_count = 0, group_target = 0;
+    bool rq = false;
+    uint32_t begin = (infos[target].flags & VK_SHADER_CREATE_LINK_STAGE_BIT_EXT) ? 0 : target;
+    uint32_t end = (infos[target].flags & VK_SHADER_CREATE_LINK_STAGE_BIT_EXT) ? count : target + 1;
+    for (uint32_t i = begin; i < end; ++i)
+        if (same_group(infos, target, i)) rq |= rq_source(&infos[i]);
+    size_t size = HEADER;
+    for (uint32_t i = begin; i < end; ++i) {
+        if (!same_group(infos, target, i)) continue;
+        if (infos[i].codeType != VK_SHADER_CODE_TYPE_SPIRV_EXT) return VK_ERROR_INCOMPATIBLE_SHADER_BINARY_EXT;
+        if (!stages[i]) {
+            stages[i] = new_record(device_allocator(dev));
+            if (!stages[i]) return VK_ERROR_OUT_OF_HOST_MEMORY;
+            VkResult result = stage_blob(dev, stages[i], &infos[i], rq);
+            if (result != VK_SUCCESS) return result;
         }
-        const uint8_t *map = p + HEADER + (size_t)code + names;
-        for (uint32_t i = 0; i < maps; ++i) {
-            uint64_t entry_size = wide(map + (size_t)i * 16, 2);
-            uint32_t offset = word(map + (size_t)i * 16, 1);
-            if (entry_size > SIZE_MAX || offset > data || entry_size > data - offset)
-                return VK_ERROR_INCOMPATIBLE_SHADER_BINARY_EXT;
-            decoded->maps[i] = (VkSpecializationMapEntry){word(map + (size_t)i * 16, 0), offset, (size_t)entry_size};
-        }
-        decoded->specialization = (VkSpecializationInfo){maps, decoded->maps, (size_t)data, map + (size_t)maps * 16};
-        native->codeType = VK_SHADER_CODE_TYPE_SPIRV_EXT;
-        native->pName = (const char *)p + HEADER + (size_t)code;
-        native->pSpecializationInfo = maps || data ? &decoded->specialization : NULL;
-        native->pNext = NULL;
-#ifdef VK_EXT_custom_resolve
-        if (word(p, W_CUSTOM)) {
-            if (colors) {
-                decoded->colors = calloc(colors, sizeof(*decoded->colors));
-                if (!decoded->colors) return VK_ERROR_OUT_OF_HOST_MEMORY;
-            }
-            const uint8_t *formats = map + (size_t)maps * 16 + (size_t)data;
-            for (uint32_t i = 0; i < colors; ++i) decoded->colors[i] = (VkFormat)word(formats, i);
-            decoded->custom = (VkCustomResolveCreateInfoEXT){VK_STRUCTURE_TYPE_CUSTOM_RESOLVE_CREATE_INFO_EXT,
-                                                             NULL,
-                                                             word(p, W_CUSTOM_ENABLE),
-                                                             colors,
-                                                             decoded->colors,
-                                                             (VkFormat)word(p, W_DEPTH),
-                                                             (VkFormat)word(p, W_STENCIL)};
-            native->pNext = &decoded->custom;
-        }
-#endif
-        if (word(p, W_SUBGROUP)) {
-            decoded->subgroup = (VkPipelineShaderStageRequiredSubgroupSizeCreateInfo){
-                VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_REQUIRED_SUBGROUP_SIZE_CREATE_INFO, native->pNext, word(p, W_SUBGROUP)};
-            native->pNext = &decoded->subgroup;
-        }
-    } else
-        return VK_ERROR_INCOMPATIBLE_SHADER_BINARY_EXT;
+        if (!add(&size, stages[i]->size)) return VK_ERROR_OUT_OF_HOST_MEMORY;
+        if (i == target) group_target = group_count;
+        ++group_count;
+    }
     record->blob = allocate(record, size);
     if (!record->blob) return VK_ERROR_OUT_OF_HOST_MEMORY;
     record->size = size;
-    memcpy(record->blob, p, size);
-    native->pCode = p + HEADER;
-    native->codeSize = (size_t)code;
+    memset(record->blob, 0, HEADER);
+    header(state, record->blob, size, group_count, group_target, rq);
+    size_t offset = HEADER;
+    for (uint32_t i = begin; i < end; ++i)
+        if (same_group(infos, target, i)) {
+            memcpy(record->blob + offset, stages[i]->blob, stages[i]->size);
+            offset += stages[i]->size;
+        }
+    put_wide(record->blob, W_HASH, checksum(record->blob, size));
+    return VK_SUCCESS;
+}
+static void group_finish(struct vkrt_device_data *dev, struct group *group) {
+    for (uint32_t i = 0; group->stages && i < group->count; ++i) {
+        struct decoded *stage = &group->stages[i];
+        free(stage->maps);
+        free(stage->colors);
+        free(stage->rewritten);
+        free(stage->ranges);
+        vkrt_shader_interface_destroy(dev, stage->owned_interface);
+    }
+    free(group->stages);
+    memset(group, 0, sizeof(*group));
+}
+static bool envelope(const VkShaderCreateInfoEXT *info) {
+    return info->codeSize >= 8 && word(info->pCode, 0) == 0x54524b56 && word(info->pCode, 1) == 0x31444853;
+}
+static VkResult decode_stage(const uint8_t *p, size_t available, bool rebuildable, struct decoded *decoded, size_t *used) {
+    if (available < STAGE_HEADER) return VK_ERROR_INCOMPATIBLE_SHADER_BINARY_EXT;
+    uint64_t total = wide(p, S_TOTAL), code = wide(p, S_CODE), data = wide(p, S_DATA), interface_bytes_size = wide(p, S_INTERFACE);
+    uint32_t names = word(p, S_NAME), maps = word(p, S_MAPS), colors = word(p, S_COLORS);
+    size_t expected = STAGE_HEADER;
+    if (total > available || total > SIZE_MAX || (total & 15) || code > SIZE_MAX || data > SIZE_MAX ||
+        interface_bytes_size > SIZE_MAX || (uint64_t)maps * 16 > SIZE_MAX || (uint64_t)colors * 4 > SIZE_MAX ||
+        !add(&expected, (size_t)code) || !add(&expected, names) || !add(&expected, (size_t)maps * 16) ||
+        !add(&expected, (size_t)data) || !add(&expected, (size_t)colors * 4) || !add(&expected, (size_t)interface_bytes_size) ||
+        expected > total || !code || code < 20 || code % 4 || !names || word(p + STAGE_HEADER, 0) != 0x07230203 ||
+        p[STAGE_HEADER + (size_t)code + names - 1] || memchr(p + STAGE_HEADER + (size_t)code, 0, names - 1) || word(p, S_RQ) > 1 ||
+        word(p, S_CUSTOM) > 1 || word(p, S_CUSTOM_ENABLE) > 1 || word(p, S_REBUILDABLE) != (uint32_t)rebuildable || word(p, 21) ||
+        word(p, 22) || word(p, 23) ||
+        (!word(p, S_CUSTOM) && (colors || word(p, S_CUSTOM_ENABLE) || word(p, S_DEPTH) || word(p, S_STENCIL))) ||
+        (rebuildable ? !interface_bytes_size : (interface_bytes_size || word(p, S_SUBGROUP) || word(p, S_CUSTOM))))
+        return VK_ERROR_INCOMPATIBLE_SHADER_BINARY_EXT;
+    for (size_t i = expected; i < (size_t)total; ++i)
+        if (p[i]) return VK_ERROR_INCOMPATIBLE_SHADER_BINARY_EXT;
+    if (!aligned_size(&expected) || expected != total ||
+        !vkrt_spirv_validate_source((const uint32_t *)(p + STAGE_HEADER), (size_t)code / 4))
+        return VK_ERROR_INCOMPATIBLE_SHADER_BINARY_EXT;
+#ifndef VK_EXT_custom_resolve
+    if (word(p, S_CUSTOM)) return VK_ERROR_INCOMPATIBLE_SHADER_BINARY_EXT;
+#endif
+    if (maps) {
+        decoded->maps = calloc(maps, sizeof(*decoded->maps));
+        if (!decoded->maps) return VK_ERROR_OUT_OF_HOST_MEMORY;
+    }
+    const uint8_t *map = p + STAGE_HEADER + (size_t)code + names;
+    for (uint32_t i = 0; i < maps; ++i) {
+        uint64_t entry_size = wide(map + (size_t)i * 16, 2);
+        uint32_t offset = word(map + (size_t)i * 16, 1), id = word(map + (size_t)i * 16, 0);
+        if (entry_size > SIZE_MAX || offset >= data || entry_size > data - offset) return VK_ERROR_INCOMPATIBLE_SHADER_BINARY_EXT;
+        for (uint32_t j = 0; j < i; ++j)
+            if (decoded->maps[j].constantID == id) return VK_ERROR_INCOMPATIBLE_SHADER_BINARY_EXT;
+        decoded->maps[i] = (VkSpecializationMapEntry){id, offset, (size_t)entry_size};
+    }
+    decoded->specialization = (VkSpecializationInfo){maps, decoded->maps, (size_t)data, map + (size_t)maps * 16};
+    decoded->info = (VkShaderCreateInfoEXT){.sType = VK_STRUCTURE_TYPE_SHADER_CREATE_INFO_EXT,
+                                            .stage = (VkShaderStageFlagBits)word(p, S_STAGE),
+                                            .nextStage = word(p, S_NEXT),
+                                            .flags = word(p, S_FLAGS),
+                                            .codeType = VK_SHADER_CODE_TYPE_SPIRV_EXT,
+                                            .pCode = p + STAGE_HEADER,
+                                            .codeSize = (size_t)code,
+                                            .pName = (const char *)p + STAGE_HEADER + (size_t)code,
+                                            .pSpecializationInfo = maps || data ? &decoded->specialization : NULL};
+    if (decoded->info.stage & VKRT_RTP_SHADER_STAGES || decoded->info.nextStage & VKRT_RTP_SHADER_STAGES ||
+        (uint32_t)rq_source(&decoded->info) != word(p, S_RQ) || !matching_entry(&decoded->info) ||
+        !valid_source_fields(&decoded->info))
+        return VK_ERROR_INCOMPATIBLE_SHADER_BINARY_EXT;
+    if (rebuildable) {
+        VkResult result = vkrt_spirv_validate_specialized_source(decoded->info.pCode, decoded->info.codeSize / 4,
+                                                                 decoded->info.pSpecializationInfo);
+        if (result != VK_SUCCESS) return result;
+    }
+    const uint8_t *formats = map + (size_t)maps * 16 + (size_t)data;
+#ifdef VK_EXT_custom_resolve
+    if (word(p, S_CUSTOM)) {
+        if (colors) {
+            decoded->colors = calloc(colors, sizeof(*decoded->colors));
+            if (!decoded->colors) return VK_ERROR_OUT_OF_HOST_MEMORY;
+        }
+        for (uint32_t i = 0; i < colors; ++i) decoded->colors[i] = (VkFormat)word(formats, i);
+        decoded->custom = (VkCustomResolveCreateInfoEXT){VK_STRUCTURE_TYPE_CUSTOM_RESOLVE_CREATE_INFO_EXT,
+                                                         NULL,
+                                                         word(p, S_CUSTOM_ENABLE),
+                                                         colors,
+                                                         decoded->colors,
+                                                         (VkFormat)word(p, S_DEPTH),
+                                                         (VkFormat)word(p, S_STENCIL)};
+        decoded->info.pNext = &decoded->custom;
+    }
+#endif
+    if (word(p, S_SUBGROUP)) {
+        decoded->subgroup = (VkPipelineShaderStageRequiredSubgroupSizeCreateInfo){
+            VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_REQUIRED_SUBGROUP_SIZE_CREATE_INFO, decoded->info.pNext, word(p, S_SUBGROUP)};
+        decoded->info.pNext = &decoded->subgroup;
+    }
+    decoded->interface_bytes = formats + (size_t)colors * 4;
+    decoded->interface_size = (size_t)interface_bytes_size;
+    if (rebuildable) {
+        VkResult result = vkrt_shader_interface_validate(decoded->interface_bytes, decoded->interface_size);
+        if (result != VK_SUCCESS) return result;
+    }
+    *used = (size_t)total;
+    return VK_SUCCESS;
+}
+static VkResult decode(struct vkrt_shader_object_state *state, const VkShaderCreateInfoEXT *info, struct group *group) {
+    const uint8_t *p = info->pCode;
+    size_t size = info->codeSize;
+    if (size < HEADER || word(p, 0) != 0x54524b56 || word(p, 1) != 0x31444853 || word(p, 2) != FORMAT || word(p, 3) != SOURCE ||
+        wide(p, W_TOTAL) != size || wide(p, W_HASH) != checksum(p, size) || memcmp(p + 96, state->uuid, VK_UUID_SIZE) ||
+        word(p, W_NATIVE_VERSION) > state->native.shaderBinaryVersion || word(p, W_ELIGIBLE) != (uint32_t)state->eligible ||
+        word(p, W_RQ) > 1 || word(p, 30) || word(p, 31))
+        return VK_ERROR_INCOMPATIBLE_SHADER_BINARY_EXT;
+    for (unsigned i = 10; i < 21; ++i)
+        if (word(p, i)) return VK_ERROR_INCOMPATIBLE_SHADER_BINARY_EXT;
+    uint32_t count = word(p, W_GROUP), target = word(p, W_TARGET);
+    uint64_t opaque = wide(p, W_OPAQUE);
+    /* Seven graphics-stage bits exist in this recipe version. A linked group
+     * must have unique stages; unlinked records always have one stage. */
+    if (!count || count > 7 || target >= count || opaque > size - HEADER ||
+        count > (size - HEADER - (size_t)opaque) / STAGE_HEADER || (word(p, W_RQ) ? opaque != 0 : opaque == 0))
+        return VK_ERROR_INCOMPATIBLE_SHADER_BINARY_EXT;
+    group->count = count;
+    group->target = target;
+    group->rq = word(p, W_RQ) != 0;
+    group->stages = calloc(count, sizeof(*group->stages));
+    if (!group->stages) return VK_ERROR_OUT_OF_HOST_MEMORY;
+    size_t offset = HEADER, end = size - (size_t)opaque;
+    bool actual_rq = false;
+    for (uint32_t i = 0; i < count; ++i) {
+        size_t used;
+        VkResult result = decode_stage(p + offset, end - offset, group->rq, &group->stages[i], &used);
+        if (result != VK_SUCCESS) return result;
+        actual_rq |= rq_source(&group->stages[i].info);
+        offset += used;
+    }
+    if (offset != end || actual_rq != group->rq || group->stages[target].info.stage != info->stage)
+        return VK_ERROR_INCOMPATIBLE_SHADER_BINARY_EXT;
+    if (count > 1) {
+        VkShaderStageFlags unique = 0;
+        bool mesh = false, classic = false;
+        for (uint32_t i = 0; i < count; ++i) {
+            const VkShaderCreateInfoEXT *stage = &group->stages[i].info;
+            if (!(stage->flags & VK_SHADER_CREATE_LINK_STAGE_BIT_EXT) || stage->stage == VK_SHADER_STAGE_COMPUTE_BIT ||
+                (unique & stage->stage))
+                return VK_ERROR_INCOMPATIBLE_SHADER_BINARY_EXT;
+            unique |= stage->stage;
+            mesh |= (stage->stage & (VK_SHADER_STAGE_TASK_BIT_EXT | VK_SHADER_STAGE_MESH_BIT_EXT)) != 0;
+            classic |= (stage->stage & (VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_TESSELLATION_CONTROL_BIT |
+                                        VK_SHADER_STAGE_TESSELLATION_EVALUATION_BIT | VK_SHADER_STAGE_GEOMETRY_BIT)) != 0;
+            unsigned order = stage_order(stage->stage), following = 6;
+            VkShaderStageFlags expected_next = 0;
+            for (uint32_t j = 0; j < count; ++j) {
+                unsigned candidate = stage_order(group->stages[j].info.stage);
+                if (candidate > order && candidate < following) {
+                    following = candidate;
+                    expected_next = group->stages[j].info.stage;
+                }
+            }
+            if (expected_next && stage->nextStage != expected_next) return VK_ERROR_INCOMPATIBLE_SHADER_BINARY_EXT;
+        }
+        if (mesh && classic) return VK_ERROR_INCOMPATIBLE_SHADER_BINARY_EXT;
+    }
+    group->opaque = p + end;
+    group->opaque_size = (size_t)opaque;
     return VK_SUCCESS;
 }
 static struct shader_record *find(struct vkrt_shader_object_state *state, VkShaderEXT shader) {
@@ -466,109 +789,261 @@ static VKAPI_ATTR void VKAPI_CALL GetPhysicalDeviceProperties2(VkPhysicalDevice 
         }
 }
 
+static VkResult translate_push_ranges(struct vkrt_device_data *dev, VkShaderCreateInfoEXT *info, VkPushConstantRange **owned) {
+    bool needed = false;
+    for (uint32_t i = 0; dev->virtual_rt && i < info->pushConstantRangeCount; ++i)
+        needed |= info->pPushConstantRanges[i].stageFlags != VK_SHADER_STAGE_ALL &&
+                  (info->pPushConstantRanges[i].stageFlags & VKRT_RTP_SHADER_STAGES) != 0;
+    if (!needed) return VK_SUCCESS;
+    *owned = calloc(info->pushConstantRangeCount, sizeof(**owned));
+    if (!*owned) return VK_ERROR_OUT_OF_HOST_MEMORY;
+    uint32_t total = 0;
+    for (uint32_t i = 0; i < info->pushConstantRangeCount; ++i) {
+        VkPushConstantRange range = info->pPushConstantRanges[i];
+        if (range.stageFlags != VK_SHADER_STAGE_ALL) range.stageFlags &= ~VKRT_RTP_SHADER_STAGES;
+        if (range.stageFlags) (*owned)[total++] = range;
+    }
+    info->pPushConstantRanges = *owned;
+    info->pushConstantRangeCount = total;
+    return VK_SUCCESS;
+}
+static VkResult ensure_resolver(struct vkrt_device_data *dev) {
+    if (!dev->shader_object_backend) return VK_ERROR_FEATURE_NOT_PRESENT;
+    struct vkrt_shader_object_state *state = dev->shader_objects;
+    vkrt_mutex_lock(&state->lock);
+    VkResult result = dev->as_registry ? VK_SUCCESS : vkrt_as_registry_init(dev, device_allocator(dev));
+    vkrt_mutex_unlock(&state->lock);
+    return result;
+}
+static VkResult rewrite_source(struct vkrt_device_data *dev, VkShaderCreateInfoEXT *info, void **owned) {
+    bool rq = rq_source(info);
+    if (rq) {
+        VkResult result = ensure_resolver(dev);
+        if (result != VK_SUCCESS) return result;
+    }
+    if (!dev->virtual_rt && !rq) return VK_SUCCESS;
+    VkShaderModuleCreateInfo source = {.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO,
+                                       .codeSize = info->codeSize,
+                                       .pCode = info->pCode},
+                             rewritten;
+    bool lowered_rq, rt;
+    VkResult result = vkrt_rewrite_shader_module(dev, &source, &rewritten, &lowered_rq, &rt);
+    if (rewritten.pCode != source.pCode) *owned = (void *)rewritten.pCode;
+    if (result != VK_SUCCESS || rt) return result == VK_SUCCESS ? VK_ERROR_FEATURE_NOT_PRESENT : result;
+    info->pCode = rewritten.pCode;
+    info->codeSize = rewritten.codeSize;
+    if (rq_source(info)) return VK_ERROR_FEATURE_NOT_PRESENT;
+    return VK_SUCCESS;
+}
+static VkResult native_binary(struct vkrt_device_data *dev, struct shader_record *owner, VkShaderEXT shader, uint8_t **bytes,
+                              size_t *size) {
+    *bytes = NULL;
+    *size = 0;
+    if (!dev->vtable.GetShaderBinaryDataEXT) return VK_ERROR_FEATURE_NOT_PRESENT;
+    VkResult result = dev->vtable.GetShaderBinaryDataEXT(dev->device, shader, size, NULL);
+    if (result != VK_SUCCESS) return result == VK_INCOMPLETE ? VK_ERROR_UNKNOWN : result;
+    if (!*size) return VK_ERROR_UNKNOWN;
+    uint8_t *data = allocate(owner, *size);
+    if (!data) return VK_ERROR_OUT_OF_HOST_MEMORY;
+    size_t capacity = *size;
+    result = dev->vtable.GetShaderBinaryDataEXT(dev->device, shader, size, data);
+    if (result != VK_SUCCESS || !*size || *size > capacity) {
+        release(owner, data);
+        return result == VK_SUCCESS || result == VK_INCOMPLETE ? VK_ERROR_UNKNOWN : result;
+    }
+    *bytes = data;
+    return VK_SUCCESS;
+}
+static VkResult append_opaque(struct shader_record *record, const void *bytes, size_t amount) {
+    size_t size = record->size;
+    if (!amount || !add(&size, amount)) return VK_ERROR_OUT_OF_HOST_MEMORY;
+    uint8_t *copy = allocate(record, size);
+    if (!copy) return VK_ERROR_OUT_OF_HOST_MEMORY;
+    memcpy(copy, record->blob, record->size);
+    memcpy(copy + record->size, bytes, amount);
+    put_wide(copy, W_TOTAL, size);
+    put_wide(copy, W_OPAQUE, amount);
+    put_wide(copy, W_HASH, checksum(copy, size));
+    release(record, record->blob);
+    record->blob = copy;
+    record->size = size;
+    return VK_SUCCESS;
+}
+static VkResult original_group(struct vkrt_device_data *dev, uint32_t count, const VkShaderCreateInfoEXT *infos, uint32_t target,
+                               struct group *group) {
+    uint32_t begin = (infos[target].flags & VK_SHADER_CREATE_LINK_STAGE_BIT_EXT) ? 0 : target;
+    uint32_t end = (infos[target].flags & VK_SHADER_CREATE_LINK_STAGE_BIT_EXT) ? count : target + 1;
+    for (uint32_t i = begin; i < end; ++i)
+        if (same_group(infos, target, i)) ++group->count;
+    group->stages = calloc(group->count, sizeof(*group->stages));
+    if (!group->stages) return VK_ERROR_OUT_OF_HOST_MEMORY;
+    uint32_t index = 0;
+    for (uint32_t i = begin; i < end; ++i)
+        if (same_group(infos, target, i)) {
+            struct decoded *stage = &group->stages[index];
+            if (i == target) group->target = index;
+            stage->info = infos[i];
+            VkResult result = translate_push_ranges(dev, &stage->info, &stage->ranges);
+            if (result != VK_SUCCESS) return result;
+            ++index;
+        }
+    return VK_SUCCESS;
+}
+static VkResult compile_group(struct vkrt_device_data *dev, struct group *group, struct shader_record *owner, uint8_t **binary,
+                              size_t *binary_size) {
+    if (!dev->vtable.GetShaderBinaryDataEXT || !dev->vtable.DestroyShaderEXT) return VK_ERROR_FEATURE_NOT_PRESENT;
+    if (group->rq && !dev->shader_object_backend) return VK_ERROR_FEATURE_NOT_PRESENT;
+    VkShaderCreateInfoEXT *infos = calloc(group->count, sizeof(*infos));
+    VkShaderEXT *shaders = calloc(group->count, sizeof(*shaders));
+    VkResult result = VK_ERROR_OUT_OF_HOST_MEMORY;
+    if (!infos || !shaders) goto done;
+    if (group->rq)
+        for (uint32_t i = 0; i < group->count; ++i) {
+            result = vkrt_shader_interface_source_supported(dev, &group->stages[i].info);
+            if (result != VK_SUCCESS) goto done;
+        }
+    for (uint32_t i = 0; i < group->count; ++i) {
+        struct decoded *stage = &group->stages[i];
+        if (group->rq) {
+            result = vkrt_shader_interface_materialize(dev, stage->interface_bytes, stage->interface_size, &stage->owned_interface);
+            if (result != VK_SUCCESS) goto done;
+            vkrt_shader_interface_apply(stage->owned_interface, &stage->info);
+        }
+        result = rewrite_source(dev, &stage->info, &stage->rewritten);
+        if (result != VK_SUCCESS) goto done;
+        infos[i] = stage->info;
+    }
+    /* Compile complete original linked groups, not an isolated exported stage.
+     * Temporary handles may alias public/native objects; retire each returned
+     * native reference directly without touching wrapper cache references. */
+    struct vkrt_shader_object_state *state = dev->shader_objects;
+    vkrt_mutex_lock(&state->lock);
+    result = dev->vtable.CreateShadersEXT(dev->device, group->count, infos, device_allocator(dev), shaders);
+    if (result == VK_SUCCESS) {
+        if (!shaders[group->target])
+            result = VK_ERROR_UNKNOWN;
+        else
+            result = native_binary(dev, owner, shaders[group->target], binary, binary_size);
+    }
+    for (uint32_t i = 0; i < group->count; ++i)
+        if (shaders[i]) dev->vtable.DestroyShaderEXT(dev->device, shaders[i], device_allocator(dev));
+    vkrt_mutex_unlock(&state->lock);
+done:
+    free(infos);
+    free(shaders);
+    return result;
+}
 static VKAPI_ATTR VkResult VKAPI_CALL CreateShadersEXT(VkDevice device, uint32_t count, const VkShaderCreateInfoEXT *infos,
                                                        const VkAllocationCallbacks *allocator, VkShaderEXT *shaders) {
     struct vkrt_device_data *dev = VKRT_FIND(struct vkrt_device_data, device);
-    if (!dev || !dev->vtable.CreateShadersEXT) {
-        for (uint32_t i = 0; i < count; ++i) shaders[i] = VK_NULL_HANDLE;
-        return dev ? VK_ERROR_FEATURE_NOT_PRESENT : VK_ERROR_INITIALIZATION_FAILED;
-    }
     for (uint32_t i = 0; i < count; ++i) shaders[i] = VK_NULL_HANDLE;
+    if (!dev || !dev->vtable.CreateShadersEXT) return dev ? VK_ERROR_FEATURE_NOT_PRESENT : VK_ERROR_INITIALIZATION_FAILED;
     if (!dev->shader_objects) return VK_ERROR_FEATURE_NOT_PRESENT;
     struct vkrt_shader_object_state *state = dev->shader_objects;
     VkShaderCreateInfoEXT *native = calloc(count, sizeof(*native));
     void **codes = calloc(count, sizeof(*codes));
     VkPushConstantRange **ranges = calloc(count, sizeof(*ranges));
-    struct shader_record **records = calloc(count, sizeof(*records));
-    struct decoded *decoded = calloc(count, sizeof(*decoded));
-    bool changed = dev->virtual_rt;
-    VkResult result = VK_ERROR_OUT_OF_HOST_MEMORY;
-    if (count && (!native || !codes || !ranges || !records || !decoded)) goto cleanup;
+    struct shader_record **records = calloc(count, sizeof(*records)), **stages = calloc(count, sizeof(*stages));
+    bool bridge = false, changed = dev->virtual_rt;
+    for (uint32_t i = 0; i < count; ++i) bridge |= infos[i].codeType == VK_SHADER_CODE_TYPE_BINARY_EXT;
+    VkResult result = VK_ERROR_OUT_OF_HOST_MEMORY, pending = VK_SUCCESS;
+    uint32_t prepared = 0;
+    if (count && (!native || !codes || !ranges || !records || !stages)) goto cleanup;
     for (uint32_t i = 0; i < count; ++i) {
+        struct group group = {0};
         native[i] = infos[i];
-        /* Native non-dispatchable handles may alias between creations. The
-         * canonical binary must outlive every alias, so its owner is the
-         * device (falling back to the instance allocator), never a shader's
-         * allocation callbacks. Native OBJECT allocations remain native. */
         records[i] = new_record(device_allocator(dev));
-        if (!records[i]) {
-            result = VK_ERROR_OUT_OF_HOST_MEMORY;
-            goto cleanup;
-        }
-        bool imported = infos[i].codeType == VK_SHADER_CODE_TYPE_BINARY_EXT && envelope(&infos[i]);
-        if (imported) {
-            result = decode(state, &infos[i], records[i], &decoded[i], &native[i]);
-            if (result != VK_SUCCESS) goto cleanup;
-            changed = true;
-        } else if (infos[i].codeType == VK_SHADER_CODE_TYPE_BINARY_EXT) {
-            result = VK_ERROR_INCOMPATIBLE_SHADER_BINARY_EXT;
-            goto cleanup;
-        }
-        if ((dev->virtual_rt || imported) && ((infos[i].stage | infos[i].nextStage) & VKRT_RTP_SHADER_STAGES)) {
+        result = records[i] ? VK_SUCCESS : VK_ERROR_OUT_OF_HOST_MEMORY;
+        if (result == VK_SUCCESS && ((infos[i].stage | infos[i].nextStage) & VKRT_RTP_SHADER_STAGES))
             result = VK_ERROR_FEATURE_NOT_PRESENT;
-            goto cleanup;
-        }
-        bool rq = native[i].codeType == VK_SHADER_CODE_TYPE_SPIRV_EXT && rq_source(&native[i]);
-        if (infos[i].codeType == VK_SHADER_CODE_TYPE_SPIRV_EXT) {
-            result = source_blob(state, records[i], &infos[i], rq);
-            if (result != VK_SUCCESS) goto cleanup;
-        }
-        if (imported && rq) {
-            if (!dev->shader_object_backend) {
-                result = VK_ERROR_FEATURE_NOT_PRESENT;
-                goto cleanup;
+        if (result == VK_SUCCESS && infos[i].codeType == VK_SHADER_CODE_TYPE_BINARY_EXT) {
+            result = envelope(&infos[i]) ? decode(state, &infos[i], &group) : VK_ERROR_INCOMPATIBLE_SHADER_BINARY_EXT;
+            if (result == VK_SUCCESS) {
+                records[i]->blob = allocate(records[i], infos[i].codeSize);
+                if (!records[i]->blob)
+                    result = VK_ERROR_OUT_OF_HOST_MEMORY;
+                else {
+                    memcpy(records[i]->blob, infos[i].pCode, infos[i].codeSize);
+                    records[i]->size = infos[i].codeSize;
+                }
             }
-            vkrt_mutex_lock(&state->lock);
-            if (!dev->as_registry)
-                result = vkrt_as_registry_init(dev, device_allocator(dev));
-            else
-                result = VK_SUCCESS;
-            vkrt_mutex_unlock(&state->lock);
-            if (result != VK_SUCCESS) goto cleanup;
+            if (result == VK_SUCCESS) {
+                if (group.rq) {
+                    size_t binary_size;
+                    result = compile_group(dev, &group, records[i], (uint8_t **)&codes[i], &binary_size);
+                    if (result == VK_SUCCESS) {
+                        native[i].pCode = codes[i];
+                        native[i].codeSize = binary_size;
+                    }
+                } else {
+                    native[i].pCode = group.opaque;
+                    native[i].codeSize = group.opaque_size;
+                }
+            }
+            changed = true;
+        } else if (result == VK_SUCCESS) {
+            result = source_blob(dev, state, count, infos, i, stages, records[i]);
+            if (result == VK_SUCCESS && bridge) {
+                if (word(records[i]->blob, W_RQ)) {
+                    VkShaderCreateInfoEXT source = infos[i];
+                    source.pCode = records[i]->blob;
+                    source.codeSize = records[i]->size;
+                    result = decode(state, &source, &group);
+                } else
+                    result = original_group(dev, count, infos, i, &group);
+                size_t binary_size = 0;
+                if (result == VK_SUCCESS) result = compile_group(dev, &group, records[i], (uint8_t **)&codes[i], &binary_size);
+                if (result == VK_SUCCESS) {
+                    native[i].codeType = VK_SHADER_CODE_TYPE_BINARY_EXT;
+                    native[i].pCode = codes[i];
+                    native[i].codeSize = binary_size;
+                    if (!group.rq) result = append_opaque(records[i], codes[i], binary_size);
+                }
+                changed = true;
+            } else if (result == VK_SUCCESS)
+                result = rewrite_source(dev, &native[i], &codes[i]);
         }
-        if (native[i].codeType == VK_SHADER_CODE_TYPE_SPIRV_EXT && (dev->virtual_rt || (imported && rq))) {
-            VkShaderModuleCreateInfo source = {.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO,
-                                               .codeSize = native[i].codeSize,
-                                               .pCode = native[i].pCode},
-                                     rewritten;
-            bool lowered_rq, rt;
-            result = vkrt_rewrite_shader_module(dev, &source, &rewritten, &lowered_rq, &rt);
-            if (rewritten.pCode != source.pCode) codes[i] = (void *)rewritten.pCode;
-            if (result != VK_SUCCESS || rt) {
-                if (result == VK_SUCCESS) result = VK_ERROR_FEATURE_NOT_PRESENT;
-                goto cleanup;
-            }
-            native[i].pCode = rewritten.pCode;
-            native[i].codeSize = rewritten.codeSize;
-            if (lowered_rq)
-                VKRT_LOG_DBG("shader-object RQ resolver=%llu profile=%u import=%u",
-                             (unsigned long long)vkrt_as_registry_address(dev), dev->virtual_rt, imported);
+        group_finish(dev, &group);
+        if (result == VK_SUCCESS) result = translate_push_ranges(dev, &native[i], &ranges[i]);
+        if (result != VK_SUCCESS) {
+            pending = result;
+            break;
         }
-        bool rewrite = false;
-        for (uint32_t j = 0; dev->virtual_rt && j < infos[i].pushConstantRangeCount; ++j)
-            rewrite |= infos[i].pPushConstantRanges[j].stageFlags != VK_SHADER_STAGE_ALL &&
-                       (infos[i].pPushConstantRanges[j].stageFlags & VKRT_RTP_SHADER_STAGES) != 0;
-        if (rewrite) {
-            ranges[i] = calloc(infos[i].pushConstantRangeCount, sizeof(**ranges));
-            if (!ranges[i]) {
-                result = VK_ERROR_OUT_OF_HOST_MEMORY;
-                goto cleanup;
+        ++prepared;
+    }
+    /* Keep independent successes before the failed element or linked group.
+     * The first NULL identifies that failure unit. Every final bridge element
+     * is BINARY, including SOURCE peers, but linked adjacency still applies. */
+    if (pending != VK_SUCCESS) prepared = linked_prefix(prepared, native);
+    if (!prepared) {
+        result = pending;
+        goto cleanup;
+    }
+    vkrt_mutex_lock(&state->lock);
+    result = dev->vtable.CreateShadersEXT(device, prepared, changed ? native : infos, allocator, shaders);
+    for (uint32_t i = 0; i < prepared; ++i) {
+        if (!shaders[i] || find(state, shaders[i])) continue;
+        if (infos[i].codeType == VK_SHADER_CODE_TYPE_SPIRV_EXT && !word(records[i]->blob, W_RQ) &&
+            !wide(records[i]->blob, W_OPAQUE)) {
+            uint8_t *binary = NULL;
+            size_t binary_size = 0;
+            VkResult cached = native_binary(dev, records[i], shaders[i], &binary, &binary_size);
+            if (cached == VK_SUCCESS) cached = append_opaque(records[i], binary, binary_size);
+            release(records[i], binary);
+            if (cached != VK_SUCCESS) {
+                /* Nothing from this failed cache slot or its tail is exposed.
+                 * Earlier complete envelopes and native partial results survive. */
+                for (uint32_t j = i; j < prepared; ++j)
+                    if (shaders[j]) {
+                        dev->vtable.DestroyShaderEXT(device, shaders[j], allocator);
+                        shaders[j] = VK_NULL_HANDLE;
+                    }
+                if (result == VK_SUCCESS) result = cached;
+                break;
             }
-            uint32_t total = 0;
-            for (uint32_t j = 0; j < infos[i].pushConstantRangeCount; ++j) {
-                VkPushConstantRange range = infos[i].pPushConstantRanges[j];
-                if (range.stageFlags != VK_SHADER_STAGE_ALL) range.stageFlags &= ~VKRT_RTP_SHADER_STAGES;
-                if (range.stageFlags) ranges[i][total++] = range;
-            }
-            native[i].pPushConstantRanges = ranges[i];
-            native[i].pushConstantRangeCount = total;
         }
     }
-    /* Keep native batching, partial creation, callbacks and binary errors. All
-     * handles stay native, including successful elements of a failing batch. */
-    vkrt_mutex_lock(&state->lock);
-    result = dev->vtable.CreateShadersEXT(device, count, changed ? native : infos, allocator, shaders);
-    for (uint32_t i = 0; i < count; ++i)
+    for (uint32_t i = 0; i < prepared; ++i)
         if (shaders[i]) {
             struct shader_record *existing = find(state, shaders[i]);
             if (existing)
@@ -581,21 +1056,30 @@ static VKAPI_ATTR VkResult VKAPI_CALL CreateShadersEXT(VkDevice device, uint32_t
             }
         }
     vkrt_mutex_unlock(&state->lock);
+    if (result == VK_SUCCESS && pending != VK_SUCCESS) result = pending;
 cleanup:
     for (uint32_t i = 0; i < count; ++i) {
-        if (codes) free(codes[i]);
+        if (codes && codes[i]) {
+            if (bridge && records && records[i])
+                release(records[i], codes[i]);
+            else if (bridge) {
+                const VkAllocationCallbacks *owner = device_allocator(dev);
+                if (owner)
+                    owner->pfnFree(owner->pUserData, codes[i]);
+                else
+                    free(codes[i]);
+            } else
+                free(codes[i]);
+        }
         if (ranges) free(ranges[i]);
         if (records) free_record(records[i]);
-        if (decoded) {
-            free(decoded[i].maps);
-            free(decoded[i].colors);
-        }
+        if (stages) free_record(stages[i]);
     }
     free(ranges);
     free(codes);
     free(native);
     free(records);
-    free(decoded);
+    free(stages);
     return result;
 }
 

@@ -156,6 +156,9 @@ struct vkrt_device_dispatch {
    PFN_vkFreeMemory                         FreeMemory;
    PFN_vkDestroyBuffer                      DestroyBuffer;
    PFN_vkCreateSampler                      CreateSampler;
+   PFN_vkDestroySampler DestroySampler;
+   PFN_vkCreateSamplerYcbcrConversion CreateSamplerYcbcrConversion;
+   PFN_vkDestroySamplerYcbcrConversion DestroySamplerYcbcrConversion;
 };
 
 /* Load every entry we might call. Missing pointers stay NULL and are
@@ -326,6 +329,13 @@ vkrt_device_dispatch_load(struct vkrt_device_dispatch *t,
    VKRT_LOAD_D(FreeMemory);
    VKRT_LOAD_D(DestroyBuffer);
    VKRT_LOAD_D(CreateSampler);
+   VKRT_LOAD_D(DestroySampler);
+   VKRT_LOAD_D(CreateSamplerYcbcrConversion);
+   if (!t->CreateSamplerYcbcrConversion)
+       t->CreateSamplerYcbcrConversion = (PFN_vkCreateSamplerYcbcrConversion)gdpa(device, "vkCreateSamplerYcbcrConversionKHR");
+   VKRT_LOAD_D(DestroySamplerYcbcrConversion);
+   if (!t->DestroySamplerYcbcrConversion)
+       t->DestroySamplerYcbcrConversion = (PFN_vkDestroySamplerYcbcrConversion)gdpa(device, "vkDestroySamplerYcbcrConversionKHR");
 #undef VKRT_LOAD_D
    t->CreateComputePipelinesInternal = t->CreateComputePipelines;
 }

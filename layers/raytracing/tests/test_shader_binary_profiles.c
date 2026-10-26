@@ -80,6 +80,51 @@ static void execute(struct context *context, VkShaderEXT shader) {
         ++g_fail;
     }
 }
+static void binary_interfaces(struct context *context, const VkShaderCreateInfoEXT *source, const void *expected,
+                              size_t expected_size) {
+    activate(context);
+    PFN_vkCreateShadersEXT create = (void *)vkGetDeviceProcAddr(g_dev, "vkCreateShadersEXT");
+    PFN_vkDestroyShaderEXT destroy = (void *)vkGetDeviceProcAddr(g_dev, "vkDestroyShaderEXT");
+    PFN_vkGetShaderBinaryDataEXT get = (void *)vkGetDeviceProcAddr(g_dev, "vkGetShaderBinaryDataEXT");
+    VkDescriptorSetLayoutBinding binding = {0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1, VK_SHADER_STAGE_ALL, NULL};
+    VkDescriptorSetLayoutCreateInfo layout = {
+        .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO, .bindingCount = 1, .pBindings = &binding};
+    VkDescriptorSetLayout different;
+    CHECK(vkCreateDescriptorSetLayout(g_dev, &layout, NULL, &different));
+    VkPushConstantRange push = {VK_SHADER_STAGE_ALL, 0, 64};
+    for (unsigned i = 0; i < 2; ++i) {
+        VkShaderCreateInfoEXT info = *source;
+        info.setLayoutCount = i;
+        info.pSetLayouts = i ? &different : NULL;
+        info.pushConstantRangeCount = i;
+        info.pPushConstantRanges = i ? &push : NULL;
+        VkShaderEXT shader;
+        CHECK(create(g_dev, 1, &info, NULL, &shader));
+        size_t size = 0;
+        CHECK(get(g_dev, shader, &size, NULL));
+        uint8_t *bytes = malloc(size);
+        if (!bytes) exit(1);
+        CHECK(get(g_dev, shader, &size, bytes));
+        if (size != expected_size || memcmp(bytes, expected, size < expected_size ? size : expected_size)) ++g_fail;
+        free(bytes);
+        destroy(g_dev, shader, NULL);
+    }
+    vkDestroyDescriptorSetLayout(g_dev, different, NULL);
+
+    /* A bad middle binary must identify its own index without erasing the
+     * successful independent shader before it. Later native partial outputs
+     * may be null or valid; every returned handle is retired below. */
+    _Alignas(16) uint8_t invalid[16] = {0};
+    VkShaderCreateInfoEXT batch[3] = {*source, *source, *source};
+    batch[1].pCode = invalid;
+    batch[1].codeSize = sizeof(invalid);
+    VkShaderEXT shaders[3] = {VK_NULL_HANDLE, VK_NULL_HANDLE, VK_NULL_HANDLE};
+    VkResult result = create(g_dev, 3, batch, NULL, shaders);
+    if (result != VK_ERROR_INCOMPATIBLE_SHADER_BINARY_EXT || !shaders[0] || shaders[1]) ++g_fail;
+    if (shaders[0]) execute(context, shaders[0]);
+    for (unsigned i = 0; i < 3; ++i)
+        if (shaders[i]) destroy(g_dev, shaders[i], NULL);
+}
 static void finish(struct context *context) {
     activate(context);
     vkDestroyPipelineLayout(g_dev, context->layout, NULL);
@@ -222,6 +267,7 @@ int main(int argc, char **argv) {
         CHECK(create(g_dev, 1, &info, NULL, &shader));
         execute(&contexts[1], shader);
         destroy(g_dev, shader, NULL);
+        binary_interfaces(&contexts[1], &info, blobs[i], sizes[i]);
         free(blobs[i]);
     }
     activate(&contexts[1]);
@@ -270,10 +316,10 @@ int main(int argc, char **argv) {
                                                        .pNext = &binary_properties};
     get_properties(g_pdev, &physical_properties);
     const uint8_t magic[] = {0x56, 0x4b, 0x52, 0x54};
-    int layer_binary = ordinary_size > 152 && !memcmp(ordinary_blob, magic, sizeof(magic));
+    int layer_binary = ordinary_size > 248 && !memcmp(ordinary_blob, magic, sizeof(magic));
     if (layer_binary) {
         if (memcmp(ordinary_blob + 96, binary_properties.shaderBinaryUUID, VK_UUID_SIZE)) ++g_fail;
-        ordinary_blob[150] = ordinary_blob[151] = 0; /* first instruction word count zero */
+        ordinary_blob[246] = ordinary_blob[247] = 0; /* FORMAT3 first stage's first instruction word count zero */
         seal_binary(ordinary_blob, ordinary_size);
         ordinary_shader = (VkShaderEXT)(uintptr_t)1;
         VkResult malformed = ordinary_create(g_dev, 1, &ordinary, NULL, &ordinary_shader);
@@ -283,10 +329,17 @@ int main(int argc, char **argv) {
     create_linked = (void *)vkGetDeviceProcAddr(g_dev, "vkCreateShadersEXT");
     destroy_linked = (void *)vkGetDeviceProcAddr(g_dev, "vkDestroyShaderEXT");
     CHECK(create_linked(g_dev, 2, linked, NULL, linked_shaders));
-    for (unsigned i = 0; i < 2; ++i) {
-        destroy_linked(g_dev, linked_shaders[i], NULL);
-        free(linked_blobs[i]);
-    }
+    for (unsigned i = 0; i < 2; ++i) destroy_linked(g_dev, linked_shaders[i], NULL);
+    /* Exporting one linked peer and importing it unlinked must still rebuild
+     * the complete original group when its other peer contains RQ code. */
+    VkShaderCreateInfoEXT alone = linked[0];
+    alone.flags = 0;
+    alone.pushConstantRangeCount = 0;
+    alone.pPushConstantRanges = NULL;
+    VkShaderEXT vertex;
+    CHECK(create_linked(g_dev, 1, &alone, NULL, &vertex));
+    destroy_linked(g_dev, vertex, NULL);
+    for (unsigned i = 0; i < 2; ++i) free(linked_blobs[i]);
     finish(&contexts[1]);
     vkDestroyInstance(g_instance, NULL);
     printf(

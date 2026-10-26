@@ -61,6 +61,7 @@ add_library(${VKRT_LAYER_NAME} SHARED
    src/vkrt_memory_queries.c
    src/vkrt_query_pool.c
    src/vkrt_shader_objects.c
+   src/vkrt_shader_interface.c
    src/vkrt_deferred.c
    src/vkrt_build.c
    src/vkrt_features.c
@@ -392,6 +393,16 @@ add_executable(test_shader_object_rq tests/test_shader_object_rq.c)
 target_link_libraries(test_shader_object_rq PRIVATE vkrt_cpu_bvh ${Vulkan_LIBRARIES})
 set_target_properties(test_shader_object_rq PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED ON)
 add_dependencies(test_shader_object_rq vkrt_shader_object_rq_spv)
+set(VKRT_SHADER_IMMUTABLE_SPV ${CMAKE_CURRENT_BINARY_DIR}/shader_binary_immutable.comp.spv)
+add_custom_command(OUTPUT ${VKRT_SHADER_IMMUTABLE_SPV}
+   COMMAND ${VKRT_GLSLC} --target-env=vulkan1.2 ${CMAKE_CURRENT_SOURCE_DIR}/tests/shader_binary_immutable.comp -o ${VKRT_SHADER_IMMUTABLE_SPV}
+   COMMAND ${VKRT_SPIRV_VAL} --target-env vulkan1.2 ${VKRT_SHADER_IMMUTABLE_SPV}
+   DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/tests/shader_binary_immutable.comp VERBATIM)
+add_custom_target(vkrt_shader_immutable_spv DEPENDS ${VKRT_SHADER_IMMUTABLE_SPV})
+add_executable(test_shader_binary_immutable tests/test_shader_binary_immutable.c)
+target_link_libraries(test_shader_binary_immutable PRIVATE vkrt_cpu_bvh ${Vulkan_LIBRARIES})
+set_target_properties(test_shader_binary_immutable PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED ON)
+add_dependencies(test_shader_binary_immutable vkrt_shader_immutable_spv)
 set(VKRT_SHADER_BINARY_PROFILE_SPV)
 foreach(profile rq plain)
    set(output ${CMAKE_CURRENT_BINARY_DIR}/shader_binary_profile_${profile}.comp.spv)
@@ -528,12 +539,32 @@ if(BUILD_TESTING)
    add_dependencies(test_query_pool_publication vkrt_bvh_spv)
    add_test(NAME vkrt.query_pool_publication COMMAND test_query_pool_publication)
    set_tests_properties(vkrt.query_pool_publication PROPERTIES LABELS "offline;no_native_rt")
-   add_executable(test_shader_objects tests/test_shader_objects.c src/vkrt_shader_objects.c)
-   target_include_directories(test_shader_objects PRIVATE src ${Vulkan_INCLUDE_DIRS})
+   add_executable(test_shader_objects tests/test_shader_objects.c src/vkrt_shader_objects.c src/vkrt_shader_interface.c)
+   target_include_directories(test_shader_objects PRIVATE src ${CMAKE_CURRENT_BINARY_DIR} ${Vulkan_INCLUDE_DIRS})
    target_link_libraries(test_shader_objects PRIVATE Threads::Threads)
    set_target_properties(test_shader_objects PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED ON)
    add_test(NAME vkrt.shader_objects COMMAND test_shader_objects)
    set_tests_properties(vkrt.shader_objects PROPERTIES LABELS "offline;no_native_rt")
+   add_executable(test_shader_interface tests/test_shader_interface.c src/vkrt_shader_interface.c)
+   target_include_directories(test_shader_interface PRIVATE src ${CMAKE_CURRENT_BINARY_DIR} ${Vulkan_INCLUDE_DIRS})
+   target_link_libraries(test_shader_interface PRIVATE Threads::Threads)
+   set_target_properties(test_shader_interface PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED ON)
+   add_test(NAME vkrt.shader_interface COMMAND test_shader_interface)
+   set_tests_properties(vkrt.shader_interface PROPERTIES LABELS "offline;no_native_rt")
+   add_test(NAME vkrt.shader_binary_immutable.software COMMAND test_shader_binary_immutable ${VKRT_SHADER_IMMUTABLE_SPV})
+   set_tests_properties(vkrt.shader_binary_immutable.software PROPERTIES
+      ENVIRONMENT "VK_LAYER_PATH=${CMAKE_BINARY_DIR}/layers;VK_INSTANCE_LAYERS=VK_LAYER_VKRT_SOFTWARE_RAY_QUERY"
+      LABELS "gpu;no_native_rt" SKIP_RETURN_CODE 77 TIMEOUT 120)
+   add_test(NAME vkrt.shader_binary_immutable.native COMMAND test_shader_binary_immutable ${VKRT_SHADER_IMMUTABLE_SPV})
+   set_tests_properties(vkrt.shader_binary_immutable.native PROPERTIES
+      ENVIRONMENT "VK_INSTANCE_LAYERS=" LABELS "gpu;native_rt" SKIP_RETURN_CODE 77 TIMEOUT 120)
+   add_test(NAME vkrt.shader_object_rq.spirv16.software COMMAND test_shader_object_rq ${VKRT_SHADER_OBJECT_RQ_SPV} --spirv16)
+   set_tests_properties(vkrt.shader_object_rq.spirv16.software PROPERTIES
+      ENVIRONMENT "VK_LAYER_PATH=${CMAKE_BINARY_DIR}/layers;VK_INSTANCE_LAYERS=VK_LAYER_VKRT_SOFTWARE_RAY_QUERY"
+      LABELS "gpu;no_native_rt" SKIP_RETURN_CODE 77 TIMEOUT 120)
+   add_test(NAME vkrt.shader_object_rq.spirv16.native COMMAND test_shader_object_rq ${VKRT_SHADER_OBJECT_RQ_SPV} --spirv16)
+   set_tests_properties(vkrt.shader_object_rq.spirv16.native PROPERTIES
+      ENVIRONMENT "VK_INSTANCE_LAYERS=" LABELS "gpu;native_rt" SKIP_RETURN_CODE 77 TIMEOUT 120)
    add_test(NAME vkrt.query_pool_gpu.cross_queue.software COMMAND test_query_pool_gpu --cross-queue)
    set_tests_properties(vkrt.query_pool_gpu.cross_queue.software PROPERTIES
       ENVIRONMENT "VK_LAYER_PATH=${CMAKE_BINARY_DIR}/layers;VK_INSTANCE_LAYERS=VK_LAYER_VKRT_SOFTWARE_RAY_QUERY"

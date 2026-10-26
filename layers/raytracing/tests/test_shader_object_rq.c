@@ -111,7 +111,8 @@ static void submit(VkCommandBuffer command) {
     vkFreeCommandBuffers(g_dev, g_pool, 1, &command);
 }
 int main(int argc, char **argv) {
-    if (argc != 2) return 1;
+    int spirv16 = argc == 3 && !strcmp(argv[2], "--spirv16");
+    if (argc != 2 && !spirv16) return 1;
     init_vulkan();
     VkDevice devices[2] = {g_dev, VK_NULL_HANDLE};
     VkCommandPool pools[2] = {g_pool, VK_NULL_HANDLE};
@@ -236,6 +237,12 @@ int main(int argc, char **argv) {
         vkUpdateDescriptorSets(g_dev, 2, writes, 0, NULL);
         size_t word_count;
         uint32_t *words = read_spv(argv[1], &word_count);
+        /* Change only the copied module's version. Its literal LocalSize and
+         * instructions remain unchanged; maintenance4 is not required. */
+        if (spirv16) {
+            if (word_count < 5) return 1;
+            words[1] = 0x00010600;
+        }
         for (unsigned all = 0; all < 2; ++all) {
             VkPushConstantRange ranges[] = {
                 {all ? VK_SHADER_STAGE_ALL : VK_SHADER_STAGE_COMPUTE_BIT | VK_SHADER_STAGE_RAYGEN_BIT_KHR, 0, 48},
@@ -325,7 +332,7 @@ int main(int argc, char **argv) {
     free(exported[0]);
     free(exported[1]);
     vkDestroyInstance(g_instance, NULL);
-    printf("Public RQ compute shader objects mixed/ALL push ranges +SPIRV/binary hit/miss across two independent devices %s\n",
-           g_fail ? "FAIL" : "PASS");
+    printf("Public RQ compute shader objects mixed/ALL push ranges +SPIRV/binary hit/miss across two independent devices%s %s\n",
+           spirv16 ? " SPIR-V1.6" : "", g_fail ? "FAIL" : "PASS");
     return g_fail ? 1 : 0;
 }
