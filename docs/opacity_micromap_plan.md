@@ -17,7 +17,8 @@ limitations under the License.
 
 # Software Opacity Micromap Layer: Implementation Plan
 
-**Status:** planning only; no milestone is complete. This plan implements the
+**Status:** implementation started; no milestone is complete. See
+[current implementation evidence](opacity_micromap_status.md). This plan implements the
 [goals and specification](opacity_micromap_layer.md). Milestones are development
 checkpoints, not progressively smaller definitions of the final extension.
 

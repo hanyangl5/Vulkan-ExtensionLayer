@@ -17,9 +17,10 @@ limitations under the License.
 
 # Software Opacity Micromap Layer: Goals and Specification
 
-**Status:** design proposal; documentation only. No OMM implementation or
-conformance claim is made by this branch. Reviewed against the Vulkan
-documentation available on 2026-10-25.
+**Status:** experimental implementation started; no complete extension support or
+conformance claim. Reviewed against the Vulkan documentation available on
+2026-10-25. See [implementation status](opacity_micromap_status.md) for tested
+components and unresolved proof gates.
 
 ## Purpose
 

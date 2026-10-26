@@ -1,0 +1,79 @@
+// Copyright 2026 The Khronos Group Inc.
+// SPDX-License-Identifier: Apache-2.0
+#version 460
+#extension GL_EXT_ray_query : require
+#extension GL_EXT_buffer_reference2 : require
+#extension GL_EXT_shader_explicit_arithmetic_types_int64 : require
+#extension GL_GOOGLE_include_directive : require
+#include "../omm_opacity.glsl"
+layout(local_size_x = 1) in;
+layout(set = 0, binding = 0) uniform accelerationStructureEXT scene;
+// These are fixture application resources. The wrapper adds no descriptor or PC.
+layout(set = 0, binding = 1, std430) buffer Result {
+    uint flags; uint nearState; uint farState; uint mode;
+    uint hit; uint instanceId; uint visible; uint automatic;
+    float hitT; uint opaqueAabb; uint nativeFlags; uint customIndex;
+} result;
+layout(buffer_reference, std430, buffer_reference_align = 16) readonly buffer Metadata { uvec4 records[]; };
+layout(constant_id = 0) const uint64_t metadataAddress = 0ul;
+layout(constant_id = 1) const uint64_t sceneAddress = 0ul;
+
+// Manual candidate-wrapper proof, not yet an arbitrary SPIR-V transformation.
+// Record fields: geometry opaque, logical instance flags, reserved, reserved.
+uint classify(uint instance, uint state, bool triangle, uint flags) {
+    uvec4 record = Metadata(metadataAddress).records[instance];
+    return ommResolveOpacity(state, triangle && state != 4u, flags, record.y, record.x);
+}
+
+// Opaque query parameters carry native query state through a helper.
+bool logicalProceed(rayQueryEXT query, uint flags) {
+    while (rayQueryProceedEXT(query)) {
+        uint id = rayQueryGetIntersectionInstanceIdEXT(query, false);
+        bool triangle = rayQueryGetIntersectionTypeEXT(query, false) == gl_RayQueryCandidateIntersectionTriangleEXT;
+        uint state = id == 0u ? result.nearState : result.farState;
+        uint opacity = classify(id, state, triangle, flags);
+        if (opacity == 0u) continue;
+        if (triangle && opacity == 1u) {
+            rayQueryConfirmIntersectionEXT(query);
+            result.automatic++;
+        } else {
+            if (!triangle) result.opaqueAabb = uint(opacity == 1u);
+            return true;
+        }
+    }
+    return false;
+}
+
+void main() {
+    uint logicalFlags = result.flags;
+    // NoOpaque forces exposure. Logical opacity culling must happen in wrapper.
+    uint nativeFlags = (logicalFlags & ~(1u | 2u | 64u | 128u | 1024u)) | 2u;
+    vec3 origin = (result.mode & 2u) != 0u ? vec3(3.25, 0.25, -1) : vec3(0.25, 0.25, -1);
+    float tmax = (result.mode & 1u) != 0u ? 1.5 : 10.0;
+    rayQueryEXT query;
+    if ((result.mode & 16u) != 0u)
+        rayQueryInitializeEXT(query, accelerationStructureEXT(sceneAddress), nativeFlags, 255u, origin, 0.0, vec3(0, 0, 1), tmax);
+    else
+        rayQueryInitializeEXT(query, scene, nativeFlags, 255u, origin, 0.0, vec3(0, 0, 1), tmax);
+    result.visible = 0u;
+    result.automatic = 0u;
+    result.opaqueAabb = 0u;
+    // The proof observes the forced native flags. Restoring arbitrary
+    // application GetRayFlags instructions remains a transformation proof gate.
+    result.nativeFlags = rayQueryGetRayFlagsEXT(query);
+    while (logicalProceed(query, logicalFlags)) {
+        result.visible++;
+        uint kind = rayQueryGetIntersectionTypeEXT(query, false);
+        if (kind == gl_RayQueryCandidateIntersectionTriangleEXT) rayQueryConfirmIntersectionEXT(query);
+        else rayQueryGenerateIntersectionEXT(query, 1.0);
+    }
+    result.hit = rayQueryGetIntersectionTypeEXT(query, true);
+    result.instanceId = 0xffffffffu;
+    result.customIndex = 0xffffffffu;
+    result.hitT = -1.0;
+    if (result.hit != gl_RayQueryCommittedIntersectionNoneEXT) {
+        result.instanceId = rayQueryGetIntersectionInstanceIdEXT(query, true);
+        result.customIndex = rayQueryGetIntersectionInstanceCustomIndexEXT(query, true);
+        result.hitT = rayQueryGetIntersectionTEXT(query, true);
+    }
+}
