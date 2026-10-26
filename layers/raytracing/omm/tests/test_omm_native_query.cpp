@@ -1,266 +1,8 @@
 // Copyright 2026 The Khronos Group Inc.
 // SPDX-License-Identifier: Apache-2.0
-// M0 candidate-wrapper proof. No emulated extension is advertised by this test.
-#include <vulkan/vulkan.h>
-#include <algorithm>
-#include <cmath>
-#include <cstdio>
-#include <cstdlib>
-#include <cstring>
-#include <fstream>
-#include <vector>
+#include "native_fixture.h"
 #include "../omm_opacity.h"
-
-#define CHECK(call)                                                   \
-    do {                                                              \
-        VkResult status = (call);                                     \
-        if (status != VK_SUCCESS) {                                   \
-            std::fprintf(stderr, "%s: VkResult %d\n", #call, status); \
-            std::exit(1);                                             \
-        }                                                             \
-    } while (0)
-template <typename T>
-static T init(VkStructureType type) {
-    return T{type};
-}
-
-struct Buffer {
-    VkBuffer handle;
-    VkDeviceMemory memory;
-    VkDeviceAddress address;
-    void* mapped;
-};
-struct Acceleration {
-    VkAccelerationStructureKHR handle;
-    VkDeviceAddress address;
-    VkAccelerationStructureBuildGeometryInfoKHR build;
-    VkAccelerationStructureBuildRangeInfoKHR range;
-};
-struct Fixture {
-    VkInstance instance{};
-    VkPhysicalDevice physical{};
-    VkDevice device{};
-    VkQueue queue{};
-    uint32_t family = UINT32_MAX;
-    VkCommandPool pool{};
-    PFN_vkCreateAccelerationStructureKHR createAS{};
-    PFN_vkDestroyAccelerationStructureKHR destroyAS{};
-    PFN_vkGetAccelerationStructureBuildSizesKHR sizesAS{};
-    PFN_vkGetAccelerationStructureDeviceAddressKHR addressAS{};
-    PFN_vkCmdBuildAccelerationStructuresKHR buildAS{};
-    VkDeviceSize scratchAlignment{};
-    std::vector<Buffer> buffers;
-    std::vector<VkAccelerationStructureKHR> structures;
-
-    bool open() {
-        auto application = init<VkApplicationInfo>(VK_STRUCTURE_TYPE_APPLICATION_INFO);
-        application.apiVersion = VK_API_VERSION_1_2;
-        auto create = init<VkInstanceCreateInfo>(VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO);
-        create.pApplicationInfo = &application;
-        CHECK(vkCreateInstance(&create, nullptr, &instance));
-        uint32_t count = 0;
-        CHECK(vkEnumeratePhysicalDevices(instance, &count, nullptr));
-        std::vector<VkPhysicalDevice> devices(count);
-        CHECK(vkEnumeratePhysicalDevices(instance, &count, devices.data()));
-        for (auto candidate : devices) {
-            VkPhysicalDeviceProperties candidateProperties;
-            vkGetPhysicalDeviceProperties(candidate, &candidateProperties);
-            if (candidateProperties.apiVersion < VK_API_VERSION_1_2) continue;
-            auto rq = init<VkPhysicalDeviceRayQueryFeaturesKHR>(VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_QUERY_FEATURES_KHR);
-            auto as = init<VkPhysicalDeviceAccelerationStructureFeaturesKHR>(
-                VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_FEATURES_KHR);
-            auto bda =
-                init<VkPhysicalDeviceBufferDeviceAddressFeatures>(VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_BUFFER_DEVICE_ADDRESS_FEATURES);
-            auto features = init<VkPhysicalDeviceFeatures2>(VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2);
-            features.pNext = &rq;
-            rq.pNext = &as;
-            as.pNext = &bda;
-            vkGetPhysicalDeviceFeatures2(candidate, &features);
-            if (!rq.rayQuery || !as.accelerationStructure || !bda.bufferDeviceAddress || !features.features.shaderInt64) continue;
-            uint32_t extensionCount = 0;
-            CHECK(vkEnumerateDeviceExtensionProperties(candidate, nullptr, &extensionCount, nullptr));
-            std::vector<VkExtensionProperties> extensions(extensionCount);
-            CHECK(vkEnumerateDeviceExtensionProperties(candidate, nullptr, &extensionCount, extensions.data()));
-            bool hasAS = false, hasRQ = false, hasDeferred = false;
-            for (const auto& extension : extensions) {
-                hasAS |= !std::strcmp(extension.extensionName, VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME);
-                hasRQ |= !std::strcmp(extension.extensionName, VK_KHR_RAY_QUERY_EXTENSION_NAME);
-                hasDeferred |= !std::strcmp(extension.extensionName, VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME);
-            }
-            if (!hasAS || !hasRQ || !hasDeferred) continue;
-            uint32_t queueCount = 0;
-            vkGetPhysicalDeviceQueueFamilyProperties(candidate, &queueCount, nullptr);
-            std::vector<VkQueueFamilyProperties> queues(queueCount);
-            vkGetPhysicalDeviceQueueFamilyProperties(candidate, &queueCount, queues.data());
-            for (uint32_t q = 0; q < queueCount; ++q) {
-                if ((queues[q].queueFlags & VK_QUEUE_COMPUTE_BIT) && queues[q].queueCount) {
-                    physical = candidate;
-                    family = q;
-                    break;
-                }
-            }
-            if (physical) break;
-        }
-        if (!physical) return false;
-        auto properties = init<VkPhysicalDeviceProperties2>(VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2);
-        auto asProperties = init<VkPhysicalDeviceAccelerationStructurePropertiesKHR>(
-            VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_PROPERTIES_KHR);
-        properties.pNext = &asProperties;
-        vkGetPhysicalDeviceProperties2(physical, &properties);
-        std::printf("Native RQ candidate proof: %s\n", properties.properties.deviceName);
-        scratchAlignment = asProperties.minAccelerationStructureScratchOffsetAlignment;
-        float priority = 1.f;
-        auto queueInfo = init<VkDeviceQueueCreateInfo>(VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO);
-        queueInfo.queueFamilyIndex = family;
-        queueInfo.queueCount = 1;
-        queueInfo.pQueuePriorities = &priority;
-        auto bda =
-            init<VkPhysicalDeviceBufferDeviceAddressFeatures>(VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_BUFFER_DEVICE_ADDRESS_FEATURES);
-        bda.bufferDeviceAddress = VK_TRUE;
-        auto as = init<VkPhysicalDeviceAccelerationStructureFeaturesKHR>(
-            VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_FEATURES_KHR);
-        as.accelerationStructure = VK_TRUE;
-        as.pNext = &bda;
-        auto rq = init<VkPhysicalDeviceRayQueryFeaturesKHR>(VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_QUERY_FEATURES_KHR);
-        rq.rayQuery = VK_TRUE;
-        rq.pNext = &as;
-        VkPhysicalDeviceFeatures core{};
-        core.shaderInt64 = VK_TRUE;
-        const char* extensions[] = {VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME, VK_KHR_RAY_QUERY_EXTENSION_NAME,
-                                    VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME};
-        auto deviceInfo = init<VkDeviceCreateInfo>(VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO);
-        deviceInfo.pNext = &rq;
-        deviceInfo.pEnabledFeatures = &core;
-        deviceInfo.queueCreateInfoCount = 1;
-        deviceInfo.pQueueCreateInfos = &queueInfo;
-        deviceInfo.enabledExtensionCount = 3;
-        deviceInfo.ppEnabledExtensionNames = extensions;
-        CHECK(vkCreateDevice(physical, &deviceInfo, nullptr, &device));
-        vkGetDeviceQueue(device, family, 0, &queue);
-#define LOAD(member, function) member = reinterpret_cast<PFN_##function>(vkGetDeviceProcAddr(device, #function))
-        LOAD(createAS, vkCreateAccelerationStructureKHR);
-        LOAD(destroyAS, vkDestroyAccelerationStructureKHR);
-        LOAD(sizesAS, vkGetAccelerationStructureBuildSizesKHR);
-        LOAD(addressAS, vkGetAccelerationStructureDeviceAddressKHR);
-        LOAD(buildAS, vkCmdBuildAccelerationStructuresKHR);
-#undef LOAD
-        if (!createAS || !destroyAS || !sizesAS || !addressAS || !buildAS) std::exit(1);
-        auto poolInfo = init<VkCommandPoolCreateInfo>(VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO);
-        poolInfo.queueFamilyIndex = family;
-        CHECK(vkCreateCommandPool(device, &poolInfo, nullptr, &pool));
-        return true;
-    }
-    Buffer buffer(VkDeviceSize size, VkBufferUsageFlags usage, bool host) {
-        Buffer value{};
-        auto create = init<VkBufferCreateInfo>(VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO);
-        create.size = size;
-        create.usage = usage;
-        CHECK(vkCreateBuffer(device, &create, nullptr, &value.handle));
-        VkMemoryRequirements requirements;
-        vkGetBufferMemoryRequirements(device, value.handle, &requirements);
-        VkPhysicalDeviceMemoryProperties properties;
-        vkGetPhysicalDeviceMemoryProperties(physical, &properties);
-        VkMemoryPropertyFlags wanted = host ? VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT : 0;
-        uint32_t type = UINT32_MAX;
-        for (uint32_t i = 0; i < properties.memoryTypeCount; ++i)
-            if ((requirements.memoryTypeBits & (1u << i)) && (properties.memoryTypes[i].propertyFlags & wanted) == wanted) {
-                type = i;
-                break;
-            }
-        if (type == UINT32_MAX) std::exit(1);
-        auto flags = init<VkMemoryAllocateFlagsInfo>(VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_FLAGS_INFO);
-        flags.flags = VK_MEMORY_ALLOCATE_DEVICE_ADDRESS_BIT;
-        auto allocate = init<VkMemoryAllocateInfo>(VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO);
-        allocate.pNext = (usage & VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT) ? &flags : nullptr;
-        allocate.allocationSize = requirements.size;
-        allocate.memoryTypeIndex = type;
-        CHECK(vkAllocateMemory(device, &allocate, nullptr, &value.memory));
-        CHECK(vkBindBufferMemory(device, value.handle, value.memory, 0));
-        if (host) CHECK(vkMapMemory(device, value.memory, 0, VK_WHOLE_SIZE, 0, &value.mapped));
-        if (usage & VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT) {
-            auto address = init<VkBufferDeviceAddressInfo>(VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO);
-            address.buffer = value.handle;
-            value.address = vkGetBufferDeviceAddress(device, &address);
-        }
-        buffers.push_back(value);
-        return value;
-    }
-    Acceleration acceleration(VkAccelerationStructureTypeKHR type, const VkAccelerationStructureGeometryKHR& geometry,
-                              uint32_t count = 1) {
-        Acceleration value{};
-        value.build =
-            init<VkAccelerationStructureBuildGeometryInfoKHR>(VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_GEOMETRY_INFO_KHR);
-        value.build.type = type;
-        value.build.mode = VK_BUILD_ACCELERATION_STRUCTURE_MODE_BUILD_KHR;
-        value.build.geometryCount = 1;
-        value.build.pGeometries = &geometry;
-        value.range.primitiveCount = count;
-        auto sizes = init<VkAccelerationStructureBuildSizesInfoKHR>(VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_SIZES_INFO_KHR);
-        sizesAS(device, VK_ACCELERATION_STRUCTURE_BUILD_TYPE_DEVICE_KHR, &value.build, &count, &sizes);
-        auto storage =
-            buffer(sizes.accelerationStructureSize,
-                   VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, false);
-        auto create = init<VkAccelerationStructureCreateInfoKHR>(VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_CREATE_INFO_KHR);
-        create.type = type;
-        create.buffer = storage.handle;
-        create.size = sizes.accelerationStructureSize;
-        CHECK(createAS(device, &create, nullptr, &value.handle));
-        structures.push_back(value.handle);
-        auto address =
-            init<VkAccelerationStructureDeviceAddressInfoKHR>(VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_DEVICE_ADDRESS_INFO_KHR);
-        address.accelerationStructure = value.handle;
-        value.address = addressAS(device, &address);
-        auto scratch = buffer(sizes.buildScratchSize + scratchAlignment - 1,
-                              VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, false);
-        value.build.dstAccelerationStructure = value.handle;
-        value.build.scratchData.deviceAddress = (scratch.address + scratchAlignment - 1) & ~(scratchAlignment - 1);
-        return value;
-    }
-    VkCommandBuffer begin() {
-        auto allocate = init<VkCommandBufferAllocateInfo>(VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO);
-        allocate.commandPool = pool;
-        allocate.commandBufferCount = 1;
-        allocate.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-        VkCommandBuffer command;
-        CHECK(vkAllocateCommandBuffers(device, &allocate, &command));
-        auto start = init<VkCommandBufferBeginInfo>(VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO);
-        CHECK(vkBeginCommandBuffer(command, &start));
-        return command;
-    }
-    static void barrier(VkCommandBuffer command, VkPipelineStageFlags source, VkAccessFlags src, VkPipelineStageFlags destination,
-                        VkAccessFlags dst) {
-        auto memory = init<VkMemoryBarrier>(VK_STRUCTURE_TYPE_MEMORY_BARRIER);
-        memory.srcAccessMask = src;
-        memory.dstAccessMask = dst;
-        vkCmdPipelineBarrier(command, source, destination, 0, 1, &memory, 0, nullptr, 0, nullptr);
-    }
-    void submit(VkCommandBuffer command) {
-        CHECK(vkEndCommandBuffer(command));
-        auto submit = init<VkSubmitInfo>(VK_STRUCTURE_TYPE_SUBMIT_INFO);
-        submit.commandBufferCount = 1;
-        submit.pCommandBuffers = &command;
-        VkFence fence;
-        auto create = init<VkFenceCreateInfo>(VK_STRUCTURE_TYPE_FENCE_CREATE_INFO);
-        CHECK(vkCreateFence(device, &create, nullptr, &fence));
-        CHECK(vkQueueSubmit(queue, 1, &submit, fence));
-        CHECK(vkWaitForFences(device, 1, &fence, VK_TRUE, UINT64_MAX));
-        vkDestroyFence(device, fence, nullptr);
-        vkFreeCommandBuffers(device, pool, 1, &command);
-    }
-    ~Fixture() {
-        if (device) {
-            for (auto as : structures) destroyAS(device, as, nullptr);
-            for (auto value : buffers) {
-                if (value.mapped) vkUnmapMemory(device, value.memory);
-                vkDestroyBuffer(device, value.handle, nullptr);
-                vkFreeMemory(device, value.memory, nullptr);
-            }
-            vkDestroyCommandPool(device, pool, nullptr);
-            vkDestroyDevice(device, nullptr);
-        }
-        if (instance) vkDestroyInstance(instance, nullptr);
-    }
-};
+#include "../omm_storage.h"
 
 int main(int argc, char** argv) {
     if (argc != 2) return 1;
@@ -333,15 +75,25 @@ int main(int argc, char** argv) {
     fixture.submit(command);
 
     auto metadata = fixture.buffer(48, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, true);
-    const uint32_t records[] = {1, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0};
+    const uint32_t records[] = {1, 0, 0, 0, 0, 0, 1, 0, 1, 0, 0, 0};
     std::memcpy(metadata.mapped, records, sizeof(records));
     struct Result {
         uint32_t flags, nearState, farState, mode, hit, instanceId, visible, automatic;
         float hitT;
         uint32_t opaqueAabb, nativeFlags, customIndex;
+        float u, v;
+        uint32_t lookupStatus, microtriangle;
     };
-    static_assert(sizeof(Result) == 48);
+    static_assert(sizeof(Result) == 64);
     auto output = fixture.buffer(sizeof(Result), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, true);
+    uint8_t triangleRecords[] = {0, 0, 0, 0, 1, 0, 2, 0, 1, 0, 0, 0, 1, 0, 2, 0};
+    uint8_t packedStates[] = {0xe4, 0x55};
+    vel::omm::StorageBuildInput buildInput{triangleRecords, sizeof(triangleRecords), 2, 8, packedStates, sizeof(packedStates)};
+    std::vector<uint8_t> blob;
+    if (vel::omm::storage_build(buildInput, &blob) != vel::omm::StorageResult::Success) return 1;
+    auto blobBuffer =
+        fixture.buffer(blob.size(), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, true);
+    std::memcpy(blobBuffer.mapped, blob.data(), blob.size());
     VkDescriptorSetLayoutBinding bindings[] = {
         {0, VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR, 1, VK_SHADER_STAGE_COMPUTE_BIT, nullptr},
         {1, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, VK_SHADER_STAGE_COMPUTE_BIT, nullptr}};
@@ -397,9 +149,9 @@ int main(int argc, char** argv) {
     moduleInfo.pCode = words.data();
     VkShaderModule module;
     CHECK(vkCreateShaderModule(fixture.device, &moduleInfo, nullptr, &module));
-    const VkDeviceAddress addresses[] = {metadata.address, tlas.address};
-    VkSpecializationMapEntry entries[] = {{0, 0, sizeof(VkDeviceAddress)}, {1, sizeof(VkDeviceAddress), sizeof(VkDeviceAddress)}};
-    VkSpecializationInfo specialization = {2, entries, sizeof(addresses), addresses};
+    const uint64_t addresses[] = {metadata.address, tlas.address, blobBuffer.address, blob.size()};
+    VkSpecializationMapEntry entries[] = {{0, 0, 8}, {1, 8, 8}, {2, 16, 8}, {3, 24, 8}};
+    VkSpecializationInfo specialization = {4, entries, sizeof(addresses), addresses};
     auto pipelineInfo = init<VkComputePipelineCreateInfo>(VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO);
     pipelineInfo.stage = init<VkPipelineShaderStageCreateInfo>(VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO);
     pipelineInfo.stage.stage = VK_SHADER_STAGE_COMPUTE_BIT;
@@ -510,6 +262,59 @@ int main(int argc, char** argv) {
                         }
                     }
     std::printf("CPU/GPU opacity with real native candidates: %u comparisons\n", comparisons);
+    unsigned packedComparisons = 0;
+    static_cast<uint32_t*>(metadata.mapped)[1] = 0;
+    const float samples[][2] = {{0.1f, 0.1f}, {0.8f, 0.1f}, {0.1f, 0.8f}, {0.4f, 0.4f}};
+    const uint32_t packedFlags[] = {0, 1, 2, 64, 128, 1024};
+    for (uint32_t format = 1; format <= 2; ++format) {
+        triangleRecords[6] = triangleRecords[14] = uint8_t(format);
+        packedStates[0] = format == 1 ? 0x0a : 0xe4;
+        packedStates[1] = format == 1 ? 0x0f : 0x55;
+        if (vel::omm::storage_build(buildInput, &blob) != vel::omm::StorageResult::Success) return 1;
+        std::memcpy(blobBuffer.mapped, blob.data(), blob.size());
+        for (uint32_t sourceKind = 0; sourceKind < 2; ++sourceKind)
+            for (const auto& sample : samples)
+                for (auto ray : packedFlags) {
+                    uint32_t index = 0;
+                    vel::omm::State state;
+                    if (vel::omm::barycentric_index(sample[0], sample[1], 1, &index) != vel::omm::Status::Success ||
+                        vel::omm::decode_state(static_cast<vel::omm::Format>(format), 1, packedStates, 1, index, &state) !=
+                            vel::omm::Status::Success)
+                        return 1;
+                    vel::omm::OpacityInput opacity{true, state, ray, 0, 1};
+                    vel::omm::Decision decision;
+                    if (vel::omm::resolve_opacity(opacity, &decision) != vel::omm::Status::Success) return 1;
+                    Result initial{};
+                    initial.flags = ray;
+                    initial.mode = 33u | (sourceKind ? 16u : 0u);
+                    initial.u = sample[0];
+                    initial.v = sample[1];
+                    initial.lookupStatus = 0xffffffffu;
+                    initial.microtriangle = 0xffffffffu;
+                    std::memcpy(output.mapped, &initial, sizeof(initial));
+                    command = fixture.begin();
+                    Fixture::barrier(command, VK_PIPELINE_STAGE_HOST_BIT, VK_ACCESS_HOST_WRITE_BIT,
+                                     VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT);
+                    vkCmdBindPipeline(command, VK_PIPELINE_BIND_POINT_COMPUTE, pipeline);
+                    vkCmdBindDescriptorSets(command, VK_PIPELINE_BIND_POINT_COMPUTE, pipelineLayout, 0, 1, &set, 0, nullptr);
+                    vkCmdDispatch(command, 1, 1, 1);
+                    Fixture::barrier(command, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_ACCESS_SHADER_WRITE_BIT,
+                                     VK_PIPELINE_STAGE_HOST_BIT, VK_ACCESS_HOST_READ_BIT);
+                    fixture.submit(command);
+                    const auto result = *static_cast<const Result*>(output.mapped);
+                    bool ignore = decision == vel::omm::Decision::Ignore;
+                    bool opaque = decision == vel::omm::Decision::Opaque;
+                    bool pass = result.lookupStatus == 0 && result.microtriangle == index && result.hit == (ignore ? 0u : 1u) &&
+                                result.visible == uint32_t(!ignore && !opaque) && result.automatic == uint32_t(opaque);
+                    ++packedComparisons;
+                    if (!pass) {
+                        ++failures;
+                        std::fprintf(stderr, "Packed/native mismatch format%u source%u cell%u ray%u status%u micro%u\n", format,
+                                     sourceKind, index, ray, result.lookupStatus, result.microtriangle);
+                    }
+                }
+    }
+    std::printf("Packed micromap lookup at native barycentric intersections: %u comparisons\n", packedComparisons);
     vkDestroyPipeline(fixture.device, pipeline, nullptr);
     vkDestroyShaderModule(fixture.device, module, nullptr);
     vkDestroyDescriptorPool(fixture.device, descriptorPool, nullptr);

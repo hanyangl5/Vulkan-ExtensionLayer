@@ -1,0 +1,17 @@
+#version 460
+// Copyright 2026 The Khronos Group Inc.
+// SPDX-License-Identifier: Apache-2.0
+#extension GL_GOOGLE_include_directive : require
+#include "native_pipeline.glsl"
+hitAttributeEXT vec2 attributes;
+void main() {
+    OmmContext context = OmmContext(ContextAddress);
+    // Opacity culling must suppress application Intersection side effects here,
+    // before calling the application code, not in a later Any-Hit shader.
+    if (logicalDecision(gl_InstanceID) == 0u) return;
+    context.intersectionCalls++;
+    context.intersectionFlags = context.flags;
+    context.nativeFlags = gl_IncomingRayFlagsEXT;
+    attributes = vec2(0.2,0.4);
+    context.reportAccepted = reportIntersectionEXT(1.25, 0x42u) ? 1u : 0u;
+}

@@ -1,0 +1,44 @@
+// Copyright 2026 The Khronos Group Inc.
+// SPDX-License-Identifier: Apache-2.0
+#version 460
+#extension GL_GOOGLE_include_directive : require
+#include "../omm_lookup.glsl"
+
+layout(local_size_x = 64) in;
+
+struct LookupCase {
+    uint64_t blobOffset;
+    uint64_t blobSize;
+    uint64_t indicesOffset;
+    uint64_t indicesBytes;
+    uint64_t stride;
+    uint64_t geometryTriangle;
+    vec2 bary;
+    uint width;
+    uint baseTriangle;
+};
+
+layout(buffer_reference, std430, buffer_reference_align = 8) readonly buffer Cases { LookupCase records[]; };
+layout(buffer_reference, std430, buffer_reference_align = 4) writeonly buffer Results { uvec4 records[]; };
+layout(push_constant, std430) uniform Parameters {
+    uint64_t blobAddress;
+    uint64_t indicesAddress;
+    uint64_t indicesBackingBytes;
+    uint64_t caseAddress;
+    uint64_t resultAddress;
+    uint count;
+}
+parameters;
+
+void main() {
+    uint id = gl_GlobalInvocationID.x;
+    if (id >= parameters.count) return;
+    LookupCase test = Cases(parameters.caseAddress).records[id];
+    OmmStorageSpan storage = OmmStorageSpan(parameters.blobAddress + test.blobOffset, test.blobSize);
+    OmmIndexSpan indices = OmmIndexSpan(parameters.indicesAddress, parameters.indicesBackingBytes, test.indicesOffset,
+                                        test.indicesBytes, test.stride, test.width, test.baseTriangle);
+    uint state = 0xeeeeeeeeu;
+    uint microtriangle = 0xddddddddu;
+    uint status = ommLookupState(storage, indices, test.geometryTriangle, test.bary, state, microtriangle);
+    Results(parameters.resultAddress).records[id] = uvec4(status, state, microtriangle, 0u);
+}

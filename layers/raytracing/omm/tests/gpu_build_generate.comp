@@ -1,0 +1,51 @@
+// Copyright 2026 The Khronos Group Inc.
+// SPDX-License-Identifier: Apache-2.0
+#version 460
+#extension GL_EXT_buffer_reference2 : require
+#extension GL_EXT_shader_explicit_arithmetic_types_int64 : require
+layout(local_size_x = 64) in;
+layout(buffer_reference, std430, buffer_reference_align = 4) buffer Words { uint words[]; };
+layout(push_constant, std430) uniform Generate {
+    uint64_t triangles;
+    uint64_t data;
+    uint64_t count;
+    uint64_t stride;
+    uint64_t seed;
+    uint64_t trianglesAccessSize;
+    uint64_t dataAccessSize;
+    uint64_t maxLevel;
+} generate;
+
+void byteAt(uint64_t address, uint64_t offset, uint value) {
+    uint64_t word = address + (offset & ~3ul);
+    uint shift = uint(offset & 3ul) * 8u;
+    Words(word).words[0] = (Words(word).words[0] & ~(255u << shift)) | ((value & 255u) << shift);
+}
+
+void main() {
+    if (gl_GlobalInvocationID.y != 0u || gl_GlobalInvocationID.z != 0u) return;
+    for (uint64_t i = uint64_t(gl_GlobalInvocationID.x) * 4ul; i < generate.dataAccessSize;
+         i += uint64_t(gl_NumWorkGroups.x) * 256ul) {
+        uint packed = 0u;
+        for (uint lane = 0u; lane < 4u; ++lane) {
+            uint index = uint(i) + lane;
+            uint value = ((index * 37u + uint(generate.seed) * 19u + 0xa7u) ^ (index >> 3u)) & 255u;
+            packed |= value << (8u * lane);
+        }
+        Words(generate.data + i).words[0] = packed;
+    }
+    if (gl_GlobalInvocationID.x != 0u) return;
+    for (uint64_t i = 0ul; i < generate.trianglesAccessSize; i += 4ul)
+        Words(generate.triangles + i).words[0] = 0xcdcdcdcdu;
+    for (uint64_t i = 0ul; i < generate.count; ++i) {
+        uint offset = uint(i % 3ul) * 3u + 7u;
+        uint level = (uint(i) + uint(generate.seed)) % (uint(generate.maxLevel) + 1u);
+        uint format = 1u + uint((i ^ generate.seed) & 1ul);
+        uint64_t record = i * generate.stride;
+        for (uint lane = 0u; lane < 4u; ++lane) byteAt(generate.triangles, record + uint64_t(lane), offset >> (8u * lane));
+        byteAt(generate.triangles, record + 4ul, level);
+        byteAt(generate.triangles, record + 5ul, 0u);
+        byteAt(generate.triangles, record + 6ul, format);
+        byteAt(generate.triangles, record + 7ul, 0u);
+    }
+}

@@ -1,0 +1,21 @@
+#version 460
+// Copyright 2026 The Khronos Group Inc.
+// SPDX-License-Identifier: Apache-2.0
+#extension GL_GOOGLE_include_directive : require
+#include "native_pipeline.glsl"
+layout(location=0) rayPayloadInEXT OmmPayload payload;
+hitAttributeEXT vec2 attributes;
+void main() {
+    OmmContext context = OmmContext(ContextAddress);
+    context.wrapperCalls++;
+    context.nativeFlags = gl_IncomingRayFlagsEXT;
+    uint decision = logicalDecision(gl_InstanceID);
+    if (decision == 0u) { ignoreIntersectionEXT; }
+    // This wrapper also supplies the logically absent application Any-Hit case.
+    if (decision == 1u || context.applicationAnyHit == 0u) return;
+    context.anyHitCalls++;
+    context.anyHitFlags = context.flags; // redirected logical application builtin
+    payload.marker += 7u;
+    if (context.action == 1u) { ignoreIntersectionEXT; }
+    if (context.action == 2u) { terminateRayEXT; }
+}

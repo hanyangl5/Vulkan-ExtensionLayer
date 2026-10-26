@@ -6,6 +6,7 @@
 #extension GL_EXT_shader_explicit_arithmetic_types_int64 : require
 #extension GL_GOOGLE_include_directive : require
 #include "../omm_opacity.glsl"
+#include "../omm_lookup.glsl"
 layout(local_size_x = 1) in;
 layout(set = 0, binding = 0) uniform accelerationStructureEXT scene;
 // These are fixture application resources. The wrapper adds no descriptor or PC.
@@ -13,10 +14,13 @@ layout(set = 0, binding = 1, std430) buffer Result {
     uint flags; uint nearState; uint farState; uint mode;
     uint hit; uint instanceId; uint visible; uint automatic;
     float hitT; uint opaqueAabb; uint nativeFlags; uint customIndex;
+    float u; float v; uint lookupStatus; uint microtriangle;
 } result;
 layout(buffer_reference, std430, buffer_reference_align = 16) readonly buffer Metadata { uvec4 records[]; };
 layout(constant_id = 0) const uint64_t metadataAddress = 0ul;
 layout(constant_id = 1) const uint64_t sceneAddress = 0ul;
+layout(constant_id = 2) const uint64_t blobAddress = 0ul;
+layout(constant_id = 3) const uint64_t blobSize = 0ul;
 
 // Manual candidate-wrapper proof, not yet an arbitrary SPIR-V transformation.
 // Record fields: geometry opaque, logical instance flags, reserved, reserved.
@@ -31,6 +35,16 @@ bool logicalProceed(rayQueryEXT query, uint flags) {
         uint id = rayQueryGetIntersectionInstanceIdEXT(query, false);
         bool triangle = rayQueryGetIntersectionTypeEXT(query, false) == gl_RayQueryCandidateIntersectionTriangleEXT;
         uint state = id == 0u ? result.nearState : result.farState;
+        if (triangle && (result.mode & 32u) != 0u) {
+            OmmIndexSpan association = OmmIndexSpan(0ul, 0ul, 0ul, 0ul, 0ul, 0u, Metadata(metadataAddress).records[id].z);
+            uint microtriangle = 0u;
+            uint status = ommLookupState(OmmStorageSpan(blobAddress, blobSize), association,
+                uint64_t(rayQueryGetIntersectionPrimitiveIndexEXT(query, false)),
+                rayQueryGetIntersectionBarycentricsEXT(query, false), state, microtriangle);
+            result.lookupStatus = status;
+            result.microtriangle = microtriangle;
+            if (status != OMM_LOOKUP_SUCCESS) continue;
+        }
         uint opacity = classify(id, state, triangle, flags);
         if (opacity == 0u) continue;
         if (triangle && opacity == 1u) {
@@ -49,6 +63,7 @@ void main() {
     // NoOpaque forces exposure. Logical opacity culling must happen in wrapper.
     uint nativeFlags = (logicalFlags & ~(1u | 2u | 64u | 128u | 1024u)) | 2u;
     vec3 origin = (result.mode & 2u) != 0u ? vec3(3.25, 0.25, -1) : vec3(0.25, 0.25, -1);
+    if ((result.mode & 32u) != 0u) origin.xy = vec2(result.u, result.v);
     float tmax = (result.mode & 1u) != 0u ? 1.5 : 10.0;
     rayQueryEXT query;
     if ((result.mode & 16u) != 0u)

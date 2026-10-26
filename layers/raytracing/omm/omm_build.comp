@@ -1,0 +1,188 @@
+// Copyright 2026 The Khronos Group Inc.
+// SPDX-License-Identifier: Apache-2.0
+#version 460
+#extension GL_EXT_buffer_reference2 : require
+#extension GL_EXT_shader_explicit_arithmetic_types_int64 : require
+
+// Phase 0 validates and plans records in one invocation. After a compute
+// write-to-read barrier, phase 1 encodes data in parallel. Neither pass reads
+// input metadata on the CPU, and each output word has exactly one writer.
+layout(local_size_x = 64) in;
+layout(buffer_reference, std430, buffer_reference_align = 4) readonly buffer InputWords { uint words[]; };
+layout(buffer_reference, std430, buffer_reference_align = 4) buffer OutputWords { uint words[]; };
+layout(push_constant, std430) uniform Build {
+    uint64_t triangles;
+    uint64_t data;
+    uint64_t outputData;
+    uint64_t status;
+    uint64_t trianglesSize;
+    uint64_t dataSize;
+    uint64_t outputSize;
+    uint64_t triangleCount;
+    uint64_t triangleStride;
+    uint64_t trianglesAccessSize;
+    uint64_t dataAccessSize;
+    uint64_t phase;
+} build;
+
+// Status: 0 success, 1 malformed/bounds/alignment/alias input, 2 arithmetic
+// overflow, 3 output size does not match actual GPU triangle metadata.
+// All addresses are valid device addresses owned by the caller. Status is a
+// disjoint 4-byte object. Input bases and accessible ranges are word-aligned;
+// trianglesSize/dataSize describe logical byte bounds. Their accessible ranges
+// must include the complete word containing the final logical byte. This avoids
+// assuming optional 8-bit storage support and is a public-adapter proof gate.
+const uint64_t maximum = 0xfffffffffffffffful;
+
+void finish(uint code) { OutputWords(build.status).words[0] = code; }
+
+uint byteAt(uint64_t address, uint64_t offset) {
+    return (InputWords(address + (offset & ~3ul)).words[0] >> (uint(offset & 3ul) * 8u)) & 255u;
+}
+
+uint little32(uint64_t address, uint64_t offset) {
+    return byteAt(address, offset) | byteAt(address, offset + 1ul) << 8u |
+           byteAt(address, offset + 2ul) << 16u | byteAt(address, offset + 3ul) << 24u;
+}
+
+void put32(uint64_t offset, uint value) { OutputWords(build.outputData + offset).words[0] = value; }
+void put64(uint64_t offset, uint64_t value) {
+    put32(offset, uint(value));
+    put32(offset + 4ul, uint(value >> 32u));
+}
+
+uint output32(uint64_t offset) { return InputWords(build.outputData + offset).words[0]; }
+uint64_t output64(uint64_t offset) { return uint64_t(output32(offset)) | (uint64_t(output32(offset + 4ul)) << 32u); }
+
+bool validRange(uint64_t address, uint64_t size) {
+    return (address & 3ul) == 0ul && (size == 0ul || address != 0ul) && size <= maximum - address;
+}
+
+bool overlap(uint64_t a, uint64_t aSize, uint64_t b, uint64_t bSize) {
+    return aSize != 0ul && bSize != 0ul && a < b + bSize && b < a + aSize;
+}
+
+bool triangleAt(uint64_t index, out uint offset, out uint level, out uint format, out uint64_t bytes) {
+    uint64_t record = index * build.triangleStride;
+    offset = little32(build.triangles, record);
+    uint packed = little32(build.triangles, record + 4ul);
+    level = packed & 65535u;
+    format = packed >> 16u;
+    if ((format != 1u && format != 2u) || level > 31u) return false;
+    uint64_t bits = (1ul << (2u * level)) * uint64_t(format);
+    bytes = bits / 8ul + uint64_t((bits & 7ul) != 0ul);
+    return true;
+}
+
+void planBuild() {
+    if (!validRange(build.outputData, build.outputSize) || !validRange(build.triangles, build.trianglesAccessSize) ||
+        !validRange(build.data, build.dataAccessSize) || (build.trianglesAccessSize & 3ul) != 0ul ||
+        (build.dataAccessSize & 3ul) != 0ul || build.trianglesSize > build.trianglesAccessSize ||
+        build.dataSize > build.dataAccessSize || build.outputSize < 64ul || (build.outputSize & 15ul) != 0ul ||
+        overlap(build.outputData, build.outputSize, build.triangles, build.trianglesAccessSize) ||
+        overlap(build.outputData, build.outputSize, build.data, build.dataAccessSize) ||
+        overlap(build.status, 4ul, build.outputData, build.outputSize) ||
+        overlap(build.status, 4ul, build.triangles, build.trianglesAccessSize) ||
+        overlap(build.status, 4ul, build.data, build.dataAccessSize)) {
+        finish(1u);
+        return;
+    }
+    if (build.triangleCount > (maximum - 79ul) / 24ul) { finish(2u); return; }
+    uint64_t dataBegin = (64ul + build.triangleCount * 24ul + 15ul) & ~15ul;
+    if (build.triangleCount != 0ul) {
+        if (build.triangleStride < 8ul) { finish(1u); return; }
+        if (build.triangleCount - 1ul > (maximum - 8ul) / build.triangleStride) { finish(2u); return; }
+        if ((build.triangleCount - 1ul) * build.triangleStride + 8ul > build.trianglesSize) { finish(1u); return; }
+    }
+    uint64_t end = dataBegin;
+    for (uint64_t i = 0ul; i < build.triangleCount; ++i) {
+        uint offset, level, format;
+        uint64_t bytes;
+        if (!triangleAt(i, offset, level, format, bytes) || uint64_t(offset) > build.dataSize ||
+            bytes > build.dataSize - uint64_t(offset)) { finish(1u); return; }
+        uint64_t slot = (bytes + 7ul) & ~7ul;
+        if (slot > maximum - end) { finish(2u); return; }
+        end += slot;
+    }
+    if (end > maximum - 15ul) { finish(2u); return; }
+    if (((end + 15ul) & ~15ul) != build.outputSize) { finish(3u); return; }
+
+    for (uint64_t word = 0ul; word < 64ul; word += 4ul) put32(word, 0u);
+    for (uint64_t word = 64ul + build.triangleCount * 24ul; word < dataBegin; word += 4ul) put32(word, 0u);
+    put32(0ul, 0x4f4c4556u); // "VELO"
+    put32(4ul, 0x00004d4du); // "MM\0\0"
+    put32(8ul, 1u);
+    put32(12ul, 64u);
+    put64(16ul, build.outputSize);
+    put64(24ul, build.triangleCount);
+    put64(32ul, 64ul);
+    put64(40ul, dataBegin);
+    uint64_t destination = dataBegin;
+    for (uint64_t i = 0ul; i < build.triangleCount; ++i) {
+        uint offset, level, format;
+        uint64_t bytes;
+        triangleAt(i, offset, level, format, bytes);
+        uint64_t record = 64ul + i * 24ul;
+        put32(record, format);
+        put32(record + 4ul, level);
+        put64(record + 8ul, destination);
+        put64(record + 16ul, bytes);
+        destination += (bytes + 7ul) & ~7ul;
+    }
+    finish(0u);
+}
+
+void encodeBuild() {
+    if (InputWords(build.status).words[0] != 0u) return;
+    // These parameters must be identical to phase 0 except for phase itself.
+    // Checking the header avoids encoding with an unrelated successful plan.
+    if (!validRange(build.outputData, build.outputSize) || build.outputSize < 64ul ||
+        output64(16ul) != build.outputSize || output64(24ul) != build.triangleCount) return;
+    uint64_t dataBegin = output64(40ul);
+    if (dataBegin > build.outputSize) return;
+    uint64_t words = (build.outputSize - dataBegin) >> 2u;
+    uint64_t step = uint64_t(gl_NumWorkGroups.x) * 64ul;
+    for (uint64_t word = uint64_t(gl_GlobalInvocationID.x); word < words; word += step) {
+        uint64_t destination = dataBegin + word * 4ul;
+        // All triangle slots are nonempty and have strictly increasing offsets.
+        // Select the slot at or before this word, including final blob padding.
+        uint64_t low = 0ul, high = build.triangleCount;
+        while (low < high) {
+            uint64_t middle = low + ((high - low) >> 1u);
+            if (output64(64ul + middle * 24ul + 8ul) <= destination) low = middle + 1ul;
+            else high = middle;
+        }
+        if (low == 0ul) continue; // The empty build has no data words.
+        uint64_t triangle = low - 1ul;
+        uint64_t record = 64ul + triangle * 24ul;
+        uint64_t relative = destination - output64(record + 8ul);
+        uint64_t bytes = output64(record + 16ul);
+        uint format = output32(record), level = output32(record + 4ul);
+        uint tail = 255u;
+        if (level <= 1u) {
+            uint bits = format << (2u * level);
+            if (bits < 8u) tail = (1u << bits) - 1u;
+        }
+        uint sourceOffset = little32(build.triangles, triangle * build.triangleStride);
+        uint packed = 0u;
+        for (uint lane = 0u; lane < 4u; ++lane) {
+            uint64_t source = relative + uint64_t(lane);
+            if (source < bytes) {
+                uint value = byteAt(build.data, uint64_t(sourceOffset) + source);
+                if (source == bytes - 1ul) value &= tail;
+                packed |= value << (8u * lane);
+            }
+        }
+        put32(destination, packed);
+    }
+}
+
+void main() {
+    if (gl_GlobalInvocationID.y != 0u || gl_GlobalInvocationID.z != 0u || build.status == 0ul ||
+        !validRange(build.status, 4ul)) return;
+    if (build.phase == 0ul) {
+        if (gl_GlobalInvocationID.x == 0u) planBuild();
+    } else if (build.phase == 1ul) {
+        encodeBuild();
+    }
+}
