@@ -21,18 +21,17 @@ NOTE: Not all layers are supported on every platform, please read the documentat
 
 | Layer | Status | Point of Contact |
 | --- | --- | --- |
-| [VK_LAYER_HANYANG_ray_tracing_fallback](docs/ray_tracing_fallback_layer.md) | Executable compute-based KHR RT pipeline subset; not a conformant implementation of the complete extensions | [@hanyangl5](https://github.com/hanyangl5) |
-| [VK_LAYER_VKRT_SOFTWARE_RAY_QUERY](vkrt_layer/README.md) | GPU-built BVHIR and SPIR-V software Ray Query lowering; bootstrap implementation requiring native RT capability exposure | [@hanyangl5](https://github.com/hanyangl5) |
+| [VK_LAYER_VKRT_SOFTWARE_RAY_QUERY](layers/raytracing/README.md) | Shared software AS, Ray Query, and typed RT Pipeline implementation; active development with selected CTS evidence | [@hanyangl5](https://github.com/hanyangl5) |
 
 The active [software RT implementation goal](docs/ray_tracing_fallback_goal.md) is complete mandatory Vulkan AS, Ray Query, and RT Pipeline functionality on qualifying devices without native RT. The selected route is Mesa build algorithms and build IR, a portable BVH4 runtime shared by RQ/RTP, and typed SPIR-V continuation lowering. See the [baseline audit and feasibility review](docs/ray_tracing_fallback_review.md).
 
-Both executable layers remain restricted development prototypes. The [D3D12 port record](docs/ray_tracing_fallback_port.md) retains source provenance and historical implementation evidence; its earlier exact D3D12 AS-builder target is superseded by the Mesa/BVH4 decision. Default builds remain opt-in.
+The canonical implementation is under `layers/raytracing`, including its host adapter, Mesa-derived builder, BVH4 backend, traversal, typed compiler, and tests. The full goal remains unfinished. The [D3D12 port record](docs/ray_tracing_fallback_port.md) retains source provenance and historical implementation evidence; its earlier exact D3D12 AS-builder target is superseded by the Mesa/BVH4 decision. Experimental builds remain opt-in.
 
 Track completed components, test evidence, and next work in the [implementation status](docs/ray_tracing_fallback_status.md).
 
 ## Information for Developing or Contributing:
 
-The software Ray Query layer is independently buildable from `vkrt_layer/layer`, or opt-in with `-DBUILD_RAY_QUERY_FALLBACK=ON` in a configured VEL build. It is a separate implementation from the RT pipeline layer, with its own acceleration-structure format. Enable only one of these experimental RT layers at a time. See [its build instructions and limitations](vkrt_layer/README.md).
+Build the unified software RT layer directly from `layers/raytracing`, or enable `-DBUILD_RAY_TRACING_FALLBACK=ON` in a configured VEL build. `BUILD_RAY_QUERY_FALLBACK` is retained as an alias for the same target. AS, Ray Query, and RT Pipeline share the layer's object model and BVH4 representation. See [the build instructions, evidence, and remaining limits](layers/raytracing/README.md).
 
 Please see the [CONTRIBUTING.md](CONTRIBUTING.md) file in this repository for more details.
 
@@ -44,6 +43,6 @@ Includes directions for building all components and testing them.
 ## License
 This work is released as open source under a Apache-style license from Khronos including a Khronos copyright.
 
-See [LICENSE](LICENSE) for a full list of licenses used in this repository.
+See [LICENSES](LICENSES) for the license texts used in this repository.
 
-The imported Ray Query layer retains its per-file license and provenance notices, including the MIT-licensed Mesa-derived builder sources. See [its source notes](vkrt_layer/README.md#source-provenance).
+The software RT implementation retains its per-file license and provenance notices, including the MIT-licensed Mesa-derived builder sources. See [its source notes](layers/raytracing/README.md#source-provenance).

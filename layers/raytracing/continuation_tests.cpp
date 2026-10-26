@@ -1,12 +1,11 @@
 // Copyright 2026 The Khronos Group Inc.
 // SPDX-License-Identifier: Apache-2.0
 #include "continuations.h"
-#include "compiler.h"
-#include "runtime.h"
+#include "glsl_compiler.h"
 #include "continuation_runtime.h"
 #include "runtime_test_shader.h"
 #include <spirv-tools/libspirv.hpp>
-#include <spirv_cross/spirv.hpp>
+#include <spirv/unified1/spirv.hpp>
 #include <algorithm>
 #include <iostream>
 #include <map>
@@ -670,10 +669,6 @@ int main() {
                                    VK_SHADER_STAGE_COMPUTE_BIT);
         spvtools::SpirvTools tools(SPV_ENV_VULKAN_1_2);
         Require(tools.Validate(runtime), "GLSL continuation runtime produced invalid SPIR-V");
-        for (uint32_t pass = 0; pass < static_cast<uint32_t>(BuildPass::Count); ++pass) {
-            auto builder = BuildShader(static_cast<BuildPass>(pass));
-            Require(tools.Validate(builder), "GPU BVH pass produced invalid SPIR-V");
-        }
         std::cout << "SPIR-V continuation analysis passed\n";
     } catch (const std::exception &error) {
         std::cerr << error.what() << '\n';

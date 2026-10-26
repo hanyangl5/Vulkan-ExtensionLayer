@@ -3,6 +3,10 @@
 
 # D3D12 fallback reference: provenance and historical port record
 
+The superseded executable was removed during source consolidation; source and
+test paths below describe their original Git revisions. Pinned upstream sources
+and the active typed-continuation component proofs remain available.
+
 The active contract is the [software RT implementation goal](ray_tracing_fallback_goal.md).
 The selected AS route is now Mesa build algorithms to portable BVH4, shared by RQ
 and RTP. This supersedes the earlier exact D3D12 builder reproduction requirement.

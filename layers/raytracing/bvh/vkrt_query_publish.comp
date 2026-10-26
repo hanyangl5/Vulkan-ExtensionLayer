@@ -1,0 +1,32 @@
+/* SPDX-License-Identifier: MIT */
+#version 460
+#extension GL_EXT_buffer_reference : require
+#extension GL_EXT_scalar_block_layout : require
+#extension GL_EXT_shader_explicit_arithmetic_types_int64 : require
+#extension GL_EXT_shader_atomic_int64 : require
+
+layout(local_size_x = 64) in;
+layout(buffer_reference, scalar, buffer_reference_align = 4) buffer Word { uint value; };
+layout(buffer_reference, scalar, buffer_reference_align = 8) buffer Counter { uint64_t value; };
+layout(push_constant, scalar) uniform PublishArgs {
+    uint64_t publication, serials, state, counters;
+    uint first, count, reset, reserved;
+} args;
+
+void main() {
+    uint id = gl_GlobalInvocationID.x;
+    if (id >= args.count) return;
+    uint64_t src = args.publication + uint64_t(id) * 16ul;
+    uint64_t dst = args.state + uint64_t(args.first + id) * 16ul;
+    uint64_t sequence = atomicAdd(Counter(args.counters + uint64_t(args.first + id) * 8ul).value, 1ul) + 1ul;
+    if (args.reset != 0u) {
+        Word(src).value = Word(src + 4ul).value = Word(src + 8ul).value = Word(src + 12ul).value = 0u;
+    }
+    Word(dst).value = Word(src).value;
+    Word(dst + 4ul).value = Word(src + 4ul).value;
+    Word(dst + 8ul).value = Word(src + 8ul).value;
+    Word(dst + 12ul).value = 0u;
+    /* This immutable execution payload is read by the host only after native
+     * timestamp acquisition. GPU/host atomic interoperability is not assumed. */
+    Counter(args.serials + uint64_t(id) * 8ul).value = sequence;
+}

@@ -4,7 +4,7 @@
 #include "typed_pipeline.h"
 #include "cts_raytmax_intersection_fixture.h"
 #include <spirv-tools/libspirv.hpp>
-#include <spirv_cross/spirv.hpp>
+#include <spirv/unified1/spirv.hpp>
 #include <vulkan/vulkan.h>
 #include <algorithm>
 #include <cstring>
@@ -346,6 +346,44 @@ OpFunctionEnd
     }
     Require(logical_copies >= 5 && volatile_loads == 3, "Aggregate conversion lost or duplicated a volatile source read");
 }
+void PrivateFrameBounds() {
+    const char *source = R"spv(
+OpCapability Shader
+OpCapability RayTracingKHR
+OpCapability Int64
+OpExtension "SPV_KHR_ray_tracing"
+OpMemoryModel Logical GLSL450
+OpEntryPoint IntersectionKHR %main "main" %large
+%void = OpTypeVoid
+%bool = OpTypeBool
+%u32 = OpTypeInt 32 0
+%u64 = OpTypeInt 64 0
+%f32 = OpTypeFloat 32
+%zero = OpConstant %u32 0
+%wide_zero = OpConstant %u64 0
+%one = OpConstant %f32 1
+%count = OpConstant %u32 1073741824
+%array = OpTypeArray %u64 %count
+%array_ptr = OpTypePointer Private %array
+%word_ptr = OpTypePointer Private %u64
+%large = OpVariable %array_ptr Private
+%fn = OpTypeFunction %void
+%main = OpFunction %void None %fn
+%entry = OpLabel
+%element = OpAccessChain %word_ptr %large %zero
+%reported = OpReportIntersectionKHR %bool %one %zero
+OpStore %element %wide_zero
+OpReturn
+OpFunctionEnd
+)spv";
+    bool rejected = false;
+    try {
+        CompileTypedContinuationSteps(Source(source), "main", spv::ExecutionModelIntersectionKHR);
+    } catch (const std::exception &e) {
+        rejected = std::string(e.what()).find("module-Private storage exceeds 32-bit") != std::string::npos;
+    }
+    Require(rejected, "Oversized module-Private array was emitted or its frame offset truncated");
+}
 void OpaqueResourceBoundaries() {
     const std::string image = R"spv(
 OpCapability Shader
@@ -668,104 +706,161 @@ int main() {
         BoundariesAndSourcePreservation();
         LargeDescriptorResourceTypes();
         ResourceValueTypes();
+        PrivateFrameBounds();
         OpaqueResourceBoundaries();
         ExactCtsImageAtomicStage();
-        auto program = CompileTypedContinuationSteps(Source(), "main", spv::ExecutionModelIntersectionKHR);
-        std::string text;
-        spvtools::SpirvTools tools(SPV_ENV_VULKAN_1_3);
-        Require(tools.Disassemble(program.spirv, &text), "Generated module disassembly failed");
-        Require(text.find("launch%123\\\"%456") != std::string::npos, "SPIR-V literal percent IDs/escaped quote were rewritten");
-        Require(program.state_count > 12, "Source CFG was not split into block/resume states");
-        const auto &frame = program.frames.functions.at(0);
-        Require(frame.suspensions.size() == 2, "Reachable helper report was not lowered");
-        std::map<std::string, uint32_t> names;
-        for (size_t p = 5; p < program.source.size(); p += program.source[p] >> 16)
-            if ((program.source[p] & 0xffff) == spv::OpName)
-                names[reinterpret_cast<const char *>(&program.source[p + 2])] = program.source[p + 1];
-        const auto first_result = names.at("first_accepted");
-        Require(std::find(frame.suspensions[0].saved_values.begin(), frame.suspensions[0].saved_values.end(), first_result) ==
-                        frame.suspensions[0].saved_values.end() &&
-                    std::find(frame.suspensions[1].saved_values.begin(), frame.suspensions[1].saved_values.end(), first_result) !=
-                        frame.suspensions[1].saved_values.end(),
-                "Suspension bool was saved before creation or not preserved at a later pause");
-        auto slot = [&](const char *name) -> const ContinuationFrameSlot & {
-            for (const auto &s : frame.slots)
-                if (s.value == names.at(name)) return s;
-            throw std::runtime_error("Missing source variable backing");
-        };
-        constexpr uint32_t count = 32, base_limit = 7;
-        std::vector<Oracle> expected;
-        for (uint32_t i = 0; i < count; ++i) expected.emplace_back(i, base_limit);
-        GPU gpu;
-        auto frame_bytes = program.frame_stride_words * count * 4;
-        auto output_offset = (frame_bytes + 255u) & ~255u;
-        if (!gpu.Init(program.spirv, output_offset + count * 4, output_offset, false, frame_bytes)) {
-            std::cout << "Generated source CFG SPIR-V validated; Vulkan execution unavailable\n";
-            return 77;
-        }
-        for (uint32_t i = 0; i < count; ++i) std::fill_n(gpu.mapped + i * program.frame_stride_words + program.control_word, 7, 0);
-        for (uint32_t i = 0; i < count; ++i) gpu.mapped[output_offset / 4 + i] = i + 100;
-        std::vector<uint32_t> event_index(count, 0);
-        gpu.Dispatch(base_limit, 0, count);
-        // A second dispatch without completing the first request must not
-        // speculate through the report, mutate source locals, or expose bool.
-        std::vector<uint32_t> waiting(gpu.mapped, gpu.mapped + output_offset / 4 + count);
-        gpu.Dispatch(base_limit, 0, count);
-        Require(std::equal(waiting.begin(), waiting.end(), gpu.mapped), "Source resumed before suspension result was ready");
-        // The source SSBO load has already occurred. Its typed SSA value must
-        // survive pauses; rematerializing that load would observe this poison.
-        for (uint32_t i = 0; i < count; ++i) gpu.mapped[output_offset / 4 + i] = 0xdeadbeef;
-        bool finished = false;
-        for (uint32_t round = 0; round < 128; ++round) {
-            finished = true;
-            for (uint32_t id = 0; id < count; ++id) {
-                auto control = gpu.mapped + id * program.frame_stride_words + program.control_word;
-                if (control[0] == UINT32_MAX) continue;
-                finished = false;
-                Require(control[1] == 2 && control[2] == 0, "Invalid generated request state");
-                Require(event_index[id] < expected[id].events.size(), "Source emitted excess suspension");
-                const auto &event = expected[id].events[event_index[id]++];
-                float distance;
-                std::memcpy(&distance, control + 4, 4);
-                Require(distance == event.distance && control[5] == event.kind, "Source ALU/request arguments changed");
-                Require(control[6] == frame.suspensions[0].word_offset || control[6] == frame.suspensions[1].word_offset,
-                        "Request lost source-site identity");
-                control[3] = (id + event.kind) % 3 != 0;
-                control[2] = 1;
+        for (bool module_private : {false, true}) {
+            std::string source = kSource;
+            if (module_private) {
+                Replace(source, "%launch %config %output", "%launch %config %output %local %untouched");
+                Replace(source, "%entry_type = OpTypeFunction",
+                        "%private_ptr = OpTypePointer Private %payload\n%private_word = OpTypePointer Private %u32\n"
+                        "%local = OpVariable %private_ptr Private %initial\n%untouched = OpVariable %private_word Private\n"
+                        "%entry_type = OpTypeFunction");
+                Replace(source, "%local = OpVariable %local_ptr Function\n", "");
+                Replace(source, "%untouched = OpVariable %local_word Function\n", "");
+                Replace(source, "%alias = OpAccessChain %local_word", "%alias = OpAccessChain %private_word");
+                Replace(source, "%result_ptr = OpAccessChain %local_word", "%result_ptr = OpAccessChain %private_word");
+                Replace(source, "OpStore %local %initial\n", "");
+                Replace(source, "OpStore %external_ptr %seed_added\n",
+                        "OpStore %external_ptr %seed_added\n%uninitialized_value = OpLoad %u32 %untouched\n");
+                for (const char *initializer : {"OpUndef", "OpConstantNull"}) {
+                    std::string undefined = source;
+                    Replace(undefined, "%local = OpVariable",
+                            std::string("%private_initializer = ") + initializer + " %payload\n%local = OpVariable");
+                    if (std::string(initializer) == "OpUndef")
+                        Replace(undefined, "%launch_id = OpLoad", "OpStore %local %private_initializer\n%launch_id = OpLoad");
+                    else
+                        Replace(undefined, "%private_ptr Private %initial", "%private_ptr Private %private_initializer");
+                    auto lowered = CompileTypedContinuationSteps(Source(undefined), "main", spv::ExecutionModelIntersectionKHR);
+                    Require(lowered.private_variables.size() == 2,
+                            "Private null initializer/undefined composite store backing lost");
+                }
             }
-            if (finished) break;
-            gpu.Dispatch(base_limit, 0, count);
+            auto program = CompileTypedContinuationSteps(Source(source), "main", spv::ExecutionModelIntersectionKHR);
+            Require(program.private_variables.size() == (module_private ? 2u : 0u), "Module-Private backing metadata missing");
+            if (module_private) {
+                auto physical = CompileTypedPipelineStage(Source(source), "main", VK_SHADER_STAGE_INTERSECTION_BIT_KHR, nullptr,
+                                                          "private_globals_bda");
+                TypedContinuationCompileOptions private_options;
+                private_options.transport = TypedFrameTransport::PrivateArray;
+                private_options.private_frame_words = physical.frame_stride_words;
+                auto native_private = CompileTypedPipelineStage(Source(source), "main", VK_SHADER_STAGE_INTERSECTION_BIT_KHR,
+                                                                nullptr, "private_globals_private", private_options);
+                Require(physical.private_variables.size() == 2 && native_private.private_variables.size() == 2 &&
+                            physical.frame_stride_bytes == native_private.frame_stride_bytes &&
+                            physical.private_variables[0].offset == native_private.private_variables[0].offset &&
+                            physical.private_variables[1].offset == native_private.private_variables[1].offset,
+                        "BDA/PrivateArray module-Private state has inconsistent checked frame backing");
+            }
+            std::string text;
+            spvtools::SpirvTools tools(SPV_ENV_VULKAN_1_3);
+            Require(tools.Disassemble(program.spirv, &text), "Generated module disassembly failed");
+            Require(text.find("launch%123\\\"%456") != std::string::npos,
+                    "SPIR-V literal percent IDs/escaped quote were rewritten");
+            Require(program.state_count > 12, "Source CFG was not split into block/resume states");
+            const auto &frame = program.frames.functions.at(0);
+            Require(frame.suspensions.size() == 2, "Reachable helper report was not lowered");
+            std::map<std::string, uint32_t> names;
+            for (size_t p = 5; p < program.source.size(); p += program.source[p] >> 16)
+                if ((program.source[p] & 0xffff) == spv::OpName)
+                    names[reinterpret_cast<const char *>(&program.source[p + 2])] = program.source[p + 1];
+            const auto first_result = names.at("first_accepted");
+            Require(std::find(frame.suspensions[0].saved_values.begin(), frame.suspensions[0].saved_values.end(), first_result) ==
+                            frame.suspensions[0].saved_values.end() &&
+                        std::find(frame.suspensions[1].saved_values.begin(), frame.suspensions[1].saved_values.end(),
+                                  first_result) != frame.suspensions[1].saved_values.end(),
+                    "Suspension bool was saved before creation or not preserved at a later pause");
+            auto offset = [&](const char *name) -> uint64_t {
+                for (const auto &s : frame.slots)
+                    if (s.value == names.at(name)) return s.offset;
+                for (const auto &s : program.private_variables)
+                    if (s.variable == names.at(name)) return s.offset;
+                throw std::runtime_error("Missing source variable backing");
+            };
+            constexpr uint32_t count = 32, base_limit = 7;
+            std::vector<Oracle> expected;
+            for (uint32_t i = 0; i < count; ++i) expected.emplace_back(i, base_limit);
+            GPU gpu;
+            auto frame_bytes = program.frame_stride_words * count * 4;
+            auto output_offset = (frame_bytes + 255u) & ~255u;
+            if (!gpu.Init(program.spirv, output_offset + count * 4, output_offset, false, frame_bytes)) {
+                std::cout << "Generated source CFG SPIR-V validated; Vulkan execution unavailable\n";
+                return 77;
+            }
+            std::vector<uint32_t> complete;
+            // Reuse the same backing for a second logical activation. The initialized
+            // aggregate must reset at entry, while all resumed states preserve it.
+            for (uint32_t activation = 0; activation < 2; ++activation) {
+                for (uint32_t i = 0; i < count; ++i)
+                    std::fill_n(gpu.mapped + i * program.frame_stride_words + program.control_word, 7, 0);
+                for (uint32_t i = 0; i < count; ++i) gpu.mapped[output_offset / 4 + i] = i + 100;
+                std::vector<uint32_t> event_index(count, 0);
+                gpu.Dispatch(base_limit, 0, count);
+                // A second dispatch without completing the first request must not
+                // speculate through the report, mutate source locals, or expose bool.
+                std::vector<uint32_t> waiting(gpu.mapped, gpu.mapped + output_offset / 4 + count);
+                gpu.Dispatch(base_limit, 0, count);
+                Require(std::equal(waiting.begin(), waiting.end(), gpu.mapped),
+                        "Source resumed before suspension result was ready");
+                // The source SSBO load has already occurred. Its typed SSA value must
+                // survive pauses; rematerializing that load would observe this poison.
+                for (uint32_t i = 0; i < count; ++i) gpu.mapped[output_offset / 4 + i] = 0xdeadbeef;
+                bool finished = false;
+                for (uint32_t round = 0; round < 128; ++round) {
+                    finished = true;
+                    for (uint32_t id = 0; id < count; ++id) {
+                        auto control = gpu.mapped + id * program.frame_stride_words + program.control_word;
+                        if (control[0] == UINT32_MAX) continue;
+                        finished = false;
+                        Require(control[1] == 2 && control[2] == 0, "Invalid generated request state");
+                        Require(event_index[id] < expected[id].events.size(), "Source emitted excess suspension");
+                        const auto &event = expected[id].events[event_index[id]++];
+                        float distance;
+                        std::memcpy(&distance, control + 4, 4);
+                        Require(distance == event.distance && control[5] == event.kind, "Source ALU/request arguments changed");
+                        Require(control[6] == frame.suspensions[0].word_offset || control[6] == frame.suspensions[1].word_offset,
+                                "Request lost source-site identity");
+                        control[3] = (id + event.kind) % 3 != 0;
+                        control[2] = 1;
+                    }
+                    if (finished) break;
+                    gpu.Dispatch(base_limit, 0, count);
+                }
+                Require(finished, "Generated source state machine did not terminate");
+                for (uint32_t id = 0; id < count; ++id) {
+                    auto words = gpu.mapped + id * program.frame_stride_words;
+                    Require(event_index[id] == expected[id].events.size(), "Source skipped a suspension");
+                    VerifyPayload(words + offset("local") / 4, expected[id].array, expected[id].result);
+                    VerifyPayload(words + offset("shadow") / 4, expected[id].shadow, 0);
+                    Require(gpu.mapped[output_offset / 4 + id] == expected[id].result, "Source SSBO binding/typed store changed");
+                    Require(words[offset("untouched") / 4] == 0xcdcdcdcd, "Source uninitialized local was speculatively copied");
+                }
+                complete.assign(gpu.mapped, gpu.mapped + output_offset / 4 + count);
+                gpu.Dispatch(base_limit + 1000, 0, count + 5);
+                Require(std::equal(complete.begin(), complete.end(), gpu.mapped), "Source terminal state executed again");
+            }
+            // An undersized frame descriptor must also skip invocation zero before
+            // touching its PC, local storage, or ordinary source output resource.
+            VkDescriptorBufferInfo tiny{gpu.buffer, 0, (program.frame_stride_words - 1) * 4};
+            VkWriteDescriptorSet write{VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};
+            write.dstSet = gpu.set;
+            write.dstBinding = 0;
+            write.descriptorCount = 1;
+            write.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+            write.pBufferInfo = &tiny;
+            vkUpdateDescriptorSets(gpu.device, 1, &write, 0, nullptr);
+            std::fill_n(gpu.mapped + program.control_word, 7, 0);
+            complete.assign(gpu.mapped, gpu.mapped + output_offset / 4 + count);
+            gpu.Dispatch(base_limit, 0, count + 5);
+            Require(std::equal(complete.begin(), complete.end(), gpu.mapped),
+                    "Undersized frame descriptor bypassed kernel bounds guard");
+            std::cout
+                << "Compiled source CFG " << (module_private ? "module-Private" : "Function")
+                << " storage validated and executed: 32 invocations, dynamic loops/branches, parallel Phi swaps, "
+                   "inlined suspending helper, typed aggregates, persistent aliases, repeated real suspend/resume and late bool "
+                   "results\n";
         }
-        Require(finished, "Generated source state machine did not terminate");
-        for (uint32_t id = 0; id < count; ++id) {
-            auto words = gpu.mapped + id * program.frame_stride_words;
-            Require(event_index[id] == expected[id].events.size(), "Source skipped a suspension");
-            VerifyPayload(words + slot("local").offset / 4, expected[id].array, expected[id].result);
-            VerifyPayload(words + slot("shadow").offset / 4, expected[id].shadow, 0);
-            Require(gpu.mapped[output_offset / 4 + id] == expected[id].result, "Source SSBO binding/typed store changed");
-            Require(words[slot("untouched").offset / 4] == 0xcdcdcdcd, "Source uninitialized local was speculatively copied");
-        }
-        std::vector<uint32_t> complete(gpu.mapped, gpu.mapped + output_offset / 4 + count);
-        gpu.Dispatch(base_limit + 1000, 0, count + 5);
-        Require(std::equal(complete.begin(), complete.end(), gpu.mapped), "Source terminal state executed again");
-        // An undersized frame descriptor must also skip invocation zero before
-        // touching its PC, local storage, or ordinary source output resource.
-        VkDescriptorBufferInfo tiny{gpu.buffer, 0, (program.frame_stride_words - 1) * 4};
-        VkWriteDescriptorSet write{VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};
-        write.dstSet = gpu.set;
-        write.dstBinding = 0;
-        write.descriptorCount = 1;
-        write.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-        write.pBufferInfo = &tiny;
-        vkUpdateDescriptorSets(gpu.device, 1, &write, 0, nullptr);
-        std::fill_n(gpu.mapped + program.control_word, 7, 0);
-        complete.assign(gpu.mapped, gpu.mapped + output_offset / 4 + count);
-        gpu.Dispatch(base_limit, 0, count + 5);
-        Require(std::equal(complete.begin(), complete.end(), gpu.mapped),
-                "Undersized frame descriptor bypassed kernel bounds guard");
-        std::cout << "Compiled source CFG validated and executed: 32 invocations, dynamic loops/branches, parallel Phi swaps, "
-                     "inlined suspending helper, typed aggregates, persistent aliases, repeated real suspend/resume and late bool "
-                     "results\n";
         return 0;
     } catch (const std::exception &error) {
         std::cerr << error.what() << "\n";

@@ -1,7 +1,7 @@
 // Copyright 2026 The Khronos Group Inc.
 // SPDX-License-Identifier: Apache-2.0
 #include "typed_runtime.h"
-#include "compiler.h"
+#include "glsl_compiler.h"
 #include "typed_runtime_sources.h"
 #include <spirv/unified1/spirv.hpp>
 #include <spirv-tools/optimizer.hpp>
@@ -281,20 +281,22 @@ TypedRuntimeProgram BuildTypedRuntimeProgram(const std::vector<TypedContinuation
     // Eliminate aggregate parameter shuttles and trivial codec calls before
     // native compilation. No fast-math or floating-point contraction passes
     // are used; source NoContraction and execution controls remain intact.
-    spvtools::Optimizer optimizer(SPV_ENV_VULKAN_1_3);
-    std::string cleanup_error;
-    optimizer.SetMessageConsumer([&](spv_message_level_t, const char *, const spv_position_t &, const char *message) {
-        cleanup_error += std::string(message) + "\n";
-    });
-    optimizer.RegisterPerformancePasses();
-    W cleaned;
-    spvtools::ValidatorOptions validation;
-    validation.SetScalarBlockLayout(true);
-    spvtools::OptimizerOptions cleanup_options;
-    cleanup_options.set_validator_options(validation);
-    bool optimized = optimizer.Run(result.spirv.data(), result.spirv.size(), &cleaned, cleanup_options);
-    Need(optimized, "native runtime cleanup failed: " + cleanup_error);
-    result.spirv = std::move(cleaned);
+    if (options.optimize) {
+        spvtools::Optimizer optimizer(SPV_ENV_VULKAN_1_3);
+        std::string cleanup_error;
+        optimizer.SetMessageConsumer([&](spv_message_level_t, const char *, const spv_position_t &, const char *message) {
+            cleanup_error += std::string(message) + "\n";
+        });
+        optimizer.RegisterPerformancePasses();
+        W cleaned;
+        spvtools::ValidatorOptions validation;
+        validation.SetScalarBlockLayout(true);
+        spvtools::OptimizerOptions cleanup_options;
+        cleanup_options.set_validator_options(validation);
+        bool optimized = optimizer.Run(result.spirv.data(), result.spirv.size(), &cleaned, cleanup_options);
+        Need(optimized, "native runtime cleanup failed: " + cleanup_error);
+        result.spirv = std::move(cleaned);
+    }
     for (uint32_t i = 0; i < groups.size(); ++i) {
         std::array<uint32_t, 8> words{i,
                                       VEL_RT_SBT_HANDLE_MAGIC,

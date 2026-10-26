@@ -12,6 +12,12 @@ This file is the repository progress checkpoint. GitHub Issues are disabled in
 this repository. It records project work; it does not activate a hosted execution
 service or imply that an external scheduler is running.
 
+Source is consolidated under `layers/raytracing`: public API in `src`, Mesa
+construction in `bvh`, shared layout/reference components in `bvh4`, traversal
+in `traversal` and integration fixtures in `tests`. The separate `vkrt_layer`
+tree and superseded HANYANG executable path have been removed. The canonical
+layer uses one AS/RQ/RTP backend; pinned upstream references remain intact.
+
 ## Goal progress
 
 - [x] Review the committed implementation and align the complete goal/route.
@@ -44,6 +50,8 @@ service or imply that an external scheduler is running.
 - [x] Cache native RTP stack variants with a private context-push layout and preserve maintenance6/application compute state.
 - [x] Translate explicit RT buffer requirement/external queries consistently and execute the public descriptor budget boundary.
 - [x] Preserve traditional descriptor-backed opaque identities across suspension and compare descriptor layout definitions.
+- [x] Execute bounded public AS property-query publication and real CTS compaction/serialization paths.
+- [x] Back numeric module-Private state per logical RT invocation and execute the additional control-flow CTS slice.
 - [ ] M0: complete all capability, no-native-RT, resource ABI, and continuation proofs.
 - [ ] M1: integrate Mesa builders, GPU BVH4 encoding/refit, and shared AS objects.
 - [ ] M2: complete Ray Query lowering and state semantics.
@@ -57,10 +65,10 @@ Component checkmarks do not complete M0/M1/M2 or the full goal.
 
 | Component | Implemented and tested | Remaining boundary |
 | --- | --- | --- |
-| [Portable BVH4 components](../layers/common/rt_fallback/README.md) | Checked reference/CPU adapter; generic BDA hierarchy encoder; direct default Mesa GPU IR adaptation/record emission with compact active leaves, full flags and explicit TLAS relocation; actual LBVH build-to-encode in one command buffer | Four-child GPU collapse, broader builder variants/large construction IDs, numerical qualification, full object/resource qualification, refit |
+| [Portable BVH4 components](../layers/raytracing/bvh4/README.md) | Checked reference/CPU adapter; generic BDA hierarchy encoder; direct default Mesa GPU IR adaptation/record emission with compact active leaves, full flags and explicit TLAS relocation; actual LBVH build-to-encode in one command buffer | Four-child GPU collapse, broader builder variants/large construction IDs, numerical qualification, full object/resource qualification, refit |
 | Typed continuation frames | Typed CFG/continuations; BDA and invocation-private library backing; builtin/push/record state; specialization, linked six-stage scheduler/shared traversal; traditional descriptor-backed opaque provenance snapshots | Complete pointer Phi/parameter provenance, actual large aggregate values, conflicting per-stage FP modes and complete resource qualification |
 | RQ host translation | Consume AS/RQ device requirements; translate resource/synchronization masks and explicit RT buffer queries; lifetime-owned AS address cells with allocator/flush/failure handling and enabled-queue-family sharing; private SSBO indexing/variable-pointer prerequisites | Complete emulation capability/limit reporting on no-RT ICDs, future unknown buffer chains, full-layout descriptor transport and private allocation budgets |
-| AS operations and host dependency | GPU CLONE/COMPACT, serialization/UUID/BLAS relocation, semantic in/out-of-place UPDATE by reconstruction; destination publication/state replay; synchronous deferred operations and ordinary-device passthrough | Complete public AS property-query pools/publication, true shrinking compaction, refit performance and full resource budgets |
+| AS operations and host dependency | GPU CLONE/COMPACT, serialization/UUID/BLAS relocation, semantic UPDATE; bounded public property pools with GPU payload/native completion acquisition and reuse/reset/free publication; synchronous deferred operations | Simultaneous query replay, complete logical-stage/native-query interaction, true shrinking compaction, refit performance and full resource budgets |
 | RQ compiler compatibility | Actual per-query AS roots from scalar/array descriptors and integer conversions; helper/value/Phi flow; direct/grouped NonUniform propagation; preserve application workgroup/specialization metadata and remove native RT declarations | Full resource-limit transparency, complete opcode/stage coverage and full shared traversal qualification |
 | RTP API compatibility | Canonical shader/pipeline/SBT/stack/Trace path; cached native variants/private context push; public layouts with retained private copies; copied descriptor definitions; maintenance6 and compute pipeline/shader-object state restoration | Full pipeline options, remaining descriptor disturbance/interoperability paths, complete mandatory API/resource qualification |
 | Base RQ SBT offset | Lower opcode 6021; select candidate/committed instance; return only the low 24 offset bits; shared-BVH4 helper and CTS evidence | Complete required getter/stage and shared-consumer qualification remain open |
@@ -84,12 +92,12 @@ It verifies those production helpers; it is not the complete no-native-RT proof.
 With the documented toolchain and Vulkan dependencies installed:
 
 ```sh
-cmake -S layers/common/rt_fallback -B build-bvh4 \
+cmake -S layers/raytracing/bvh4 -B build-bvh4 \
   -DCMAKE_BUILD_TYPE=Debug -DVEL_RT_BVH4_SANITIZERS=ON
 cmake --build build-bvh4 --parallel
 ctest --test-dir build-bvh4 --output-on-failure
 
-cmake -S vkrt_layer/layer -B build-rq -G Ninja \
+cmake -S layers/raytracing -B build-rq -G Ninja \
   -DCMAKE_BUILD_TYPE=Debug -DBUILD_TESTING=ON
 cmake --build build-rq --parallel 2
 ctest --test-dir build-rq -L offline --output-on-failure
@@ -161,7 +169,7 @@ for the full M0-M5 contract; this checkpoint does not complete any full mileston
 Reproduce shared component checks on this Windows toolchain:
 
 ```powershell
-cmake -S layers/common/rt_fallback -B build-rt-bvh4 -G Ninja `
+cmake -S layers/raytracing/bvh4 -B build-rt-bvh4 -G Ninja `
   -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ `
   -DCMAKE_BUILD_TYPE=Debug -DVEL_RT_BVH4_GPU_TESTS=ON
 cmake --build build-rt-bvh4 --parallel 4
@@ -171,7 +179,7 @@ ctest --test-dir build-rt-bvh4 --output-on-failure
 # Release CRT avoids Debug-CRT/ASan startup incompatibility in this installation.
 # The LLVM ASan runtime DLL must be discoverable when running instrumented EXEs.
 $env:PATH='C:\Program Files\LLVM\lib\clang\20\lib\windows;' + $env:PATH
-cmake -S layers/common/rt_fallback -B build-rt-bvh4-sanitize-release -G Ninja `
+cmake -S layers/raytracing/bvh4 -B build-rt-bvh4-sanitize-release -G Ninja `
   -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ `
   -DCMAKE_BUILD_TYPE=RelWithDebInfo -DVEL_RT_BVH4_SANITIZERS=ON `
   -DVEL_RT_BVH4_GPU_TESTS=ON
@@ -285,7 +293,7 @@ physical BVH4 roots. GENERIC objects retain same-buffer offset differences and
 same-offset aliases. GetASAddress publishes into a preallocated coherent leaf;
 stable calls neither allocate nor flush/write mapped memory. RQ embeds the
 per-device context as an ordinary constant; TLAS construction resolves public
-BLAS references into physical runtime records. The [address ABI](../layers/common/rt_fallback/AS_ADDRESS_ABI.md)
+BLAS references into physical runtime records. The [address ABI](../layers/raytracing/bvh4/AS_ADDRESS_ABI.md)
 records the pinned normative contract, publication/lifetime and remaining limits.
 
 An actual public-API GPU build/query regression passes with backing BDA
@@ -368,6 +376,34 @@ diagnostics, crashes or timeouts were found. The RQ/AS rerun retains **54 pass,
 complete expanded reruns and intermediate failures. Complete M0–M5 and public
 AS query-pool publication remain open.
 
+The following [query/control-flow checkpoint](rt_query_controlflow_2026-10-26.md)
+implements bounded public property-query publication. The former compaction and
+serialization CTS failures pass 2/2; an expanded AS operation slice passes 24/24
+with 24/24 native controls. The complete 56-case first query rerun instead
+measures 53 passes and three early process crashes. All three pass against the
+identical snapshot on recheck; the original crashes remain unresolved and are
+not converted into a clean 56/56 run. Pre-Vulkan WGL initialization is a source
+hypothesis under investigation, rather than a proven cause.
+
+Another 46-case external control-flow slice improves from 36 passes/10 failures
+to 46/46 with matching native controls. Typed source invocation frames now own
+numeric module-Private variables, including initializer/reset/resume behavior.
+Base derivative creation and disable-optimization flags have public software,
+native and validation evidence. Shader-object source envelopes now rebuild for
+the destination device and preserve allocator/handle-alias lifetimes. Valid
+BINARY imports with absent/different layouts still fail two external CTS cases;
+the original compilation interface must be preserved before full qualification.
+
+After [source consolidation](rt_source_consolidation_2026-10-26.md), one expanded
+226-case external RT run records **224 pass, 2 NotSupported, zero failures,
+crashes or timeouts**. It includes all 56 RQ cases, the prior 100 RTP cases,
+46 control-flow cases and 24 AS-operation cases. Both skips match native controls.
+Earlier startup crashes remain unresolved historical evidence. Fresh builds
+pass 24 offline, 29 GPU and five independent BVH4 checks. The final rebuilt DLL
+passes its three RT smoke cases and two binary-interface controls, retaining the
+two known binary-interface failures. Simultaneous queries, generic stage
+scheduling and the complete M0–M5 criteria remain open.
+
 ## Next work
 
 Run M0 proof work in parallel with shared-backend construction:
@@ -394,16 +430,21 @@ Run M0 proof work in parallel with shared-backend construction:
    descriptor-buffer interoperability, and pipeline option/API coverage before
    claiming the full typed-continuation M0 proof. Cached native pipelines now
    use a separate internal context-push layout with public state replay.
+   Shader-object source envelopes now rebuild against destination device state,
+   but valid BINARY imports with null/different layouts still fail external CTS.
+   Preserve original descriptor/sampler/push interfaces and reconstruct the
+   destination compilation interface before claiming binary compatibility.
 4. Extend the now-shared RQ/RTP builder, BVH4 traversal and AS object model.
    Implement four-child GPU collapse/refit and qualify numerical cases and large construction IDs. Wire PLOC/HPLOC only
    with complete host contracts. M1 remains incomplete.
-5. Implement full public AS property queries to address the two
-   measured [external CTS failures](rt_cts_copy_pipeline_2026-10-26.md). Use
-   execution-time GPU sizes and per-submission host publication; GPU serialization
-   itself is now implemented. Do not invent serialization sizes or rely on unproven coherent-memory polling. Expand
-   configurations and validation. Retain historical failures and
-   investigate the old unexplained startup crash if it recurs. Do not erase
-   failures or count skips as passes.
+5. Complete public AS queries beyond the bounded non-simultaneous route. Its
+   actual GPU properties and native completion acquisition now execute the two
+   former [CTS failures](rt_cts_copy_pipeline_2026-10-26.md). Implement fresh
+   execution operands/replay for overlapping recordings and complete logical
+   stage scheduling, native query interaction and queue/device qualification.
+   Preserve source wait scopes rather than imposing whole-submit waits. The
+   early startup crash has recurred; investigate it while retaining all original
+   failures and recheck evidence. Do not count skips as passes.
 6. Qualify the complete capability profile and threading/queue-family behavior
    on physical no-RT GPUs and POSIX. SSBO dynamic/nonuniform indexing and
    variablePointersStorageBuffer and compatible coherent resolver memory are

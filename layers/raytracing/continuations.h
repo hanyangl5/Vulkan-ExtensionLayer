@@ -94,6 +94,10 @@ struct ContinuationFrameOptions {
     // Reserved transport/system bytes before all function/SSA slots. Slot
     // offsets and FunctionFrame::size include this prefix; type layouts do not.
     uint32_t prefix_bytes = 0;
+    // The executable caller supplies separate typed per-invocation backing for
+    // reachable module-Private variables. The planner does not allocate those
+    // globals itself; default callers must still reject unbacked mutable state.
+    bool persistent_private_storage = false;
 };
 struct ContinuationFrames {
     ContinuationAnalysis analysis;
@@ -105,7 +109,8 @@ struct ContinuationFrames {
 // values are never byte-spilled. Preserve their provenance through supported
 // access/copy/load/sample operations and save dynamic index operands. Reject
 // unsupported provenance (including pointer parameters/phi, specialized array
-// lengths, and reachable mutable module-Private storage) explicitly. Shader
+// lengths, and reachable mutable module-Private storage without explicit caller
+// backing) explicitly. Shader
 // invocation/control/argument/return backing is a separate unimplemented ABI;
 // these metadata alone are not an executable continuation frame implementation.
 // The opt-in software-AS-value policy serializes uint64 values, never native

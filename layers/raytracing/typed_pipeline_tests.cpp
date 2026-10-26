@@ -1,7 +1,7 @@
 // Copyright 2026 The Khronos Group Inc.
 // SPDX-License-Identifier: Apache-2.0
 #include "typed_pipeline.h"
-#include "compiler.h"
+#include "glsl_compiler.h"
 #include <spirv-tools/libspirv.hpp>
 #include <spirv/unified1/spirv.hpp>
 #include <array>

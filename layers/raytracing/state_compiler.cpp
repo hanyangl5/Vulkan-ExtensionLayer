@@ -4,7 +4,7 @@
 #include "frame_emitter.h"
 #include <spirv-tools/libspirv.hpp>
 #include <spirv-tools/optimizer.hpp>
-#include <spirv_cross/spirv.hpp>
+#include <spirv/unified1/spirv.hpp>
 #include <algorithm>
 #include <cctype>
 #include <functional>
@@ -169,7 +169,7 @@ class Compiler {
             }
             if (i.op == spv::OpDecorate && i.words.at(2) == spv::DecorationVolatile) {
                 const auto &target = Def(i.words.at(1));
-                if (target.in_function || (target.op == spv::OpVariable && IsInvocationStorage(target.words.at(3))))
+                if (target.in_function || (target.op == spv::OpVariable && IsPersistentStorage(target.words.at(3))))
                     Unsupported("volatile persistent storage requires volatile frame codecs");
             }
         }
@@ -186,6 +186,7 @@ class Compiler {
         }
         std::vector<uint32_t> types(value_types.begin(), value_types.end());
         ContinuationFrameOptions options{true, true};
+        options.persistent_private_storage = true;
         options.physical_frame_addresses = BDA();
         options.private_frame_words = config.private_frame_words;
         if (config.transport == TypedFrameTransport::PrivateArray) {
@@ -225,6 +226,16 @@ class Compiler {
                 if (layout->size > UINT32_MAX || persistent_size > UINT32_MAX - layout->size)
                     Unsupported("invocation storage exceeds 32-bit byte indexing");
                 persistent_size += layout->size;
+            } else if (variable.words.at(3) == spv::StorageClassPrivate) {
+                const auto pointee = Def(variable.type).words.at(3);
+                const auto layout =
+                    std::find_if(preview.types.begin(), preview.types.end(), [&](const auto &v) { return v.type == pointee; });
+                if (layout == preview.types.end()) Unsupported("module-Private storage has no concrete typed layout");
+                persistent_size = (persistent_size + layout->alignment - 1) & ~uint64_t(layout->alignment - 1);
+                if (layout->size > UINT32_MAX || persistent_size > UINT32_MAX - layout->size)
+                    Unsupported("module-Private storage exceeds 32-bit byte indexing");
+                output.private_variables.push_back({id, pointee, persistent_size, layout->size, layout->alignment});
+                persistent_size += layout->size;
             } else if (variable.words.at(3) == spv::StorageClassUniformConstant && IsASDescriptor(Def(variable.type).words.at(3))) {
                 if (!resource_sets.count(id) || !resource_bindings.count(id)) Unsupported("AS descriptor is missing set/binding");
                 output.acceleration_structure_descriptors.push_back({id, resource_sets.at(id), resource_bindings.at(id)});
@@ -242,6 +253,7 @@ class Compiler {
             Unsupported("source frame exceeds the PrivateArray word budget");
         output.max_invocations64 = BDA() ? UINT64_MAX / output.frame_stride_bytes : output.max_invocations;
         for (const auto &variable : output.invocation_variables) invocation_variables[variable.variable] = &variable;
+        for (const auto &variable : output.private_variables) private_variables[variable.variable] = &variable;
         code = EmitContinuationFrameCodecs(output.source, this->entry, model, set, binding, "sc_cf_", types, options);
         // Reuse the component's existing word pointer declaration rather than
         // emit an illegal duplicate non-aggregate SPIR-V pointer type.
@@ -337,6 +349,7 @@ class Compiler {
     std::map<uint32_t, ContinuationTypeCodec> codecs;
     std::map<uint32_t, const ContinuationFrameSlot *> slots;
     std::map<uint32_t, const TypedInvocationVariable *> invocation_variables;
+    std::map<uint32_t, const TypedPrivateVariable *> private_variables;
     std::map<uint32_t, const TypedBuiltinVariable *> builtin_variables;
     std::map<uint32_t, const ContinuationSuspensionCodec *> sites;
     std::map<uint32_t, uint32_t> first_state;
@@ -462,7 +475,7 @@ class Compiler {
                storage == spv::StorageClassHitAttributeKHR;
     }
     static bool IsPersistentStorage(uint32_t storage) {
-        return storage == spv::StorageClassFunction || IsInvocationStorage(storage);
+        return storage == spv::StorageClassFunction || storage == spv::StorageClassPrivate || IsInvocationStorage(storage);
     }
     bool IsASDescriptor(uint32_t type) const {
         const auto &d = Def(type);
@@ -538,7 +551,7 @@ class Compiler {
         const auto &d = Def(id);
         if (d.in_function || !globals.insert(id).second) return;
         NeedType(d.type);
-        if (d.op == spv::OpVariable && IsInvocationStorage(d.words.at(3)))
+        if (d.op == spv::OpVariable && IsPersistentStorage(d.words.at(3)))
             NeedValueType(Def(d.type).words.at(3));
         else if (d.op == spv::OpUndef || (d.op >= spv::OpConstantTrue && d.op <= spv::OpConstantNull))
             NeedValueType(d.type);
@@ -715,7 +728,7 @@ class Compiler {
             else if (i.op >= spv::OpSpecConstantTrue && i.op <= spv::OpSpecConstantOp)
                 Unsupported("specialization must run before state lowering");
             else if (i.op == spv::OpVariable) {
-                if (IsInvocationStorage(i.words.at(3))) continue;
+                if (IsPersistentStorage(i.words.at(3))) continue;
                 if (BDA() && i.words.at(3) == spv::StorageClassInput) continue;
                 if (BDA() && i.words.at(3) == spv::StorageClassPushConstant) {
                     output.uses_app_push_constants = true;
@@ -742,7 +755,7 @@ class Compiler {
             if (i.op != spv::OpDecorate && i.op != spv::OpMemberDecorate) continue;
             auto target = i.words.at(1);
             if (!globals.count(target) && !needed_types.count(target)) continue;
-            if (invocation_variables.count(target)) continue;
+            if (invocation_variables.count(target) || private_variables.count(target)) continue;
             if (BDA() && globals.count(target) && Def(target).op == spv::OpVariable &&
                 (Def(target).words.at(3) == spv::StorageClassInput || Def(target).words.at(3) == spv::StorageClassPushConstant ||
                  Def(target).words.at(3) == spv::StorageClassShaderRecordBufferKHR))
@@ -929,6 +942,8 @@ class Compiler {
         if (system != builtin_variables.end()) return Constant(system->second->byte_offset);
         auto invocation = invocation_variables.find(pointer);
         if (invocation != invocation_variables.end()) return Constant(static_cast<uint32_t>(invocation->second->offset));
+        auto private_variable = private_variables.find(pointer);
+        if (private_variable != private_variables.end()) return Constant(static_cast<uint32_t>(private_variable->second->offset));
         auto slot = slots.find(pointer);
         if (slot != slots.end() && slot->second->local_storage) return Constant(static_cast<uint32_t>(slot->second->offset));
         const auto &d = Def(pointer);
@@ -1239,6 +1254,17 @@ class Compiler {
     void Body(const State &state) {
         ephemeral_values.clear();
         ephemeral_pointers.clear();
+        if (state.number == 0) {
+            // The source entry block cannot be a branch target. It executes
+            // exactly once in each logical activation, including a recursive
+            // activation with a different frame. Resume states skip this code.
+            for (const auto &variable : output.private_variables) {
+                const auto &source = Def(variable.variable);
+                if (source.words.size() > 4)
+                    Op("OpFunctionCall " + code.void_type + " " + codecs.at(variable.type).store + " %sc_base " +
+                       Constant(static_cast<uint32_t>(variable.offset)) + " " + Value(source.words.at(4)));
+            }
+        }
         if (state.resume) Resume(*state.resume);
         for (size_t n = state.begin; n < state.end; ++n) {
             const auto &i = *state.block->body[n];

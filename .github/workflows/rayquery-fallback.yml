@@ -1,18 +1,16 @@
 # SPDX-License-Identifier: MIT
-name: Software Ray Query fallback
+name: Ray tracing fallback layer
 
 on:
   push:
     paths:
-      - 'vkrt_layer/**'
-      - 'layers/common/rt_fallback/**'
+      - 'layers/raytracing/**'
       - 'CMakeLists.txt'
       - 'README.md'
       - '.github/workflows/rayquery-fallback.yml'
   pull_request:
     paths:
-      - 'vkrt_layer/**'
-      - 'layers/common/rt_fallback/**'
+      - 'layers/raytracing/**'
       - 'CMakeLists.txt'
       - 'README.md'
       - '.github/workflows/rayquery-fallback.yml'
@@ -32,17 +30,17 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             build-essential cmake ninja-build python3 libvulkan-dev \
-            spirv-tools spirv-headers glslc mesa-vulkan-drivers
+            spirv-tools spirv-headers glslc glslang-dev mesa-vulkan-drivers
       - name: Configure
         run: >-
-          cmake -S vkrt_layer/layer -B build-rq -G Ninja
+          cmake -S layers/raytracing -B build-raytracing -G Ninja
           -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON
       - name: Build layer, tests and validated SPIR-V
-        run: cmake --build build-rq --parallel 2
+        run: cmake --build build-raytracing --parallel 2
       - name: Run offline tests
-        run: ctest --test-dir build-rq -L offline --output-on-failure
-      - name: Run traversal helper semantics without native RT
+        run: ctest --test-dir build-raytracing -L offline --output-on-failure
+      - name: Run software Vulkan tests without native RT
         run: |
           export VK_ICD_FILENAMES="$(find /usr/share/vulkan/icd.d -name 'lvp_icd*.json' -print -quit)"
           test -n "$VK_ICD_FILENAMES"
-          ctest --test-dir build-rq -L no_native_rt --output-on-failure
+          ctest --test-dir build-raytracing -L no_native_rt --output-on-failure

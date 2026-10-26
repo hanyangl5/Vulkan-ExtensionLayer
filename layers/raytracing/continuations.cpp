@@ -3,7 +3,7 @@
 #include "continuations.h"
 
 #include <spirv-tools/libspirv.hpp>
-#include <spirv_cross/spirv.hpp>
+#include <spirv/unified1/spirv.hpp>
 #include <algorithm>
 #include <cstring>
 #include <functional>
@@ -228,7 +228,7 @@ class FramePlanner {
     FunctionFrame Plan(const FunctionContinuations &analysis) {
         FunctionFrame frame{analysis.function, options.prefix_bytes, 1, {}, {}};
         if (!analysis.can_suspend && !options.persistent_function_storage) return frame;
-        RejectPrivateStorage(analysis.function);
+        if (!options.persistent_private_storage) RejectPrivateStorage(analysis.function);
         const auto &function = m.functions.at(analysis.function);
         // A pointer can be consumed by a suspending helper without being live
         // after the call. SSA liveness alone therefore cannot select variables

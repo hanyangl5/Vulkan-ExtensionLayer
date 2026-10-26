@@ -57,6 +57,11 @@ struct TypedInvocationVariable {
     uint64_t offset, size;
     uint32_t alignment;
 };
+struct TypedPrivateVariable {
+    uint32_t variable, type;
+    uint64_t offset, size;
+    uint32_t alignment;
+};
 struct TypedAccelerationStructureDescriptor {
     uint32_t variable, descriptor_set, binding;
     // The original AS descriptor/array now contains ordinary SSBO value cells.
@@ -97,6 +102,10 @@ struct TypedContinuationProgram {
     std::vector<uint32_t> source;
     ContinuationFrames frames;
     std::vector<TypedInvocationVariable> invocation_variables;
+    // Module-Private storage is independent in each logical source invocation,
+    // including recursive activations of the same stage. Constant initializers
+    // execute at source entry once; suspension/resume never reinitializes it.
+    std::vector<TypedPrivateVariable> private_variables;
     std::vector<TypedAccelerationStructureDescriptor> acceleration_structure_descriptors;
     std::vector<TypedBuiltinVariable> builtin_variables;
     std::vector<TypedRequiredExecutionMode> required_execution_modes;
@@ -124,7 +133,9 @@ struct TypedContinuationProgram {
 // Actual source CFG lowering, independent of the legacy GLSL compiler. Each
 // compute invocation resumes one frame, executes source blocks/parallel Phi
 // edges in a dynamic structured dispatcher, and runs until suspension/return.
-// Source Function storage is persistent; only suspension-live SSA is spilled.
+// Source Function and module-Private storage are persistent in each logical
+// stage invocation; Private initializers execute once at the source entry.
+// Only suspension-live numeric SSA is spilled.
 // Helpers are inlined before analysis. Logical local access-chain/copy aliases,
 // numeric/composite ALU, push constants, ordinary buffer resources, and launch
 // ID/size inputs are supported. Native image/sampler values and image texel

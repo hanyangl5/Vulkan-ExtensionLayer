@@ -32,6 +32,29 @@ cmake -S . -B build -D UPDATE_DEPS=ON -D BUILD_WERROR=ON -D BUILD_TESTS=ON -D CM
 cmake --build build --config Debug
 ```
 
+### Experimental software ray tracing
+
+The unified AS, Ray Query, and RT Pipeline implementation lives in
+[`layers/raytracing`](layers/raytracing/README.md). It is opt-in and remains under
+development. A standalone build avoids dependencies of unrelated VEL layers:
+
+```sh
+cmake -S layers/raytracing -B build-raytracing -G Ninja \
+  -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON
+cmake --build build-raytracing --parallel
+ctest --test-dir build-raytracing -L offline --output-on-failure
+```
+
+Use a 64-bit C11/C++17 toolchain and a Vulkan SDK containing `glslc`, `spirv-val`,
+SPIRV-Headers, SPIRV-Tools with optimizer/linker libraries, and glslang development
+libraries. Release builds avoid mixing debug and release runtimes with SDK import
+libraries. See the [layer instructions](layers/raytracing/README.md) for registry
+generation, GPU checks, layer activation, and external CTS evidence.
+
+For a top-level VEL build, add `-DBUILD_RAY_TRACING_FALLBACK=ON` to the normal
+configure command. `BUILD_RAY_QUERY_FALLBACK` enables the same canonical target;
+enabling both builds it once.
+
 ### Warnings as errors off by default!
 
 By default `BUILD_WERROR` is `OFF`. The idiom for open source projects is to NOT enable warnings as errors.

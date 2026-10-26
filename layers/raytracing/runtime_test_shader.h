@@ -2,6 +2,24 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 namespace vel::rt {
+inline constexpr const char *kMemory = R"glsl(
+#extension GL_EXT_buffer_reference : require
+#extension GL_EXT_shader_explicit_arithmetic_types_int64 : require
+layout(buffer_reference, std430, buffer_reference_align=4) coherent buffer VELMemory { uint w[]; };
+uint vu(uint64_t a, uint i) { return VELMemory(a).w[i]; }
+float vf(uint64_t a, uint i) { return uintBitsToFloat(vu(a,i)); }
+vec3 vv(uint64_t a, uint i) { return vec3(vf(a,i),vf(a,i+1),vf(a,i+2)); }
+uint64_t va(uint64_t a, uint i) { return uint64_t(vu(a,i)) | (uint64_t(vu(a,i+1))<<32); }
+void ws(uint64_t a, uint i, uint v) { VELMemory(a).w[i]=v; }
+void wf(uint64_t a, uint i, float v) { ws(a,i,floatBitsToUint(v)); }
+void wv(uint64_t a, uint i, vec3 v) { wf(a,i,v.x); wf(a,i+1,v.y); wf(a,i+2,v.z); }
+vec3 tx(uint64_t a, uint i, vec3 p, float h) {
+    return vec3(dot(vec4(vv(a,i),vf(a,i+3)),vec4(p,h)),
+                dot(vec4(vv(a,i+4),vf(a,i+7)),vec4(p,h)),
+                dot(vec4(vv(a,i+8),vf(a,i+11)),vec4(p,h)));
+}
+)glsl";
+
 inline constexpr const char *kRuntimeTestShader = R"glsl(
 layout(local_size_x=8,local_size_y=4,local_size_z=1) in;
 layout(push_constant) uniform Result { uint64_t address; } result;

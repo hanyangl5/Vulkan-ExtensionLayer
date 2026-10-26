@@ -14,7 +14,8 @@ checkpoint. Historical failures remain in the machine-readable
 
 All fallback runs use `VK_LAYER_VKRT_SOFTWARE_RAY_QUERY`, including RTP cases.
 The runner's new `--mode software-rt` names this canonical manifest explicitly;
-`--mode ray-tracing` still selects the older, separate RTP prototype.
+At this historical checkpoint, `--mode ray-tracing` selected the older RTP
+prototype; that obsolete mode and executable have since been removed.
 
 | Matrix | Pass | Fail | Skip/crash/timeout/no result |
 | --- | ---: | ---: | ---: |

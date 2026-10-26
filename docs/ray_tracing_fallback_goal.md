@@ -29,6 +29,11 @@ and the next actionable work item in this repository. Complete milestones only
 after their exit criteria are demonstrated; do not mark the full goal complete
 because an intermediate subset runs.
 
+Keep fallback source, shaders, shared BVH4 components and tests together under
+`layers/raytracing`, with one canonical AS/RQ/RTP build entry. Remove superseded
+runtime implementations after extracting any shared dependencies still in use.
+Keep pinned upstream source and historical validation records as provenance.
+
 ## Architecture decisions
 
 | Module | Selected route |
@@ -212,7 +217,7 @@ not complete until its full proof set passes. A CPU encoder is a reference and
 layout-validation tool; it does not satisfy the GPU encoding or shared integration
 milestones.
 
-The initial [BVH4 reference foundation](../layers/common/rt_fallback/README.md)
+The initial [BVH4 reference foundation](../layers/raytracing/bvh4/README.md)
 provides the experimental C-compatible ABI, checked size planner, CPU encoder,
 and structural tests. It is intentionally labelled as component work until the
 GPU producers and both consumers adopt it.
@@ -280,7 +285,7 @@ iteration is not goal completion.
 - [Baseline audit and feasibility review](ray_tracing_fallback_review.md)
 - [D3D12 source provenance and historical port record](ray_tracing_fallback_port.md)
 - [Current RTP executable limitations](ray_tracing_fallback_layer.md)
-- [Current RQ executable limitations](../vkrt_layer/README.md)
+- [Current RQ executable limitations](../layers/raytracing/README.md)
 - [Vulkan required limits](https://docs.vulkan.org/refpages/latest/refpages/source/Required_Limits.html)
 - [Ray traversal specification](https://docs.vulkan.org/spec/latest/chapters/raytraversal.html)
 - [SPV_KHR_ray_query](https://github.khronos.org/SPIRV-Registry/extensions/KHR/SPV_KHR_ray_query.html)

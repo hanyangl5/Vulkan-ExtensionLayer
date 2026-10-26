@@ -1,8 +1,8 @@
 # Copyright 2026 The Khronos Group Inc.
 # SPDX-License-Identifier: Apache-2.0
 set(_typed_source_dir "${CMAKE_CURRENT_LIST_DIR}")
-set(_typed_common_dir "${_typed_source_dir}/../common/rt_fallback")
-set(_typed_traversal_dir "${_typed_source_dir}/../../vkrt_layer/layer/traversal")
+set(_typed_common_dir "${_typed_source_dir}/bvh4")
+set(_typed_traversal_dir "${_typed_source_dir}/traversal")
 set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
     "${_typed_source_dir}/typed_runtime.glsl" "${_typed_common_dir}/bvh4_abi.glsl"
     "${_typed_common_dir}/as_address.glsl" "${_typed_traversal_dir}/sw_ray_query.glsl"

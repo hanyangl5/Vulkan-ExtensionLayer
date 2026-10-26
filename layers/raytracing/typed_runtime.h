@@ -12,6 +12,9 @@ struct TypedRuntimeBuildOptions {
     // A private compute layout supplies the immutable context through 8 push
     // bytes. The default specialization route remains available to components.
     bool context_via_push_constants = false;
+    // DISABLE_OPTIMIZATION omits optional runtime performance passes. Required
+    // source specialization, continuation lowering and stage linking remain.
+    bool optimize = true;
 };
 struct TypedRuntimeProgram {
     std::vector<uint32_t> spirv;

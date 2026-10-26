@@ -3,7 +3,7 @@
 #include "frame_emitter.h"
 
 #include <spirv-tools/libspirv.hpp>
-#include <spirv_cross/spirv.hpp>
+#include <spirv/unified1/spirv.hpp>
 #include <vulkan/vulkan.h>
 #include <algorithm>
 #include <array>

@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #include "frame_emitter.h"
 
-#include <spirv_cross/spirv.hpp>
+#include <spirv/unified1/spirv.hpp>
 #include <algorithm>
 #include <cctype>
 #include <limits>

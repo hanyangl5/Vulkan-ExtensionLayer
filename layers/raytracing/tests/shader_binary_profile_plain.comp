@@ -1,0 +1,7 @@
+// SPDX-License-Identifier: MIT
+#version 460
+layout(local_size_x=1) in;
+layout(constant_id=7) const uint saved=37;
+layout(set=0,binding=0,std430) buffer Output { uint value; } result;
+layout(push_constant,std430) uniform Push { uvec2 address; uint query; uint bias; } pc;
+void main() { result.value=saved+pc.bias; }

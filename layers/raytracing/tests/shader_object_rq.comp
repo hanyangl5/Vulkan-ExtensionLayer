@@ -1,0 +1,16 @@
+// SPDX-License-Identifier: MIT
+#version 460
+#extension GL_EXT_ray_query : require
+layout(local_size_x=1) in;
+layout(set=0,binding=0) uniform accelerationStructureEXT scene;
+layout(set=0,binding=1,std430) buffer Output { uint value[]; } result;
+layout(push_constant,std430) uniform Push {
+    vec3 origin; float tmin; vec3 direction; float tmax;
+    uint flags; uint mask; uint index; uint bias;
+} pc;
+void main() {
+    rayQueryEXT ray;
+    rayQueryInitializeEXT(ray,scene,pc.flags,pc.mask,pc.origin,pc.tmin,pc.direction,pc.tmax);
+    while (rayQueryProceedEXT(ray)) {}
+    result.value[pc.index]=pc.bias+(rayQueryGetIntersectionTypeEXT(ray,true)==gl_RayQueryCommittedIntersectionTriangleEXT ? 100u : 200u);
+}

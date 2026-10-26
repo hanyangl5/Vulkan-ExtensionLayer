@@ -1,8 +1,8 @@
 // Copyright 2026 The Khronos Group Inc.
 // SPDX-License-Identifier: Apache-2.0
 #include "typed_runtime.h"
-#include "compiler.h"
-#include "../common/rt_fallback/bvh4_abi.h"
+#include "glsl_compiler.h"
+#include "bvh4/bvh4_abi.h"
 #include <spirv-tools/libspirv.hpp>
 #include <algorithm>
 #include <cstring>

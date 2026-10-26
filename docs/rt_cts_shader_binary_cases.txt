@@ -1,0 +1,9 @@
+# Copyright 2026 The Khronos Group Inc.
+# SPDX-License-Identifier: Apache-2.0
+# VK-GL-CTS source pin: d18e4c68543103371715845cd914c71e5859963e
+# Source: external/vulkancts/modules/vulkan/shader_object/vktShaderObjectBinaryTests.cpp
+# Exact external CTS controls for source-envelope interface reconstruction.
+dEQP-VK.shader_object.binary.query.comp.unlinked.same_shader
+dEQP-VK.shader_object.binary.query.comp.unlinked.shader_from_binary
+dEQP-VK.shader_object.binary.query.comp.unlinked.shader_from_binary_null_layout
+dEQP-VK.shader_object.binary.query.comp.unlinked.shader_from_binary_different_layout
