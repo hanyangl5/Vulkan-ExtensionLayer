@@ -34,6 +34,8 @@ there is no `vkrt_layer` hierarchy or fallback build dependency.
 | Native RTP mechanism proof | Native TraceRay, injected Any-Hit, procedural Intersection guarding, payload/attributes, Ignore/Terminate and legal zero triangle hit groups |
 | Query compiler preparation | SPIR-V shadow state for query objects, fixed arrays/structs and function parameters; logical flags saved at initialization and restored by getter rewriting |
 | Automatic RQ consumer | Typed parallel state, inline Proceed filtering and flags/AABB getter restoration; explicit metadata/classifier bridge remains required |
+| Native metadata component | Checked BVH-independent RootCell/TLAS/BLAS layout, normalized 64-bit association and GPU-owned inline OMM snapshots; AS interception/publication remains open |
+| Packed classifier composition | Resource-free classifier closure linked into ordinary application SPIR-V; actual GPU packed-data/native-RQ chain passes 4,506 traces with explicit scene RootCell |
 | Experimental public API | Public create/destroy/sizes/build/clone/compact, buffer translation, compute/push restoration and sync translation; mandatory queries/serialization remain open |
 
 The CPU evaluator reports 396,693 checks and the storage suite reports 786 checks.
@@ -99,6 +101,18 @@ helpers, reinitialization, first-hit and AABB behavior. EXT declarations are
 removed before execution on a logical device without native micromap enabled.
 Its fixture callback consumes encoded CPU-oracle decisions; this does not prove
 automatic AS provenance or the production packed-data classifier bridge.
+
+The next component fixture now replaces that encoded callback with the real
+packed-data classifier. It runs GPU canonical build, GPU association/snapshot
+production, source-buffer destruction, classifier composition and automatic
+Proceed filtering before 4,506 actual native traces. Metadata host tests pass
+1,643 checks; the GPU producer passes 35 assertions and eight invalid-input cases,
+including replay after active source size changes from 2608 to 1104 bytes.
+The native fixture still explicitly supplies RootCells and CPU-known TLAS
+identity metadata. AS descriptor/integer provenance, GPU-generated TLAS capture,
+safe root publication and private allocation/retirement remain required.
+See [the metadata/classifier report](omm_metadata_classifier_2026-10-27.md) and
+[exact CTS consumer bridge audit](omm_cts_consumer_bridge_2026-10-27.md).
 
 The loader/device checkpoint and its actual public API tests are documented in
 [the 2026-10-27 report](omm_layer_api_2026-10-27.md). Explicit experimental mode

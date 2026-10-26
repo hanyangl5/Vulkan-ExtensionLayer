@@ -1,0 +1,1017 @@
+{
+  "SPDX-FileCopyrightText": "2026 The Khronos Group Inc.",
+  "SPDX-License-Identifier": "CC-BY-4.0",
+  "schema_version": 1,
+  "date": "2026-10-27",
+  "source_base_commit": "4377d0f439262ffdbb66a3273816206e8f7e5489",
+  "source_state": "GPU metadata/classifier components after base commit; exact worktree bytes below.",
+  "complete_milestone": false,
+  "routing": "Unchanged native pass-through by default; experimental software mode still rejects consumer-enabled devices and AS builds.",
+  "validation_environment": {
+    "VK_INSTANCE_LAYERS": "VK_LAYER_KHRONOS_validation",
+    "VK_LAYER_PATH": "C:/VulkanSDK/1.4.357.0/Bin",
+    "VK_LAYER_VALIDATE_SYNC": "1",
+    "VK_LOADER_LAYERS_DISABLE": "~implicit~",
+    "VK_LAYER_ENABLES": "unset",
+    "public_loader": "Both VVL orders with generated layer path and VK_VEL_OMM_EXPERIMENTAL_SOFTWARE=1; exact CTS environment in each summary."
+  },
+  "results": {
+    "standalone_non_loader_ctest": {
+      "pass": 20,
+      "fail": 0,
+      "skip": 0,
+      "offline": 10,
+      "gpu": 10
+    },
+    "public_api_above_vvl": {
+      "checks": 54,
+      "fail": 0,
+      "validation_errors": 0,
+      "warnings": 0
+    },
+    "public_api_below_vvl": {
+      "checks": 54,
+      "fail": 0,
+      "validation_errors": 0,
+      "warnings": 0
+    },
+    "parent_offline_ctest": {
+      "pass": 10,
+      "fail": 0
+    },
+    "host_only_ctest": {
+      "pass": 3,
+      "fail": 0
+    },
+    "composer_host_checks": 194,
+    "metadata_host_checks": 1643,
+    "metadata_gpu": {
+      "assertions": 35,
+      "geometries": 7,
+      "body_bytes": 9264,
+      "invalid_cases": 8,
+      "source_active_size_replay": [
+        2608,
+        1104
+      ],
+      "same_producer_cb": true
+    },
+    "native_packed_classifier_traces": 4506,
+    "workgroup_gpu": {
+      "application_local_size": [
+        4,
+        2,
+        1
+      ],
+      "invocations": 8,
+      "local_index_sum": 28
+    },
+    "independent_composer_findings": "WorkgroupSize override, sustained OOM escape and helper SpecId collision all fixed and independently reproduced/rechecked."
+  },
+  "external_cts": {
+    "revision": "d18e4c68543103371715845cd914c71e5859963e",
+    "executable": {
+      "path": "D:/Codes/VK-GL-CTS/build/external/vulkancts/modules/vulkan/Release/deqp-vk.exe",
+      "bytes": 63076864,
+      "sha256": "8cf824c598181ef43ccd74d67acce89c9cc6fc47029a164440f0b0ea74af0380"
+    },
+    "native_control": {
+      "pass": 8,
+      "fail": 2,
+      "summary": "build-omm-cts-evidence/metadata-native-control/summary.json",
+      "failure_cause": "Native compacted/serialization-size query-pool creation VK_ERROR_UNKNOWN, unchanged from driver baseline; unresolved."
+    },
+    "software_admission": {
+      "pass": 0,
+      "cts_results": 0,
+      "early_process_failures": 3,
+      "raw_status": {
+        "Crash": 3
+      },
+      "summary": "build-omm-cts-evidence/metadata-software-admission/summary.json",
+      "failure_cause": "CTS fatal exit at vkCreateDevice: VK_ERROR_FEATURE_NOT_PRESENT from the incomplete consumer gate; not observed GPU faults, skips or passes."
+    },
+    "coverage_corrections": [
+      "The RTP-namespaced compacted-size query case does not exercise any RTP consumer.",
+      "The selected RQ copy.compact case actually records CLONE at the pinned CTS source revision."
+    ]
+  },
+  "limitations": [
+    "Native fixture supplies an explicit RootCell; descriptor/integer AS provenance and full-budget binding-context transport remain open.",
+    "TLAS identity metadata is packed from CPU-known native instances; GPU-generated instance capture/normalization remains open.",
+    "Actual layer AS build/clone/update/serialization interception, GPU status-guarded root publication and bounded private allocation/retirement remain open.",
+    "AS-buffer-scoped barriers and ownership transfers must cover separate hidden sidecar buffers, retaining the native AS dependency.",
+    "Native RT pipeline/SBT/general recursion and mandatory public queries/serialization remain required.",
+    "The native classifier matrix is level 2; higher-level shared lookup evidence is separate and is not claimed as native matrix coverage."
+  ],
+  "sources": [
+    {
+      "path": "CMakeLists.txt",
+      "bytes": 3889,
+      "sha256": "3f2f59011f34f7463aaed6ef74e1d642b019d9d63ee93f6879ca8750ab953519"
+    },
+    {
+      "path": "layers/raytracing/CMakeLists.txt",
+      "bytes": 396,
+      "sha256": "b1a69daf4f0b72128791e7d9f0b6b62f27f8d20250e9137de0663a461a943935"
+    },
+    {
+      "path": "layers/raytracing/omm/CMakeLists.txt",
+      "bytes": 16352,
+      "sha256": "05df77164a082d316e3c020255f6f778550f90951eade16907c65789897587f0"
+    },
+    {
+      "path": "layers/raytracing/omm/embed_kernels.cmake",
+      "bytes": 701,
+      "sha256": "805b5d936cf7d81e858c4c0dc3e3530ccdb46026c367d74e9339a1a5b24b0d52"
+    },
+    {
+      "path": "layers/raytracing/omm/omm_build.comp",
+      "bytes": 8735,
+      "sha256": "30f0a7093ac9bfbb275b9032172327e727619af12ee5a78cd5be6eab0d8aca12"
+    },
+    {
+      "path": "layers/raytracing/omm/omm_classifier.glsl",
+      "bytes": 7247,
+      "sha256": "692c9cb6a762e7278bed9066c4bade325e54429d3de6984ea780f3f184e06de1"
+    },
+    {
+      "path": "layers/raytracing/omm/omm_command_state.cpp",
+      "bytes": 3599,
+      "sha256": "8f5c68795b5a3a5c2a8d14a8ac627554da75f00e825cf6949f6b372877ed5bd9"
+    },
+    {
+      "path": "layers/raytracing/omm/omm_command_state.h",
+      "bytes": 2479,
+      "sha256": "c1b131056f930326e94bb64b760f12148a83a5e1e05a3844c445be131b20871a"
+    },
+    {
+      "path": "layers/raytracing/omm/omm_copy.comp",
+      "bytes": 2263,
+      "sha256": "f7a111390fa8f174cdf682a669eb6edba7265718a8da8615eb78bd3187d485ec"
+    },
+    {
+      "path": "layers/raytracing/omm/omm_device.cpp",
+      "bytes": 23018,
+      "sha256": "d26befb190ea75c8d4681e8d2056b2e393ef19d68e969fa47a24b3b5a0a8d2d5"
+    },
+    {
+      "path": "layers/raytracing/omm/omm_device.h",
+      "bytes": 3367,
+      "sha256": "9c29a6659623d7da3d30ec8ff96908203e0ca5752c0ee066aeccf238d577820c"
+    },
+    {
+      "path": "layers/raytracing/omm/omm_layer.cpp",
+      "bytes": 54787,
+      "sha256": "63bc18e2d916bc40f69b8ee1795c0271d27a4f0475c29cbd6ff713884abc25ec"
+    },
+    {
+      "path": "layers/raytracing/omm/omm_layer.def",
+      "bytes": 216,
+      "sha256": "25147d8cf117f8d559270cfd725fd9ab917769d88157b3a81d204a8d56a88ac1"
+    },
+    {
+      "path": "layers/raytracing/omm/omm_lookup.glsl",
+      "bytes": 8733,
+      "sha256": "0c78323325873e3594a7e7f86bf13b9e104f792fec7e197e74676202f18076fd"
+    },
+    {
+      "path": "layers/raytracing/omm/omm_metadata.comp",
+      "bytes": 10599,
+      "sha256": "6a761f6dd9bf8ec73c9b6be2f7d7014d2c1d2cdadd941fc1a0b63a38a2277330"
+    },
+    {
+      "path": "layers/raytracing/omm/omm_metadata.cpp",
+      "bytes": 15788,
+      "sha256": "5ea7b0c58d8e35255993e27ec73ce05ba94d026215226c4f0e9e7740b70e7492"
+    },
+    {
+      "path": "layers/raytracing/omm/omm_metadata.h",
+      "bytes": 5208,
+      "sha256": "cd483e5f61b5caf4791b0f294db8d96a3b420c1f8709ec18f0591738b3a27e38"
+    },
+    {
+      "path": "layers/raytracing/omm/omm_opacity.cpp",
+      "bytes": 7863,
+      "sha256": "c305be71f81e92a76f1be4368691937ad41328c209cd6ac53f1ebee4d82b6d1e"
+    },
+    {
+      "path": "layers/raytracing/omm/omm_opacity.glsl",
+      "bytes": 1409,
+      "sha256": "730a10bb160fd3cbef92ecc1795ca5518bb4f3f6eef9a1cb862f8a6a773aab12"
+    },
+    {
+      "path": "layers/raytracing/omm/omm_opacity.h",
+      "bytes": 3599,
+      "sha256": "8ebe544b5baf09eec55d799e1c3883453da6bca6e870c7360d75a5d372ee301f"
+    },
+    {
+      "path": "layers/raytracing/omm/omm_query_rewrite.cpp",
+      "bytes": 33505,
+      "sha256": "383584e066d3d09d44c5e383975b99099615a4505150900578ae9b3476f2e250"
+    },
+    {
+      "path": "layers/raytracing/omm/omm_query_rewrite.h",
+      "bytes": 3451,
+      "sha256": "48aaf1d4564514091a295329861b73a5ee3d7e39d840b64ef2f14922ce1ab1d6"
+    },
+    {
+      "path": "layers/raytracing/omm/omm_shader_compose.cpp",
+      "bytes": 13903,
+      "sha256": "a200349c25f01f57afe3c7fc043e72b884d638f0ca75a306e04693cf87b247d5"
+    },
+    {
+      "path": "layers/raytracing/omm/omm_shader_compose.h",
+      "bytes": 1766,
+      "sha256": "c60d4b0c8268dd8237ba8b0da55cce31790df3e60cffd445e82d6b09db4f842f"
+    },
+    {
+      "path": "layers/raytracing/omm/omm_storage.cpp",
+      "bytes": 12151,
+      "sha256": "80ac0ae5fb70e7b64a0b4f8222599f7d3d0ab9295f4715bebc61ff094dfb502b"
+    },
+    {
+      "path": "layers/raytracing/omm/omm_storage.h",
+      "bytes": 2788,
+      "sha256": "7726e19868238919852fff50381672b541a8231ee4c3ac5eb917540663649c29"
+    },
+    {
+      "path": "layers/raytracing/omm/omm_sync.cpp",
+      "bytes": 7245,
+      "sha256": "9fb226ba208d8e85207a547cafebf6bf0e706f926a6f503eb4f81672a8ef11e1"
+    },
+    {
+      "path": "layers/raytracing/omm/omm_sync.h",
+      "bytes": 2584,
+      "sha256": "58ca2524b432429d55aa543b01a8ed209df02b84c3aaac3b5eb426341db18e9c"
+    },
+    {
+      "path": "layers/raytracing/omm/tests/classifier_library.comp",
+      "bytes": 384,
+      "sha256": "bb04e0aeafb3a715685b0392b928ae47e7cdfa4402655963df74f8192fd7f7f5"
+    },
+    {
+      "path": "layers/raytracing/omm/tests/classifier_query.comp",
+      "bytes": 2253,
+      "sha256": "b94bde7760b2a127bf5fe56ef9f0f300dd574ad9fba21d8f5b4827264e5dc13d"
+    },
+    {
+      "path": "layers/raytracing/omm/tests/composition_workgroup.comp",
+      "bytes": 374,
+      "sha256": "c45a38bd528d133269905d2d3c72407ef30cdaa1bb19f7e07b806bb13639553f"
+    },
+    {
+      "path": "layers/raytracing/omm/tests/gpu_build_generate.comp",
+      "bytes": 2231,
+      "sha256": "e5e5ead12d1ead327d45fff0ab1be57400c8a2ed615492017d6c64a8db7703be"
+    },
+    {
+      "path": "layers/raytracing/omm/tests/gpu_lookup.comp",
+      "bytes": 1634,
+      "sha256": "0e1d81cf6f7d0898036e9ec68f65b14d3ba4a7a0e6d3fc5913fb3a0ccc39bde2"
+    },
+    {
+      "path": "layers/raytracing/omm/tests/layer_state.comp",
+      "bytes": 881,
+      "sha256": "b06861a2cee5f5e886d1699f1c4371f3c341b51c898c609bb6ff156b39c6b006"
+    },
+    {
+      "path": "layers/raytracing/omm/tests/native_fixture.h",
+      "bytes": 15423,
+      "sha256": "09e7f69fe0d2fd3b05ceaa21fe967f10904dccec7c88b2b1a5dae54f02a2ed68"
+    },
+    {
+      "path": "layers/raytracing/omm/tests/native_pipeline.glsl",
+      "bytes": 1508,
+      "sha256": "9042756a56ecee494bf1c5591ffed74968712ad51260dab8cf74fd91c4453ead"
+    },
+    {
+      "path": "layers/raytracing/omm/tests/native_pipeline.rahit",
+      "bytes": 925,
+      "sha256": "b2fd9db654589d368b04b14295e4b26f53f33368055493c288722bf5abb359d3"
+    },
+    {
+      "path": "layers/raytracing/omm/tests/native_pipeline.rchit",
+      "bytes": 559,
+      "sha256": "e9332abf43e43658fd8f57db3ec67903af64ba6a782be3609fc681a294396c06"
+    },
+    {
+      "path": "layers/raytracing/omm/tests/native_pipeline.rgen",
+      "bytes": 1202,
+      "sha256": "8b857d76ad04d0e4295e6fa309af554f4951ecb39a78ae99adb04f2863d50ee9"
+    },
+    {
+      "path": "layers/raytracing/omm/tests/native_pipeline.rint",
+      "bytes": 740,
+      "sha256": "dbedc268e96bcc5a7b0c84e5ee90852736955c0286d5a9af620e038493e91d28"
+    },
+    {
+      "path": "layers/raytracing/omm/tests/native_pipeline.rmiss",
+      "bytes": 322,
+      "sha256": "5a19f40960a4775249ac38a9737167ee2042a7eb030d57256da64d90c4a657ea"
+    },
+    {
+      "path": "layers/raytracing/omm/tests/native_query.comp",
+      "bytes": 4790,
+      "sha256": "7049fcf510a35215d0cb72bf7e1651dd0bec097bdfcc0b2104a4b5e2c85e8db3"
+    },
+    {
+      "path": "layers/raytracing/omm/tests/query_state.comp",
+      "bytes": 1536,
+      "sha256": "d8015a1e3ce82ecb2abbfa7803c8f731f00c07ac4b6df10d6680355ac882f27f"
+    },
+    {
+      "path": "layers/raytracing/omm/tests/run_omm_cts.py",
+      "bytes": 6779,
+      "sha256": "4870e12dee17e87cc841fa2460dbf7ece0562d922228b093d3e2c25c768c5ece"
+    },
+    {
+      "path": "layers/raytracing/omm/tests/test_omm_classifier.cpp",
+      "bytes": 28276,
+      "sha256": "bdcb10f0dca82d5d2b7eb6136e2796e5851f1aa82f580aa07dd03d06b50eec52"
+    },
+    {
+      "path": "layers/raytracing/omm/tests/test_omm_command_state.cpp",
+      "bytes": 17224,
+      "sha256": "7afafc329157b817dbc561e0381ae23902b7b16cbc6bd6f5ccedf33b27cc72fc"
+    },
+    {
+      "path": "layers/raytracing/omm/tests/test_omm_compose_workgroup.cpp",
+      "bytes": 5776,
+      "sha256": "c24587207bef6439ef1340299794778a25d5b969157dd88933bb1b458397d57f"
+    },
+    {
+      "path": "layers/raytracing/omm/tests/test_omm_device.cpp",
+      "bytes": 18863,
+      "sha256": "8ad5e4025abc8b9a80c08bca5961d4f2f3fc28702ac78061307a1428588326c6"
+    },
+    {
+      "path": "layers/raytracing/omm/tests/test_omm_gpu_build.cpp",
+      "bytes": 14702,
+      "sha256": "c0cf17967644d1855cc1e65362b8bff3edeabd5b198e52767efeb7f1797f31d4"
+    },
+    {
+      "path": "layers/raytracing/omm/tests/test_omm_gpu_lookup.cpp",
+      "bytes": 20192,
+      "sha256": "5e084c7c0fce35e093cd47577fcab0b8adf627d0279916bff2bd07540c88ef3c"
+    },
+    {
+      "path": "layers/raytracing/omm/tests/test_omm_layer.cpp",
+      "bytes": 25028,
+      "sha256": "fbd53855c5952df1b507b1c1d697cf11e62b06f3cd737dd3d33fc8d8f58ca76b"
+    },
+    {
+      "path": "layers/raytracing/omm/tests/test_omm_layer_registry.cpp",
+      "bytes": 9932,
+      "sha256": "c0491f3a0e614a2d5e7dfb14688462adfa9982692a9079b692fc303f88d57243"
+    },
+    {
+      "path": "layers/raytracing/omm/tests/test_omm_metadata.cpp",
+      "bytes": 8337,
+      "sha256": "b716074e49e0292a0ae9e7a1895985633438bc4ffe6fced49c000b9eb72b42db"
+    },
+    {
+      "path": "layers/raytracing/omm/tests/test_omm_metadata_gpu.cpp",
+      "bytes": 18813,
+      "sha256": "7e953d8a4d94539dea4a3df958ed4d2cf6db42388ecf66a4076b2e2027a5d5b1"
+    },
+    {
+      "path": "layers/raytracing/omm/tests/test_omm_native_pipeline.cpp",
+      "bytes": 20865,
+      "sha256": "2b25d7e5808dd3434358285a0632fc9d00d1812c90ee2b693960ee46abaa9b05"
+    },
+    {
+      "path": "layers/raytracing/omm/tests/test_omm_native_query.cpp",
+      "bytes": 21254,
+      "sha256": "275e01be27be4069afc470e0a1080cc0aa0cf31946c8b67b07af74f2b0596f91"
+    },
+    {
+      "path": "layers/raytracing/omm/tests/test_omm_opacity.cpp",
+      "bytes": 16747,
+      "sha256": "17d1c2cf78249d2c54c1fd4c570f6b2269062e1fc4537f078ab13272170c84f5"
+    },
+    {
+      "path": "layers/raytracing/omm/tests/test_omm_query_graph.cpp",
+      "bytes": 25752,
+      "sha256": "5e6fbfb30394f11b91b8a35459fa710a0e9cc952f925ea6325d6380e9f68a179"
+    },
+    {
+      "path": "layers/raytracing/omm/tests/test_omm_query_proceed.cpp",
+      "bytes": 36117,
+      "sha256": "331233ac25db08e9948600b6fc8306d52c6d2296543639fddc4883cef6544cad"
+    },
+    {
+      "path": "layers/raytracing/omm/tests/test_omm_query_rewrite.cpp",
+      "bytes": 9281,
+      "sha256": "d171333a55e0232e4a78e8f33c740893394f2e8e9eb8884b298f5ca50f224ef4"
+    },
+    {
+      "path": "layers/raytracing/omm/tests/test_omm_shader_compose.cpp",
+      "bytes": 13827,
+      "sha256": "ce9aaeef296bf9a0c02ea8e3ba7f2482da605178e7593f1c4ffd6086127ab435"
+    },
+    {
+      "path": "layers/raytracing/omm/tests/test_omm_storage.cpp",
+      "bytes": 12932,
+      "sha256": "ff3e44748ca68df454d455a2e3c7771fe6c1eb5af4a1c060a77972820e9a1e4e"
+    },
+    {
+      "path": "layers/raytracing/omm/tests/test_omm_sync.cpp",
+      "bytes": 20531,
+      "sha256": "b8ac9e3148bbf2ecdf0991bae3265728bc6ddb967977a2108b7d54d251aa0b23"
+    }
+  ],
+  "artifacts": [
+    {
+      "path": "build-omm/omm/classifier_library.comp.spv",
+      "bytes": 43416,
+      "sha256": "f621b88c3d494836f8f86dd9514abee29149fdb9dc5a482ec423344dcc28bf48"
+    },
+    {
+      "path": "build-omm/omm/classifier_query.comp.spv",
+      "bytes": 4620,
+      "sha256": "25f661e9913561da3cca030be348f8faef9e034ac8c8361c1baea3e98aae49e2"
+    },
+    {
+      "path": "build-omm/omm/composition_workgroup.comp.spv",
+      "bytes": 804,
+      "sha256": "be3ff7ed66cd0fc00fc2b934e81c08be9790ca189e020f84a86225c3e5b870b4"
+    },
+    {
+      "path": "build-omm/omm/gpu_build_generate.comp.spv",
+      "bytes": 7096,
+      "sha256": "ae4c2c0800c9d830589fb4e7a2cec33ff25aefa4e15300885d8ba3ef6989367a"
+    },
+    {
+      "path": "build-omm/omm/gpu_lookup.comp.spv",
+      "bytes": 25588,
+      "sha256": "0a1966ce50d637f5dc4fa4ec0206305de817bd3138b5ec3a363de9994ff91d88"
+    },
+    {
+      "path": "build-omm/omm/layer_state.comp.spv",
+      "bytes": 1620,
+      "sha256": "5b34184accbfcb334bb8a2f5bf17334394f44c8a443e2845240543eb1d8ffd8c"
+    },
+    {
+      "path": "build-omm/omm/layers/VkLayer_VEL_opacity_micromap.dll",
+      "bytes": 307712,
+      "sha256": "d03e3c8a7ac3d084df7d2a24cd31048dad430fb5cfa6f65895a7535bdb830d6a"
+    },
+    {
+      "path": "build-omm/omm/layers/VkLayer_VEL_opacity_micromap.json",
+      "bytes": 326,
+      "sha256": "b3896749f46eb8bb445c92ee7bbcd4ce1dc26ff839a945cb155c80411cb842b0"
+    },
+    {
+      "path": "build-omm/omm/native_pipeline.rahit.spv",
+      "bytes": 7500,
+      "sha256": "b683ac6818f5df09745f970d5866d8511bfceed26034dcc63c2619c0dbc61446"
+    },
+    {
+      "path": "build-omm/omm/native_pipeline.rchit.spv",
+      "bytes": 3188,
+      "sha256": "07e506d868af14d1374de9dd7b651a979eef53f52f0cf86d2ac5131a95974074"
+    },
+    {
+      "path": "build-omm/omm/native_pipeline.rgen.spv",
+      "bytes": 4868,
+      "sha256": "63e4a79b5ee0c1273cf8a37839d1ddca343b5ea4e62393e2945f55c42e62f68f"
+    },
+    {
+      "path": "build-omm/omm/native_pipeline.rint.spv",
+      "bytes": 6680,
+      "sha256": "1f603a28f1abe8c1ef1aabe7d89d7b11f1f093f0d267829b7782a8a73fd54a6c"
+    },
+    {
+      "path": "build-omm/omm/native_pipeline.rmiss.spv",
+      "bytes": 2488,
+      "sha256": "2bb2f810856520304b9ca7216ee5d98baf566609c06c624b7bda9b80128d1e86"
+    },
+    {
+      "path": "build-omm/omm/native_query.comp.spv",
+      "bytes": 32028,
+      "sha256": "a2ea7e40890ad0900d24620241c19500f0d32db391a7e76b1f747637b61cbf55"
+    },
+    {
+      "path": "build-omm/omm/omm_build.comp.spv",
+      "bytes": 25400,
+      "sha256": "ead0fb559c825929f2e07183178079993f7af81a1b5155433fa4e4a5b9be7f02"
+    },
+    {
+      "path": "build-omm/omm/omm_copy.comp.spv",
+      "bytes": 7608,
+      "sha256": "a5e1c2eada0e974567ac54ea97576584ddd689257f5ef950e29489253755b61a"
+    },
+    {
+      "path": "build-omm/omm/omm_kernels.h",
+      "bytes": 107456,
+      "sha256": "712585f53133433e837c5428e110f2e97f14e651fd8909ce9a3a2585dd6099f5"
+    },
+    {
+      "path": "build-omm/omm/omm_metadata.comp.spv",
+      "bytes": 36708,
+      "sha256": "1ce049e1158a19c411c9d57d570a98e2011727ec5537f668dd4bd2c34961d74b"
+    },
+    {
+      "path": "build-omm/omm/query_state.comp.spv",
+      "bytes": 2736,
+      "sha256": "172469229e888d4b429d0f01cde2e57f4591983031b3187690f833eb4061c0a2"
+    },
+    {
+      "path": "build-omm/omm/test_omm_classifier.exe",
+      "bytes": 2230784,
+      "sha256": "134db8b6eba05e74c758e973e8d75d570a3ac798b91312f7b9c77a6572271556"
+    },
+    {
+      "path": "build-omm/omm/test_omm_command_state.exe",
+      "bytes": 37888,
+      "sha256": "e23dc433c8457fe2e1a668114baa8402f836c45c896eeaccba0703cd067f730b"
+    },
+    {
+      "path": "build-omm/omm/test_omm_compose_workgroup.exe",
+      "bytes": 2049024,
+      "sha256": "862ebceca2b7f608e7828d40d854b8cf396d61b01274d29f86ccad19cad24529"
+    },
+    {
+      "path": "build-omm/omm/test_omm_device.exe",
+      "bytes": 79872,
+      "sha256": "35832dc9c02c9669dfb55af50e9a7150b429d02e77354ea91f7460a49cc5be09"
+    },
+    {
+      "path": "build-omm/omm/test_omm_gpu_build.exe",
+      "bytes": 53248,
+      "sha256": "d1081f6ea80ebc56edb06ef254d94161d568e878e954c961a5b2801411a66188"
+    },
+    {
+      "path": "build-omm/omm/test_omm_gpu_lookup.exe",
+      "bytes": 60928,
+      "sha256": "1c5a0ca4c83bd8c8bd688732eca7e8db661f6cb53a5c6416dc257f3dfb1e2f19"
+    },
+    {
+      "path": "build-omm/omm/test_omm_layer.exe",
+      "bytes": 61952,
+      "sha256": "0feb0c147ec7bc566cdfc88d425a164e8122ea79c49c9b397e7894013ca52fee"
+    },
+    {
+      "path": "build-omm/omm/test_omm_layer_registry.exe",
+      "bytes": 313856,
+      "sha256": "3b8040eaf21c0135088e60232f71d4a9d707b70ed7544f09e4a36abb4e66a226"
+    },
+    {
+      "path": "build-omm/omm/test_omm_metadata.exe",
+      "bytes": 37888,
+      "sha256": "c089eaf8db3c7fd32a5175bdfa7f7938cd1f1c46451ee369ac95e12b2d892fa4"
+    },
+    {
+      "path": "build-omm/omm/test_omm_metadata_gpu.exe",
+      "bytes": 79872,
+      "sha256": "ad089bd3d4e58b29cc6ae70c335c7b7663b6a1813343b39aadaf690e0a5ca721"
+    },
+    {
+      "path": "build-omm/omm/test_omm_native_pipeline.exe",
+      "bytes": 51200,
+      "sha256": "66874327c8c45dda019b9474aaee74a69fce0bd309ccc5f8a670bcf5d12860bd"
+    },
+    {
+      "path": "build-omm/omm/test_omm_native_query.exe",
+      "bytes": 54272,
+      "sha256": "f4e8b91dce4d3f88232b14f6b5563077b3c9da09b48c48409f7d9b6cfeb0ed9b"
+    },
+    {
+      "path": "build-omm/omm/test_omm_opacity.exe",
+      "bytes": 25088,
+      "sha256": "4d2fc64c518653325d2000097eead5cf0a26df7ca2f97c7cfd79bb9dc2461569"
+    },
+    {
+      "path": "build-omm/omm/test_omm_query_graph.exe",
+      "bytes": 1951744,
+      "sha256": "d81d91a4033b396d978fd83292c342f7a373625641c56d407f40680434b1e841"
+    },
+    {
+      "path": "build-omm/omm/test_omm_query_proceed.exe",
+      "bytes": 1943552,
+      "sha256": "80434e839e47a9ee5de45d2d07050c4ca8a98b8512cf697b4cbf756cb9a518ce"
+    },
+    {
+      "path": "build-omm/omm/test_omm_query_rewrite.exe",
+      "bytes": 1856512,
+      "sha256": "d23aece5b7a721dc05d7819e7b93d37661f4499930c77fc2258778f0ec5ca2bf"
+    },
+    {
+      "path": "build-omm/omm/test_omm_shader_compose.exe",
+      "bytes": 2141184,
+      "sha256": "d7da46b017cd7d5adbbcb1a63fc2cc64c2ac633e8390915f8d200e97047c7177"
+    },
+    {
+      "path": "build-omm/omm/test_omm_storage.exe",
+      "bytes": 35840,
+      "sha256": "9c3df25d0e058cfa36eb8cde875d7eb391147c1c1be9035eb528354ba3e62f06"
+    },
+    {
+      "path": "build-omm/omm/test_omm_sync.exe",
+      "bytes": 35328,
+      "sha256": "f0172f505239a9fc605bbd2314ab3cb4111e2b3a70fdfa878fae07b0cedb1aee"
+    },
+    {
+      "path": "build-omm/omm/vel_omm_commands.lib",
+      "bytes": 25658,
+      "sha256": "75924bdef1d3611ae38172556c06e213c72f6dde5a7554fd1fdadafbbf2daec1"
+    },
+    {
+      "path": "build-omm/omm/vel_omm_core.lib",
+      "bytes": 33576,
+      "sha256": "6e27ee7c67887c38f9fa9bd9e36168aa9141de1bca01c61ac60a7775b7949580"
+    },
+    {
+      "path": "build-omm/omm/vel_omm_device.lib",
+      "bytes": 24180,
+      "sha256": "41b8945159e5903dda77d2a2d112e1b1384a31c46207573e24b5c5cebb856e6a"
+    },
+    {
+      "path": "build-omm/omm/vel_omm_metadata.lib",
+      "bytes": 36832,
+      "sha256": "c723f3bcfe2359effef578ca9eae1adad38583a914b16a15cb683f6017c86991"
+    },
+    {
+      "path": "build-omm/omm/vel_omm_query_rewrite.lib",
+      "bytes": 695102,
+      "sha256": "13cf939cb913291be08edca0e10e72ee0ac33d31255ebaffb1bb4a71b0434cf8"
+    },
+    {
+      "path": "build-omm/omm/vel_omm_shader_compose.lib",
+      "bytes": 237524,
+      "sha256": "71c358b44fb7a22478c92195ac091babd2c269d3724f9c3f0e273aa50407477e"
+    },
+    {
+      "path": "build-omm/omm/vel_omm_sync.lib",
+      "bytes": 37738,
+      "sha256": "bed53d25b9406f40893801b29d586908993f7261b21f73bc0811138adf454717"
+    },
+    {
+      "path": "build-omm/omm/VkLayer_VEL_opacity_micromap.lib",
+      "bytes": 2260,
+      "sha256": "009f26a37340edaa786875ad69bd45637cef659912825da1a21fa2253ea3c371"
+    }
+  ],
+  "evidence": [
+    {
+      "path": "build-omm/metadata-components-final-details.log",
+      "bytes": 32245,
+      "sha256": "2cb7c3ce578e4378913adf30d8d959b8edfabea66e80ad232d416602b852723c"
+    },
+    {
+      "path": "build-omm/metadata-components-final-vvl-sync.log",
+      "bytes": 2555,
+      "sha256": "97d92a2600ff98f5d3b8e7559a3dbed335fa63dee9861838d67b74f611147fdf"
+    },
+    {
+      "path": "build-omm/metadata-public-above-details.log",
+      "bytes": 2309,
+      "sha256": "8b7802fed6c5a7cd1a4f275d3936f5a6616862d3e55368af9fc0c2786d5e79fe"
+    },
+    {
+      "path": "build-omm/metadata-public-above.log",
+      "bytes": 511,
+      "sha256": "e5bd0ae5484ec91b517e3dbdcbf5f396eadaa4c80822fc9ba5c33ed6943af729"
+    },
+    {
+      "path": "build-omm/metadata-public-below-details.log",
+      "bytes": 2309,
+      "sha256": "85fcb21040ff8669989ad61296712055c5c28e864ce72c95e279237789990975"
+    },
+    {
+      "path": "build-omm/metadata-public-below.log",
+      "bytes": 511,
+      "sha256": "6de3652e03da72255ff091d6928bf48a089918130bd3ec7add1cffbcc01fc2b2"
+    },
+    {
+      "path": "build-omm-classifier/final-artifacts.json",
+      "bytes": 1199,
+      "sha256": "1c01a519e970acad174238c55ec17b9d28dd0ce77680327e44f1cb0569ae9775"
+    },
+    {
+      "path": "build-omm-classifier/final-native-vvl.log",
+      "bytes": 190,
+      "sha256": "bbf44a36a00e3bf09ba054821fcde455f0369719ea504559caa2502f75d9a557"
+    },
+    {
+      "path": "build-omm-compose/actual-gpu-workgroup-vvl-sync.log",
+      "bytes": 166,
+      "sha256": "5d68cdd1000a4a8030bd16bd990a0fcf455c3b25c67030f3184f8e1451ae1f9b"
+    },
+    {
+      "path": "build-omm-compose/workgroup-oom-specid-fixed.log",
+      "bytes": 55,
+      "sha256": "984aa2efc7418fe973fa54c935a811237bfe32feeb6b254e54e2aad256a450f1"
+    },
+    {
+      "path": "build-omm-cts-audit/composer/fixed-results.log",
+      "bytes": 326,
+      "sha256": "5ccb4cd16d071183057be62715e5d1ca9dba0d4b761a56a70a77ae99bf5324bc"
+    },
+    {
+      "path": "build-omm-cts-audit/composer/gpu-fixed.log",
+      "bytes": 136,
+      "sha256": "8f364044979728d6ef3438bcf5bb4f8d721c89696ca008aefc68a202bcb7ebff"
+    },
+    {
+      "path": "build-omm-cts-audit/composer/gpu-old.log",
+      "bytes": 136,
+      "sha256": "e2760b7daa67efddd2b4f743744bb5e8cc31063dd8809df958da4853392ffa1f"
+    },
+    {
+      "path": "build-omm-cts-audit/composer/gpu_probe.cpp",
+      "bytes": 4938,
+      "sha256": "39e24601f4ff5c0bafafebd63b6f47f9fe2075c1972db98b7a3f7847cc44c957"
+    },
+    {
+      "path": "build-omm-cts-audit/composer/library.comp",
+      "bytes": 578,
+      "sha256": "f91a4b41b6a6ca88a59e5534124f486840b69e455436cb9368e77655835361e8"
+    },
+    {
+      "path": "build-omm-cts-audit/composer/library.spv",
+      "bytes": 2168,
+      "sha256": "e2fea9839b5796c3bde9b8d8765423bc9f6bd8bf7ba487a648db60bae34a2e09"
+    },
+    {
+      "path": "build-omm-cts-audit/composer/linked.spv",
+      "bytes": 2668,
+      "sha256": "84b96551d3a9a0766744ad77a9f1d0d055efe629851674b8432d0f24f4263ac9"
+    },
+    {
+      "path": "build-omm-cts-audit/composer/omm_shader_compose_fixed.cpp",
+      "bytes": 13514,
+      "sha256": "62700babf26505f698de4c760f0d6bf612b3306041abc1eb6775edbe03352db9"
+    },
+    {
+      "path": "build-omm-cts-audit/composer/omm_shader_compose_snapshot.cpp",
+      "bytes": 12880,
+      "sha256": "4ad2e1ddc47a11e19338b6941982f4d5e367b590d0faf2de3f7207f56f7e3187"
+    },
+    {
+      "path": "build-omm-cts-audit/composer/omm_shader_compose_specid_fixed.cpp",
+      "bytes": 13903,
+      "sha256": "a200349c25f01f57afe3c7fc043e72b884d638f0ca75a306e04693cf87b247d5"
+    },
+    {
+      "path": "build-omm-cts-audit/composer/probe.cpp",
+      "bytes": 2013,
+      "sha256": "96db1d1d6b6a9101b8808d6092096e3dc2acf5db46e2eb7950b071d500d22765"
+    },
+    {
+      "path": "build-omm-cts-audit/composer/probe2.cpp",
+      "bytes": 3497,
+      "sha256": "46ce0ee39aa8f2a102c6455620ddcec9f246f23b774f7f9fdc931dfac01a8f3e"
+    },
+    {
+      "path": "build-omm-cts-audit/composer/results.log",
+      "bytes": 326,
+      "sha256": "bdabe276b4d4a8ac64eb655e0309230f694a03c306f93f502ca706fd5a901de0"
+    },
+    {
+      "path": "build-omm-cts-audit/composer/version-specid-fixed.log",
+      "bytes": 166,
+      "sha256": "50812cc877a4566c502ad9a39d4918d9339e9a3808bce3370b140be22c190e15"
+    },
+    {
+      "path": "build-omm-cts-audit/composer/version-specid-results.log",
+      "bytes": 159,
+      "sha256": "ac387db3b12e342131aae56dc73de49dc1964a28f532c947a6aa32b40735f311"
+    },
+    {
+      "path": "build-omm-cts-evidence/metadata-native-control/0001-9607468f29e7.qpa",
+      "bytes": 9293,
+      "sha256": "bc4527ddd2a41bd2cb9807db8171c8a8bec8e917d69fd6bdd403160f2f42662c"
+    },
+    {
+      "path": "build-omm-cts-evidence/metadata-native-control/0001-9607468f29e7.stdout.txt",
+      "bytes": 606,
+      "sha256": "b1eaf81f26a8aad6889576ba8125a2d2edd2ecfbf7728166b4f529d148e39768"
+    },
+    {
+      "path": "build-omm-cts-evidence/metadata-native-control/0002-62255fc217a3.qpa",
+      "bytes": 9335,
+      "sha256": "abd82c9466b62b72d54ecef6b106091d090ebbe38cad77ed8701014fc118b785"
+    },
+    {
+      "path": "build-omm-cts-evidence/metadata-native-control/0002-62255fc217a3.stdout.txt",
+      "bytes": 620,
+      "sha256": "9fd87140e71c5a70670887ca5be67b01711a036149c3ca21822be51c9dfa83b6"
+    },
+    {
+      "path": "build-omm-cts-evidence/metadata-native-control/0003-fb835ab0dd03.qpa",
+      "bytes": 9253,
+      "sha256": "ad9059123e7c238e9dbe0417821ffdf5e3ea08f786dd9b9c33da174a02b04276"
+    },
+    {
+      "path": "build-omm-cts-evidence/metadata-native-control/0003-fb835ab0dd03.stdout.txt",
+      "bytes": 600,
+      "sha256": "61b7f677c54f92530324c2debbfffa9a415957e4e5019ba208c1d075dcc9b8b8"
+    },
+    {
+      "path": "build-omm-cts-evidence/metadata-native-control/0004-d806801a74c9.qpa",
+      "bytes": 9220,
+      "sha256": "c17d1386a4562810ae7783ec8a6206938aab45d27a8fa83566618f518dbb050c"
+    },
+    {
+      "path": "build-omm-cts-evidence/metadata-native-control/0004-d806801a74c9.stdout.txt",
+      "bytes": 589,
+      "sha256": "e4806656d16e066566054d2ecaf8eef7f9bdfe4f99d788ab98b5c23ad61dc836"
+    },
+    {
+      "path": "build-omm-cts-evidence/metadata-native-control/0005-927fdc40d4a8.qpa",
+      "bytes": 9203,
+      "sha256": "eafe216eb5d29d66157c9f1fc45cd5e5cdba364f20d43507175a5bbfbc0df0d4"
+    },
+    {
+      "path": "build-omm-cts-evidence/metadata-native-control/0005-927fdc40d4a8.stdout.txt",
+      "bytes": 576,
+      "sha256": "77de3c6383e461e6789804a0218985330b7e6036b9871561729339eee1553f01"
+    },
+    {
+      "path": "build-omm-cts-evidence/metadata-native-control/0006-38865ac57c20.qpa",
+      "bytes": 9209,
+      "sha256": "046b9542c98ecb4b9bd5327918e650946a4113f2b24af97072a96b1f7dfd95ef"
+    },
+    {
+      "path": "build-omm-cts-evidence/metadata-native-control/0006-38865ac57c20.stdout.txt",
+      "bytes": 578,
+      "sha256": "c82706fc31c0ce748af2305a7a81570a9865aec9ebdcc63fe1a5deb4a8652b5b"
+    },
+    {
+      "path": "build-omm-cts-evidence/metadata-native-control/0007-00666b7486be.qpa",
+      "bytes": 14678,
+      "sha256": "fde03ba7ae48f927295dc722bcb5ff4623bc40f996c037e37f7642ed77b3514f"
+    },
+    {
+      "path": "build-omm-cts-evidence/metadata-native-control/0007-00666b7486be.stdout.txt",
+      "bytes": 605,
+      "sha256": "39ea2e755b578989e3988918c6d22cca3b25d169d0cdc65dea9de02ee88d5eb9"
+    },
+    {
+      "path": "build-omm-cts-evidence/metadata-native-control/0008-2c43918a1ba0.qpa",
+      "bytes": 14534,
+      "sha256": "136853eb522d54e2f10bdbcf60197e489d1bfc79ff92e53a326af126be9136bc"
+    },
+    {
+      "path": "build-omm-cts-evidence/metadata-native-control/0008-2c43918a1ba0.stdout.txt",
+      "bytes": 595,
+      "sha256": "bf65883b8104a050cf8f5d154ff9275d8e0b285352b4c0f48ba9cc1a7d00595a"
+    },
+    {
+      "path": "build-omm-cts-evidence/metadata-native-control/0009-c585888dc0ff.qpa",
+      "bytes": 4185,
+      "sha256": "ff05d9ee1ec4a6de41e708afabe43e83056489a1ead08a5ebe51a556221a0ce2"
+    },
+    {
+      "path": "build-omm-cts-evidence/metadata-native-control/0009-c585888dc0ff.stdout.txt",
+      "bytes": 686,
+      "sha256": "d0596d13f3d02e6fcb8b40e1edf90e0d20d3d6e0e253924c536a981ce8757121"
+    },
+    {
+      "path": "build-omm-cts-evidence/metadata-native-control/0010-55cd57923a93.qpa",
+      "bytes": 4197,
+      "sha256": "3b8fab5b3257b803b6926c4cb15ff92ddb52f207ae5950b46cc716d3aca698c9"
+    },
+    {
+      "path": "build-omm-cts-evidence/metadata-native-control/0010-55cd57923a93.stdout.txt",
+      "bytes": 690,
+      "sha256": "0e92736797a20ad5cd7f272a987d1d622dfc346bce34daead8b7f2993e61b5f2"
+    },
+    {
+      "path": "build-omm-cts-evidence/metadata-native-control/layer_snapshot/VkLayer_VEL_opacity_micromap.dll",
+      "bytes": 307712,
+      "sha256": "d03e3c8a7ac3d084df7d2a24cd31048dad430fb5cfa6f65895a7535bdb830d6a"
+    },
+    {
+      "path": "build-omm-cts-evidence/metadata-native-control/layer_snapshot/VkLayer_VEL_opacity_micromap.json",
+      "bytes": 474,
+      "sha256": "ade11cce642c9fe1aee3c7e15063c8318aab88322c8b4ed865896b0ef4126963"
+    },
+    {
+      "path": "build-omm-cts-evidence/metadata-native-control/summary.json",
+      "bytes": 14981,
+      "sha256": "6e471d5d8b5e8d654de6a110c6c764f9441567bf612ca2d64b80dc23eb42d424"
+    },
+    {
+      "path": "build-omm-cts-evidence/metadata-software-admission/0001-927fdc40d4a8.qpa",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "build-omm-cts-evidence/metadata-software-admission/0001-927fdc40d4a8.stdout.txt",
+      "bytes": 219,
+      "sha256": "b0da685a531e1798158f70c620737a6b6c76e15a4a192506718419ce52e58c06"
+    },
+    {
+      "path": "build-omm-cts-evidence/metadata-software-admission/0002-9607468f29e7.qpa",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "build-omm-cts-evidence/metadata-software-admission/0002-9607468f29e7.stdout.txt",
+      "bytes": 219,
+      "sha256": "b0da685a531e1798158f70c620737a6b6c76e15a4a192506718419ce52e58c06"
+    },
+    {
+      "path": "build-omm-cts-evidence/metadata-software-admission/0003-c585888dc0ff.qpa",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "build-omm-cts-evidence/metadata-software-admission/0003-c585888dc0ff.stdout.txt",
+      "bytes": 219,
+      "sha256": "b0da685a531e1798158f70c620737a6b6c76e15a4a192506718419ce52e58c06"
+    },
+    {
+      "path": "build-omm-cts-evidence/metadata-software-admission/layer_snapshot/VkLayer_VEL_opacity_micromap.dll",
+      "bytes": 307712,
+      "sha256": "d03e3c8a7ac3d084df7d2a24cd31048dad430fb5cfa6f65895a7535bdb830d6a"
+    },
+    {
+      "path": "build-omm-cts-evidence/metadata-software-admission/layer_snapshot/VkLayer_VEL_opacity_micromap.json",
+      "bytes": 478,
+      "sha256": "8d7bb7b00ea5fc64a5ccdc2f309db036b68ae69375aa2b8166e1f00bab4b8288"
+    },
+    {
+      "path": "build-omm-cts-evidence/metadata-software-admission/summary.json",
+      "bytes": 5756,
+      "sha256": "dc69d654db582a18ddd5e1821f56a53bac9767911761b81959335c9e25a20d94"
+    },
+    {
+      "path": "build-omm-host-only/metadata-final.log",
+      "bytes": 574,
+      "sha256": "5524f5e72fcd47700d2bbf675d38c16a6d629bdaffb05f3dbe34046c51f26af1"
+    },
+    {
+      "path": "build-omm-metadata/gpu-metadata-final-vvl-sync.log",
+      "bytes": 692,
+      "sha256": "8f0dcc73790b07af6f307c5d7c39a8336f002cb34eee2b55ca39c33b8d024712"
+    },
+    {
+      "path": "build-omm-metadata/metadata-host-final.log",
+      "bytes": 42,
+      "sha256": "e53f3f50d102b51fe656cb0283046cca3696e1cf4366c9094f024cc610c15a04"
+    },
+    {
+      "path": "build-omm-parent/metadata-offline-final.log",
+      "bytes": 1339,
+      "sha256": "67df816b126824dbe99979da5689b52d35038145a552545885316d37e4c86f38"
+    }
+  ],
+  "documents": [
+    {
+      "path": "docs/omm_cts_consumer_bridge_2026-10-27.md",
+      "bytes": 20663,
+      "sha256": "b83823ea755034a90726d712297eed3cca717eb66ee9bc42e44d600e4f548d6a"
+    },
+    {
+      "path": "docs/omm_cts_experimental_probe_cases.txt",
+      "bytes": 442,
+      "sha256": "8f541207458632b3204036ad98eac88ede156f57c188171933264dcaa495a747"
+    },
+    {
+      "path": "docs/omm_cts_smoke_cases.txt",
+      "bytes": 1042,
+      "sha256": "5e5bb093aa827d77656f46ece308aac2d895a69286e1bc17f4dd38cba6f4dff7"
+    },
+    {
+      "path": "docs/omm_metadata_classifier_2026-10-27.md",
+      "bytes": 8267,
+      "sha256": "18d4c46e3bca65bdd6cf54c41bbf296174c70b40466694e11f6b7af8bf87e26f"
+    },
+    {
+      "path": "docs/opacity_micromap_status.md",
+      "bytes": 14082,
+      "sha256": "7a7565a16ebce8f7604b19968f781e4b6b940387dd4e3131fd09f030d8953225"
+    }
+  ],
+  "runtime_dependencies": [
+    {
+      "path": "C:/VulkanSDK/1.4.357.0/Bin/VkLayer_khronos_validation.dll",
+      "bytes": 21681592,
+      "sha256": "9725ce7a9225f42f8961c433dacae4cc8fae3a16e95ef1d0a7c7e8bc09132c40"
+    },
+    {
+      "path": "C:/VulkanSDK/1.4.357.0/Bin/VkLayer_khronos_validation.json",
+      "bytes": 129847,
+      "sha256": "20d3ef44fe96aa41fceefab2308892f9d4b346d23eebfe8b5e1690715f23f472"
+    },
+    {
+      "path": "C:/VulkanSDK/1.4.357.0/Lib/SPIRV-Tools-link.lib",
+      "bytes": 4560562,
+      "sha256": "cdbdba1737ac5cbccd7dc81659174e3b3cf9b9b7ef22d3f4bbc12d87da22455a"
+    },
+    {
+      "path": "C:/VulkanSDK/1.4.357.0/Lib/SPIRV-Tools-opt.lib",
+      "bytes": 66578852,
+      "sha256": "945005788d020341ffa256c8ddeefdc0b3dfd2027786fc698db6a8ce4680373b"
+    },
+    {
+      "path": "C:/VulkanSDK/1.4.357.0/Lib/SPIRV-Tools.lib",
+      "bytes": 25389086,
+      "sha256": "fa78c21d828afca6e2018a5bfddf849cfa761ae71b58a2ccca6b4f04afb1bda1"
+    }
+  ]
+}

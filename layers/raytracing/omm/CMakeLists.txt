@@ -3,10 +3,18 @@
 add_library(vel_omm_core STATIC omm_opacity.cpp omm_storage.cpp)
 target_compile_features(vel_omm_core PUBLIC cxx_std_17)
 target_include_directories(vel_omm_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+add_library(vel_omm_metadata STATIC omm_metadata.cpp)
+target_link_libraries(vel_omm_metadata PUBLIC vel_omm_core)
+add_executable(test_omm_metadata tests/test_omm_metadata.cpp)
+target_link_libraries(test_omm_metadata PRIVATE vel_omm_metadata)
+add_test(NAME omm_metadata COMMAND test_omm_metadata)
+set_tests_properties(omm_metadata PROPERTIES LABELS "offline;omm")
 if(MSVC)
     target_compile_options(vel_omm_core PRIVATE /W4 /WX)
+    target_compile_options(vel_omm_metadata PRIVATE /W4 /WX)
 else()
     target_compile_options(vel_omm_core PRIVATE -Wall -Wextra -Werror)
+    target_compile_options(vel_omm_metadata PRIVATE -Wall -Wextra -Werror)
 endif()
 
 foreach(component opacity storage)
@@ -34,10 +42,24 @@ if(OMM_BUILD_NATIVE_PROOFS)
     target_compile_features(vel_omm_query_rewrite PUBLIC cxx_std_17)
     target_include_directories(vel_omm_query_rewrite PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
     target_link_libraries(vel_omm_query_rewrite PUBLIC SPIRV-Tools-static)
+    find_library(OMM_SPIRV_LINK_LIBRARY NAMES SPIRV-Tools-link
+        HINTS "${Vulkan_ROOT}/Lib" "$ENV{VULKAN_SDK}/Lib" REQUIRED)
+    find_library(OMM_SPIRV_OPT_LIBRARY NAMES SPIRV-Tools-opt
+        HINTS "${Vulkan_ROOT}/Lib" "$ENV{VULKAN_SDK}/Lib" REQUIRED)
+    add_library(vel_omm_shader_compose STATIC omm_shader_compose.cpp)
+    target_compile_features(vel_omm_shader_compose PUBLIC cxx_std_17)
+    target_include_directories(vel_omm_shader_compose PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+    target_link_libraries(vel_omm_shader_compose PUBLIC ${OMM_SPIRV_LINK_LIBRARY} ${OMM_SPIRV_OPT_LIBRARY} SPIRV-Tools-static)
+    add_executable(test_omm_shader_compose tests/test_omm_shader_compose.cpp)
+    target_link_libraries(test_omm_shader_compose PRIVATE vel_omm_shader_compose)
+    add_test(NAME omm_shader_compose COMMAND test_omm_shader_compose)
+    set_tests_properties(omm_shader_compose PROPERTIES LABELS "offline;omm")
     if(MSVC)
         target_compile_options(vel_omm_query_rewrite PRIVATE /W4 /WX)
+        target_compile_options(vel_omm_shader_compose PRIVATE /W4 /WX)
     else()
         target_compile_options(vel_omm_query_rewrite PRIVATE -Wall -Wextra -Werror)
+        target_compile_options(vel_omm_shader_compose PRIVATE -Wall -Wextra -Werror)
     endif()
     add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/native_query.comp.spv
         COMMAND Vulkan::glslangValidator -V --target-env vulkan1.2
@@ -55,25 +77,50 @@ if(OMM_BUILD_NATIVE_PROOFS)
     set_tests_properties(omm_native_query PROPERTIES LABELS "gpu;native_rt;omm;experimental" SKIP_RETURN_CODE 77
         FAIL_REGULAR_EXPRESSION "Validation Error;SYNC-HAZARD")
 
-    set(extra_shaders query_state.comp omm_build.comp omm_copy.comp gpu_build_generate.comp gpu_lookup.comp layer_state.comp)
+    set(extra_shaders query_state.comp omm_build.comp omm_copy.comp omm_metadata.comp gpu_build_generate.comp gpu_lookup.comp layer_state.comp
+        classifier_library.comp classifier_query.comp composition_workgroup.comp)
     foreach(stage rgen rmiss rahit rchit rint)
         list(APPEND extra_shaders native_pipeline.${stage})
     endforeach()
     set(shader_outputs)
     foreach(shader ${extra_shaders})
-        if(shader STREQUAL "omm_build.comp" OR shader STREQUAL "omm_copy.comp")
+        if(shader STREQUAL "omm_build.comp" OR shader STREQUAL "omm_copy.comp" OR shader STREQUAL "omm_metadata.comp")
             set(shader_source ${CMAKE_CURRENT_SOURCE_DIR}/${shader})
         else()
             set(shader_source ${CMAKE_CURRENT_SOURCE_DIR}/tests/${shader})
         endif()
+        set(shader_flags)
+        if(shader STREQUAL "classifier_library.comp")
+            list(APPEND shader_flags --keep-uncalled)
+        endif()
         add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/${shader}.spv
-            COMMAND Vulkan::glslangValidator -V --target-env vulkan1.2 ${shader_source}
+            COMMAND Vulkan::glslangValidator -V --target-env vulkan1.2 ${shader_flags} ${shader_source}
                 -o ${CMAKE_CURRENT_BINARY_DIR}/${shader}.spv
             COMMAND ${OMM_SPIRV_VALIDATOR} --target-env vulkan1.2 ${CMAKE_CURRENT_BINARY_DIR}/${shader}.spv
-            DEPENDS ${shader_source} tests/native_pipeline.glsl omm_opacity.glsl omm_lookup.glsl VERBATIM)
+            DEPENDS ${shader_source} tests/native_pipeline.glsl omm_opacity.glsl omm_lookup.glsl omm_classifier.glsl VERBATIM)
         list(APPEND shader_outputs ${CMAKE_CURRENT_BINARY_DIR}/${shader}.spv)
     endforeach()
     add_custom_target(omm_extra_spv DEPENDS ${shader_outputs})
+    add_executable(test_omm_metadata_gpu tests/test_omm_metadata_gpu.cpp)
+    target_link_libraries(test_omm_metadata_gpu PRIVATE vel_omm_metadata Vulkan::Vulkan)
+    add_dependencies(test_omm_metadata_gpu omm_extra_spv)
+    add_test(NAME omm_metadata_gpu COMMAND test_omm_metadata_gpu ${CMAKE_CURRENT_BINARY_DIR}/omm_metadata.comp.spv
+        ${CMAKE_CURRENT_BINARY_DIR}/omm_build.comp.spv ${CMAKE_CURRENT_BINARY_DIR}/gpu_build_generate.comp.spv)
+    set_tests_properties(omm_metadata_gpu PROPERTIES LABELS "gpu;native_rt;omm;experimental" SKIP_RETURN_CODE 77
+        FAIL_REGULAR_EXPRESSION "Validation Error;SYNC-HAZARD")
+    add_executable(test_omm_classifier tests/test_omm_classifier.cpp)
+    target_link_libraries(test_omm_classifier PRIVATE vel_omm_metadata vel_omm_query_rewrite vel_omm_shader_compose Vulkan::Vulkan)
+    add_dependencies(test_omm_classifier omm_extra_spv)
+    add_test(NAME omm_classifier COMMAND test_omm_classifier ${CMAKE_CURRENT_BINARY_DIR})
+    set_tests_properties(omm_classifier PROPERTIES LABELS "gpu;native_rt;omm;experimental" SKIP_RETURN_CODE 77
+        FAIL_REGULAR_EXPRESSION "Validation Error;SYNC-HAZARD")
+    add_executable(test_omm_compose_workgroup tests/test_omm_compose_workgroup.cpp)
+    target_link_libraries(test_omm_compose_workgroup PRIVATE vel_omm_shader_compose Vulkan::Vulkan)
+    add_dependencies(test_omm_compose_workgroup omm_extra_spv)
+    add_test(NAME omm_compose_workgroup COMMAND test_omm_compose_workgroup ${CMAKE_CURRENT_BINARY_DIR}/composition_workgroup.comp.spv
+        ${CMAKE_CURRENT_BINARY_DIR}/classifier_library.comp.spv)
+    set_tests_properties(omm_compose_workgroup PROPERTIES LABELS "gpu;native_rt;omm;experimental" SKIP_RETURN_CODE 77
+        FAIL_REGULAR_EXPRESSION "Validation Error;SYNC-HAZARD")
     add_library(vel_omm_device STATIC omm_device.cpp)
     target_link_libraries(vel_omm_device PUBLIC vel_omm_core Vulkan::Vulkan)
     add_library(vel_omm_commands STATIC omm_command_state.cpp)

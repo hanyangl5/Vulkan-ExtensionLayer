@@ -1,0 +1,166 @@
+// Copyright 2026 The Khronos Group Inc.
+// SPDX-License-Identifier: Apache-2.0
+#version 460
+#extension GL_EXT_buffer_reference2 : require
+#extension GL_EXT_shader_explicit_arithmetic_types_int64 : require
+
+// BLAS metadata component. Sources are the 128-byte MetadataGeometrySource jobs
+// in omm_metadata.h; the caller owns geometryCount complete jobs. Phase 0 plans
+// the body, phase 1 uses workgroup Y + geometryBase to encode one geometry span.
+// Insert a COMPUTE/SHADER_WRITE -> COMPUTE/SHADER_READ|WRITE barrier between them.
+// GPU source data is never read on the CPU. A separate AS publisher may expose
+// the new body only after phase 1 completes AND status is zero. Bad GPU index
+// semantics can leave a partial private body; they never authorize publication.
+layout(local_size_x = 64) in;
+layout(buffer_reference, std430, buffer_reference_align = 4) readonly buffer ReadWords { uint words[]; };
+layout(buffer_reference, std430, buffer_reference_align = 4) buffer WriteWords { uint words[]; };
+layout(push_constant, std430) uniform MetadataBuild {
+    uint64_t sourcesAddress;
+    uint64_t outputAddress;
+    uint64_t outputCapacity;
+    uint64_t statusAddress;
+    uint64_t geometryCount;
+    uint64_t generation;
+    uint64_t geometryBase;
+    uint buildFlags;
+    uint phase;
+} build;
+const uint64_t maximum = 0xfffffffffffffffful;
+
+uint read32(uint64_t address, uint64_t offset) { return ReadWords(address + offset).words[0]; }
+uint64_t read64(uint64_t address, uint64_t offset) { return uint64_t(read32(address, offset)) | uint64_t(read32(address, offset + 4ul)) << 32u; }
+uint job32(uint64_t geometry, uint offset) { return read32(build.sourcesAddress, geometry * 128ul + uint64_t(offset)); }
+uint64_t job64(uint64_t geometry, uint offset) { return read64(build.sourcesAddress, geometry * 128ul + uint64_t(offset)); }
+void put32(uint64_t offset, uint value) { WriteWords(build.outputAddress + offset).words[0] = value; }
+void put64(uint64_t offset, uint64_t value) { put32(offset, uint(value)); put32(offset + 4ul, uint(value >> 32u)); }
+void fail(uint code) { WriteWords(build.statusAddress).words[0] = code; }
+bool range(uint64_t address, uint64_t bytes) { return (address & 3ul) == 0ul && (bytes == 0ul || address != 0ul) && bytes <= maximum - address; }
+bool overlaps(uint64_t a, uint64_t aSize, uint64_t b, uint64_t bSize) { return aSize != 0ul && bSize != 0ul && a < b + bSize && b < a + aSize; }
+
+bool sourceSnapshot(uint64_t geometry, out uint64_t activeBytes, out uint64_t triangleCount) {
+    activeBytes = triangleCount = 0ul;
+    uint64_t capacity = job64(geometry, 40u);
+    if (capacity == 0ul) return job64(geometry, 104u) == 0ul && job64(geometry, 112u) == 0ul;
+    uint64_t address = job64(geometry, 104u), sourceCapacity = job64(geometry, 112u);
+    if (sourceCapacity < 64ul || !range(address, sourceCapacity)) return false;
+    if (read32(address, 0ul) != 0x4f4c4556u || read32(address, 4ul) != 0x00004d4du || read32(address, 8ul) != 1u ||
+        read32(address, 12ul) != 64u || read64(address, 32ul) != 64ul || read64(address, 48ul) != 0ul || read64(address, 56ul) != 0ul) return false;
+    activeBytes = read64(address, 16ul); triangleCount = read64(address, 24ul);
+    if (activeBytes < 64ul || (activeBytes & 15ul) != 0ul || activeBytes > sourceCapacity || activeBytes > capacity ||
+        triangleCount > (maximum - 79ul) / 24ul || ((64ul + triangleCount * 24ul + 15ul) & ~15ul) != read64(address, 40ul) ||
+        read64(address, 40ul) > activeBytes) return false;
+    return true;
+}
+bool multiply32(uint64_t a, uint64_t b, out uint64_t result) {
+    uint64_t low = (a & 0xfffffffful) * b, high = (a >> 32u) * b;
+    if (high > 0xfffffffful || low > maximum - (high << 32u)) return false;
+    result = low + (high << 32u);
+    return true;
+}
+
+void planBody() {
+    if (build.outputCapacity < 64ul || (build.outputCapacity & 15ul) != 0ul || !range(build.outputAddress, build.outputCapacity) ||
+        build.geometryCount > (maximum - 64ul) / 128ul || !range(build.sourcesAddress, build.geometryCount * 128ul) ||
+        overlaps(build.sourcesAddress, build.geometryCount * 128ul, build.outputAddress, build.outputCapacity) ||
+        overlaps(build.sourcesAddress, build.geometryCount * 128ul, build.statusAddress, 4ul) ||
+        overlaps(build.statusAddress, 4ul, build.outputAddress, build.outputCapacity)) { fail(1u); return; }
+    uint64_t cursor = 64ul + build.geometryCount * 64ul;
+    for (uint64_t geometry = 0ul; geometry < build.geometryCount; ++geometry) {
+        uint type = job32(geometry, 0u), flags = job32(geometry, 4u), association = job32(geometry, 48u);
+        uint64_t count = job64(geometry, 8u), assoc = job64(geometry, 16u), assocBytes = job64(geometry, 24u);
+        uint64_t snapshot = job64(geometry, 32u), snapshotCapacity = job64(geometry, 40u);
+        if (type > 1u || (flags & ~3u) != 0u || association > 1u || job32(geometry, 52u) != 0u || job64(geometry, 56u) != 0ul) { fail(1u); return; }
+        if (association == 0u) {
+            if (assoc != 0ul || assocBytes != 0ul || snapshot != 0ul || snapshotCapacity != 0ul) { fail(1u); return; }
+            continue;
+        }
+        if (type != 0u || count > (maximum - 15ul) / 8ul || assocBytes != count * 8ul ||
+            (count == 0ul ? assoc != 0ul : assoc != cursor)) { fail(1u); return; }
+        if (assocBytes > maximum - cursor - 15ul) { fail(2u); return; }
+        cursor = (cursor + assocBytes + 15ul) & ~15ul;
+        if (snapshotCapacity != 0ul) {
+            if (snapshotCapacity < 64ul || (snapshotCapacity & 15ul) != 0ul || snapshot != cursor || snapshotCapacity > maximum - cursor) { fail(1u); return; }
+            cursor += snapshotCapacity;
+        } else if (snapshot != 0ul) { fail(1u); return; }
+        uint64_t activeBytes, triangleCount;
+        if (!sourceSnapshot(geometry, activeBytes, triangleCount)) { fail(1u); return; }
+        uint width = job32(geometry, 120u);
+        if (width != 0u && width != 16u && width != 32u) { fail(1u); return; }
+        if (width != 0u && count != 0ul) {
+            uint64_t address = job64(geometry, 64u), accessible = job64(geometry, 72u), offset = job64(geometry, 80u);
+            uint64_t bytes = job64(geometry, 88u), stride = job64(geometry, 96u), required;
+            if (!range(address, accessible) || (accessible & 3ul) != 0ul || offset > accessible || bytes > accessible - offset ||
+                stride > 0xfffffffful || (stride & uint64_t(width / 8u - 1u)) != 0ul ||
+                !multiply32(count - 1ul, stride, required) || required > bytes || uint64_t(width / 8u) > bytes - required ||
+                overlaps(build.statusAddress, 4ul, address, accessible) ||
+                overlaps(build.outputAddress, build.outputCapacity, address, accessible)) { fail(1u); return; }
+        }
+        if (snapshotCapacity != 0ul &&
+            (overlaps(build.outputAddress, build.outputCapacity, job64(geometry, 104u), job64(geometry, 112u)) ||
+             overlaps(build.statusAddress, 4ul, job64(geometry, 104u), job64(geometry, 112u)))) { fail(1u); return; }
+    }
+    if (cursor > build.outputCapacity) { fail(1u); return; }
+    for (uint word = 0u; word < 16u; ++word) put32(uint64_t(word) * 4ul, 0u);
+    put32(0ul, 0x424d4d4fu); put32(4ul, 1u); put32(8ul, 1u); put32(12ul, 64u);
+    put64(16ul, cursor); put64(24ul, cursor); put64(32ul, build.geometryCount); put64(40ul, 64ul);
+    put32(48ul, build.buildFlags); put64(56ul, build.generation);
+    for (uint64_t geometry = 0ul; geometry < build.geometryCount; ++geometry)
+        for (uint word = 0u; word < 16u; ++word) put32(64ul + geometry * 64ul + uint64_t(word) * 4ul, job32(geometry, word * 4u));
+    fail(0u);
+}
+
+uint64_t normalized(uint64_t geometry, uint64_t primitive, uint64_t triangleCount, out bool valid) {
+    valid = false;
+    uint width = job32(geometry, 120u), raw = 0u;
+    if (width == 0u) {
+        if (primitive > 0xfffffffful) return 0ul;
+        raw = uint(primitive); width = 32u;
+    } else {
+        uint64_t offset = job64(geometry, 80u) + primitive * job64(geometry, 96u);
+        uint64_t address = job64(geometry, 64u);
+        for (uint lane = 0u; lane < width / 8u; ++lane) {
+            uint64_t byte = offset + uint64_t(lane);
+            raw |= ((read32(address, byte & ~3ul) >> (uint(byte & 3ul) * 8u)) & 255u) << (8u * lane);
+        }
+    }
+    uint largest = 0xffffffffu >> (32u - width);
+    if (raw >= largest - 3u) { valid = true; return maximum - uint64_t(largest - raw); }
+    uint64_t triangle = uint64_t(raw) + uint64_t(job32(geometry, 124u));
+    valid = job64(geometry, 40u) != 0ul && triangle < triangleCount;
+    return triangle;
+}
+
+void encodeBody() {
+    if (atomicAdd(WriteWords(build.statusAddress).words[0], 0u) != 0u) return;
+    if (build.geometryBase > maximum - uint64_t(gl_WorkGroupID.y)) return;
+    uint64_t geometry = build.geometryBase + uint64_t(gl_WorkGroupID.y);
+    if (geometry >= build.geometryCount || job32(geometry, 48u) == 0u) return;
+    uint64_t assoc = job64(geometry, 16u), assocBytes = job64(geometry, 24u);
+    uint64_t snapshot = job64(geometry, 32u), snapshotCapacity = job64(geometry, 40u);
+    uint64_t begin = assocBytes != 0ul ? assoc : snapshot;
+    uint64_t end = snapshotCapacity != 0ul ? snapshot + snapshotCapacity : (assoc + assocBytes + 15ul) & ~15ul;
+    if (begin == 0ul || end == 0ul) return;
+    uint64_t activeBytes, triangleCount;
+    if (!sourceSnapshot(geometry, activeBytes, triangleCount)) { atomicOr(WriteWords(build.statusAddress).words[0], 1u); return; }
+    uint64_t step = uint64_t(gl_NumWorkGroups.x) * 256ul;
+    for (uint64_t word = begin + uint64_t(gl_GlobalInvocationID.x) * 4ul; word < end; word += step) {
+        uint value = 0u;
+        if (assocBytes != 0ul && word < assoc + assocBytes) {
+            uint64_t relative = word - assoc;
+            bool valid;
+            uint64_t triangle = normalized(geometry, relative >> 3u, triangleCount, valid);
+            if (!valid) atomicOr(WriteWords(build.statusAddress).words[0], 1u);
+            value = (relative & 4ul) == 0ul ? uint(triangle) : uint(triangle >> 32u);
+        } else if (snapshotCapacity != 0ul && word >= snapshot && word - snapshot < activeBytes) {
+            value = read32(job64(geometry, 104u), word - snapshot);
+        }
+        put32(word, value);
+    }
+}
+
+void main() {
+    if (gl_GlobalInvocationID.z != 0u || build.statusAddress == 0ul || !range(build.statusAddress, 4ul)) return;
+    if (build.phase == 0u) {
+        if (all(equal(gl_GlobalInvocationID, uvec3(0)))) planBody();
+    } else if (build.phase == 1u) encodeBody();
+}

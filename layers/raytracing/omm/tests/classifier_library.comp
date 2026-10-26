@@ -1,0 +1,10 @@
+// Copyright 2026 The Khronos Group Inc.
+// SPDX-License-Identifier: Apache-2.0
+#version 460
+#extension GL_GOOGLE_include_directive : require
+#include "../omm_classifier.glsl"
+
+// Compile with --keep-uncalled. The composer removes this dummy entry point and
+// links the classifier closure into application stages without global resources.
+layout(local_size_x = 1) in;
+void main() {}
