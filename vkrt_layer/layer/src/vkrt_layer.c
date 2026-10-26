@@ -20,6 +20,9 @@
 #include "vkrt_as_registry.h"
 #include "vkrt_as_copy.h"
 #include "vkrt_deferred.h"
+#include "vkrt_as_serialization.h"
+#include "vkrt_rtp.h"
+#include "vkrt_rt_capabilities.h"
 
 struct vkrt_global vkrt_global = VKRT_GLOBAL_INITIALIZER;
 
@@ -230,11 +233,15 @@ vkrt_CreateDevice(VkPhysicalDevice physicalDevice,
        result = vkrt_as_registry_init(data, pAllocator);
        if (result == VK_SUCCESS) result = vkrt_build_init(data);
        if (result == VK_SUCCESS) result = vkrt_as_copy_init(data);
+       if (result == VK_SUCCESS) result = vkrt_as_serialization_init(data, pAllocator);
+       if (result == VK_SUCCESS) result = vkrt_rtp_init(data, pAllocator);
    }
    if (result != VK_SUCCESS) {
       VKRT_LOG_ERR("GPU BVH pipeline initialization failed: %d", result);
       vkrt_build_finish(data);
       vkrt_as_copy_finish(data);
+      vkrt_as_serialization_finish(data);
+      vkrt_rtp_finish(data);
       vkrt_deferred_finish(data);
       vkrt_as_registry_finish(data);
       data->vtable.DestroyDevice(*pDevice, pAllocator);
@@ -270,7 +277,9 @@ vkrt_DestroyDevice(VkDevice device, const VkAllocationCallbacks *pAllocator)
       return;
 
    vkrt_commands_finish(data);
+   vkrt_rtp_finish(data);
    vkrt_as_copy_finish(data);
+   vkrt_as_serialization_finish(data);
    vkrt_deferred_finish(data);
    vkrt_build_finish(data);
    vkrt_as_registry_finish(data);
@@ -302,6 +311,9 @@ vkrt_CreateShaderModule(VkDevice device,
       return VK_ERROR_INITIALIZATION_FAILED;
 
    VkShaderModuleCreateInfo local_ci = *pCreateInfo;
+   bool handled = false;
+   VkResult rtp_result = vkrt_rtp_create_shader(data, pCreateInfo, pAllocator, pShaderModule, &handled);
+   if (handled || rtp_result != VK_SUCCESS) return rtp_result;
    bool uses_rq = false, uses_rtp = false;
 
    VkResult result = vkrt_rewrite_shader_module(data, pCreateInfo, &local_ci,
@@ -351,6 +363,7 @@ vkrt_DestroyShaderModule(VkDevice device, VkShaderModule shaderModule,
    if (!data)
       return;
 
+   if (vkrt_rtp_destroy_shader(data, shaderModule)) return;
    struct vkrt_shader_module_data *sm =
       (struct vkrt_shader_module_data *)vkrt_unmap_object(
          VKRT_HKEY(shaderModule));
@@ -380,12 +393,13 @@ vkrt_CreateDescriptorSetLayout(VkDevice device,
       return VK_ERROR_INITIALIZATION_FAILED;
 
    bool rewrite = false;
+   if (!data->as_registry) return data->vtable.CreateDescriptorSetLayout(device, pCreateInfo, pAllocator, pSetLayout);
    for (uint32_t i = 0; i < pCreateInfo->bindingCount; i++) {
-      if (pCreateInfo->pBindings[i].descriptorType ==
-          VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR) {
-         rewrite = true;
-         break;
-      }
+       if (pCreateInfo->pBindings[i].descriptorType == VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR ||
+           (pCreateInfo->pBindings[i].stageFlags & VKRT_RTP_SHADER_STAGES)) {
+           rewrite = true;
+           break;
+       }
    }
    if (!rewrite)
       return data->vtable.CreateDescriptorSetLayout(device, pCreateInfo,
@@ -400,6 +414,7 @@ vkrt_CreateDescriptorSetLayout(VkDevice device,
       return VK_ERROR_OUT_OF_HOST_MEMORY;
    for (uint32_t i = 0; i < pCreateInfo->bindingCount; i++) {
       b[i] = pCreateInfo->pBindings[i];
+      b[i].stageFlags = vkrt_compute_shader_stages(b[i].stageFlags);
       if (b[i].descriptorType == VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR)
          b[i].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
    }
@@ -573,12 +588,21 @@ static VKAPI_ATTR void VKAPI_CALL vkrt_CmdCopyAccelerationStructureKHR(VkCommand
     struct vkrt_cmd_buffer_data *cb = VKRT_FIND(struct vkrt_cmd_buffer_data, commandBuffer);
     if (cb) vkrt_cmd_copy_as(cb->device_data, commandBuffer, info);
 }
-VKRT_REJECT_CMD(CmdCopyAccelerationStructureToMemoryKHR,
-                VkCommandBuffer commandBuffer,
-                const VkCopyAccelerationStructureToMemoryInfoKHR *pInfo)
-VKRT_REJECT_CMD(CmdCopyMemoryToAccelerationStructureKHR,
-                VkCommandBuffer commandBuffer,
-                const VkCopyMemoryToAccelerationStructureInfoKHR *pInfo)
+static VKAPI_ATTR void VKAPI_CALL vkrt_CmdCopyAccelerationStructureToMemoryKHR(
+    VkCommandBuffer commandBuffer, const VkCopyAccelerationStructureToMemoryInfoKHR *info) {
+    struct vkrt_cmd_buffer_data *cb = VKRT_FIND(struct vkrt_cmd_buffer_data, commandBuffer);
+    if (cb) vkrt_cmd_serialize_as(cb->device_data, commandBuffer, info);
+}
+static VKAPI_ATTR void VKAPI_CALL vkrt_CmdCopyMemoryToAccelerationStructureKHR(
+    VkCommandBuffer commandBuffer, const VkCopyMemoryToAccelerationStructureInfoKHR *info) {
+    struct vkrt_cmd_buffer_data *cb = VKRT_FIND(struct vkrt_cmd_buffer_data, commandBuffer);
+    if (cb) vkrt_cmd_deserialize_as(cb->device_data, commandBuffer, info);
+}
+static VKAPI_ATTR void VKAPI_CALL vkrt_GetDeviceAccelerationStructureCompatibilityKHR(
+    VkDevice device, const VkAccelerationStructureVersionInfoKHR *version, VkAccelerationStructureCompatibilityKHR *compatibility) {
+    struct vkrt_device_data *dev = VKRT_FIND(struct vkrt_device_data, device);
+    if (dev) vkrt_as_serialization_compatibility(dev, version, compatibility);
+}
 VKRT_REJECT_CMD(CmdWriteAccelerationStructuresPropertiesKHR,
                 VkCommandBuffer commandBuffer,
                 uint32_t accelerationStructureCount,
@@ -638,42 +662,45 @@ vkrt_GetDeviceProcAddr(VkDevice device, const char *pName);
 static void *
 vkrt_find_device_fn(const char *name)
 {
-   PFN_vkVoidFunction command = vkrt_command_proc(name);
-   if (command) return (void *)command;
-   command = vkrt_sync_proc(name);
-   if (command) return (void *)command;
-   command = vkrt_deferred_proc(name);
-   if (command) return (void *)command;
-   static const struct {
-      const char *name;
-      void       *ptr;
-   } map[] = {
-       {"vkGetDeviceProcAddr", (void *)vkrt_GetDeviceProcAddr},
-       {"vkDestroyDevice", (void *)vkrt_DestroyDevice},
-       {"vkCreateShaderModule", (void *)vkrt_CreateShaderModule},
-       {"vkDestroyShaderModule", (void *)vkrt_DestroyShaderModule},
-       {"vkCreateBuffer", (void *)vkrt_CreateBuffer},
-       {"vkDestroyBuffer", (void *)vkrt_DestroyBuffer},
-       {"vkCreateDescriptorSetLayout", (void *)vkrt_CreateDescriptorSetLayout},
-       {"vkCreateDescriptorPool", (void *)vkrt_CreateDescriptorPool},
-       {"vkCreateQueryPool", (void *)vkrt_CreateQueryPool},
-       {"vkUpdateDescriptorSets", (void *)vkrt_UpdateDescriptorSets},
-       {"vkAllocateMemory", (void *)vkrt_AllocateMemory},
-       {"vkCreateAccelerationStructureKHR", (void *)vkrt_CreateAccelerationStructureKHR},
-       {"vkDestroyAccelerationStructureKHR", (void *)vkrt_DestroyAccelerationStructureKHR},
-       {"vkGetAccelerationStructureBuildSizesKHR", (void *)vkrt_GetAccelerationStructureBuildSizesKHR},
-       {"vkGetAccelerationStructureDeviceAddressKHR", (void *)vkrt_GetAccelerationStructureDeviceAddressKHR},
-       {"vkCmdBuildAccelerationStructuresKHR", (void *)vkrt_CmdBuildAccelerationStructuresKHR},
-       {"vkCmdBuildAccelerationStructuresIndirectKHR", (void *)vkrt_CmdBuildAccelerationStructuresIndirectKHR},
-       {"vkCmdCopyAccelerationStructureKHR", (void *)vkrt_CmdCopyAccelerationStructureKHR},
-       {"vkCmdCopyAccelerationStructureToMemoryKHR", (void *)vkrt_CmdCopyAccelerationStructureToMemoryKHR},
-       {"vkCmdCopyMemoryToAccelerationStructureKHR", (void *)vkrt_CmdCopyMemoryToAccelerationStructureKHR},
-       {"vkCmdWriteAccelerationStructuresPropertiesKHR", (void *)vkrt_CmdWriteAccelerationStructuresPropertiesKHR},
-       {"vkCmdSerializeAccelerationStructuresKHR", (void *)vkrt_CmdSerializeAccelerationStructuresKHR},
-       {"vkCmdDeserializeAccelerationStructuresKHR", (void *)vkrt_CmdDeserializeAccelerationStructuresKHR},
-       {"vkCreateRayTracingPipelinesKHR", (void *)vkrt_CreateRayTracingPipelinesKHR},
-       {"vkCmdTraceRaysKHR", (void *)vkrt_CmdTraceRaysKHR},
-   };
+    PFN_vkVoidFunction command = vkrt_rtp_proc(name);
+    if (command) return (void *)command;
+    command = vkrt_command_proc(name);
+    if (command) return (void *)command;
+    command = vkrt_sync_proc(name);
+    if (command) return (void *)command;
+    command = vkrt_deferred_proc(name);
+    if (command) return (void *)command;
+    static const struct {
+        const char *name;
+        void *ptr;
+    } map[] = {
+        {"vkGetDeviceProcAddr", (void *)vkrt_GetDeviceProcAddr},
+        {"vkDestroyDevice", (void *)vkrt_DestroyDevice},
+        {"vkCreateShaderModule", (void *)vkrt_CreateShaderModule},
+        {"vkDestroyShaderModule", (void *)vkrt_DestroyShaderModule},
+        {"vkCreateBuffer", (void *)vkrt_CreateBuffer},
+        {"vkDestroyBuffer", (void *)vkrt_DestroyBuffer},
+        {"vkCreateDescriptorSetLayout", (void *)vkrt_CreateDescriptorSetLayout},
+        {"vkCreateDescriptorPool", (void *)vkrt_CreateDescriptorPool},
+        {"vkCreateQueryPool", (void *)vkrt_CreateQueryPool},
+        {"vkUpdateDescriptorSets", (void *)vkrt_UpdateDescriptorSets},
+        {"vkAllocateMemory", (void *)vkrt_AllocateMemory},
+        {"vkCreateAccelerationStructureKHR", (void *)vkrt_CreateAccelerationStructureKHR},
+        {"vkDestroyAccelerationStructureKHR", (void *)vkrt_DestroyAccelerationStructureKHR},
+        {"vkGetAccelerationStructureBuildSizesKHR", (void *)vkrt_GetAccelerationStructureBuildSizesKHR},
+        {"vkGetAccelerationStructureDeviceAddressKHR", (void *)vkrt_GetAccelerationStructureDeviceAddressKHR},
+        {"vkCmdBuildAccelerationStructuresKHR", (void *)vkrt_CmdBuildAccelerationStructuresKHR},
+        {"vkCmdBuildAccelerationStructuresIndirectKHR", (void *)vkrt_CmdBuildAccelerationStructuresIndirectKHR},
+        {"vkCmdCopyAccelerationStructureKHR", (void *)vkrt_CmdCopyAccelerationStructureKHR},
+        {"vkCmdCopyAccelerationStructureToMemoryKHR", (void *)vkrt_CmdCopyAccelerationStructureToMemoryKHR},
+        {"vkCmdCopyMemoryToAccelerationStructureKHR", (void *)vkrt_CmdCopyMemoryToAccelerationStructureKHR},
+        {"vkGetDeviceAccelerationStructureCompatibilityKHR", (void *)vkrt_GetDeviceAccelerationStructureCompatibilityKHR},
+        {"vkCmdWriteAccelerationStructuresPropertiesKHR", (void *)vkrt_CmdWriteAccelerationStructuresPropertiesKHR},
+        {"vkCmdSerializeAccelerationStructuresKHR", (void *)vkrt_CmdSerializeAccelerationStructuresKHR},
+        {"vkCmdDeserializeAccelerationStructuresKHR", (void *)vkrt_CmdDeserializeAccelerationStructuresKHR},
+        {"vkCreateRayTracingPipelinesKHR", (void *)vkrt_CreateRayTracingPipelinesKHR},
+        {"vkCmdTraceRaysKHR", (void *)vkrt_CmdTraceRaysKHR},
+    };
 
    for (size_t i = 0; i < VKRT_ARRAY_SIZE(map); i++) {
       if (strcmp(name, map[i].name) == 0)

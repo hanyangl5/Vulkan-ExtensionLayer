@@ -118,11 +118,18 @@ Words ImportStages(const Words &scheduler, const std::vector<TypedContinuationPr
     std::map<uint32_t, uint32_t> address_pointers;
     std::set<uint32_t> void_types, address_types;
     bool physical_capability = false;
+    uint32_t private_variable = 0, private_words = 0;
     std::set<std::string> requested;
     for (const auto &stage : stages) {
-        Require(stage.transport == TypedFrameTransport::PhysicalAddress && !stage.step_export_name.empty(),
+        Require((stage.transport == TypedFrameTransport::PhysicalAddress || stage.transport == TypedFrameTransport::PrivateArray) &&
+                    !stage.step_export_name.empty(),
                 "stage does not expose a physical frame library");
         Require(requested.insert(stage.step_export_name).second, "duplicate stage export");
+        if (stage.transport == TypedFrameTransport::PrivateArray) {
+            Require(stage.private_frame_words && (!private_words || private_words == stage.private_frame_words),
+                    "private stage libraries disagree on invocation stack capacity");
+            private_words = stage.private_frame_words;
+        }
     }
     for (size_t p = 5; p < scheduler.size(); p += scheduler[p] >> 16) {
         auto op = spv::Op(scheduler[p] & 0xffff);
@@ -131,6 +138,10 @@ Words ImportStages(const Words &scheduler, const std::vector<TypedContinuationPr
             physical_capability = true;
         if (op == spv::OpName) {
             auto name = String(scheduler, p + 2, p + length);
+            if (name == "vel_rt_private_frames") {
+                Require(!private_variable, "ambiguous scheduler private frame variable");
+                private_variable = scheduler[p + 1];
+            }
             auto end = name.find('(');
             auto stem = name.substr(0, end);
             if (requested.count(stem)) Require(targets.emplace(stem, scheduler[p + 1]).second, "ambiguous scheduler stub");
@@ -147,6 +158,15 @@ Words ImportStages(const Words &scheduler, const std::vector<TypedContinuationPr
     }
     Require(targets.size() == requested.size(), "scheduler is missing a required typed stage stub");
     Words annotations, declarations, imports;
+    if (private_words) {
+        Require(private_variable, "scheduler is missing per-invocation private frame storage");
+        auto name = Literal("vel_rt_private_frames");
+        annotations.push_back((uint32_t(name.size() + 4) << 16) | spv::OpDecorate);
+        annotations.push_back(private_variable);
+        annotations.push_back(spv::DecorationLinkageAttributes);
+        annotations.insert(annotations.end(), name.begin(), name.end());
+        annotations.push_back(spv::LinkageTypeExport);
+    }
     struct Adapter {
         uint32_t import, result_type, address_type;
         bool reference;
@@ -250,6 +270,12 @@ TypedContinuationProgram CompileTypedPipelineStage(const Words &source, const st
                                                    const VkSpecializationInfo *specialization, const std::string &export_name) {
     TypedContinuationCompileOptions options;
     options.transport = TypedFrameTransport::PhysicalAddress;
+    return CompileTypedPipelineStage(source, entry, stage, specialization, export_name, options);
+}
+TypedContinuationProgram CompileTypedPipelineStage(const Words &source, const std::string &entry, VkShaderStageFlagBits stage,
+                                                   const VkSpecializationInfo *specialization, const std::string &export_name,
+                                                   const TypedContinuationCompileOptions &configuration) {
+    auto options = configuration;
     options.emit_compute_entry = false;
     options.step_export_name = export_name;
     return CompileTypedContinuationSteps(Specialize(source, specialization), entry, Model(stage), options);

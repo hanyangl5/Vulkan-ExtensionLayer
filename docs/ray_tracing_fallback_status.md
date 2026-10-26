@@ -38,6 +38,9 @@ service or imply that an external scheduler is running.
 - [x] Implement shared-BVH4 GPU CLONE/COMPACT and expand real CTS to 54 passes with two retained mandatory-operation failures.
 - [x] Provide synchronous owned deferred operations without GPU backend prerequisites for unrelated devices.
 - [x] Execute descriptor-free BDA system frames and linked typed stages with GPU-only call scheduling in one dispatch.
+- [x] Connect canonical typed RTP to the shared AS backend, with invocation-private frames and public GPU SBT/Trace execution.
+- [x] Implement GPU AS serialization/compatibility/relocation and semantic UPDATE through full reconstruction.
+- [x] Expand external canonical RTP CTS to 20 passing cases, preserving intermediate compiler failures and matching native controls.
 - [ ] M0: complete all capability, no-native-RT, resource ABI, and continuation proofs.
 - [ ] M1: integrate Mesa builders, GPU BVH4 encoding/refit, and shared AS objects.
 - [ ] M2: complete Ray Query lowering and state semantics.
@@ -51,13 +54,13 @@ Component checkmarks do not complete M0/M1/M2 or the full goal.
 
 | Component | Implemented and tested | Remaining boundary |
 | --- | --- | --- |
-| [Portable BVH4 components](../layers/common/rt_fallback/README.md) | Checked reference/CPU adapter; generic BDA hierarchy encoder; direct default Mesa GPU IR adaptation/record emission with compact active leaves, full flags and explicit TLAS relocation; actual LBVH build-to-encode in one command buffer | Four-child GPU collapse, broader builder variants/large construction IDs, numerical qualification, RTP/object integration, refit |
-| Typed continuation frames | Typed CFG/continuations; persistent invocation backing; BDA library export with system builtin/push/record state; default/provided specialization and one-dispatch GPU stage linkage | Production scheduling/traversal/SBT/API integration, pointer Phi/select/physical-source provenance, conflicting per-stage FP modes and complete descriptor/layout budgets |
+| [Portable BVH4 components](../layers/common/rt_fallback/README.md) | Checked reference/CPU adapter; generic BDA hierarchy encoder; direct default Mesa GPU IR adaptation/record emission with compact active leaves, full flags and explicit TLAS relocation; actual LBVH build-to-encode in one command buffer | Four-child GPU collapse, broader builder variants/large construction IDs, numerical qualification, full object/resource qualification, refit |
+| Typed continuation frames | Typed CFG/continuations; BDA and invocation-private library backing; builtin/push/record state; specialization, linked six-stage scheduler and shared resumable traversal | Full pointer/opaque provenance, aggregate resource/value type correctness, conflicting per-stage FP modes and complete descriptor/layout budgets |
 | RQ host translation | Consume AS/RQ device requirements; translate resource/synchronization masks; lifetime-owned AS address cells with allocator/flush/failure handling and enabled-queue-family sharing; private SSBO indexing/variable-pointer prerequisites | Complete emulation capability/limit reporting on no-RT ICDs, buffer-requirement query paths, full-layout descriptor transport and shared-layer object model |
-| AS copy and host-operation dependency | Execution-time GPU CLONE/COMPACT from shared total_size; destination publication, strided 64-bit copy, state replay; fully owned synchronous deferred operations and no-RT device passthrough | AS property query storage/publication, actual serialization/compatibility, refit and final unified RTP object model |
-| RQ compiler compatibility | Actual per-query AS roots from scalar/array descriptors and integer conversions; helper/value/Phi flow; direct/grouped NonUniform propagation; preserve application workgroup/specialization metadata and remove native RT declarations | Full resource-limit transparency, complete opcode/stage coverage and unified RTP traversal |
-| RTP API compatibility | Preserve registry-known device pNext structures including Vulkan 1.4; inject storage16 prerequisites without duplicate aggregates; accept empty dynamic-state lists; generate absolute multi-config-aware manifests | Typed compiler/runtime, arbitrary payloads, complete pipeline options/mandatory API and shared backend integration |
-| Base RQ SBT offset | Lower opcode 6021; select candidate/committed instance; return only the low 24 offset bits; shared-BVH4 helper and CTS evidence | Complete required getter/stage coverage and unified RTP consumption remain open |
+| AS operations and host dependency | GPU CLONE/COMPACT, serialization/UUID/BLAS relocation, semantic in/out-of-place UPDATE by reconstruction; destination publication/state replay; synchronous deferred operations and ordinary-device passthrough | Complete public AS property-query pools/publication, true shrinking compaction, refit performance and full resource budgets |
+| RQ compiler compatibility | Actual per-query AS roots from scalar/array descriptors and integer conversions; helper/value/Phi flow; direct/grouped NonUniform propagation; preserve application workgroup/specialization metadata and remove native RT declarations | Full resource-limit transparency, complete opcode/stage coverage and full shared traversal qualification |
+| RTP API compatibility | Canonical owned shader/pipeline/SBT/stack/Trace path, genuine native public layouts with retained private copies, stage push snapshots and compute-state restoration; GPU public API and external CTS evidence | Full pipeline options, descriptor definition/disturbance compatibility, optional pipeline interoperability, complete mandatory API/resource qualification |
+| Base RQ SBT offset | Lower opcode 6021; select candidate/committed instance; return only the low 24 offset bits; shared-BVH4 helper and CTS evidence | Complete required getter/stage and shared-consumer qualification remain open |
 | AABB opacity | Apply the existing ray-over-instance-over-geometry precedence before opacity culling and expose the correct candidate opacity | Does not complete all RQ traversal or no-native-RT layer behavior |
 
 The BVH4 planner covers allocations larger than 4 GiB and the mandatory
@@ -327,12 +330,26 @@ The standalone RTP suite passes **16/16**, with the six typed checks **6/6 under
 validation**. These components do not complete canonical RTP API/SBT/traversal
 integration or prove complete AS-descriptor/multi-stage resource budgets.
 
+The subsequent [canonical typed RTP checkpoint](rt_cts_typed_runtime_2026-10-26.md)
+does connect production pipeline creation, SBT selection and all six stages to
+the shared Mesa/BVH4 AS backend. Continuation frames use native invocation-private
+storage sized from actual metadata, with no shared writable frame pool. Public
+API GPU traces, lifecycle/state restoration, Report/Any-hit/Callable/nested Trace
+and serialization/UPDATE proofs pass validation. Standalone RTP passes **17/17**;
+canonical integration passes **15/15 offline** and **7/7 selected GPU tests**.
+
+The new external matrix measures **20/20 RTP** and **54/56 RQ/AS**, with no skips,
+crashes or timeouts. Matching RTP native controls pass **20/20**. The two public AS query-pool failures remain explicit; intermediate 18/20 and
+19/20 aggregate/image-atomic/root failures are retained with their fixes. Original 0/6 and 4/6 canonical RTP runs are
+retained, including the now-fixed image type/unused-attribute/UPDATE defects.
+No complete extension-support or physical no-RT claim follows from this slice.
+
 ## Next work
 
 Run M0 proof work in parallel with shared-backend construction:
 
-1. Complete the public AS resolver's application resource budgets and share its
-   object/address model with RTP. Aligned suballocation values and GENERIC
+1. Complete application resource budgets for the now-shared AS resolver and
+   RQ/RTP object/address model. Aligned suballocation values and GENERIC
    same-buffer differences are now implemented and tested. Complete one
    capability/device/object translation path for genuinely no-RT
    drivers. Device stripping and buffer/barrier/submit/event/timestamp/render-pass
@@ -344,27 +361,28 @@ Run M0 proof work in parallel with shared-backend construction:
    path can be added ahead of the proven constant-space parent-walk path.
    Address-cell transport still consumes an SSBO per AS descriptor
    and an allocation per AS; it does not prove full application resource budgets.
-3. Integrate the typed BDA stage compiler/linker and persistent system/invocation
-   backing with production pipeline creation, shader/SBT selection,
-   builtins and traversal scheduling. Address invocation-private storage,
-   pointer parameters/Phi provenance, specialization and full argument/return
-   ABI before claiming the full
-   typed-continuation M0 stress proof or resolving the RTP payload CTS failures.
-4. Adopt the shared builder, BVH4 traversal and one AS object model in RTP; RQ
-   production integration is now tested. Implement four-child GPU collapse/refit
-   and qualify numerical cases and large construction IDs. Wire PLOC/HPLOC only
+3. Expand external CTS beyond the passing typed RTP selection. Image atomics,
+   BDA root classification and resource/value aggregate types are now fixed;
+   complete opaque values across suspension, pointer parameters/Phi provenance
+   and the full argument/return ABI. Complete descriptor compatibility/disturbance and pipeline option/API
+   coverage before claiming the full typed-continuation M0 proof. Cache native
+   pipelines using a separate internal context-push layout while preserving
+   application layout/descriptor/push semantics.
+4. Extend the now-shared RQ/RTP builder, BVH4 traversal and AS object model.
+   Implement four-child GPU collapse/refit and qualify numerical cases and large construction IDs. Wire PLOC/HPLOC only
    with complete host contracts. M1 remains incomplete.
-5. Implement full AS property queries and serialization to address the two
+5. Implement full public AS property queries to address the two
    measured [external CTS failures](rt_cts_copy_pipeline_2026-10-26.md). Use
-   execution-time GPU sizes and per-submission host publication; do not invent
-   serialization sizes or rely on unproven coherent-memory polling. Expand
+   execution-time GPU sizes and per-submission host publication; GPU serialization
+   itself is now implemented. Do not invent serialization sizes or rely on unproven coherent-memory polling. Expand
    configurations and validation. Retain historical failures and
    investigate the old unexplained startup crash if it recurs. Do not erase
    failures or count skips as passes.
 6. Qualify the complete capability profile and threading/queue-family behavior
    on physical no-RT GPUs and POSIX. SSBO dynamic/nonuniform indexing and
    variablePointersStorageBuffer and compatible coherent resolver memory are
-   now explicit private prerequisites;
+   now explicit private prerequisites. Active builder subgroup/float controls,
+   workgroup bounds and native Vulkan 1.2 are checked;
    legacy Vulkan 1.0 extension-dependency coverage remains unqualified.
 
 Follow the goal's [iteration and stop policy](ray_tracing_fallback_goal.md#iteration-and-stop-policy).

@@ -111,6 +111,42 @@ static VKAPI_ATTR void VKAPI_CALL mock_properties(VkPhysicalDevice p, VkPhysical
     ++property_queries;
     memset(properties, 0, sizeof(*properties));
     properties->apiVersion = driver_api;
+    properties->limits.maxComputeWorkGroupInvocations = missing_capability == 18 ? 127 : 128;
+    properties->limits.maxComputeWorkGroupSize[0] = missing_capability == 19 ? 127 : 128;
+    properties->limits.maxComputeWorkGroupSize[1] = missing_capability == 20 ? 0 : 1;
+    properties->limits.maxComputeWorkGroupSize[2] = missing_capability == 21 ? 0 : 1;
+    properties->limits.maxComputeWorkGroupCount[0] = missing_capability == 22 ? 0 : 65535;
+    properties->limits.maxComputeWorkGroupCount[1] = missing_capability == 23 ? 0 : 1;
+    properties->limits.maxComputeWorkGroupCount[2] = missing_capability == 24 ? 0 : 1;
+    properties->limits.maxPushConstantsSize = missing_capability == 25 ? 127 : 128;
+    properties->limits.maxComputeSharedMemorySize = missing_capability == 26 ? 2067 : 2068;
+}
+
+static VKAPI_ATTR void VKAPI_CALL mock_properties2(VkPhysicalDevice p, VkPhysicalDeviceProperties2 *properties) {
+    REQUIRE(properties->sType == VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2);
+    mock_properties(p, &properties->properties);
+    unsigned seen = 0;
+    for (VkBaseOutStructure *next = properties->pNext; next; next = next->pNext) {
+        if (next->sType == VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SUBGROUP_PROPERTIES) {
+            VkPhysicalDeviceSubgroupProperties *s = (void *)next;
+            s->supportedStages = VK_SHADER_STAGE_FRAGMENT_BIT | (missing_capability == 13 ? 0 : VK_SHADER_STAGE_COMPUTE_BIT);
+            s->supportedOperations = VK_SUBGROUP_FEATURE_BASIC_BIT | VK_SUBGROUP_FEATURE_BALLOT_BIT |
+                                     VK_SUBGROUP_FEATURE_SHUFFLE_BIT | VK_SUBGROUP_FEATURE_VOTE_BIT;
+            if (missing_capability == 14) s->supportedOperations &= ~VK_SUBGROUP_FEATURE_BASIC_BIT;
+            if (missing_capability == 15) s->supportedOperations &= ~VK_SUBGROUP_FEATURE_BALLOT_BIT;
+            if (missing_capability == 16) s->supportedOperations &= ~VK_SUBGROUP_FEATURE_SHUFFLE_BIT;
+            s->subgroupSize = 32;
+            ++seen;
+        } else if (next->sType == VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FLOAT_CONTROLS_PROPERTIES) {
+            VkPhysicalDeviceFloatControlsProperties *f = (void *)next;
+            f->shaderSignedZeroInfNanPreserveFloat32 = missing_capability != 17;
+            f->shaderSignedZeroInfNanPreserveFloat16 = f->shaderSignedZeroInfNanPreserveFloat64 = VK_TRUE;
+            ++seen;
+        } else {
+            REQUIRE(false);
+        }
+    }
+    REQUIRE(seen == 2);
 }
 
 static void check_core(VkPhysicalDeviceFeatures actual, VkPhysicalDeviceFeatures expected) {
@@ -339,6 +375,7 @@ static void defaults(void) {
     instance.api_version = VK_API_VERSION_1_2;
     instance.vtable.GetPhysicalDeviceFeatures2 = mock_features;
     instance.vtable.GetPhysicalDeviceProperties = mock_properties;
+    instance.vtable.GetPhysicalDeviceProperties2 = mock_properties2;
     driver_api = VK_API_VERSION_1_2;
     basic = (VkDeviceCreateInfo){.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO};
     expected_extension_count = 0;
@@ -362,7 +399,7 @@ static void non_rt_boundary(void) {
     basic.ppEnabledExtensionNames = extensions;
     basic.enabledExtensionCount = VKRT_ARRAY_SIZE(extensions);
     VkDeviceCreateInfo saved_basic = basic;
-    for (missing_capability = 1; missing_capability <= 12; ++missing_capability) {
+    for (missing_capability = 1; missing_capability <= 26; ++missing_capability) {
         REQUIRE(call_non_rt(&basic) == VK_SUCCESS);
         REQUIRE(!memcmp(&core, &saved_core, sizeof(core)) && !memcmp(&basic, &saved_basic, sizeof(basic)));
     }
@@ -371,6 +408,7 @@ static void non_rt_boundary(void) {
     instance.api_version = driver_api = VK_API_VERSION_1_0;
     instance.vtable.GetPhysicalDeviceFeatures2 = NULL;
     instance.vtable.GetPhysicalDeviceProperties = NULL;
+    instance.vtable.GetPhysicalDeviceProperties2 = NULL;
     REQUIRE(call_non_rt(&basic) == VK_SUCCESS);
     basic.enabledExtensionCount = 0;
     basic.ppEnabledExtensionNames = NULL;
@@ -498,6 +536,54 @@ static void virtual_requests(void) {
     REQUIRE(call_non_rt(&basic) == VK_SUCCESS);
 }
 
+static void base_pipeline_requests(void) {
+    defaults();
+    expect_private_dynamic_indexing = true;
+    VkPhysicalDeviceRayTracingPipelineFeaturesKHR pipeline = {
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_FEATURES_KHR, .rayTracingPipeline = VK_TRUE};
+    VkPhysicalDeviceRayTracingPipelineFeaturesKHR saved_pipeline = pipeline;
+    basic.pNext = &pipeline;
+    REQUIRE(vkrt_device_uses_virtual_rt(&basic));
+    REQUIRE(call(&basic) == VK_SUCCESS && !memcmp(&pipeline, &saved_pipeline, sizeof(pipeline)));
+
+    /* An extension-only request must initialize the same virtual backend and
+     * must not forward a native RTP extension or feature to the ICD. */
+    const char *extension = VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME;
+    basic.pNext = NULL;
+    basic.ppEnabledExtensionNames = &extension;
+    basic.enabledExtensionCount = 1;
+    REQUIRE(vkrt_device_uses_virtual_rt(&basic));
+    REQUIRE(call(&basic) == VK_SUCCESS);
+
+    VkLayerDeviceLink link = {0};
+    VkLayerDeviceCreateInfo loader = {
+        .sType = VK_STRUCTURE_TYPE_LOADER_DEVICE_CREATE_INFO, .function = VK_LAYER_LINK_INFO, .u.pLayerInfo = &link};
+    pipeline.pNext = &loader;
+    VkPhysicalDeviceAccelerationStructureFeaturesKHR as = {
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_FEATURES_KHR,
+        .pNext = &pipeline,
+        .accelerationStructure = VK_TRUE};
+    VkPhysicalDeviceRayQueryFeaturesKHR query = {
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_QUERY_FEATURES_KHR, .pNext = &as, .rayQuery = VK_TRUE};
+    const char *extensions[] = {VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME, VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME,
+                                VK_KHR_RAY_QUERY_EXTENSION_NAME, VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME,
+                                "VK_KHR_swapchain"};
+    basic.pNext = &query;
+    basic.ppEnabledExtensionNames = extensions;
+    basic.enabledExtensionCount = VKRT_ARRAY_SIZE(extensions);
+    expected_extensions[0] = extensions[4];
+    expected_extension_count = 1;
+    saved_pipeline = pipeline;
+    VkPhysicalDeviceAccelerationStructureFeaturesKHR saved_as = as;
+    VkPhysicalDeviceRayQueryFeaturesKHR saved_query = query;
+    VkLayerDeviceCreateInfo saved_loader = loader;
+    REQUIRE(call(&basic) == VK_SUCCESS);
+    REQUIRE(!memcmp(&pipeline, &saved_pipeline, sizeof(pipeline)) && !memcmp(&as, &saved_as, sizeof(as)));
+    REQUIRE(!memcmp(&query, &saved_query, sizeof(query)) && !memcmp(&loader, &saved_loader, sizeof(loader)));
+    downstream_result = VK_ERROR_DEVICE_LOST;
+    REQUIRE(call(&basic) == VK_ERROR_DEVICE_LOST);
+}
+
 static void aggregate_and_individual_features(void) {
     defaults();
     expect_private_dynamic_indexing = true;
@@ -561,7 +647,14 @@ static void versions_and_opaque_chains(void) {
             for (uint32_t i = 0; i < VKRT_ARRAY_SIZE(required); ++i)
                 if (instance_api < (i == 0 || i == 6 ? 1u : 2u) || device_api < (i == 0 || i == 6 ? 1u : 2u))
                     expected_extensions[expected_extension_count++] = required[i];
-            REQUIRE(call(&basic) == VK_SUCCESS);
+            unsigned before = creates;
+            VkDeviceCreateInfo saved = basic;
+            VkResult result = call(&basic);
+            if (device_api < 2)
+                REQUIRE(result == VK_ERROR_FEATURE_NOT_PRESENT && creates == before);
+            else
+                REQUIRE(result == VK_SUCCESS);
+            REQUIRE(!memcmp(&basic, &saved, sizeof(basic)));
         }
     }
     /* A requested alias is not duplicated when private requirements add it. */
@@ -679,7 +772,13 @@ static void descriptor_array_feature(void) {
             for (unsigned i = 0; i < VKRT_ARRAY_SIZE(required); ++i)
                 if (application_version < (i == 0 || i == 6 ? 1u : 2u) || device_version < (i == 0 || i == 6 ? 1u : 2u))
                     expected_extensions[expected_extension_count++] = required[i];
-            REQUIRE(call(&basic) == VK_SUCCESS);
+            unsigned before = creates;
+            VkResult result = call(&basic);
+            if (device_version < 2)
+                REQUIRE(result == VK_ERROR_FEATURE_NOT_PRESENT && creates == before);
+            else
+                REQUIRE(result == VK_SUCCESS);
+            REQUIRE(!memcmp(&pointers, &saved_pointers, sizeof(pointers)));
         }
     }
     instance.api_version = VK_API_VERSION_1_1;
@@ -700,6 +799,39 @@ static void descriptor_array_feature(void) {
     for (unsigned i = 0; i < VKRT_ARRAY_SIZE(required); ++i)
         if (i != 6) expected_extensions[expected_extension_count++] = required[i];
     REQUIRE(call(&basic) == VK_SUCCESS);
+}
+
+static void builder_property_prerequisites(void) {
+    defaults();
+    struct {
+        VkStructureType sType;
+        const void *pNext;
+        uint64_t payload;
+    } suffix = {.sType = VK_STRUCTURE_TYPE_MAX_ENUM, .payload = UINT64_C(0x123456789abcdef0)};
+    VkPhysicalDeviceRayQueryFeaturesKHR query = {
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_QUERY_FEATURES_KHR, .pNext = &suffix, .rayQuery = VK_TRUE};
+    VkPhysicalDeviceFeatures core = {.samplerAnisotropy = VK_TRUE};
+    basic.pNext = &query;
+    basic.pEnabledFeatures = &core;
+    opaque_suffix = (const void *)&suffix;
+    expect_private_dynamic_indexing = true;
+    const VkDeviceCreateInfo saved = basic;
+    const VkPhysicalDeviceRayQueryFeaturesKHR saved_query = query;
+    const VkPhysicalDeviceFeatures saved_core = core;
+    for (missing_capability = 13; missing_capability <= 26; ++missing_capability) {
+        unsigned before = creates;
+        REQUIRE(call(&basic) == VK_ERROR_FEATURE_NOT_PRESENT && creates == before);
+        REQUIRE(!memcmp(&basic, &saved, sizeof(basic)) && !memcmp(&query, &saved_query, sizeof(query)) &&
+                !memcmp(&core, &saved_core, sizeof(core)) && suffix.payload == UINT64_C(0x123456789abcdef0));
+    }
+    missing_capability = 0;
+    /* The mock defaults are the selected kernels' exact workgroup bounds. */
+    REQUIRE(call(&basic) == VK_SUCCESS);
+    unsigned before = creates, before_queries = queries;
+    instance.vtable.GetPhysicalDeviceProperties2 = NULL;
+    REQUIRE(call(&basic) == VK_ERROR_FEATURE_NOT_PRESENT && creates == before && queries == before_queries);
+    REQUIRE(!memcmp(&basic, &saved, sizeof(basic)) && !memcmp(&query, &saved_query, sizeof(query)) &&
+            !memcmp(&core, &saved_core, sizeof(core)));
 }
 
 static void rejection(void) {
@@ -727,7 +859,8 @@ static void rejection(void) {
     VkPhysicalDeviceRayTracingPipelineFeaturesKHR rtp = {.sType =
                                                              VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_FEATURES_KHR};
     basic.pNext = &rtp;
-    VkBool32 *pipeline[] = {&rtp.rayTracingPipeline, &rtp.rayTracingPipelineShaderGroupHandleCaptureReplay,
+    rtp.rayTracingPipeline = VK_TRUE;
+    VkBool32 *pipeline[] = {&rtp.rayTracingPipelineShaderGroupHandleCaptureReplay,
                             &rtp.rayTracingPipelineShaderGroupHandleCaptureReplayMixed, &rtp.rayTracingPipelineTraceRaysIndirect,
                             &rtp.rayTraversalPrimitiveCulling};
     for (uint32_t i = 0; i < VKRT_ARRAY_SIZE(pipeline); ++i) {
@@ -747,7 +880,7 @@ static void rejection(void) {
     REQUIRE(call(&basic) == VK_SUCCESS);
 #endif
     basic.pNext = NULL;
-    const char *unsupported[] = {VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME,
+    const char *unsupported[] = {"VK_KHR_ray_tracing_pipeline_unsupported",
                                  "VK_KHR_ray_tracing_maintenance1",
                                  "VK_KHR_ray_tracing_position_fetch",
                                  "VK_NV_ray_tracing",
@@ -775,9 +908,11 @@ static void rejection(void) {
 int main(void) {
     non_rt_boundary();
     virtual_requests();
+    base_pipeline_requests();
     aggregate_and_individual_features();
     versions_and_opaque_chains();
     descriptor_array_feature();
+    builder_property_prerequisites();
     rejection();
     printf("No-native-RT device creation boundary: %s (%u failures, %u creates, %u capability queries)\n",
            failures ? "FAIL" : "PASS", failures, creates, queries);

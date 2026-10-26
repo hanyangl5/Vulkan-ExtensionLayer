@@ -7,6 +7,9 @@
 // Explicit identity relocation: source instance base_ptr already names a
 // runtime BVH4 BLAS. This never detects or accepts a legacy runtime format.
 #define VEL_RT_MESA_GPU_IDENTITY_BLAS UINT32_C(1)
+/* Requires IDENTITY_BLAS; source values are public AS handles resolved through
+ * specialization constant 6, then retained at instance byte 120. */
+#define VEL_RT_MESA_GPU_PUBLIC_BLAS UINT32_C(2)
 typedef struct VelRtMesaGpuEncodeArgs {
     uint64_t source, source_size, output_as, mapping;
     uint64_t geometry_flags, runtime_blas, status, first;

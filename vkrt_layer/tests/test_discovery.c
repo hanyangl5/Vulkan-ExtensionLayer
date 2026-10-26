@@ -16,14 +16,18 @@ static unsigned failures, enumeration_calls, feature_queries;
 static const VkPhysicalDevice physical = HANDLE(VkPhysicalDevice, 7);
 static VkBool32 native_rt;
 static bool ignore_rt_features;
+static bool hide_pipeline_base;
 static VkResult enumeration_error;
 static bool grow_once, incomplete_fill;
 static bool hide_deferred;
 static const char *last_layer;
 static const char *native_names[] = {VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME,
                                      VK_KHR_RAY_QUERY_EXTENSION_NAME,
-                                     VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME,
                                      VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME,
+                                     VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME,
+                                     "VK_KHR_ray_tracing_maintenance1",
+                                     "VK_KHR_ray_tracing_position_fetch",
+                                     "VK_KHR_ray_tracing_pipeline_unsupported",
                                      "VK_EXT_pipeline_library_group_handles",
                                      "VK_KHR_pipeline_library",
                                      "VK_EXT_ray_tracing_invocation_reorder",
@@ -39,6 +43,7 @@ static const char *native_names[] = {VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAM
                                      "VK_EXT_robustness2"};
 static const char *visible_names[] = {VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME,
                                       VK_KHR_RAY_QUERY_EXTENSION_NAME,
+                                      VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME,
                                       VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME,
                                       "VK_KHR_pipeline_library",
                                       "VK_KHR_swapchain",
@@ -63,7 +68,7 @@ static VKAPI_ATTR VkResult VKAPI_CALL mock_enumerate(VkPhysicalDevice p, const c
         return VK_SUCCESS;
     }
     uint32_t total = (uint32_t)VKRT_ARRAY_SIZE(native_names);
-    uint32_t start = native_rt ? 0 : 2;
+    uint32_t start = native_rt ? 0 : 3;
     total -= start;
     if (hide_deferred) --total;
     if (!properties) {
@@ -99,7 +104,8 @@ static VKAPI_ATTR void VKAPI_CALL mock_features(VkPhysicalDevice p, VkPhysicalDe
             if (!ignore_rt_features) ((VkPhysicalDeviceRayQueryFeaturesKHR *)next)->rayQuery = native_rt;
         } else if (next->sType == VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_FEATURES_KHR) {
             VkPhysicalDeviceRayTracingPipelineFeaturesKHR *rtp = (void *)next;
-            rtp->rayTracingPipeline = rtp->rayTracingPipelineShaderGroupHandleCaptureReplay = VK_TRUE;
+            if (!ignore_rt_features) rtp->rayTracingPipeline = hide_pipeline_base ? VK_FALSE : native_rt;
+            rtp->rayTracingPipelineShaderGroupHandleCaptureReplay = VK_TRUE;
             rtp->rayTracingPipelineShaderGroupHandleCaptureReplayMixed = rtp->rayTracingPipelineTraceRaysIndirect = VK_TRUE;
             rtp->rayTraversalPrimitiveCulling = VK_TRUE;
         } else if (next->sType == VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_INDEXING_FEATURES) {
@@ -119,13 +125,13 @@ static VKAPI_ATTR void VKAPI_CALL mock_features(VkPhysicalDevice p, VkPhysicalDe
 static void enumeration(PFN_vkEnumerateDeviceExtensionProperties enumerate) {
     for (unsigned rt = 0; rt < 2; ++rt) {
         native_rt = rt;
-        uint32_t count = 99, start = rt ? 0 : 2;
+        uint32_t count = 99, start = rt ? 0 : 3;
         const uint32_t visible = (uint32_t)VKRT_ARRAY_SIZE(visible_names) - start;
         REQUIRE(enumerate(physical, NULL, &count, NULL) == VK_SUCCESS && count == visible);
         for (uint32_t capacity = 0; capacity <= visible + 2; ++capacity) {
-            VkExtensionProperties output[8];
+            VkExtensionProperties output[10];
             memset(output, 0xa5, sizeof(output));
-            VkExtensionProperties saved[8];
+            VkExtensionProperties saved[10];
             memcpy(saved, output, sizeof(saved));
             count = capacity;
             VkResult result = enumerate(physical, NULL, &count, output);
@@ -139,7 +145,7 @@ static void enumeration(PFN_vkEnumerateDeviceExtensionProperties enumerate) {
                                                       ? VK_KHR_DEFERRED_HOST_OPERATIONS_SPEC_VERSION
                                                       : 100 + native_index));
             }
-            REQUIRE(!memcmp(output + count, saved + count, (8 - count) * sizeof(output[0])));
+            REQUIRE(!memcmp(output + count, saved + count, (10 - count) * sizeof(output[0])));
         }
     }
     native_rt = VK_TRUE;
@@ -175,10 +181,10 @@ static void enumeration(PFN_vkEnumerateDeviceExtensionProperties enumerate) {
     hide_deferred = true;
     for (unsigned rt = 0; rt < 2; ++rt) {
         native_rt = rt;
-        VkExtensionProperties output[8];
-        count = 8;
+        VkExtensionProperties output[10];
+        count = 10;
         REQUIRE(enumerate(physical, NULL, &count, output) == VK_SUCCESS);
-        REQUIRE(count == VKRT_ARRAY_SIZE(visible_names) - (rt ? 0 : 2));
+        REQUIRE(count == VKRT_ARRAY_SIZE(visible_names) - (rt ? 0 : 3));
         REQUIRE(!strcmp(output[count - 1].extensionName, VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME));
         REQUIRE(output[count - 1].specVersion == VK_KHR_DEFERRED_HOST_OPERATIONS_SPEC_VERSION);
     }
@@ -210,10 +216,10 @@ static void features(PFN_vkGetPhysicalDeviceFeatures2 query, struct vkrt_instanc
         native_rt = rt;
         query(physical, &core);
         REQUIRE(core.features.shaderInt64 && core.features.geometryShader);
-        REQUIRE(rq.rayQuery == rt && as.accelerationStructure == rt);
+        REQUIRE(rq.rayQuery == rt && as.accelerationStructure == rt && rtp.rayTracingPipeline == rt);
         REQUIRE(!as.accelerationStructureCaptureReplay && !as.accelerationStructureIndirectBuild &&
                 !as.accelerationStructureHostCommands && !as.descriptorBindingAccelerationStructureUpdateAfterBind);
-        REQUIRE(!rtp.rayTracingPipeline && !rtp.rayTracingPipelineShaderGroupHandleCaptureReplay &&
+        REQUIRE(!rtp.rayTracingPipelineShaderGroupHandleCaptureReplay &&
                 !rtp.rayTracingPipelineShaderGroupHandleCaptureReplayMixed && !rtp.rayTracingPipelineTraceRaysIndirect &&
                 !rtp.rayTraversalPrimitiveCulling);
         REQUIRE(indexing.runtimeDescriptorArray && indexing.descriptorBindingPartiallyBound);
@@ -223,17 +229,23 @@ static void features(PFN_vkGetPhysicalDeviceFeatures2 query, struct vkrt_instanc
         REQUIRE(groups.pNext == &indexing && !groups.pipelineLibraryGroupHandles);
 #endif
     }
+    /* Native AS/RQ support is not evidence of native RTP base support. */
+    native_rt = VK_TRUE;
+    hide_pipeline_base = true;
+    query(physical, &core);
+    REQUIRE(rq.rayQuery && as.accelerationStructure && !rtp.rayTracingPipeline);
+    hide_pipeline_base = false;
     /* An old no-RT ICD can ignore those structs; stale caller bytes are not
      * native support and must not become an emulated base-feature claim. */
     ignore_rt_features = true;
-    rq.rayQuery = as.accelerationStructure = VK_TRUE;
+    rq.rayQuery = as.accelerationStructure = rtp.rayTracingPipeline = VK_TRUE;
     query(physical, &core);
-    REQUIRE(!rq.rayQuery && !as.accelerationStructure);
+    REQUIRE(!rq.rayQuery && !as.accelerationStructure && !rtp.rayTracingPipeline);
     instance->vtable.GetPhysicalDeviceFeatures2 = NULL;
-    rq.rayQuery = as.accelerationStructure = VK_TRUE;
+    rq.rayQuery = as.accelerationStructure = rtp.rayTracingPipeline = VK_TRUE;
     unsigned before = feature_queries;
     query(physical, &core);
-    REQUIRE(!rq.rayQuery && !as.accelerationStructure && before == feature_queries);
+    REQUIRE(!rq.rayQuery && !as.accelerationStructure && !rtp.rayTracingPipeline && before == feature_queries);
 }
 
 int main(void) {

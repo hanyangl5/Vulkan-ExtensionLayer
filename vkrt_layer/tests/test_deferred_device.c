@@ -113,6 +113,58 @@ static bool ordinary_buffer(VkPhysicalDevice physical, VkDevice device) {
     return result == VK_SUCCESS;
 }
 
+static bool ordinary_all_stage_push(VkDevice device, uint32_t family) {
+    VkPushConstantRange range = {VK_SHADER_STAGE_ALL, 0, sizeof(uint32_t)};
+    VkPipelineLayoutCreateInfo layout_info = {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO, .pushConstantRangeCount = 1, .pPushConstantRanges = &range};
+    VkPipelineLayout layout = VK_NULL_HANDLE;
+    VkResult result = vkCreatePipelineLayout(device, &layout_info, NULL, &layout);
+    CHECK(result == VK_SUCCESS);
+    if (result != VK_SUCCESS) return false;
+    VkCommandPoolCreateInfo pool_info = {.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO, .queueFamilyIndex = family};
+    VkCommandPool pool = VK_NULL_HANDLE;
+    result = vkCreateCommandPool(device, &pool_info, NULL, &pool);
+    CHECK(result == VK_SUCCESS);
+    if (result == VK_SUCCESS) {
+        VkCommandBufferAllocateInfo allocate = {.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
+                                                .commandPool = pool,
+                                                .level = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
+                                                .commandBufferCount = 1};
+        VkCommandBuffer command = VK_NULL_HANDLE;
+        result = vkAllocateCommandBuffers(device, &allocate, &command);
+        CHECK(result == VK_SUCCESS);
+        if (result == VK_SUCCESS) {
+            VkCommandBufferBeginInfo begin = {.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
+            result = vkBeginCommandBuffer(command, &begin);
+            CHECK(result == VK_SUCCESS);
+            if (result == VK_SUCCESS) {
+                const uint32_t value = 0x12345678;
+                /* ALL is legal without enabling each stage's feature. The
+                 * implicit inclusion of RT bits must not activate emulation. */
+                vkCmdPushConstants(command, layout, VK_SHADER_STAGE_ALL, 0, sizeof(value), &value);
+                result = vkEndCommandBuffer(command);
+                CHECK(result == VK_SUCCESS);
+                if (result == VK_SUCCESS) {
+                    VkQueue queue = VK_NULL_HANDLE;
+                    vkGetDeviceQueue(device, family, 0, &queue);
+                    VkSubmitInfo submit = {
+                        .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO, .commandBufferCount = 1, .pCommandBuffers = &command};
+                    result = vkQueueSubmit(queue, 1, &submit, VK_NULL_HANDLE);
+                    CHECK(result == VK_SUCCESS);
+                    if (result == VK_SUCCESS) {
+                        result = vkQueueWaitIdle(queue);
+                        CHECK(result == VK_SUCCESS);
+                    }
+                }
+            }
+        }
+        vkDestroyCommandPool(device, pool, NULL);
+    }
+    vkDestroyPipelineLayout(device, layout, NULL);
+    printf("Ordinary ALL-stage push on featureless device: %s\n", result == VK_SUCCESS ? "PASS" : "FAIL");
+    return result == VK_SUCCESS;
+}
+
 static bool check_device(VkPhysicalDevice physical) {
     if (!deferred_enumerated(physical, NULL) || !deferred_enumerated(physical, software_layer)) return false;
     uint32_t count = 0;
@@ -121,7 +173,9 @@ static bool check_device(VkPhysicalDevice physical) {
     if (!families) return false;
     vkGetPhysicalDeviceQueueFamilyProperties(physical, &count, families);
     uint32_t family = 0;
-    while (family < count && !families[family].queueCount) ++family;
+    while (family < count &&
+           (!families[family].queueCount || !(families[family].queueFlags & (VK_QUEUE_GRAPHICS_BIT | VK_QUEUE_COMPUTE_BIT))))
+        ++family;
     free(families);
     CHECK(family < count);
     if (family == count) return false;
@@ -159,6 +213,7 @@ static bool check_device(VkPhysicalDevice physical) {
     CHECK(create && destroy && concurrency && result && join);
     bool complete = create && destroy && concurrency && result && join;
     CHECK(ordinary_buffer(physical, device));
+    CHECK(ordinary_all_stage_push(device, family));
     if (complete) {
         VkDeferredOperationKHR operations[8] = {0};
         for (unsigned i = 0; i < 8; ++i) {

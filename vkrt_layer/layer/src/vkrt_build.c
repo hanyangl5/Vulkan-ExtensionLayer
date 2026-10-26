@@ -45,9 +45,12 @@ VkResult vkrt_build_init(struct vkrt_device_data *dev)
    entries[6] = (VkSpecializationMapEntry){6, 24, 8};
    VkSpecializationInfo spec = {7, entries, sizeof(values), &values};
    for (uint32_t i = 0; i < VKRT_ARRAY_SIZE(shaders); ++i) {
-       uint32_t phase = i >= ENCODE_0 ? i - ENCODE_0 : 0;
-       VkSpecializationMapEntry phase_entry = {0, 0, sizeof(phase)};
-       VkSpecializationInfo encode_spec = {1, &phase_entry, sizeof(phase), &phase};
+       struct {
+           uint32_t phase, padding;
+           uint64_t context;
+       } encode_values = {i >= ENCODE_0 ? i - ENCODE_0 : 0, 0, vkrt_as_registry_address(dev)};
+       const VkSpecializationMapEntry encode_entries[] = {{0, 0, 4}, {6, 8, 8}};
+       VkSpecializationInfo encode_spec = {2, encode_entries, sizeof(encode_values), &encode_values};
        VkShaderModuleCreateInfo smci = {
            .sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO, .codeSize = shaders[i].size, .pCode = shaders[i].code};
        VkShaderModule sm;
@@ -114,12 +117,17 @@ void vkrt_cmd_build_as(struct vkrt_device_data *dev, VkCommandBuffer cmd, uint32
    for (uint32_t i = 0; i < count; ++i) {
       const VkAccelerationStructureBuildGeometryInfoKHR *info = &infos[i];
       struct vkrt_virtual_as *as = VKRT_FIND(struct vkrt_virtual_as, info->dstAccelerationStructure);
-      if (info->mode != VK_BUILD_ACCELERATION_STRUCTURE_MODE_BUILD_KHR || !as ||
-          as->owner != dev->device || !ranges ||
-          !ranges[i] || !info->scratchData.deviceAddress) {
-         VKRT_LOG_ERR("invalid or unsupported acceleration structure build");
-         cb->record_result = VK_ERROR_FEATURE_NOT_PRESENT;
-         break;
+      bool update = info->mode == VK_BUILD_ACCELERATION_STRUCTURE_MODE_UPDATE_KHR;
+      struct vkrt_virtual_as *source = update ? VKRT_FIND(struct vkrt_virtual_as, info->srcAccelerationStructure) : NULL;
+      if ((!update && info->mode != VK_BUILD_ACCELERATION_STRUCTURE_MODE_BUILD_KHR) || !as || as->owner != dev->device || !ranges ||
+          !ranges[i] || !info->scratchData.deviceAddress ||
+          (update &&
+           (!source || source->owner != dev->device || !(info->flags & VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_UPDATE_BIT_KHR) ||
+            (source->type != VK_ACCELERATION_STRUCTURE_TYPE_GENERIC_KHR && source->type != info->type) ||
+            (as->type != VK_ACCELERATION_STRUCTURE_TYPE_GENERIC_KHR && as->type != info->type)))) {
+          VKRT_LOG_ERR("invalid or unsupported acceleration structure build");
+          cb->record_result = VK_ERROR_FEATURE_NOT_PRESENT;
+          break;
       }
       struct vkrt_build_layout l = vkrt_build_layout(info, NULL, ranges[i]);
       for (uint32_t g = 0; g < info->geometryCount; ++g) {
@@ -170,7 +178,14 @@ void vkrt_cmd_build_as(struct vkrt_device_data *dev, VkCommandBuffer cmd, uint32
           dispatch(dev, cmd, PREPARE, &prepare, sizeof(prepare), 1);
       }
       struct vkrt_build_emit_context context = {dev, cmd};
-      VkResult result = bvh_ir_record_build(info, ranges[i], scratch + l.source, scratch, 0, vkrt_build_emit, &context);
+      /* UPDATE supplies the complete geometry description. Rebuild the shared
+       * representation on the GPU at the destination's unchanged physical
+       * header base. No source AS bytes are written for an out-of-place update,
+       * and existing TLAS references remain valid for an in-place BLAS update.
+       * Topology need not be preserved by Vulkan. This is not a refit path. */
+      VkAccelerationStructureBuildGeometryInfoKHR build = *info;
+      build.mode = VK_BUILD_ACCELERATION_STRUCTURE_MODE_BUILD_KHR;
+      VkResult result = bvh_ir_record_build(&build, ranges[i], scratch + l.source, scratch, 0, vkrt_build_emit, &context);
       if (result != VK_SUCCESS) { cb->record_result = result; break; }
       VelRtMesaGpuEncodeArgs encode = {scratch + l.source,
                                        l.ir.as_size,
@@ -183,7 +198,7 @@ void vkrt_cmd_build_as(struct vkrt_device_data *dev, VkCommandBuffer cmd, uint32
                                        (uint32_t)l.leaf_count,
                                        geometry_type,
                                        info->geometryCount,
-                                       VEL_RT_MESA_GPU_IDENTITY_BLAS};
+                                       VEL_RT_MESA_GPU_IDENTITY_BLAS | VEL_RT_MESA_GPU_PUBLIC_BLAS};
       for (uint32_t phase = ENCODE_0; phase <= ENCODE_2; ++phase) {
           uint64_t invocations = l.leaf_count ? l.leaf_count : 1;
           uint64_t chunk = (uint64_t)dev->max_build_dispatch_x * 64;

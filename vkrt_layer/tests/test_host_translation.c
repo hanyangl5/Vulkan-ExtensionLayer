@@ -195,7 +195,8 @@ static VKAPI_ATTR void VKAPI_CALL mock_barrier(VkCommandBuffer cmd, VkPipelineSt
     REQUIRE(nm == 2 && nb == 1 && ni == 1);
     REQUIRE(m[0].srcAccessMask == (VK_ACCESS_SHADER_WRITE_BIT | VK_ACCESS_TRANSFER_WRITE_BIT));
     REQUIRE(m[0].dstAccessMask == (VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_UNIFORM_READ_BIT));
-    REQUIRE(m[1].srcAccessMask == VK_ACCESS_TRANSFER_WRITE_BIT && m[1].dstAccessMask == VK_ACCESS_SHADER_READ_BIT);
+    REQUIRE(m[1].srcAccessMask == (VK_ACCESS_TRANSFER_WRITE_BIT | VK_ACCESS_SHADER_WRITE_BIT) &&
+            m[1].dstAccessMask == VK_ACCESS_SHADER_READ_BIT);
     REQUIRE(b->srcAccessMask == VK_ACCESS_SHADER_WRITE_BIT && b->dstAccessMask == VK_ACCESS_SHADER_READ_BIT);
     REQUIRE(b->buffer == HANDLE(VkBuffer, 91) && b->offset == 128 && b->size == 4096);
     REQUIRE(b->srcQueueFamilyIndex == 2 && b->dstQueueFamilyIndex == 5);
@@ -430,6 +431,192 @@ static void synchronization(struct vkrt_device_data *dev) {
     REQUIRE(submit2(queue, 2, infos2, fence) == VK_ERROR_FEATURE_NOT_PRESENT && submits2 == 2);
     vkrt_unmap_object(VKRT_HKEY(command));
     vkrt_unmap_object(VKRT_HKEY(queue));
+}
+
+/* Serialization's TRANSFER accesses execute in compute at virtual AS stages.
+ * Exercise the public scopes rather than only ordinary AS access-bit aliases. */
+static VkPipelineStageFlags2 serial_src_stage, serial_dst_stage;
+static VkAccessFlags2 serial_src_access, serial_dst_access;
+static unsigned serial_sync_calls;
+static VKAPI_ATTR void VKAPI_CALL serial_barrier(VkCommandBuffer cmd, VkPipelineStageFlags src, VkPipelineStageFlags dst,
+                                                 VkDependencyFlags flags, uint32_t nm, const VkMemoryBarrier *m, uint32_t nb,
+                                                 const VkBufferMemoryBarrier *b, uint32_t ni, const VkImageMemoryBarrier *im) {
+    REQUIRE(cmd == command && !flags && src == serial_src_stage && dst == serial_dst_stage && nm == 1 && nb == 1 && ni == 1);
+    REQUIRE(m->srcAccessMask == serial_src_access && m->dstAccessMask == serial_dst_access);
+    REQUIRE(b->srcAccessMask == serial_src_access && b->dstAccessMask == serial_dst_access);
+    REQUIRE(im->srcAccessMask == serial_src_access && im->dstAccessMask == serial_dst_access);
+    ++serial_sync_calls;
+}
+static VKAPI_ATTR void VKAPI_CALL serial_wait(VkCommandBuffer cmd, uint32_t count, const VkEvent *events, VkPipelineStageFlags src,
+                                              VkPipelineStageFlags dst, uint32_t nm, const VkMemoryBarrier *m, uint32_t nb,
+                                              const VkBufferMemoryBarrier *b, uint32_t ni, const VkImageMemoryBarrier *im) {
+    REQUIRE(count == 1 && events && events[0] == HANDLE(VkEvent, 99));
+    serial_barrier(cmd, src, dst, 0, nm, m, nb, b, ni, im);
+}
+static VKAPI_ATTR void VKAPI_CALL serial_barrier2(VkCommandBuffer cmd, const VkDependencyInfo *info) {
+    REQUIRE(cmd == command && info->memoryBarrierCount == 1 && info->bufferMemoryBarrierCount == 1 &&
+            info->imageMemoryBarrierCount == 1);
+#define SERIAL_SCOPE(p)                                                                              \
+    do {                                                                                             \
+        REQUIRE((p)->srcStageMask == serial_src_stage && (p)->dstStageMask == serial_dst_stage);     \
+        REQUIRE((p)->srcAccessMask == serial_src_access && (p)->dstAccessMask == serial_dst_access); \
+    } while (0)
+    SERIAL_SCOPE(info->pMemoryBarriers);
+    SERIAL_SCOPE(info->pBufferMemoryBarriers);
+    SERIAL_SCOPE(info->pImageMemoryBarriers);
+#undef SERIAL_SCOPE
+    ++serial_sync_calls;
+}
+static VKAPI_ATTR void VKAPI_CALL serial_set2(VkCommandBuffer cmd, VkEvent event, const VkDependencyInfo *info) {
+    REQUIRE(event == HANDLE(VkEvent, 99));
+    serial_barrier2(cmd, info);
+}
+static VKAPI_ATTR void VKAPI_CALL serial_wait2(VkCommandBuffer cmd, uint32_t count, const VkEvent *events,
+                                               const VkDependencyInfo *infos) {
+    REQUIRE(count == 1 && events[0] == HANDLE(VkEvent, 99));
+    serial_barrier2(cmd, infos);
+}
+static VKAPI_ATTR VkResult VKAPI_CALL serial_render(VkDevice d, const VkRenderPassCreateInfo *info, const VkAllocationCallbacks *a,
+                                                    VkRenderPass *pass) {
+    REQUIRE(d == device && !a && info->dependencyCount == 1);
+    const VkSubpassDependency *dep = info->pDependencies;
+    REQUIRE(dep->srcStageMask == VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT && dep->srcAccessMask == VK_ACCESS_SHADER_READ_BIT);
+    REQUIRE(dep->dstStageMask == VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT && dep->dstAccessMask == VK_ACCESS_SHADER_READ_BIT);
+    *pass = HANDLE(VkRenderPass, 98);
+    return VK_SUCCESS;
+}
+static VKAPI_ATTR VkResult VKAPI_CALL serial_render2(VkDevice d, const VkRenderPassCreateInfo2 *info,
+                                                     const VkAllocationCallbacks *a, VkRenderPass *pass) {
+    REQUIRE(d == device && !a && info->dependencyCount == 1);
+    const VkSubpassDependency2 *dep = info->pDependencies;
+    REQUIRE(dep->srcStageMask == VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT && dep->srcAccessMask == VK_ACCESS_SHADER_READ_BIT);
+    REQUIRE(dep->dstStageMask == VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT && dep->dstAccessMask == VK_ACCESS_SHADER_READ_BIT);
+    const VkMemoryBarrier2 *override = dep->pNext;
+    REQUIRE(override->srcStageMask == VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT &&
+            override->srcAccessMask == VK_ACCESS_2_SHADER_WRITE_BIT);
+    REQUIRE(override->dstStageMask == VK_PIPELINE_STAGE_2_COPY_BIT && override->dstAccessMask == VK_ACCESS_2_TRANSFER_READ_BIT);
+    *pass = HANDLE(VkRenderPass, 98);
+    return VK_SUCCESS;
+}
+static void serialization_sync_scopes(struct vkrt_device_data *dev) {
+    dev->vtable.CmdPipelineBarrier = serial_barrier;
+    dev->vtable.CmdWaitEvents = serial_wait;
+    dev->vtable.CmdPipelineBarrier2 = serial_barrier2;
+    dev->vtable.CmdSetEvent2 = serial_set2;
+    dev->vtable.CmdWaitEvents2 = serial_wait2;
+    struct vkrt_cmd_buffer_data cb = {.cmd = command, .device_data = dev};
+    vkrt_map_object(VKRT_HKEY(command), &cb);
+    PFN_vkCmdPipelineBarrier legacy = (void *)vkrt_sync_proc("vkCmdPipelineBarrier");
+    PFN_vkCmdWaitEvents wait = (void *)vkrt_sync_proc("vkCmdWaitEvents");
+    PFN_vkCmdPipelineBarrier2 sync2 = (void *)vkrt_sync_proc("vkCmdPipelineBarrier2");
+    PFN_vkCmdSetEvent2 set2 = (void *)vkrt_sync_proc("vkCmdSetEvent2");
+    PFN_vkCmdWaitEvents2 wait2 = (void *)vkrt_sync_proc("vkCmdWaitEvents2");
+    const struct {
+        VkPipelineStageFlags2 source, destination, translated_source, translated_destination;
+        VkAccessFlags2 source_access, destination_access;
+    } cases[] = {
+        {VK_PIPELINE_STAGE_2_ACCELERATION_STRUCTURE_BUILD_BIT_KHR, VK_PIPELINE_STAGE_2_ACCELERATION_STRUCTURE_BUILD_BIT_KHR,
+         VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_ACCESS_2_SHADER_READ_BIT,
+         VK_ACCESS_2_SHADER_WRITE_BIT},
+        {VK_PIPELINE_STAGE_2_ACCELERATION_STRUCTURE_BUILD_BIT_KHR | VK_PIPELINE_STAGE_2_ALL_TRANSFER_BIT,
+         VK_PIPELINE_STAGE_2_ALL_TRANSFER_BIT, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_2_ALL_TRANSFER_BIT,
+         VK_PIPELINE_STAGE_2_ALL_TRANSFER_BIT, VK_ACCESS_2_TRANSFER_READ_BIT | VK_ACCESS_2_SHADER_READ_BIT,
+         VK_ACCESS_2_TRANSFER_WRITE_BIT},
+        {VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
+         VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, VK_ACCESS_2_TRANSFER_READ_BIT | VK_ACCESS_2_SHADER_READ_BIT,
+         VK_ACCESS_2_TRANSFER_WRITE_BIT | VK_ACCESS_2_SHADER_WRITE_BIT},
+        {VK_PIPELINE_STAGE_2_ALL_TRANSFER_BIT, VK_PIPELINE_STAGE_2_ALL_TRANSFER_BIT, VK_PIPELINE_STAGE_2_ALL_TRANSFER_BIT,
+         VK_PIPELINE_STAGE_2_ALL_TRANSFER_BIT, VK_ACCESS_2_TRANSFER_READ_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT},
+        {VK_PIPELINE_STAGE_2_ACCELERATION_STRUCTURE_COPY_BIT_KHR,
+         VK_PIPELINE_STAGE_2_ACCELERATION_STRUCTURE_BUILD_BIT_KHR | VK_PIPELINE_STAGE_2_COPY_BIT,
+         VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_2_COPY_BIT,
+         VK_ACCESS_2_SHADER_READ_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT | VK_ACCESS_2_SHADER_WRITE_BIT},
+        {VK_PIPELINE_STAGE_2_COPY_BIT, VK_PIPELINE_STAGE_2_CLEAR_BIT, VK_PIPELINE_STAGE_2_COPY_BIT, VK_PIPELINE_STAGE_2_CLEAR_BIT,
+         VK_ACCESS_2_TRANSFER_READ_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT}};
+    VkEvent event = HANDLE(VkEvent, 99);
+    for (unsigned i = 0; i < VKRT_ARRAY_SIZE(cases); ++i) {
+        serial_src_stage = cases[i].translated_source;
+        serial_dst_stage = cases[i].translated_destination;
+        serial_src_access = cases[i].source_access;
+        serial_dst_access = cases[i].destination_access;
+        VkMemoryBarrier2 m = {.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER_2,
+                              .srcStageMask = cases[i].source,
+                              .dstStageMask = cases[i].destination,
+                              .srcAccessMask = VK_ACCESS_2_TRANSFER_READ_BIT,
+                              .dstAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT};
+        VkBufferMemoryBarrier2 b = {.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER_2,
+                                    .srcStageMask = m.srcStageMask,
+                                    .dstStageMask = m.dstStageMask,
+                                    .srcAccessMask = m.srcAccessMask,
+                                    .dstAccessMask = m.dstAccessMask};
+        VkImageMemoryBarrier2 im = {.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
+                                    .srcStageMask = m.srcStageMask,
+                                    .dstStageMask = m.dstStageMask,
+                                    .srcAccessMask = m.srcAccessMask,
+                                    .dstAccessMask = m.dstAccessMask};
+        VkDependencyInfo info = {.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
+                                 .memoryBarrierCount = 1,
+                                 .pMemoryBarriers = &m,
+                                 .bufferMemoryBarrierCount = 1,
+                                 .pBufferMemoryBarriers = &b,
+                                 .imageMemoryBarrierCount = 1,
+                                 .pImageMemoryBarriers = &im};
+        VkMemoryBarrier2 saved_m = m;
+        VkBufferMemoryBarrier2 saved_b = b;
+        VkImageMemoryBarrier2 saved_im = im;
+        sync2(command, &info);
+        set2(command, event, &info);
+        wait2(command, 1, &event, &info);
+        REQUIRE(!memcmp(&m, &saved_m, sizeof(m)) && !memcmp(&b, &saved_b, sizeof(b)) && !memcmp(&im, &saved_im, sizeof(im)));
+        if (i < 4) {
+            VkMemoryBarrier lm = {.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER,
+                                  .srcAccessMask = VK_ACCESS_TRANSFER_READ_BIT,
+                                  .dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT};
+            VkBufferMemoryBarrier lb = {.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER,
+                                        .srcAccessMask = lm.srcAccessMask,
+                                        .dstAccessMask = lm.dstAccessMask};
+            VkImageMemoryBarrier li = {.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+                                       .srcAccessMask = lm.srcAccessMask,
+                                       .dstAccessMask = lm.dstAccessMask};
+            legacy(command, (VkPipelineStageFlags)cases[i].source, (VkPipelineStageFlags)cases[i].destination, 0, 1, &lm, 1, &lb, 1,
+                   &li);
+            wait(command, 1, &event, (VkPipelineStageFlags)cases[i].source, (VkPipelineStageFlags)cases[i].destination, 1, &lm, 1,
+                 &lb, 1, &li);
+            REQUIRE(lm.srcAccessMask == VK_ACCESS_TRANSFER_READ_BIT && lm.dstAccessMask == VK_ACCESS_TRANSFER_WRITE_BIT);
+        }
+    }
+    REQUIRE(serial_sync_calls == 26 && cb.record_result == VK_SUCCESS);
+    vkrt_unmap_object(VKRT_HKEY(command));
+    dev->vtable.CreateRenderPass = serial_render;
+    dev->vtable.CreateRenderPass2 = serial_render2;
+    VkSubpassDependency rd = {.srcSubpass = VK_SUBPASS_EXTERNAL,
+                              .srcStageMask = VK_PIPELINE_STAGE_ACCELERATION_STRUCTURE_BUILD_BIT_KHR,
+                              .dstStageMask = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+                              .srcAccessMask = VK_ACCESS_TRANSFER_READ_BIT,
+                              .dstAccessMask = VK_ACCESS_SHADER_READ_BIT};
+    VkRenderPassCreateInfo rp = {.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO, .dependencyCount = 1, .pDependencies = &rd};
+    PFN_vkCreateRenderPass create = (void *)vkrt_sync_proc("vkCreateRenderPass");
+    VkRenderPass pass;
+    REQUIRE(create(device, &rp, NULL, &pass) == VK_SUCCESS && rd.srcAccessMask == VK_ACCESS_TRANSFER_READ_BIT);
+    VkMemoryBarrier2 override = {.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER_2,
+                                 .srcStageMask = VK_PIPELINE_STAGE_2_ACCELERATION_STRUCTURE_COPY_BIT_KHR,
+                                 .dstStageMask = VK_PIPELINE_STAGE_2_COPY_BIT,
+                                 .srcAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT,
+                                 .dstAccessMask = VK_ACCESS_2_TRANSFER_READ_BIT};
+    VkSubpassDependency2 rd2 = {.sType = VK_STRUCTURE_TYPE_SUBPASS_DEPENDENCY_2,
+                                .pNext = &override,
+                                .srcSubpass = VK_SUBPASS_EXTERNAL,
+                                .srcStageMask = rd.srcStageMask,
+                                .dstStageMask = rd.dstStageMask,
+                                .srcAccessMask = rd.srcAccessMask,
+                                .dstAccessMask = rd.dstAccessMask};
+    VkRenderPassCreateInfo2 rp2 = {
+        .sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO_2, .dependencyCount = 1, .pDependencies = &rd2};
+    PFN_vkCreateRenderPass2 create2 = (void *)vkrt_sync_proc("vkCreateRenderPass2");
+    REQUIRE(create2(device, &rp2, NULL, &pass) == VK_SUCCESS && rd2.pNext == &override &&
+            rd2.srcAccessMask == VK_ACCESS_TRANSFER_READ_BIT);
+    REQUIRE(override.srcStageMask == VK_PIPELINE_STAGE_2_ACCELERATION_STRUCTURE_COPY_BIT_KHR &&
+            override.srcAccessMask == VK_ACCESS_2_TRANSFER_WRITE_BIT);
 }
 
 static unsigned event_commands, event_waits, event_sets2, event_waits2, timestamps;
@@ -1015,6 +1202,7 @@ int main(void)
     buffer_usages();
     query_pools();
     synchronization(&dev);
+    serialization_sync_scopes(&dev);
     events_and_timestamps(&dev);
     render_pass_dependencies(&dev);
     sync_alias_loading();

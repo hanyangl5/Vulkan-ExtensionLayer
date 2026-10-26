@@ -214,7 +214,10 @@ void vkrt_as_build_sizes(struct vkrt_device_data *dev, const VkAccelerationStruc
     struct vkrt_build_layout l = vkrt_build_layout(pBuildInfo, pMaxPrimitiveCounts, NULL);
     pSizeInfo->accelerationStructureSize = l.as_size;
     pSizeInfo->buildScratchSize = l.scratch_size;
-    pSizeInfo->updateScratchSize = 0; /* refit is explicitly unsupported */
+    /* UPDATE currently rebuilds the same non-shrinking BVH4 representation.
+     * It needs the full builder scratch, including Mesa IR and encoding maps.
+     * Revisit this contract if COMPACT ever produces a smaller representation. */
+    pSizeInfo->updateScratchSize = (pBuildInfo->flags & VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_UPDATE_BIT_KHR) ? l.scratch_size : 0;
 }
 
 VkDeviceAddress vkrt_as_backing_address(struct vkrt_device_data *dev, VkAccelerationStructureKHR handle) {

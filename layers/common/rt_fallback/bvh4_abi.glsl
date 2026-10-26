@@ -6,7 +6,7 @@
 // Shader view of bvh4_abi.h. All region offsets and address arithmetic are
 // 64-bit. Packed scalar word loads avoid std430 vec3-array stride differences.
 #define VEL_RT_BVH4_MAGIC 0x344c4556u
-#define VEL_RT_BVH4_ABI_VERSION 1u
+#define VEL_RT_BVH4_ABI_VERSION 2u
 #define VEL_RT_BVH4_INVALID_ID 0xffffffffu
 #define VEL_RT_BVH4_INDEX_MASK 0x3fffffffu
 #define VEL_RT_BVH4_FLAG_INVALID 0x80000000u
@@ -40,6 +40,7 @@
 #define VEL_RT_BVH4_NODE_PARENT 116u
 #define VEL_RT_BVH4_INSTANCE_OTW 16u
 #define VEL_RT_BVH4_INSTANCE_WTO 64u
+#define VEL_RT_BVH4_INSTANCE_PUBLIC_ADDRESS 120u
 
 layout(buffer_reference, scalar, buffer_reference_align = 4) readonly buffer VelRtBvh4Word { uint value; };
 

@@ -21,6 +21,9 @@ class Emitter {
   public:
     Emitter(const std::vector<uint32_t> &input, ContinuationFrames plan, std::string prefix) : prefix(std::move(prefix)) {
         output.plan = std::move(plan);
+        if (output.plan.options.private_frame_words &&
+            (!output.plan.options.physical_frame_addresses || output.plan.options.private_frame_words > UINT32_MAX / 4u))
+            throw std::runtime_error("Private frame codecs require uint64 byte offsets and a checked word budget");
         if (this->prefix.empty() || !std::isalpha(static_cast<unsigned char>(this->prefix.front())) ||
             !std::all_of(this->prefix.begin(), this->prefix.end(), [](unsigned char c) { return std::isalnum(c) || c == '_'; }))
             throw std::runtime_error("Invalid continuation frame emitter ID prefix");
@@ -55,7 +58,10 @@ class Emitter {
               << ID("pair") << " = OpTypeVector " << ID("u32") << " 2\n";
         scalars["i32u"] = ID("u32");
         output.base_type = output.plan.options.physical_frame_addresses ? Unsigned(64) : ID("u32");
-        if (output.plan.options.physical_frame_addresses) {
+        if (output.plan.options.private_frame_words) {
+            caps.insert("Linkage");
+            caps.insert("PhysicalStorageBufferAddresses");
+        } else if (output.plan.options.physical_frame_addresses) {
             output.memory.clear();
             caps.insert("PhysicalStorageBufferAddresses");
         }
@@ -76,13 +82,21 @@ class Emitter {
         for (auto type : order) {
             EmitLoad(type);
             EmitStore(type);
-            output.types.push_back({type, Type(type), Load(type), Store(type)});
+            output.types.push_back({type, Type(type), Load(type), Store(type),
+                                    definitions.at(type).op == spv::OpTypeArray ? Constant(Count(type)) : ""});
         }
         for (const auto &frame : output.plan.functions) {
             for (const auto &site : frame.suspensions) EmitSuspension(frame, site);
         }
         std::ostringstream storage;
-        if (output.plan.options.physical_frame_addresses) {
+        if (output.plan.options.private_frame_words) {
+            storage << ID("words") << " = OpTypeArray " << ID("u32") << " " << Constant(output.plan.options.private_frame_words)
+                    << "\n"
+                    << ID("buffer_ptr") << " = OpTypePointer Private " << ID("words") << "\n"
+                    << ID("word_ptr") << " = OpTypePointer Private " << ID("u32") << "\n"
+                    << output.memory << " = OpVariable " << ID("buffer_ptr") << " Private\n";
+            output.annotations = "OpDecorate " + output.memory + " LinkageAttributes \"vel_rt_private_frames\" Import\n";
+        } else if (output.plan.options.physical_frame_addresses) {
             storage << ID("word_ptr") << " = OpTypePointer PhysicalStorageBuffer " << ID("u32") << "\n";
         } else
             storage << ID("words") << " = OpTypeRuntimeArray " << ID("u32") << "\n"
@@ -91,7 +105,7 @@ class Emitter {
                     << ID("word_ptr") << " = OpTypePointer StorageBuffer " << ID("u32") << "\n"
                     << output.memory << " = OpVariable " << ID("buffer_ptr") << " StorageBuffer\n";
         for (const auto &cap : caps) output.capabilities += "OpCapability " + cap + "\n";
-        if (!output.plan.options.physical_frame_addresses)
+        if (!output.plan.options.physical_frame_addresses && !output.plan.options.private_frame_words)
             output.annotations = "OpDecorate " + ID("words") + " ArrayStride 4\nOpMemberDecorate " + ID("buffer") +
                                  " 0 Offset 0\nOpDecorate " + ID("buffer") + " Block\nOpDecorate " + output.memory +
                                  " DescriptorSet " + std::to_string(set) + "\nOpDecorate " + output.memory + " Binding " +
@@ -232,6 +246,13 @@ class Emitter {
         return result;
     }
     std::string Pointer(const std::string &base, const std::string &offset) {
+        if (output.plan.options.private_frame_words) {
+            auto wide = Op("OpUConvert " + output.base_type + " " + offset);
+            auto address = Op("OpIAdd " + output.base_type + " " + base + " " + wide);
+            auto narrow = Op("OpUConvert " + ID("u32") + " " + address);
+            auto word = Op("OpShiftRightLogical " + ID("u32") + " " + narrow + " " + Constant(2));
+            return Op("OpAccessChain " + ID("word_ptr") + " " + output.memory + " " + word);
+        }
         if (output.plan.options.physical_frame_addresses) {
             auto aligned = Op("OpBitwiseAnd " + ID("u32") + " " + offset + " " + Constant(UINT32_MAX - 3u));
             auto wide = Op("OpUConvert " + output.base_type + " " + aligned);
@@ -242,7 +263,9 @@ class Emitter {
         word = Op("OpIAdd " + ID("u32") + " " + base + " " + word);
         return Op("OpAccessChain " + ID("word_ptr") + " " + output.memory + " " + Constant(0) + " " + word);
     }
-    std::string Alignment() const { return output.plan.options.physical_frame_addresses ? " Aligned 4" : ""; }
+    std::string Alignment() const {
+        return output.plan.options.physical_frame_addresses && !output.plan.options.private_frame_words ? " Aligned 4" : "";
+    }
     std::string Shift(const std::string &offset) {
         auto byte = Op("OpBitwiseAnd " + ID("u32") + " " + offset + " " + Constant(3));
         return Op("OpIMul " + ID("u32") + " " + byte + " " + Constant(8));

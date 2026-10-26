@@ -88,6 +88,9 @@ struct ContinuationFrameOptions {
     // returns without suspending (for example a closest-hit/callable callee).
     bool persistent_function_storage = false;
     bool physical_frame_addresses = false;
+    // Nonzero selects a linked per-invocation Private array instead of BDA
+    // storage. Bases remain uint64 byte offsets; the shared array is imported.
+    uint32_t private_frame_words = 0;
     // Reserved transport/system bytes before all function/SSA slots. Slot
     // offsets and FunctionFrame::size include this prefix; type layouts do not.
     uint32_t prefix_bytes = 0;

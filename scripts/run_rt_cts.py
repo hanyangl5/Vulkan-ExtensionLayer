@@ -36,6 +36,7 @@ import xml.etree.ElementTree as ET
 
 LAYERS = {
     "ray-query": "VK_LAYER_VKRT_SOFTWARE_RAY_QUERY",
+    "software-rt": "VK_LAYER_VKRT_SOFTWARE_RAY_QUERY",
     "ray-tracing": "VK_LAYER_HANYANG_ray_tracing_fallback",
 }
 STATUSES = ("pass", "fail", "notSupported", "crash", "timeout", "noresult")
@@ -150,7 +151,7 @@ def run_environment(mode, snapshot, validation_dir=None):
     overrides = {"VK_LOADER_LAYERS_DISABLE": "~implicit~"}
     if mode != "native":
         overrides.update(VK_INSTANCE_LAYERS=LAYERS[mode], VK_LAYER_PATH=str(snapshot))
-        if mode == "ray-query":
+        if mode in ("ray-query", "software-rt"):
             overrides["ENABLE_VKRT_SOFTWARE_RAY_QUERY"] = "1"
     if validation_dir:
         overrides["VK_LAYER_PATH"] = os.pathsep.join(
@@ -329,7 +330,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--cts", required=True, type=Path)
     parser.add_argument("--cases", required=True, type=Path, help="one exact CTS case per line; # comments allowed")
-    parser.add_argument("--mode", required=True, choices=("native", "ray-query", "ray-tracing"))
+    parser.add_argument("--mode", required=True, choices=("native", "ray-query", "software-rt", "ray-tracing"))
     parser.add_argument("--layer-dir", type=Path, help="directory containing the chosen fallback manifest")
     parser.add_argument("--output-dir", required=True, type=Path, help="new or empty evidence directory")
     parser.add_argument("--archive-dir", required=True, type=Path, help="CTS test-resource directory")

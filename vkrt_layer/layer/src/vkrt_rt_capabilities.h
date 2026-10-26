@@ -6,10 +6,19 @@
 #include "vkrt_common.h"
 #include <stddef.h>
 
+#define VKRT_RTP_SHADER_STAGES                                                                             \
+    (VK_SHADER_STAGE_RAYGEN_BIT_KHR | VK_SHADER_STAGE_MISS_BIT_KHR | VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR | \
+     VK_SHADER_STAGE_ANY_HIT_BIT_KHR | VK_SHADER_STAGE_INTERSECTION_BIT_KHR | VK_SHADER_STAGE_CALLABLE_BIT_KHR)
+static inline VkShaderStageFlags vkrt_compute_shader_stages(VkShaderStageFlags stages) {
+    if (stages == VK_SHADER_STAGE_ALL) return stages;
+    return (stages & ~VKRT_RTP_SHADER_STAGES) | ((stages & VKRT_RTP_SHADER_STAGES) ? VK_SHADER_STAGE_COMPUTE_BIT : 0);
+}
+
 /* The current prototype cannot mix native RT with layer-owned AS objects.
  * Keep rejection and discovery masking in one table. Generic pipeline-library
  * support is unrelated and must not be hidden with its RT-only dependent. */
 static inline bool vkrt_incompatible_device_extension(const char *name) {
+    if (!strcmp(name, VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME)) return false;
     return !strncmp(name, "VK_KHR_ray_tracing", strlen("VK_KHR_ray_tracing")) ||
            !strncmp(name, "VK_NV_ray_tracing", strlen("VK_NV_ray_tracing")) ||
            !strncmp(name, "VK_EXT_ray_tracing", strlen("VK_EXT_ray_tracing")) || !strcmp(name, "VK_EXT_opacity_micromap") ||
@@ -21,7 +30,7 @@ static inline bool vkrt_incompatible_device_extension(const char *name) {
 }
 
 /* Ranges contain only consecutive VkBool32 members, excluding pNext/padding.
- * Base AS/RQ native truth is retained; every unsupported optional RT bit is
+ * Base AS/RQ/RTP native truth is retained; every unsupported optional RT bit is
  * reported false and rejected if explicitly requested at device creation. */
 static inline bool vkrt_unsupported_rt_feature_range(VkStructureType type, size_t *offset, size_t *bytes) {
 #define RANGE(stype, ctype, first, last)                             \
@@ -34,7 +43,7 @@ static inline bool vkrt_unsupported_rt_feature_range(VkStructureType type, size_
               VkPhysicalDeviceAccelerationStructureFeaturesKHR, accelerationStructureCaptureReplay,
               descriptorBindingAccelerationStructureUpdateAfterBind);
         RANGE(VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_FEATURES_KHR, VkPhysicalDeviceRayTracingPipelineFeaturesKHR,
-              rayTracingPipeline, rayTraversalPrimitiveCulling);
+              rayTracingPipelineShaderGroupHandleCaptureReplay, rayTraversalPrimitiveCulling);
 #ifdef VK_KHR_ray_tracing_maintenance1
         RANGE(VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_MAINTENANCE_1_FEATURES_KHR,
               VkPhysicalDeviceRayTracingMaintenance1FeaturesKHR, rayTracingMaintenance1, rayTracingPipelineTraceRaysIndirect2);

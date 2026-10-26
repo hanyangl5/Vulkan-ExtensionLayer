@@ -202,7 +202,13 @@ static void namespace_and_aliases(void) {
     CHECK(vkrt_as_registry_publish(&dev, first, physical) == physical && resolve(av) == physical);
     CHECK(vkrt_as_registry_publish(&dev, alias, physical) == physical && operations == before);
     CHECK(vkrt_as_registry_publish(&dev, alias, physical + 16) == 0 && resolve(av) == physical);
-    CHECK(vkrt_as_registry_publish(&dev, far_entry, physical + 4) == physical + 4 && resolve(fv) == physical + 4);
+    CHECK(resolve(fv) == physical + offset && resolve(endv) == physical + size);
+    CHECK(vkrt_as_registry_publish(&dev, far_entry, physical + offset) == physical + offset && operations == before);
+    struct vkrt_as_registry_entry *future;
+    uint64_t futurev;
+    CHECK(vkrt_as_registry_acquire(&dev, a, 256, &future, &futurev) == VK_SUCCESS && futurev == av + 256 &&
+          resolve(futurev) == physical + 256);
+    vkrt_as_registry_release(&dev, future);
     vkrt_as_registry_release(&dev, first);
     CHECK(resolve(aliasv) == physical);
     vkrt_as_registry_release(&dev, alias);
@@ -210,7 +216,7 @@ static void namespace_and_aliases(void) {
     vkrt_as_registry_release(&dev, far_entry);
     vkrt_as_registry_release(&dev, end);
     CHECK(live_buffers() == 2);
-    CHECK(vkrt_as_registry_acquire(&dev, a, 0, &first, &aliasv) == VK_SUCCESS && aliasv == av);
+    CHECK(vkrt_as_registry_acquire(&dev, a, 0, &first, &aliasv) == VK_SUCCESS && aliasv == av && resolve(aliasv) == physical);
     vkrt_as_registry_buffer_destroy(&dev, a); /* Keep range until this final AS ref dies. */
     CHECK(vkrt_as_registry_buffer_create(&dev, c, 256) == VK_SUCCESS);
     struct vkrt_as_registry_entry *other;
@@ -234,14 +240,19 @@ static void full_width_and_churn(void) {
     CHECK(vkrt_as_registry_buffer_create(&dev, buffer, maximum - 256) == VK_SUCCESS);
     struct vkrt_as_registry_entry *entry;
     uint64_t value;
+    CHECK(vkrt_as_registry_acquire(&dev, buffer, 0, &entry, &value) == VK_SUCCESS);
+    CHECK(vkrt_as_registry_publish(&dev, entry, 512) == 0 && resolve(value) == 0); /* Whole buffer end cannot wrap. */
+    vkrt_as_registry_release(&dev, entry);
     CHECK(vkrt_as_registry_acquire(&dev, buffer, maximum - 256, &entry, &value) == VK_SUCCESS && value == maximum);
-    CHECK(vkrt_as_registry_publish(&dev, entry, UINT64_C(0xabcdef123404)) == UINT64_C(0xabcdef123404));
-    CHECK(resolve(value) == UINT64_C(0xabcdef123404));
+    CHECK(vkrt_as_registry_publish(&dev, entry, 4) == 0); /* Base subtraction cannot wrap. */
+    CHECK(vkrt_as_registry_publish(&dev, entry, maximum - 252) == maximum - 252);
+    CHECK(resolve(value) == maximum - 252);
     vkrt_as_registry_release(&dev, entry);
     CHECK(vkrt_as_registry_buffer_create(&dev, H(VkBuffer, 2002), 256) == VK_ERROR_OUT_OF_DEVICE_MEMORY);
     for (unsigned i = 0; i < 300; ++i) {
         CHECK(vkrt_as_registry_acquire(&dev, buffer, (uint64_t)i * UINT64_C(0x100000000), &entry, &value) == VK_SUCCESS);
-        CHECK(vkrt_as_registry_publish(&dev, entry, UINT64_C(0x100000004)) != 0);
+        uint64_t physical = (uint64_t)i * UINT64_C(0x100000000) + 4;
+        CHECK(resolve(value) == physical && vkrt_as_registry_publish(&dev, entry, physical) == physical);
         vkrt_as_registry_release(&dev, entry);
         CHECK(live_buffers() == 2);
     }

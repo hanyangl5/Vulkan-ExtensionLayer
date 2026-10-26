@@ -48,6 +48,8 @@ struct vkrt_device_data {
    struct vkrt_instance_data  *instance_data;
    struct vkrt_as_registry *as_registry;
    struct vkrt_deferred_state *deferred;
+   struct vkrt_serialization_state *serialization;
+   struct vkrt_rtp_state *rtp;
    /* Immutable enabled queue families. Hidden AS cells are shared across
     * every family the application can use, without exposed ownership state. */
    uint32_t queue_family_count;
@@ -76,15 +78,16 @@ struct vkrt_saved_push {
 };
 
 struct vkrt_cmd_buffer_data {
-   VkCommandBuffer             cmd;
-   struct vkrt_device_data    *device_data;
-   VkCommandPool               pool;
-   struct vkrt_cmd_buffer_data *next;
-   struct vkrt_saved_push      *push_head, *push_tail;
-   VkResult                    record_result;
+    struct vkrt_rtp_command *rtp;
+    VkCommandBuffer cmd;
+    struct vkrt_device_data *device_data;
+    VkCommandPool pool;
+    struct vkrt_cmd_buffer_data *next;
+    struct vkrt_saved_push *push_head, *push_tail;
+    VkResult record_result;
 
-   /* Saved application state so our builder binds can be undone. */
-   VkPipeline                  bound_compute_pipeline;
+    /* Saved application state so our builder binds can be undone. */
+    VkPipeline bound_compute_pipeline;
 };
 
 /* ------------------------------------------------------------------ */

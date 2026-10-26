@@ -46,6 +46,8 @@ add_library(${VKRT_LAYER_NAME} SHARED
    src/vkrt_virtual_as.c
    src/vkrt_as_registry.c
    src/vkrt_as_copy.c
+   src/vkrt_as_serialization.c
+   src/vkrt_rtp.cpp
    src/vkrt_deferred.c
    src/vkrt_build.c
    src/vkrt_features.c
@@ -60,7 +62,23 @@ add_library(${VKRT_LAYER_NAME} SHARED
 set(VKRT_TYPED_SOURCE ${CMAKE_CURRENT_SOURCE_DIR}/../../layers/raytracing)
 add_library(vkrt_typed_compiler STATIC
    ${VKRT_TYPED_SOURCE}/continuations.cpp ${VKRT_TYPED_SOURCE}/frame_emitter.cpp
-   ${VKRT_TYPED_SOURCE}/state_compiler.cpp ${VKRT_TYPED_SOURCE}/typed_pipeline.cpp)
+   ${VKRT_TYPED_SOURCE}/state_compiler.cpp ${VKRT_TYPED_SOURCE}/typed_pipeline.cpp
+   ${VKRT_TYPED_SOURCE}/typed_runtime.cpp ${VKRT_TYPED_SOURCE}/glsl_compiler.cpp)
+include(${VKRT_TYPED_SOURCE}/typed_runtime_sources.cmake)
+target_include_directories(vkrt_typed_compiler PRIVATE ${CMAKE_CURRENT_BINARY_DIR})
+if(WIN32)
+   find_path(VKRT_GLSLANG_INCLUDE_DIR glslang/Public/ShaderLang.h HINTS ${Vulkan_INCLUDE_DIRS} REQUIRED)
+   foreach(_vkrt_glslang IN ITEMS SPIRV glslang glslang-default-resource-limits)
+      find_library(VKRT_${_vkrt_glslang}_LIBRARY NAMES ${_vkrt_glslang}
+         HINTS "$ENV{VULKAN_SDK}/Lib" "${Vulkan_INCLUDE_DIRS}/../Lib" REQUIRED)
+      list(APPEND VKRT_GLSLANG_LIBRARIES ${VKRT_${_vkrt_glslang}_LIBRARY})
+   endforeach()
+   target_include_directories(vkrt_typed_compiler PRIVATE ${VKRT_GLSLANG_INCLUDE_DIR})
+   target_link_libraries(vkrt_typed_compiler PUBLIC ${VKRT_GLSLANG_LIBRARIES})
+else()
+   find_package(glslang CONFIG REQUIRED)
+   target_link_libraries(vkrt_typed_compiler PUBLIC glslang::SPIRV glslang::glslang glslang::glslang-default-resource-limits)
+endif()
 target_include_directories(vkrt_typed_compiler PUBLIC ${VKRT_TYPED_SOURCE} ${Vulkan_INCLUDE_DIRS} ${VKRT_SPIRV_HEADERS_INCLUDE_DIR})
 target_link_libraries(vkrt_typed_compiler PUBLIC ${VKRT_SPIRV_LIBRARIES})
 target_compile_features(vkrt_typed_compiler PUBLIC cxx_std_17)
@@ -118,6 +136,9 @@ set(VKRT_BVH_SHADER_SOURCES
    bvh/leaf_bvh4.comp
    bvh/vkrt_bvh4_prepare.comp
    bvh/vkrt_bvh4_copy.comp
+   bvh/vkrt_bvh4_serialization.comp
+   bvh/vkrt_as_query.comp
+   bvh/vkrt_query_format.comp
    ../../layers/common/rt_fallback/bvh4_mesa_encode.comp
    bvh/id_prefix_sum.comp
    bvh/morton_sort.comp
@@ -155,6 +176,7 @@ foreach(_vkrt_bvh_src IN LISTS VKRT_BVH_SHADER_SOURCES)
          ${CMAKE_CURRENT_SOURCE_DIR}/bvh/bvh_ir_build_layout.h
          ${CMAKE_CURRENT_SOURCE_DIR}/bvh/vk_bvh_helpers.h
          ${CMAKE_CURRENT_SOURCE_DIR}/bvh/leaf.h
+         ${CMAKE_CURRENT_SOURCE_DIR}/bvh/vkrt_as_serialization.glsl
          ${VKRT_COMMON_BVH4}/as_address.glsl
          ${VKRT_COMMON_BVH4}/bvh4_abi.glsl
          ${CMAKE_CURRENT_SOURCE_DIR}/bvh/pair_triangles.h
@@ -347,6 +369,21 @@ add_executable(test_as_copy ../tests/test_as_copy.c)
 target_link_libraries(test_as_copy PRIVATE vkrt_cpu_bvh ${Vulkan_LIBRARIES})
 set_target_properties(test_as_copy PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED ON)
 add_dependencies(test_as_copy vkrt_test_rq_spv)
+add_executable(test_as_update ../tests/test_as_update.c)
+target_link_libraries(test_as_update PRIVATE vkrt_cpu_bvh ${Vulkan_LIBRARIES})
+target_include_directories(test_as_update PRIVATE src ${VKRT_COMMON_BVH4})
+set_target_properties(test_as_update PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED ON)
+add_dependencies(test_as_update vkrt_test_rq_spv)
+add_executable(test_as_serialization ../tests/test_as_serialization.c)
+target_link_libraries(test_as_serialization PRIVATE vkrt_cpu_bvh ${Vulkan_LIBRARIES})
+target_include_directories(test_as_serialization PRIVATE src)
+set_target_properties(test_as_serialization PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED ON)
+add_dependencies(test_as_serialization vkrt_test_rq_spv)
+add_executable(test_query_properties ../tests/test_query_properties.c)
+target_link_libraries(test_query_properties PRIVATE vkrt_cpu_bvh ${Vulkan_LIBRARIES})
+target_include_directories(test_query_properties PRIVATE src bvh ${VKRT_COMMON_BVH4})
+set_target_properties(test_query_properties PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED ON)
+add_dependencies(test_query_properties vkrt_test_rq_spv vkrt_bvh_spv)
 
 set(VKRT_TEST_GETTER_SPV ${CMAKE_CURRENT_BINARY_DIR}/rq_sbt_offset.spv)
 add_custom_command(
@@ -363,6 +400,29 @@ add_dependencies(test_spirv_lower vkrt_traversal_spv vkrt_test_rq_spv vkrt_test_
 
 include(CTest)
 if(BUILD_TESTING)
+   set(VKRT_RTP_API_SPV)
+   foreach(stage rgen rmiss rchit comp)
+      set(output ${CMAKE_CURRENT_BINARY_DIR}/rtp_api.${stage}.spv)
+      add_custom_command(
+         OUTPUT ${output}
+         COMMAND ${VKRT_GLSLC} --target-env=vulkan1.2
+            ${CMAKE_CURRENT_SOURCE_DIR}/../tests/rtp_api.${stage} -o ${output}
+         COMMAND ${VKRT_SPIRV_VAL} --target-env vulkan1.2 ${output}
+         DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/../tests/rtp_api.${stage}
+         COMMENT "Compiling public RTP API ${stage} fixture"
+         VERBATIM)
+      list(APPEND VKRT_RTP_API_SPV ${output})
+   endforeach()
+   add_custom_target(vkrt_rtp_api_spv DEPENDS ${VKRT_RTP_API_SPV})
+   add_executable(test_rtp_api ../tests/test_rtp_api.c)
+   target_include_directories(test_rtp_api PRIVATE src ${VKRT_COMMON_BVH4} ${Vulkan_INCLUDE_DIRS})
+   target_link_libraries(test_rtp_api PRIVATE vkrt_cpu_bvh ${Vulkan_LIBRARIES})
+   set_target_properties(test_rtp_api PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED ON)
+   add_dependencies(test_rtp_api vkrt_rtp_api_spv)
+   add_test(NAME vkrt.rtp_api.software COMMAND test_rtp_api ${VKRT_RTP_API_SPV})
+   set_tests_properties(vkrt.rtp_api.software PROPERTIES
+      ENVIRONMENT "VK_LAYER_PATH=${CMAKE_BINARY_DIR}/layers;VK_INSTANCE_LAYERS=VK_LAYER_VKRT_SOFTWARE_RAY_QUERY"
+      LABELS "gpu;typed_rtp" SKIP_RETURN_CODE 77 TIMEOUT 600)
    # Manual capability probe; its observed address/alignment is device-specific.
    add_executable(probe_bda_alignment ../tests/probe_bda_alignment.c)
    target_include_directories(probe_bda_alignment PRIVATE ${Vulkan_INCLUDE_DIRS})
@@ -465,6 +525,13 @@ if(BUILD_TESTING)
    set_target_properties(test_as_copy_host PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED ON)
    add_dependencies(test_as_copy_host vkrt_bvh_spv)
    add_test(NAME vkrt.as_copy_host COMMAND test_as_copy_host)
+   add_executable(test_as_serialization_host ../tests/test_as_serialization_host.c src/vkrt_as_serialization.c)
+   target_include_directories(test_as_serialization_host PRIVATE src ${CMAKE_CURRENT_BINARY_DIR}/bvh ${VKRT_COMMON_BVH4} ${Vulkan_INCLUDE_DIRS})
+   target_link_libraries(test_as_serialization_host PRIVATE Threads::Threads)
+   set_target_properties(test_as_serialization_host PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED ON)
+   add_dependencies(test_as_serialization_host vkrt_bvh_spv)
+   add_test(NAME vkrt.as_serialization_host COMMAND test_as_serialization_host)
+   set_tests_properties(vkrt.as_serialization_host PROPERTIES LABELS "offline;no_native_rt")
    set_tests_properties(vkrt.as_copy_host PROPERTIES LABELS "offline;no_native_rt")
    add_test(NAME vkrt.spirv_ids COMMAND test_spirv_ids)
    set_tests_properties(vkrt.host_translation vkrt.spirv_ids PROPERTIES LABELS "offline")
@@ -483,7 +550,12 @@ if(BUILD_TESTING)
    add_test(NAME vkrt.gpu_build.aligned_values COMMAND test_gpu_build --aligned-values)
    add_test(NAME vkrt.gpu_build.aligned_values.native COMMAND test_gpu_build --aligned-values)
    add_test(NAME vkrt.as_copy.software COMMAND test_as_copy)
-   set_tests_properties(vkrt.cpu_fixture vkrt.gpu_build.software vkrt.gpu_build.aligned_values vkrt.as_copy.software PROPERTIES
+   add_test(NAME vkrt.as_update.software COMMAND test_as_update)
+   add_test(NAME vkrt.as_serialization.software COMMAND test_as_serialization)
+   add_test(NAME vkrt.query_properties.software COMMAND test_query_properties
+      ${CMAKE_CURRENT_BINARY_DIR}/bvh/vkrt_as_query.spv ${CMAKE_CURRENT_BINARY_DIR}/bvh/vkrt_query_format.spv)
+   set_tests_properties(vkrt.cpu_fixture vkrt.gpu_build.software vkrt.gpu_build.aligned_values vkrt.as_copy.software
+      vkrt.as_update.software vkrt.as_serialization.software vkrt.query_properties.software PROPERTIES
       ENVIRONMENT "VK_LAYER_PATH=${CMAKE_BINARY_DIR}/layers;VK_INSTANCE_LAYERS=VK_LAYER_VKRT_SOFTWARE_RAY_QUERY"
       LABELS "gpu" TIMEOUT 600)
    set_tests_properties(vkrt.gpu_build.native PROPERTIES ENVIRONMENT "VK_INSTANCE_LAYERS=" LABELS "gpu;native_rt" TIMEOUT 600)

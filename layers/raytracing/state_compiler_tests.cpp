@@ -1,6 +1,8 @@
 // Copyright 2026 The Khronos Group Inc.
 // SPDX-License-Identifier: Apache-2.0
 #include "state_compiler.h"
+#include "typed_pipeline.h"
+#include "cts_raytmax_intersection_fixture.h"
 #include <spirv-tools/libspirv.hpp>
 #include <spirv_cross/spirv.hpp>
 #include <vulkan/vulkan.h>
@@ -201,6 +203,229 @@ void Replace(std::string &source, const std::string &before, const std::string &
     Require(offset != std::string::npos, "Regression source fragment missing");
     source.replace(offset, before.size(), after);
 }
+void ResourceValueTypes() {
+    // SPIR-V1.4 permits a source Function pointer to the same explicitly laid
+    // out structure used by a buffer. The newer emitted module must split
+    // logical values from resource layouts without weakening those layouts.
+    const char *source = R"spv(
+OpCapability Shader
+OpCapability RayTracingKHR
+OpExtension "SPV_KHR_ray_tracing"
+OpMemoryModel Logical GLSL450
+OpEntryPoint RayGenerationKHR %main "main" %buffer %callable
+OpMemberDecorate %pair 0 Offset 0
+OpMemberDecorate %pair 1 Offset 8
+OpDecorate %array ArrayStride 16
+OpMemberDecorate %block 0 Offset 0
+OpMemberDecorate %block 1 Offset 16
+OpDecorate %block Block
+OpDecorate %buffer DescriptorSet 0
+OpDecorate %buffer Binding 1
+OpDecorate %callable Location 0
+%void = OpTypeVoid
+%uint = OpTypeInt 32 0
+%float = OpTypeFloat 32
+%zero = OpConstant %uint 0
+%one = OpConstant %uint 1
+%two = OpConstant %uint 2
+%pair = OpTypeStruct %uint %float
+%array = OpTypeArray %pair %two
+%block = OpTypeStruct %pair %array
+%buffer_ptr = OpTypePointer StorageBuffer %block
+%pair_ptr = OpTypePointer StorageBuffer %pair
+%array_ptr = OpTypePointer StorageBuffer %array
+%local_ptr = OpTypePointer Function %pair
+%callable_ptr = OpTypePointer CallableDataKHR %uint
+%buffer = OpVariable %buffer_ptr StorageBuffer
+%callable = OpVariable %callable_ptr CallableDataKHR
+%fn = OpTypeFunction %void
+%main = OpFunction %void None %fn
+%entry = OpLabel
+%local = OpVariable %local_ptr Function
+%p = OpAccessChain %pair_ptr %buffer %zero
+%a = OpAccessChain %array_ptr %buffer %one
+%before = OpLoad %pair %p Volatile
+%before_array = OpLoad %array %a Volatile
+OpExecuteCallableKHR %zero %callable
+%after = OpLoad %pair %p Volatile
+OpStore %local %before
+OpStore %p %after Volatile
+OpStore %a %before_array Volatile
+OpReturn
+OpFunctionEnd
+)spv";
+    spvtools::SpirvTools tools(SPV_ENV_VULKAN_1_3);
+    std::string error;
+    tools.SetMessageConsumer(
+        [&](spv_message_level_t, const char *, const spv_position_t &, const char *message) { error += message; });
+    std::vector<uint32_t> words;
+    Require(tools.Assemble(source, &words), "Resource source assembly: " + error);
+    words[1] = 0x00010400;
+    Require(tools.Validate(words), "Resource source validation: " + error);
+    auto program = CompileTypedContinuationSteps(words, "main", spv::ExecutionModelRayGenerationKHR);
+    Require(tools.Validate(program.spirv), "Resource value/layout split validation: " + error);
+    uint32_t logical_copies = 0, volatile_loads = 0;
+    for (size_t p = 5; p < program.spirv.size(); p += program.spirv[p] >> 16) {
+        const auto op = program.spirv[p] & 65535;
+        logical_copies += op == spv::OpCopyLogical;
+        volatile_loads +=
+            op == spv::OpLoad && (program.spirv[p] >> 16) >= 5 && (program.spirv[p + 4] & spv::MemoryAccessVolatileMask);
+    }
+    Require(logical_copies >= 5 && volatile_loads == 3, "Aggregate conversion lost or duplicated a volatile source read");
+}
+void OpaqueResourceBoundaries() {
+    const std::string image = R"spv(
+OpCapability Shader
+OpCapability RayTracingKHR
+OpExtension "SPV_KHR_ray_tracing"
+OpMemoryModel Logical GLSL450
+OpEntryPoint RayGenerationKHR %main "main" %image
+OpDecorate %image DescriptorSet 0
+OpDecorate %image Binding 1
+%void = OpTypeVoid
+%bool = OpTypeBool
+%u32 = OpTypeInt 32 0
+%i32 = OpTypeInt 32 1
+%f32 = OpTypeFloat 32
+%v3i = OpTypeVector %i32 3
+%v4i = OpTypeVector %i32 4
+%image_type = OpTypeImage %i32 3D 0 0 0 2 R32i
+%image_pointer = OpTypePointer UniformConstant %image_type
+%image = OpVariable %image_pointer UniformConstant
+%fn = OpTypeFunction %void
+%zero = OpConstant %i32 0
+%one = OpConstant %i32 1
+%uzero = OpConstant %u32 0
+%fone = OpConstant %f32 1
+%coord = OpConstantComposite %v3i %zero %zero %zero
+%color = OpConstantComposite %v4i %one %zero %zero %one
+%main = OpFunction %void None %fn
+%entry = OpLabel
+%loaded = OpLoad %image_type %image
+OpImageWrite %loaded %coord %color SignExtend
+OpReturn
+OpFunctionEnd
+)spv";
+    auto check = [&](const std::string &source, uint32_t model) {
+        auto program = CompileTypedContinuationSteps(Source(source), "main", model);
+        uint32_t writes = 0, images = 0;
+        for (size_t p = 5; p < program.spirv.size(); p += program.spirv[p] >> 16) {
+            auto op = program.spirv[p] & 65535;
+            writes += op == spv::OpImageWrite;
+            images += op == spv::OpTypeImage;
+        }
+        Require(writes == 1 && images == 1, "Storage image source operation/interface lost");
+    };
+    check(image, spv::ExecutionModelRayGenerationKHR);
+    std::string late = image;
+    Replace(late, "RayGenerationKHR %main", "IntersectionKHR %main");
+    Replace(late, "%loaded = OpLoad", "%reported = OpReportIntersectionKHR %bool %fone %uzero\n%loaded = OpLoad");
+    check(late, spv::ExecutionModelIntersectionKHR);
+    std::string crossing = image;
+    Replace(crossing, "OpImageWrite", "OpBranch %next\n%next = OpLabel\nOpImageWrite");
+    bool rejected = false;
+    try {
+        CompileTypedContinuationSteps(Source(crossing), "main", spv::ExecutionModelRayGenerationKHR);
+    } catch (const std::exception &e) {
+        rejected = std::string(e.what()).find("opaque resource SSA crosses") != std::string::npos;
+    }
+    Require(rejected, "Cross-state opaque resource was silently spilled or reloaded");
+
+    std::string atomic = image;
+    Replace(atomic, "%image_pointer = OpTypePointer", "%texel_pointer = OpTypePointer Image %i32\n%image_pointer = OpTypePointer");
+    Replace(atomic, "%uzero = OpConstant",
+            "%device = OpConstant %u32 1\n%image_acq_rel = OpConstant %u32 2056\n"
+            "%image_release = OpConstant %u32 2052\n%uzero = OpConstant");
+    Replace(atomic, "%loaded = OpLoad %image_type %image\nOpImageWrite %loaded %coord %color SignExtend",
+            "%texel = OpImageTexelPointer %texel_pointer %image %coord %uzero\n"
+            "%prior = OpAtomicSMin %i32 %texel %device %image_acq_rel %one\n"
+            "OpAtomicStore %texel %device %image_release %prior\nOpMemoryBarrier %device %image_acq_rel");
+    auto atomic_check = [&](const std::string &source, uint32_t model, uint32_t expected_texels = 1) {
+        auto program = CompileTypedContinuationSteps(Source(source), "main", model);
+        std::map<uint32_t, uint32_t> constants;
+        uint32_t texels = 0, minima = 0, stores = 0, barriers = 0;
+        for (size_t p = 5; p < program.spirv.size(); p += program.spirv[p] >> 16) {
+            const auto op = program.spirv[p] & 65535;
+            if (op == spv::OpConstant && program.spirv[p] >> 16 == 4) constants[program.spirv[p + 2]] = program.spirv[p + 3];
+            texels += op == spv::OpImageTexelPointer;
+            if (op == spv::OpAtomicSMin) {
+                ++minima;
+                Require(constants.at(program.spirv[p + 4]) == 1 && constants.at(program.spirv[p + 5]) == 2056,
+                        "Image atomic scope or acquire/release/image memory semantics changed");
+            }
+            if (op == spv::OpAtomicStore) {
+                ++stores;
+                Require(constants.at(program.spirv[p + 2]) == 1 && constants.at(program.spirv[p + 3]) == 2052,
+                        "Image atomic store scope or release/image semantics changed");
+            }
+            if (op == spv::OpMemoryBarrier) {
+                ++barriers;
+                Require(constants.at(program.spirv[p + 1]) == 1 && constants.at(program.spirv[p + 2]) == 2056,
+                        "Source memory barrier semantics changed");
+            }
+        }
+        Require(texels == expected_texels && minima == 1 && stores == 1 && barriers == 1,
+                "Image texel pointer/atomic side effects duplicated or lost");
+        if (expected_texels == 2) {
+            uint32_t atomic_value = 0;
+            for (size_t p = 5; p < program.source.size(); p += program.source[p] >> 16)
+                if ((program.source[p] & 65535) == spv::OpAtomicSMin) atomic_value = program.source[p + 2];
+            const auto &saved = program.frames.functions.at(0).suspensions.at(0).saved_values;
+            Require(std::find(saved.begin(), saved.end(), atomic_value) != saved.end(),
+                    "Atomic result lost across suspension or atomic side effect scheduled for replay");
+        }
+    };
+    atomic_check(atomic, spv::ExecutionModelRayGenerationKHR);
+    std::string late_atomic = atomic;
+    Replace(late_atomic, "RayGenerationKHR %main", "IntersectionKHR %main");
+    Replace(late_atomic, "%texel = OpImageTexelPointer",
+            "%reported = OpReportIntersectionKHR %bool %fone %uzero\n%texel = OpImageTexelPointer");
+    atomic_check(late_atomic, spv::ExecutionModelIntersectionKHR);
+    std::string live_atomic = atomic;
+    Replace(live_atomic, "RayGenerationKHR %main", "IntersectionKHR %main");
+    Replace(live_atomic, "OpAtomicStore %texel",
+            "%reported = OpReportIntersectionKHR %bool %fone %uzero\n"
+            "%later_texel = OpImageTexelPointer %texel_pointer %image %coord %uzero\nOpAtomicStore %later_texel");
+    atomic_check(live_atomic, spv::ExecutionModelIntersectionKHR, 2);
+    std::string crossing_pointer = atomic;
+    Replace(crossing_pointer, "%prior = OpAtomicSMin", "OpBranch %next\n%next = OpLabel\n%prior = OpAtomicSMin");
+    rejected = false;
+    try {
+        CompileTypedContinuationSteps(Source(crossing_pointer), "main", spv::ExecutionModelRayGenerationKHR);
+    } catch (const std::exception &e) {
+        rejected = std::string(e.what()).find("image texel pointer crosses") != std::string::npos;
+    }
+    Require(rejected, "Cross-state image texel pointer was silently recreated");
+}
+void ExactCtsImageAtomicStage() {
+    spvtools::SpirvTools source_tools(SPV_ENV_VULKAN_1_3);
+    std::vector<uint32_t> source;
+    Require(source_tools.Assemble(kCtsRayTMaxIntersectionSource, &source, SPV_TEXT_TO_BINARY_OPTION_PRESERVE_NUMERIC_IDS),
+            "Exact CTS intersection source assembly failed");
+    source[1] = 0x00010400;
+    Require(source_tools.Validate(source), "Exact CTS SPIR-V1.4 intersection source failed validation");
+    auto physical = CompileTypedPipelineStage(source, "main", VK_SHADER_STAGE_INTERSECTION_BIT_KHR, nullptr, "cts_is_bda");
+    TypedContinuationCompileOptions options;
+    options.transport = TypedFrameTransport::PrivateArray;
+    options.private_frame_words = static_cast<uint32_t>(physical.frame_stride_bytes / 4);
+    auto private_array =
+        CompileTypedPipelineStage(source, "main", VK_SHADER_STAGE_INTERSECTION_BIT_KHR, nullptr, "cts_is_private", options);
+    for (const auto *program : {&physical, &private_array}) {
+        spvtools::SpirvTools library_tools(SPV_ENV_UNIVERSAL_1_5);
+        Require(library_tools.Validate(program->spirv), "Exact CTS image atomic stage library failed validation");
+        uint32_t pointers = 0, atomics = 0;
+        for (size_t p = 5; p < program->spirv.size(); p += program->spirv[p] >> 16) {
+            const auto op = program->spirv[p] & 65535;
+            pointers += op == spv::OpImageTexelPointer;
+            atomics += op == spv::OpAtomicSMin;
+        }
+        Require(pointers == 1 && atomics == 1 && program->frames.functions.at(0).suspensions.size() == 1,
+                "Exact CTS image atomic/report source shape changed");
+        Require(std::any_of(program->builtin_variables.begin(), program->builtin_variables.end(),
+                            [](const auto &v) { return v.builtin == spv::BuiltInRayTmaxKHR; }),
+                "Exact CTS RayTmax system backing was lost");
+    }
+}
 void BoundariesAndSourcePreservation() {
     constexpr uint32_t tail = kTypedContinuationControlWords * 4u + 3u;
     auto bounds = PlanTypedContinuationFrameBounds(UINT32_MAX - tail);
@@ -333,6 +558,9 @@ void VerifyPayload(const uint32_t *value, const uint32_t *array, uint32_t result
 int main() {
     try {
         BoundariesAndSourcePreservation();
+        ResourceValueTypes();
+        OpaqueResourceBoundaries();
+        ExactCtsImageAtomicStage();
         auto program = CompileTypedContinuationSteps(Source(), "main", spv::ExecutionModelIntersectionKHR);
         std::string text;
         spvtools::SpirvTools tools(SPV_ENV_VULKAN_1_3);

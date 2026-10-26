@@ -12,11 +12,24 @@ static VkPipelineStageFlags2 stages(VkPipelineStageFlags2 mask)
                                                  VK_PIPELINE_STAGE_2_ACCELERATION_STRUCTURE_COPY_BIT_KHR;
     return (mask & ~virtual_stages) | ((mask & virtual_stages) ? VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT : 0);
 }
-static VkAccessFlags2 accesses(VkAccessFlags2 mask)
-{
-   if (mask & VK_ACCESS_2_ACCELERATION_STRUCTURE_READ_BIT_KHR) mask |= VK_ACCESS_2_SHADER_READ_BIT;
-   if (mask & VK_ACCESS_2_ACCELERATION_STRUCTURE_WRITE_BIT_KHR) mask |= VK_ACCESS_2_SHADER_WRITE_BIT;
-   return mask & ~(VK_ACCESS_2_ACCELERATION_STRUCTURE_READ_BIT_KHR | VK_ACCESS_2_ACCELERATION_STRUCTURE_WRITE_BIT_KHR);
+static VkAccessFlags2 accesses(VkAccessFlags2 mask, VkPipelineStageFlags2 original_stages) {
+    if (mask & VK_ACCESS_2_ACCELERATION_STRUCTURE_READ_BIT_KHR) mask |= VK_ACCESS_2_SHADER_READ_BIT;
+    if (mask & VK_ACCESS_2_ACCELERATION_STRUCTURE_WRITE_BIT_KHR) mask |= VK_ACCESS_2_SHADER_WRITE_BIT;
+    const VkPipelineStageFlags2 serialized_stages = VK_PIPELINE_STAGE_2_ACCELERATION_STRUCTURE_BUILD_BIT_KHR |
+                                                    VK_PIPELINE_STAGE_2_ACCELERATION_STRUCTURE_COPY_BIT_KHR |
+                                                    VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
+    if (original_stages & serialized_stages) {
+        /* AS serialization exposes TRANSFER accesses at AS BUILD/COPY stages,
+         * while this implementation executes shader buffer loads/stores. Mixed
+         * native transfer scopes must still retain their original accesses. */
+        if (mask & VK_ACCESS_2_TRANSFER_READ_BIT) mask |= VK_ACCESS_2_SHADER_READ_BIT;
+        if (mask & VK_ACCESS_2_TRANSFER_WRITE_BIT) mask |= VK_ACCESS_2_SHADER_WRITE_BIT;
+        const VkPipelineStageFlags2 native_transfer = VK_PIPELINE_STAGE_2_ALL_TRANSFER_BIT | VK_PIPELINE_STAGE_2_COPY_BIT |
+                                                      VK_PIPELINE_STAGE_2_BLIT_BIT | VK_PIPELINE_STAGE_2_RESOLVE_BIT |
+                                                      VK_PIPELINE_STAGE_2_CLEAR_BIT | VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
+        if (!(original_stages & native_transfer)) mask &= ~(VK_ACCESS_2_TRANSFER_READ_BIT | VK_ACCESS_2_TRANSFER_WRITE_BIT);
+    }
+    return mask & ~(VK_ACCESS_2_ACCELERATION_STRUCTURE_READ_BIT_KHR | VK_ACCESS_2_ACCELERATION_STRUCTURE_WRITE_BIT_KHR);
 }
 static void *copy_array(const void *src, size_t count, size_t size)
 {
@@ -48,12 +61,12 @@ static bool copy_dependency(const VkDependencyInfo *source, struct dependency_co
     if ((source->memoryBarrierCount && !copy->memory) || (source->bufferMemoryBarrierCount && !copy->buffers) ||
         (source->imageMemoryBarrierCount && !copy->images))
         return false;
-#define FIX(p, n)                                              \
-    for (uint32_t i = 0; i < (n); ++i) {                       \
-        (p)[i].srcStageMask = stages((p)[i].srcStageMask);     \
-        (p)[i].dstStageMask = stages((p)[i].dstStageMask);     \
-        (p)[i].srcAccessMask = accesses((p)[i].srcAccessMask); \
-        (p)[i].dstAccessMask = accesses((p)[i].dstAccessMask); \
+#define FIX(p, n)                                                                   \
+    for (uint32_t i = 0; i < (n); ++i) {                                            \
+        (p)[i].srcAccessMask = accesses((p)[i].srcAccessMask, (p)[i].srcStageMask); \
+        (p)[i].dstAccessMask = accesses((p)[i].dstAccessMask, (p)[i].dstStageMask); \
+        (p)[i].srcStageMask = stages((p)[i].srcStageMask);                          \
+        (p)[i].dstStageMask = stages((p)[i].dstStageMask);                          \
     }
     FIX(copy->memory, source->memoryBarrierCount);
     FIX(copy->buffers, source->bufferMemoryBarrierCount);
@@ -77,10 +90,14 @@ static VKAPI_ATTR void VKAPI_CALL CmdPipelineBarrier(VkCommandBuffer cmd,
    VkImageMemoryBarrier *ic = copy_array(im, ni, sizeof(*im));
    if ((nm && !mc) || (nb && !bc) || (ni && !ic)) cb->record_result = VK_ERROR_OUT_OF_HOST_MEMORY;
    else {
-#define FIX_ACCESS(p, n) for (uint32_t i = 0; i < (n); ++i) { \
-      (p)[i].srcAccessMask = (VkAccessFlags)accesses((p)[i].srcAccessMask); \
-      (p)[i].dstAccessMask = (VkAccessFlags)accesses((p)[i].dstAccessMask); }
-      FIX_ACCESS(mc, nm); FIX_ACCESS(bc, nb); FIX_ACCESS(ic, ni);
+#define FIX_ACCESS(p, n)                                                          \
+   for (uint32_t i = 0; i < (n); ++i) {                                           \
+       (p)[i].srcAccessMask = (VkAccessFlags)accesses((p)[i].srcAccessMask, src); \
+       (p)[i].dstAccessMask = (VkAccessFlags)accesses((p)[i].dstAccessMask, dst); \
+   }
+       FIX_ACCESS(mc, nm);
+       FIX_ACCESS(bc, nb);
+       FIX_ACCESS(ic, ni);
 #undef FIX_ACCESS
       cb->device_data->vtable.CmdPipelineBarrier(cmd, (VkPipelineStageFlags)stages(src),
          (VkPipelineStageFlags)stages(dst), flags, nm, mc, nb, bc, ni, ic);
@@ -140,10 +157,10 @@ static VKAPI_ATTR void VKAPI_CALL CmdWaitEvents(VkCommandBuffer cmd, uint32_t co
     if ((nm && !mc) || (nb && !bc) || (ni && !ic))
         cb->record_result = VK_ERROR_OUT_OF_HOST_MEMORY;
     else {
-#define FIX(p, n)                                                             \
-    for (uint32_t i = 0; i < (n); ++i) {                                      \
-        (p)[i].srcAccessMask = (VkAccessFlags)accesses((p)[i].srcAccessMask); \
-        (p)[i].dstAccessMask = (VkAccessFlags)accesses((p)[i].dstAccessMask); \
+#define FIX(p, n)                                                                  \
+    for (uint32_t i = 0; i < (n); ++i) {                                           \
+        (p)[i].srcAccessMask = (VkAccessFlags)accesses((p)[i].srcAccessMask, src); \
+        (p)[i].dstAccessMask = (VkAccessFlags)accesses((p)[i].dstAccessMask, dst); \
     }
         FIX(mc, nm);
         FIX(bc, nb);
@@ -246,10 +263,10 @@ static VKAPI_ATTR VkResult VKAPI_CALL CreateRenderPass(VkDevice device, const Vk
     VkSubpassDependency *deps = copy_array(info->pDependencies, info->dependencyCount, sizeof(*deps));
     if (info->dependencyCount && !deps) return VK_ERROR_OUT_OF_HOST_MEMORY;
     for (uint32_t i = 0; i < info->dependencyCount; ++i) {
+        deps[i].srcAccessMask = (VkAccessFlags)accesses(deps[i].srcAccessMask, deps[i].srcStageMask);
+        deps[i].dstAccessMask = (VkAccessFlags)accesses(deps[i].dstAccessMask, deps[i].dstStageMask);
         deps[i].srcStageMask = (VkPipelineStageFlags)stages(deps[i].srcStageMask);
         deps[i].dstStageMask = (VkPipelineStageFlags)stages(deps[i].dstStageMask);
-        deps[i].srcAccessMask = (VkAccessFlags)accesses(deps[i].srcAccessMask);
-        deps[i].dstAccessMask = (VkAccessFlags)accesses(deps[i].dstAccessMask);
     }
     local.pDependencies = deps;
     VkResult result = dev->vtable.CreateRenderPass(device, &local, allocator, pass);
@@ -285,10 +302,10 @@ static VkResult copy_override(const void *chain, struct barrier_override *copy, 
         tail = &node->pNext;
         if (p == existing) {
             VkMemoryBarrier2 *barrier = (VkMemoryBarrier2 *)node;
+            barrier->srcAccessMask = accesses(barrier->srcAccessMask, barrier->srcStageMask);
+            barrier->dstAccessMask = accesses(barrier->dstAccessMask, barrier->dstStageMask);
             barrier->srcStageMask = stages(barrier->srcStageMask);
             barrier->dstStageMask = stages(barrier->dstStageMask);
-            barrier->srcAccessMask = accesses(barrier->srcAccessMask);
-            barrier->dstAccessMask = accesses(barrier->dstAccessMask);
             node->pNext = (void *)existing->pNext;
             copy->suffix = existing->pNext;
             break;
@@ -313,10 +330,10 @@ static VKAPI_ATTR VkResult VKAPI_CALL CreateRenderPass2(VkDevice device, const V
     }
     VkResult result = VK_SUCCESS;
     for (uint32_t i = 0; i < info->dependencyCount; ++i) {
+        deps[i].srcAccessMask = (VkAccessFlags)accesses(deps[i].srcAccessMask, deps[i].srcStageMask);
+        deps[i].dstAccessMask = (VkAccessFlags)accesses(deps[i].dstAccessMask, deps[i].dstStageMask);
         deps[i].srcStageMask = (VkPipelineStageFlags)stages(deps[i].srcStageMask);
         deps[i].dstStageMask = (VkPipelineStageFlags)stages(deps[i].dstStageMask);
-        deps[i].srcAccessMask = (VkAccessFlags)accesses(deps[i].srcAccessMask);
-        deps[i].dstAccessMask = (VkAccessFlags)accesses(deps[i].dstAccessMask);
         // VkMemoryBarrier2 in a dependency's pNext overrides its legacy masks.
         // Clone only its known prefix and preserve the borrowed suffix unchanged.
         result = copy_override(deps[i].pNext, &overrides[i], &deps[i].pNext);

@@ -52,7 +52,7 @@ if(VEL_RT_BVH4_GPU_TESTS)
         COMMAND "${VEL_RT_GLSLC}" --target-env=vulkan1.2 -fshader-stage=compute
             "${CMAKE_CURRENT_SOURCE_DIR}/bvh4_mesa_encode.comp" -o "${VEL_RT_MESA_ENCODE_SPV}"
         COMMAND "${VEL_RT_SPIRV_VAL}" --target-env vulkan1.2 --scalar-block-layout "${VEL_RT_MESA_ENCODE_SPV}"
-        DEPENDS bvh4_mesa_encode.comp VERBATIM)
+        DEPENDS bvh4_mesa_encode.comp as_address.glsl bvh4_abi.glsl VERBATIM)
     add_custom_target(vel_rt_bvh4_mesa_encode_spv DEPENDS "${VEL_RT_MESA_ENCODE_SPV}")
     add_executable(vel_rt_bvh4_gpu_tests bvh4_gpu_tests.cpp)
     target_compile_definitions(vel_rt_bvh4_gpu_tests PRIVATE _CRT_SECURE_NO_WARNINGS)

@@ -31,6 +31,9 @@ namespace vel::rt::bvh4 {
 // slot, explicitly translating each live instance to the shared runtime BLAS.
 // Alternatively, options=IDENTITY_BLAS and runtime_blas=0 explicitly declares
 // that source instance addresses already name final runtime BLASes.
+// IDENTITY_BLAS|PUBLIC_BLAS instead declares public AS values: specialize
+// constant 6 with the AS-address registry context, resolve physical BLAS roots,
+// and retain those public values for canonical serialization relocation.
 // The encoder never mistakes an old source-IR address for a runtime address.
 // RQ production uses this encoder; RTP integration and four-child collapse
 // remain open. Mesa construction IDs are 32-bit byte offsets; output math is 64-bit.

@@ -10,6 +10,10 @@ struct ContinuationTypeCodec {
     // SPIR-V assembly IDs in the returned component. They do not reuse input
     // module IDs, so the component can be included in a compute state module.
     std::string spirv_type, load, store;
+    // For OpTypeArray, the exact Length ID of this logical type. Resource
+    // copies may use a separate ArrayStride-decorated type, but OpCopyLogical
+    // requires both arrays to share this operand ID, not just its value.
+    std::string array_length;
 };
 struct ContinuationSuspensionCodec {
     uint32_t function, word_offset;
@@ -25,6 +29,8 @@ struct ContinuationFrameCodecs {
     // owns %<prefix>memory, a uint StorageBuffer runtime array at set/binding
     // in default mode. In physical mode memory is empty and base_type is
     // uint64; word access uses PhysicalStorageBuffer pointers with Aligned4.
+    // A private_frame_words budget instead imports vel_rt_private_frames, a
+    // per-invocation Private uint array; uint64 bases are byte offsets into it.
     // It contains no entry point, RT capability, source names, or source code.
     std::string capabilities, annotations, declarations, functions;
     std::string word_type, bool_type, void_type, memory, word_pointer_type, word_pair_type, base_type, step_signature;

@@ -154,7 +154,7 @@ class Compiler {
             if (opcode.find("Group") == 0 || opcode.find("Subgroup") == 0 || (i.op >= spv::OpDPdx && i.op <= spv::OpFwidthCoarse))
                 Unsupported("subgroup/derivative execution semantics require scheduler support");
             if (i.type && Def(i.type).op == spv::OpTypePointer && i.op != spv::OpVariable && i.op != spv::OpAccessChain &&
-                i.op != spv::OpInBoundsAccessChain && i.op != spv::OpCopyObject)
+                i.op != spv::OpInBoundsAccessChain && i.op != spv::OpCopyObject && i.op != spv::OpImageTexelPointer)
                 Unsupported("unsupported pointer provenance Op" + std::string(spvOpcodeString(i.op)) + " for ID " +
                             std::to_string(i.result));
             NeedType(i.type);
@@ -185,6 +185,14 @@ class Compiler {
         std::vector<uint32_t> types(value_types.begin(), value_types.end());
         ContinuationFrameOptions options{true, true};
         options.physical_frame_addresses = BDA();
+        options.private_frame_words = config.private_frame_words;
+        if (config.transport == TypedFrameTransport::PrivateArray) {
+            if (!config.private_frame_words || config.private_frame_words > UINT32_MAX / 4u || config.emit_compute_entry)
+                Unsupported("PrivateArray requires a library and a nonzero checked word budget");
+            output.private_frame_words = config.private_frame_words;
+        } else if (config.private_frame_words) {
+            Unsupported("private word budget requires PrivateArray transport");
+        }
         options.prefix_bytes = BDA() ? VEL_RT_SYSTEM_BYTES : 0;
         output.system_header_bytes = options.prefix_bytes;
         const auto preview = PlanContinuationFrames(output.source, this->entry, model, types, options);
@@ -226,13 +234,18 @@ class Compiler {
         output.control_word = static_cast<uint32_t>((persistent_size + 3) / 4);
         output.control_byte_offset = output.control_word * 4;
         output.frame_stride_bytes = uint64_t(output.frame_stride_words) * 4;
+        if (config.transport == TypedFrameTransport::PrivateArray &&
+            output.frame_stride_bytes > uint64_t(config.private_frame_words) * 4)
+            Unsupported("source frame exceeds the PrivateArray word budget");
         output.max_invocations64 = BDA() ? UINT64_MAX / output.frame_stride_bytes : output.max_invocations;
         for (const auto &variable : output.invocation_variables) invocation_variables[variable.variable] = &variable;
         code = EmitContinuationFrameCodecs(output.source, this->entry, model, set, binding, "sc_cf_", types, options);
         // Reuse the component's existing word pointer declaration rather than
         // emit an illegal duplicate non-aggregate SPIR-V pointer type.
-        pointer_types[std::to_string(BDA() ? spv::StorageClassPhysicalStorageBuffer : spv::StorageClassStorageBuffer) + " " +
-                      code.word_type] = code.word_pointer_type;
+        pointer_types[std::to_string(config.transport == TypedFrameTransport::PrivateArray ? spv::StorageClassPrivate
+                                     : BDA()                                               ? spv::StorageClassPhysicalStorageBuffer
+                                                                                           : spv::StorageClassStorageBuffer) +
+                      " " + code.word_type] = code.word_pointer_type;
         output.frames = code.plan;
         for (const auto &c : code.types) codecs[c.type] = c;
         for (const auto &f : code.plan.functions) {
@@ -307,14 +320,17 @@ class Compiler {
     std::map<uint32_t, const ContinuationSuspensionCodec *> sites;
     std::map<uint32_t, uint32_t> first_state;
     std::map<uint32_t, std::string> cloned_types;
+    std::map<uint32_t, std::string> resource_types;
     std::map<std::string, std::string> pointer_types;
     std::map<uint32_t, std::string> descriptor_types;
     std::map<uint32_t, std::string> constants;
+    std::map<uint32_t, std::string> ephemeral_values;
+    std::map<uint32_t, std::string> ephemeral_pointers;
     std::set<uint64_t> wide_constants;
     std::vector<std::string> interfaces;
     std::ostringstream source_caps, imports, extensions, execution_modes, annotations, declarations, functions;
     std::string gid, gid_type, group_count, pc_pointer;
-    bool BDA() const { return config.transport == TypedFrameTransport::PhysicalAddress; }
+    bool BDA() const { return config.transport != TypedFrameTransport::StorageBuffer; }
     void CollectBuiltins() {
         for (auto id : globals) {
             const auto &variable = Def(id);
@@ -409,7 +425,11 @@ class Compiler {
             return PointerRoot(d.words.at(3));
         Unsupported("unsupported pointer root provenance");
     }
-    bool SystemPointer(uint32_t id) const { return BDA() && builtin_variables.count(PointerRoot(id)) != 0; }
+    bool SystemPointer(uint32_t id) const {
+        // Only Input pointers can name a system builtin. Native resource
+        // pointers (notably ImageTexelPointer) have independent provenance.
+        return BDA() && Storage(id) == spv::StorageClassInput && builtin_variables.count(PointerRoot(id)) != 0;
+    }
     bool PhysicalResourcePointer(uint32_t id) const {
         auto storage = Storage(id);
         return BDA() && (storage == spv::StorageClassPushConstant || storage == spv::StorageClassShaderRecordBufferKHR);
@@ -495,6 +515,10 @@ class Compiler {
                            : storage == spv::StorageClassInput                 ? "Input"
                            : storage == spv::StorageClassPushConstant          ? "PushConstant"
                            : storage == spv::StorageClassStorageBuffer         ? "StorageBuffer"
+                           : storage == spv::StorageClassPrivate               ? "Private"
+                           : storage == spv::StorageClassUniformConstant       ? "UniformConstant"
+                           : storage == spv::StorageClassUniform               ? "Uniform"
+                           : storage == spv::StorageClassImage                 ? "Image"
                            : storage == spv::StorageClassPhysicalStorageBuffer ? "PhysicalStorageBuffer"
                                                                                : nullptr;
         if (!name) Unsupported("pointer storage class " + std::to_string(storage));
@@ -507,6 +531,10 @@ class Compiler {
         if (d.op == spv::OpTypeVoid) return code.void_type;
         auto codec = codecs.find(id);
         if (codec != codecs.end()) return codec->second.spirv_type;
+        // Runtime arrays and their enclosing blocks have no logical frame
+        // codec. Reuse their one resource declaration, including its Block
+        // decoration, rather than emitting an invalid unadorned duplicate.
+        if (d.op == spv::OpTypeStruct || d.op == spv::OpTypeArray || d.op == spv::OpTypeRuntimeArray) return ResourceType(id);
         auto found = cloned_types.find(id);
         if (found != cloned_types.end()) return found->second;
         if (d.op == spv::OpTypePointer) {
@@ -514,15 +542,57 @@ class Compiler {
                 return PointerType(spv::StorageClassStorageBuffer, DescriptorType(d.words.at(3)));
             if (BDA() &&
                 (d.words.at(2) == spv::StorageClassPushConstant || d.words.at(2) == spv::StorageClassShaderRecordBufferKHR))
-                return PointerType(spv::StorageClassPhysicalStorageBuffer, Type(d.words.at(3)));
-            return PointerType(d.words.at(2), Type(d.words.at(3)));
+                return PointerType(spv::StorageClassPhysicalStorageBuffer, ResourceType(d.words.at(3)));
+            const auto storage = d.words.at(2);
+            const bool resource = storage == spv::StorageClassStorageBuffer || storage == spv::StorageClassUniform ||
+                                  storage == spv::StorageClassPushConstant || storage == spv::StorageClassShaderRecordBufferKHR;
+            return PointerType(storage, resource ? ResourceType(d.words.at(3)) : Type(d.words.at(3)));
         }
-        if (d.op != spv::OpTypeStruct && d.op != spv::OpTypeRuntimeArray)
+        if (d.op != spv::OpTypeStruct && d.op != spv::OpTypeRuntimeArray && d.op != spv::OpTypeArray && d.op != spv::OpTypeImage &&
+            d.op != spv::OpTypeSampler && d.op != spv::OpTypeSampledImage)
             Unsupported("opaque or unsupported source type " + std::to_string(id));
-        for (auto child : d.uses) Type(child);
+        for (auto child : d.uses) {
+            const auto &v = Def(child);
+            if (v.op >= spv::OpTypeVoid && v.op <= spv::OpTypeForwardPointer) Type(child);
+        }
         auto name = SourceID(id);
-        declarations << Rewrite(d.text, [&](uint32_t child) { return child == id ? name : Type(child); }) << "\n";
+        declarations << Rewrite(d.text, [&](uint32_t child) { return child == id ? name : Global(child); }) << "\n";
         cloned_types[id] = name;
+        return name;
+    }
+    // A source composite can be both an explicitly laid-out resource pointee
+    // and an ordinary SSA/Function value. Their nominal types must differ:
+    // Vulkan forbids Offset/ArrayStride/Block-decorated composites in Function
+    // storage. Frame codecs deliberately own undecorated logical value types.
+    std::string ResourceType(uint32_t id) {
+        const auto &d = Def(id);
+        if (d.op != spv::OpTypeStruct && d.op != spv::OpTypeArray && d.op != spv::OpTypeRuntimeArray) return Type(id);
+        auto found = resource_types.find(id);
+        if (found != resource_types.end()) return found->second;
+        const auto name = "%sc_resource" + std::to_string(id);
+        std::vector<std::string> children;
+        if (d.op == spv::OpTypeStruct) {
+            for (size_t member = 2; member < d.words.size(); ++member) children.push_back(ResourceType(d.words[member]));
+            declarations << name << " = OpTypeStruct";
+            for (const auto &child : children) declarations << " " << child;
+        } else {
+            const auto element = ResourceType(d.words.at(2));
+            if (d.op == spv::OpTypeArray) {
+                const auto &length = Def(d.words.at(3));
+                if (length.op != spv::OpConstant || length.words.size() < 4)
+                    Unsupported("resource array length requires specialization first");
+                uint64_t count = length.words.at(3);
+                if (length.words.size() > 4) count |= uint64_t(length.words.at(4)) << 32;
+                if (!count || count > UINT32_MAX) Unsupported("resource array length exceeds uint32");
+                auto codec = codecs.find(id);
+                const auto size = codec != codecs.end() ? codec->second.array_length : Constant(static_cast<uint32_t>(count));
+                if (size.empty()) Unsupported("missing logical array length ID");
+                declarations << name << " = OpTypeArray " << element << " " << size;
+            } else
+                declarations << name << " = OpTypeRuntimeArray " << element;
+        }
+        declarations << "\n";
+        resource_types[id] = name;
         return name;
     }
     void EnsureCapability(const std::string &capability) {
@@ -622,7 +692,8 @@ class Compiler {
                     continue;
                 }
                 if (i.words.at(3) != spv::StorageClassInput && i.words.at(3) != spv::StorageClassPushConstant &&
-                    i.words.at(3) != spv::StorageClassStorageBuffer)
+                    i.words.at(3) != spv::StorageClassStorageBuffer && i.words.at(3) != spv::StorageClassUniformConstant &&
+                    i.words.at(3) != spv::StorageClassUniform)
                     Unsupported("module variable storage requires invocation backing");
                 declarations << Rewrite(i.text, GlobalMapper()) << "\n";
                 interfaces.push_back(SourceID(i.result));
@@ -649,7 +720,12 @@ class Compiler {
                 } else
                     Unsupported("RT builtin requires scheduler invocation backing");
             } else
-                annotations << Rewrite(i.text, GlobalMapper()) << "\n";
+                annotations << Rewrite(i.text, [&](uint32_t id) {
+                    return id == target && (Def(id).op == spv::OpTypeStruct || Def(id).op == spv::OpTypeArray ||
+                                            Def(id).op == spv::OpTypeRuntimeArray)
+                               ? ResourceType(id)
+                               : Global(id);
+                }) << "\n";
         }
     }
     std::function<std::string(uint32_t)> GlobalMapper() {
@@ -670,16 +746,32 @@ class Compiler {
         }
     }
     bool IsPointer(uint32_t type) const { return type && Def(type).op == spv::OpTypePointer; }
+    bool Ephemeral(uint32_t type) const {
+        if (!type) return false;
+        auto op = Def(type).op;
+        return op == spv::OpTypeImage || op == spv::OpTypeSampler || op == spv::OpTypeSampledImage;
+    }
     std::string Value(uint32_t id) {
         const auto &d = Def(id);
         if (IsPointer(d.type)) return RealPointer(id);
         if (!d.in_function) return Global(id);
         if (!d.result || !d.type || Def(d.type).op == spv::OpTypeVoid) Unsupported("non-value source operand");
+        if (Ephemeral(d.type)) {
+            auto found = ephemeral_values.find(id);
+            if (found == ephemeral_values.end())
+                Unsupported("opaque resource SSA crosses a source state boundary; explicit provenance rematerialization required");
+            return found->second;
+        }
         auto result = Op("OpLoad " + Type(d.type) + " " + Register(id));
         DecorateResult(id, result, true);
         return result;
     }
-    void Save(uint32_t id, const std::string &value) { functions << "OpStore " << Register(id) << " " << value << "\n"; }
+    void Save(uint32_t id, const std::string &value) {
+        if (Ephemeral(Def(id).type))
+            ephemeral_values[id] = value;
+        else
+            functions << "OpStore " << Register(id) << " " << value << "\n";
+    }
     uint32_t Storage(uint32_t pointer) const { return Def(Def(pointer).type).words.at(2); }
     std::string Offset(uint32_t pointer) {
         auto system = builtin_variables.find(pointer);
@@ -726,6 +818,12 @@ class Compiler {
     std::string RealPointer(uint32_t id) {
         const auto &d = Def(id);
         if (IsPersistentStorage(Storage(id)) || SystemPointer(id)) Unsupported("persistent pointer used outside typed load/store");
+        if (Storage(id) == spv::StorageClassImage) {
+            auto found = ephemeral_pointers.find(id);
+            if (found != ephemeral_pointers.end()) return found->second;
+            if (d.op == spv::OpCopyObject) return RealPointer(d.words.at(3));
+            Unsupported("image texel pointer crosses a source state boundary; explicit provenance rematerialization required");
+        }
         if (!d.in_function && d.op == spv::OpVariable && PhysicalResourcePointer(id)) {
             auto offset =
                 Storage(id) == spv::StorageClassPushConstant ? VEL_RT_SYS_APP_PUSH_ADDRESS : VEL_RT_SYS_SHADER_RECORD_ADDRESS;
@@ -911,9 +1009,10 @@ class Compiler {
         std::map<uint32_t, std::string> loaded;
         for (auto id : i.uses)
             if (!loaded.count(id)) loaded[id] = Value(id);
+        const auto result_type = i.op == spv::OpLoad ? ResourceType(i.type) : Type(i.type);
         auto text = Rewrite(i.text, [&](uint32_t id) {
             if (id == i.result) return result;
-            if (id == i.type) return Type(id);
+            if (id == i.type) return result_type;
             return loaded.at(id);
         });
         if (i.op == spv::OpLoad && PhysicalResourcePointer(i.words.at(3))) text = AlignedMemory(text, i, i.type, 5);
@@ -925,6 +1024,7 @@ class Compiler {
             text.replace(name, std::string("OpConvertUToAccelerationStructureKHR").size(), "OpBitcast");
         }
         functions << text << "\n";
+        if (result_type != Type(i.type)) result = Op("OpCopyLogical " + Type(i.type) + " " + result);
         DecorateResult(i.result, result);
         Save(i.result, result);
     }
@@ -986,6 +1086,8 @@ class Compiler {
         functions << merge << " = OpLabel\nOpBranch %sc_dispatch_merge\n";
     }
     void Body(const State &state) {
+        ephemeral_values.clear();
+        ephemeral_pointers.clear();
         if (state.resume) Resume(*state.resume);
         for (size_t n = state.begin; n < state.end; ++n) {
             const auto &i = *state.block->body[n];
@@ -1001,8 +1103,19 @@ class Compiler {
                 continue;
             }
             if (i.op == spv::OpAccessChain || i.op == spv::OpInBoundsAccessChain ||
-                (i.op == spv::OpCopyObject && IsPointer(i.type)))
+                (i.op == spv::OpCopyObject && IsPointer(i.type) && Def(i.type).words.at(2) != spv::StorageClassImage))
                 continue;
+            if (i.op == spv::OpImageTexelPointer || (i.op == spv::OpCopyObject && IsPointer(i.type))) {
+                auto result = Fresh();
+                functions << Rewrite(i.text, [&](uint32_t id) {
+                    if (id == i.result) return result;
+                    if (id == i.type) return Type(id);
+                    return Value(id);
+                }) << "\n";
+                DecorateResult(i.result, result);
+                ephemeral_pointers[i.result] = result;
+                continue;
+            }
             if (i.op == spv::OpIgnoreIntersectionKHR || i.op == spv::OpTerminateRayKHR) {
                 StoreWord(1, Constant(i.op == spv::OpIgnoreIntersectionKHR ? 4u : 5u));
                 StoreWord(2, Constant(0));
@@ -1026,7 +1139,11 @@ class Compiler {
                     Op("OpFunctionCall " + code.void_type + " " + codecs.at(type).store + " %sc_base " + address + " " +
                        Value(i.words.at(2)));
                 } else {
-                    auto text = Rewrite(i.text, [&](uint32_t id) { return Value(id); });
+                    const auto value_id = i.words.at(2);
+                    const auto type = Def(value_id).type;
+                    auto value = Value(value_id);
+                    if (ResourceType(type) != Type(type)) value = Op("OpCopyLogical " + ResourceType(type) + " " + value);
+                    auto text = Rewrite(i.text, [&](uint32_t id) { return id == value_id ? value : Value(id); });
                     if (PhysicalResourcePointer(i.words.at(1))) text = AlignedMemory(text, i, Def(i.words.at(2)).type, 3);
                     functions << text << "\n";
                 }
@@ -1052,6 +1169,9 @@ class Compiler {
                           << "\n";
                 functions << merge << " = OpLabel\nOpBranch %sc_dispatch_merge\n";
                 return;
+            } else if (i.op == spv::OpImageWrite || i.op == spv::OpAtomicStore || i.op == spv::OpAtomicFlagClear ||
+                       i.op == spv::OpMemoryBarrier) {
+                functions << Rewrite(i.text, [&](uint32_t id) { return Value(id); }) << "\n";
             } else if (i.op == spv::OpReturn) {
                 StoreWord(0, Constant(UINT32_MAX));
                 functions << "OpReturn\n";
@@ -1074,7 +1194,9 @@ class Compiler {
         auto pc_type = PointerType(spv::StorageClassFunction, code.word_type);
         functions << pc_pointer << " = OpVariable " << pc_type << " Function\n";
         for (const auto &i : parsed.instructions) {
-            if (!i.in_function || !i.result || !i.type || IsPointer(i.type) || Def(i.type).op == spv::OpTypeVoid) continue;
+            if (!i.in_function || !i.result || !i.type || IsPointer(i.type) || Ephemeral(i.type) ||
+                Def(i.type).op == spv::OpTypeVoid)
+                continue;
             auto pointer = PointerType(spv::StorageClassFunction, Type(i.type));
             functions << Register(i.result) << " = OpVariable " << pointer << " Function\n";
         }

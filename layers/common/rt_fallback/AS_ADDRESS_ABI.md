@@ -70,11 +70,14 @@ BLAS root in the existing BVH4 instance record. Traversal therefore does not
 depend on retaining the BLAS handle or resolver entry after TLAS construction.
 The [construction definition](https://github.com/KhronosGroup/Vulkan-Docs/blob/d184375dcc5da2b06ca375a8d7d1f9d21ca64a76/chapters/accelstructures.adoc#L21-L25)
 requires Build/Copy with the given AS as destination; recreating a view over old
-bytes does not construct it. Future Copy/deserialize destinations must publish
-their mapping before GPU use, just as the current Build destination does.
+bytes does not construct it. Build, copy and deserialization destinations publish
+their mapping before GPU use. BVH4 ABI 2
+also retains the original public BLAS value at instance byte 120 for serialized
+reference lists; the physical traversal root remains at byte 0.
 
 This closes the observed legal 16-byte buffer-suballocation address gap, not
 the complete resource ABI proof. Per-AS descriptor SSBOs and native allocation
-budgets remain unresolved for full-limit applications. Copy, update, compaction,
-serialization and unified RTP object integration remain unfinished. Optional
+budgets remain unresolved for full-limit applications. GPU copy/compaction and
+serialization and semantic UPDATE are implemented; full property-query publication and
+complete RTP qualification remain unfinished. Optional
 capture/replay and device-address commands are not claimed by this path.

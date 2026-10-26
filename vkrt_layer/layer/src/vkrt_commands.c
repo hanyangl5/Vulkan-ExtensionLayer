@@ -1,10 +1,16 @@
 /* SPDX-License-Identifier: MIT */
 #include "vkrt_layer.h"
+#include "vkrt_rtp.h"
 
 static void reset_state(struct vkrt_cmd_buffer_data *cb)
 {
-   struct vkrt_saved_push *p = cb->push_head;
-   while (p) { struct vkrt_saved_push *next = p->next; free(p); p = next; }
+    vkrt_rtp_reset_command(cb);
+    struct vkrt_saved_push *p = cb->push_head;
+    while (p) {
+        struct vkrt_saved_push *next = p->next;
+        free(p);
+        p = next;
+    }
    cb->push_head = cb->push_tail = NULL;
    cb->bound_compute_pipeline = VK_NULL_HANDLE;
    cb->record_result = VK_SUCCESS;
@@ -123,6 +129,7 @@ static VKAPI_ATTR void VKAPI_CALL CmdBindPipeline(VkCommandBuffer cmd, VkPipelin
 {
    struct vkrt_cmd_buffer_data *cb = VKRT_FIND(struct vkrt_cmd_buffer_data, cmd);
    if (!cb) return;
+   if (vkrt_rtp_bind_pipeline(cb, point, pipeline)) return;
    if (point == VK_PIPELINE_BIND_POINT_COMPUTE) cb->bound_compute_pipeline = pipeline;
    cb->device_data->vtable.CmdBindPipeline(cmd, point, pipeline);
 }
@@ -132,18 +139,29 @@ static VKAPI_ATTR void VKAPI_CALL CmdPushConstants(VkCommandBuffer cmd, VkPipeli
 {
    struct vkrt_cmd_buffer_data *cb = VKRT_FIND(struct vkrt_cmd_buffer_data, cmd);
    if (!cb) return;
+   stages = vkrt_rtp_push(cb, layout, stages, offset, size, values);
+   if (!stages || cb->record_result != VK_SUCCESS) return;
+   layout = vkrt_rtp_native_layout(cb->device_data, layout);
    /* Replay all affected pushes in order: a layout range may cover both
     * graphics and compute, and restoring such a push must not overwrite
     * a later graphics-only update with stale bytes. */
-   if (offset < 128) {
-      struct vkrt_saved_push *p = malloc(sizeof(*p) + size);
-      if (!p) cb->record_result = VK_ERROR_OUT_OF_HOST_MEMORY;
-      else {
-         p->next = NULL; p->layout = layout; p->stages = stages; p->offset = offset; p->size = size;
-         memcpy(p->bytes, values, size);
-         if (cb->push_tail) cb->push_tail->next = p; else cb->push_head = p;
-         cb->push_tail = p;
-      }
+   {
+       struct vkrt_saved_push *p = malloc(sizeof(*p) + size);
+       if (!p)
+           cb->record_result = VK_ERROR_OUT_OF_HOST_MEMORY;
+       else {
+           p->next = NULL;
+           p->layout = layout;
+           p->stages = stages;
+           p->offset = offset;
+           p->size = size;
+           memcpy(p->bytes, values, size);
+           if (cb->push_tail)
+               cb->push_tail->next = p;
+           else
+               cb->push_head = p;
+           cb->push_tail = p;
+       }
    }
    cb->device_data->vtable.CmdPushConstants(cmd, layout, stages, offset, size, values);
 }

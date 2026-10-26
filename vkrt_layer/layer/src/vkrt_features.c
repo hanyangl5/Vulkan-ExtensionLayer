@@ -3,9 +3,8 @@
 #include "vkrt_chain.h"
 #include "vkrt_rt_capabilities.h"
 
-/* The AS/RQ objects and shaders are always layer-owned. A native RTP pipeline
- * cannot consume their virtual handles/representation; mixed execution needs
- * the shared backend, not forwarding an apparently supported feature bit. */
+/* Base AS/RQ/RTP objects and shaders use the shared layer backend. Consume
+ * their requests instead of enabling native RT on the downstream device. */
 static VkResult virtual_feature(const VkBaseInStructure *p, bool *remove, bool *uses_virtual_rt) {
     size_t offset, bytes;
     *remove = vkrt_unsupported_rt_feature_range(p->sType, &offset, &bytes);
@@ -20,6 +19,10 @@ static VkResult virtual_feature(const VkBaseInStructure *p, bool *remove, bool *
         *uses_virtual_rt |= ((const VkPhysicalDeviceAccelerationStructureFeaturesKHR *)p)->accelerationStructure != VK_FALSE;
     if (p->sType == VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_QUERY_FEATURES_KHR) {
         *uses_virtual_rt |= ((const VkPhysicalDeviceRayQueryFeaturesKHR *)p)->rayQuery != VK_FALSE;
+        *remove = true;
+    }
+    if (p->sType == VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_FEATURES_KHR) {
+        *uses_virtual_rt |= ((const VkPhysicalDeviceRayTracingPipelineFeaturesKHR *)p)->rayTracingPipeline != VK_FALSE;
         *remove = true;
     }
     return VK_SUCCESS;
@@ -47,7 +50,8 @@ static bool augmented_feature(VkStructureType type) {
 bool vkrt_device_uses_virtual_rt(const VkDeviceCreateInfo *info) {
     for (uint32_t i = 0; info->ppEnabledExtensionNames && i < info->enabledExtensionCount; ++i)
         if (!strcmp(info->ppEnabledExtensionNames[i], VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME) ||
-            !strcmp(info->ppEnabledExtensionNames[i], VK_KHR_RAY_QUERY_EXTENSION_NAME))
+            !strcmp(info->ppEnabledExtensionNames[i], VK_KHR_RAY_QUERY_EXTENSION_NAME) ||
+            !strcmp(info->ppEnabledExtensionNames[i], VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME))
             return true;
     for (const VkBaseInStructure *p = info->pNext; p; p = p->pNext) {
         if (p->sType == VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_FEATURES_KHR &&
@@ -55,6 +59,9 @@ bool vkrt_device_uses_virtual_rt(const VkDeviceCreateInfo *info) {
             return true;
         if (p->sType == VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_QUERY_FEATURES_KHR &&
             ((const VkPhysicalDeviceRayQueryFeaturesKHR *)p)->rayQuery)
+            return true;
+        if (p->sType == VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_FEATURES_KHR &&
+            ((const VkPhysicalDeviceRayTracingPipelineFeaturesKHR *)p)->rayTracingPipeline)
             return true;
     }
     return false;
@@ -132,8 +139,9 @@ VkResult vkrt_create_device_with_features(struct vkrt_instance_data *inst,
     for (uint32_t i = 0; i < ci->enabledExtensionCount; ++i) {
         const char *name = ci->ppEnabledExtensionNames[i];
         if (vkrt_incompatible_device_extension(name)) return VK_ERROR_FEATURE_NOT_PRESENT;
-        uses_virtual_rt |=
-            !strcmp(name, VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME) || !strcmp(name, VK_KHR_RAY_QUERY_EXTENSION_NAME);
+        uses_virtual_rt |= !strcmp(name, VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME) ||
+                           !strcmp(name, VK_KHR_RAY_QUERY_EXTENSION_NAME) ||
+                           !strcmp(name, VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME);
     }
     /* Clone through the last node that must change. An opaque unmodified suffix
      * can be borrowed intact; a prefix whose size is unknown cannot be spliced
@@ -163,7 +171,9 @@ VkResult vkrt_create_device_with_features(struct vkrt_instance_data *inst,
     VkPhysicalDeviceVariablePointersFeatures pointers = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VARIABLE_POINTERS_FEATURES,
                                                          .pNext = &descriptor};
     VkPhysicalDeviceFeatures2 supported = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2, .pNext = &pointers};
-    if (!inst->vtable.GetPhysicalDeviceFeatures2 || !inst->vtable.GetPhysicalDeviceProperties) return VK_ERROR_FEATURE_NOT_PRESENT;
+    if (!inst->vtable.GetPhysicalDeviceFeatures2 || !inst->vtable.GetPhysicalDeviceProperties ||
+        !inst->vtable.GetPhysicalDeviceProperties2)
+        return VK_ERROR_FEATURE_NOT_PRESENT;
     inst->vtable.GetPhysicalDeviceFeatures2(physical, &supported);
     if (!supported.features.shaderInt64 || !supported.features.shaderInt16 || !storage16.storageBuffer16BitAccess ||
         !storage8.storageBuffer8BitAccess || !int8.shaderInt8 || !scalar.scalarBlockLayout || !bda.bufferDeviceAddress ||
@@ -178,6 +188,37 @@ VkResult vkrt_create_device_with_features(struct vkrt_instance_data *inst,
     if (uses_virtual_rt && (!supported.features.shaderStorageBufferArrayDynamicIndexing ||
                             !descriptor.shaderStorageBufferArrayNonUniformIndexing || !pointers.variablePointersStorageBuffer)) {
         VKRT_LOG_ERR("AS value lowering requires storage-buffer dynamic/nonuniform indexing and variable pointers");
+        return VK_ERROR_FEATURE_NOT_PRESENT;
+    }
+
+    /* These requirements come from the active leaf/Morton/LBVH SPIR-V, not
+     * the unused PLOC/HPLOC variants. Leaf encoding preserves float32 signed
+     * zero/Inf/NaN and uses subgroup ballots; Morton sorting uses shuffles.
+     * The selected host specializations use at most 128 invocations in X and
+     * 256 key32/id pairs plus five uints (2068 bytes) in workgroup storage. */
+    VkPhysicalDeviceFloatControlsProperties floating = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FLOAT_CONTROLS_PROPERTIES};
+    VkPhysicalDeviceSubgroupProperties subgroup = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SUBGROUP_PROPERTIES,
+                                                   .pNext = &floating};
+    VkPhysicalDeviceProperties2 properties2 = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2, .pNext = &subgroup};
+    inst->vtable.GetPhysicalDeviceProperties2(physical, &properties2);
+    const VkSubgroupFeatureFlags operations =
+        VK_SUBGROUP_FEATURE_BASIC_BIT | VK_SUBGROUP_FEATURE_BALLOT_BIT | VK_SUBGROUP_FEATURE_SHUFFLE_BIT;
+    const VkPhysicalDeviceLimits *limits = &properties2.properties.limits;
+    /* Every active builder and the linked production RTP program is SPIR-V
+     * 1.5. Injecting the older extension aliases does not make a native Vulkan
+     * 1.0/1.1 driver support that module version. Application API 1.0/1.1 on a
+     * native 1.2+ device still follows the alias path below. */
+    if (properties2.properties.apiVersion < VK_API_VERSION_1_2) {
+        VKRT_LOG_ERR("GPU BVH requires native Vulkan 1.2 for its SPIR-V 1.5 modules");
+        return VK_ERROR_FEATURE_NOT_PRESENT;
+    }
+    if (!(subgroup.supportedStages & VK_SHADER_STAGE_COMPUTE_BIT) || (subgroup.supportedOperations & operations) != operations ||
+        !floating.shaderSignedZeroInfNanPreserveFloat32 || limits->maxComputeWorkGroupInvocations < 128 ||
+        limits->maxComputeWorkGroupSize[0] < 128 || limits->maxComputeWorkGroupSize[1] < 1 ||
+        limits->maxComputeWorkGroupSize[2] < 1 || limits->maxComputeWorkGroupCount[0] < 1 ||
+        limits->maxComputeWorkGroupCount[1] < 1 || limits->maxComputeWorkGroupCount[2] < 1 ||
+        limits->maxComputeSharedMemorySize < 2068 || limits->maxPushConstantsSize < 128) {
+        VKRT_LOG_ERR("GPU BVH requires compute subgroup basic/ballot/shuffle, float32 preservation and active workgroup limits");
         return VK_ERROR_FEATURE_NOT_PRESENT;
     }
 
@@ -312,6 +353,7 @@ VkResult vkrt_create_device_with_features(struct vkrt_instance_data *inst,
    for (uint32_t i = 0; i < ci->enabledExtensionCount; ++i) {
        const char *name = ci->ppEnabledExtensionNames[i];
        if (!strcmp(name, VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME) || !strcmp(name, VK_KHR_RAY_QUERY_EXTENSION_NAME) ||
+           !strcmp(name, VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME) ||
            !strcmp(name, VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME))
            continue;
        extensions[local.enabledExtensionCount++] = name;

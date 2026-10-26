@@ -23,6 +23,8 @@ struct registry_buffer {
     VkBuffer buffer;
     VkDeviceSize size;
     uint64_t first, count, references;
+    VkDeviceAddress physical_base;
+    bool has_physical_base;
     bool alive;
 };
 struct vkrt_as_registry_entry {
@@ -286,6 +288,12 @@ static void path_prune(struct vkrt_as_registry *registry, struct vkrt_as_registr
         entry->path[level] = NULL;
     }
 }
+static void entry_publish(struct vkrt_as_registry_entry *entry, VkDeviceAddress address) {
+    if (entry->physical_address == address) return;
+    memcpy((uint8_t *)entry->path[VKRT_AS_REGISTRY_LEVELS - 1]->storage.mapping + entry->indices[VKRT_AS_REGISTRY_LEVELS - 1] * 8,
+           &address, 8);
+    entry->physical_address = address;
+}
 VkResult vkrt_as_registry_acquire(struct vkrt_device_data *dev, VkBuffer handle, VkDeviceSize offset,
                                   struct vkrt_as_registry_entry **out, VkDeviceAddress *public_address) {
     *out = NULL;
@@ -338,6 +346,7 @@ VkResult vkrt_as_registry_acquire(struct vkrt_device_data *dev, VkBuffer handle,
     entry->next = buffer->entries;
     buffer->entries = entry;
     ++buffer->references;
+    if (buffer->has_physical_base) entry_publish(entry, buffer->physical_base + offset);
     *out = entry;
     *public_address = entry->public_address;
 done:
@@ -370,16 +379,29 @@ VkDeviceAddress vkrt_as_registry_publish(struct vkrt_device_data *dev, struct vk
     struct vkrt_as_registry *registry = dev->as_registry;
     if (!registry || !entry || !physical_address || (physical_address & 3)) return 0;
     vkrt_mutex_lock(&registry->lock);
-    VkDeviceAddress result = entry->physical_address;
-    if (!result) {
-        memcpy(
-            (uint8_t *)entry->path[VKRT_AS_REGISTRY_LEVELS - 1]->storage.mapping + entry->indices[VKRT_AS_REGISTRY_LEVELS - 1] * 8,
-            &physical_address, 8);
-        entry->physical_address = result = physical_address;
-    } else if (result != physical_address) {
-        VKRT_LOG_ERR("AS registry: immutable backing address changed");
-        result = 0;
+    struct registry_buffer *buffer = entry->owner;
+    VkDeviceAddress result = 0;
+    if (physical_address < entry->offset) goto done;
+    VkDeviceAddress base = physical_address - entry->offset;
+    if (base > UINT64_MAX - buffer->size) goto done;
+    if (buffer->has_physical_base) {
+        if (buffer->physical_base == base)
+            result = entry->physical_address;
+        else
+            VKRT_LOG_ERR("AS registry: immutable backing address changed");
+    } else {
+        /* One valid address query proves this ordinary buffer is bound. Its
+         * binding cannot change. Publish every preallocated offset, including
+         * unbuilt BLAS referenced by GENERIC arithmetic during deserialization.
+         * Future AS creations use this same cached base without another query.
+         * Subsequent Get/Build calls perform no GPU mapping writes. */
+        buffer->physical_base = base;
+        buffer->has_physical_base = true;
+        for (struct vkrt_as_registry_entry *current = buffer->entries; current; current = current->next)
+            entry_publish(current, base + current->offset);
+        result = entry->physical_address;
     }
+done:
     vkrt_mutex_unlock(&registry->lock);
     return result;
 }

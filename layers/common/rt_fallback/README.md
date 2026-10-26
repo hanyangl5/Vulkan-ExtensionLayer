@@ -5,9 +5,9 @@
 
 This directory defines an experimental layer-owned BVH4 wire ABI, CPU reference
 encoder/layout planner, Mesa scalar-IR adapter, and component GPU hierarchy
-encoder. The RQ production builder and traverser now consume this representation;
-RTP integration and a unified AS object model remain unfinished. These components
-make no complete extension-support claim.
+encoder. The RQ production builder/traverser and canonical typed RTP now share
+this representation and AS object model. Full backend/API/resource qualification
+remains unfinished. These components make no complete extension-support claim.
 
 Internal nodes contain four FP32 child bounds and tagged indices in 128 bytes.
 The design is BOX32-inspired, but no AMD address packing or hardware node ABI is
@@ -24,6 +24,13 @@ to 256 bytes. Production word-load consumers require physical bases aligned to
 4 bytes; public Vulkan AS values are separately 256-aligned and resolved through
 `as_address.glsl`. Public values must never be dereferenced as buffer BDAs.
 
+BVH4 ABI version 2 retains each instance's public BLAS value at byte 120 of
+the 128-byte instance record, alongside the resolved physical root at byte 0.
+The public value supports serialization relocation; traversal reads the physical
+root. This is separate from the AS resolver context ABI, which remains version 1.
+The production Mesa encoder resolves the public construction input explicitly;
+physical-only component inputs leave the public field zero.
+
 The generic reference input is a compact binary tree with dense leaf indices for
 each kind. It is independent of Mesa host/runtime types; a Mesa IR adapter is
 still required. The encoder expands the largest-area internal frontier until
@@ -35,8 +42,9 @@ builder adapter before this reference interface.
 
 RQ production traversal now uses these parent links for constant-space
 resumable walks without fixed-stack truncation. It tests all four child slots,
-including a depth140/fourth-child regression. Serialization, refit/compaction,
-RTP consumption and unified layer-owned AS objects remain separate work.
+including a depth140/fourth-child regression. Production CLONE/COMPACT and GPU
+serialization now use this representation. Complete property-query publication,
+refit and full RTP integration/qualification remain open.
 
 ## Mesa construction IR adapter
 

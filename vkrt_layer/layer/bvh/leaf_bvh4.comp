@@ -3,6 +3,7 @@
 #include "vkrt_bvh_preamble.h"
 #include "vk_bvh_defines.h"
 #include "as_address.glsl"
+#include "bvh4_abi.glsl"
 layout(constant_id = 6) const uint64_t vkrt_as_registry_context = 0ul;
 #define VKRT_RUNTIME_BVH4
 #define VK_USED_BUILD_FLAGS VK_LEAF_BUILD_FLAGS

@@ -7,7 +7,7 @@
 
 // Layer-owned, experimental wire ABI. These are not AMD hardware node IDs.
 #define VEL_RT_BVH4_MAGIC UINT32_C(0x344c4556)
-#define VEL_RT_BVH4_ABI_VERSION UINT32_C(1)
+#define VEL_RT_BVH4_ABI_VERSION UINT32_C(2)
 #define VEL_RT_BVH4_FLAG_INVALID UINT32_C(0x80000000)
 #define VEL_RT_BVH4_INVALID_ID UINT32_C(0xffffffff)
 #define VEL_RT_BVH4_INDEX_MASK UINT32_C(0x3fffffff)
@@ -58,7 +58,11 @@ typedef struct VelRtBvh4Instance {
     uint64_t blas_address;
     uint32_t custom_index_mask, sbt_offset_flags;
     float object_to_world[12], world_to_object[12];
-    uint32_t instance_id, reserved[3];
+    uint32_t instance_id, reserved;
+    // Retain the application-visible AS value independently of its resolved
+    // physical root. Serialization exposes only this value for relocation.
+    // Explicit physical-only component fixtures leave this field zero.
+    uint64_t blas_public_address;
 } VelRtBvh4Instance;
 
 // Leaf parent table order is triangles, AABBs, then instances. Entries and node

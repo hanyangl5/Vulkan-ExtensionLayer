@@ -1,0 +1,57 @@
+/* SPDX-License-Identifier: MIT */
+#version 460
+#extension GL_EXT_buffer_reference : require
+#extension GL_EXT_scalar_block_layout : require
+#extension GL_EXT_shader_explicit_arithmetic_types_int64 : require
+#include "bvh4_abi.glsl"
+#include "vkrt_as_serialization.glsl"
+
+layout(local_size_x = 1) in;
+layout(buffer_reference, scalar, buffer_reference_align = 4) buffer QueryWord { uint value; };
+layout(push_constant, scalar) uniform QueryArgs {
+    uint64_t source, source_capacity, result_address;
+    uint query_type, reserved;
+}
+args;
+
+void store_value(uint64_t value, bool valid) {
+    QueryWord(args.result_address).value = uint(value);
+    QueryWord(args.result_address + 4ul).value = uint(value >> 32);
+    QueryWord(args.result_address + 8ul).value = valid ? 1u : 0u;
+    QueryWord(args.result_address + 12ul).value = 0u;
+}
+
+void main() {
+    /* This slot is GPU data, not a coherent-memory host polling protocol. */
+    if (args.source == 0ul || (args.source & 3ul) != 0ul || args.source_capacity < uint64_t(VEL_RT_BVH4_HEADER_SIZE) ||
+        args.source > 0xfffffffffffffffful - args.source_capacity) {
+        store_value(0ul, false);
+        return;
+    }
+    uint type = vel_rt_bvh4_u32(args.source, 8ul);
+    uint64_t physical_size = vel_rt_bvh4_u64(args.source, VEL_RT_BVH4_HEADER_TOTAL_SIZE);
+    bool valid =
+        vel_rt_bvh4_u32(args.source, 0ul) == VEL_RT_BVH4_MAGIC && vel_rt_bvh4_u32(args.source, 4ul) == VEL_RT_BVH4_ABI_VERSION &&
+        type <= 1u && (vel_rt_bvh4_u32(args.source, 12ul) & VEL_RT_BVH4_FLAG_INVALID) == 0u &&
+        physical_size >= uint64_t(VEL_RT_BVH4_HEADER_SIZE) && (physical_size & 3ul) == 0ul && physical_size <= args.source_capacity;
+    uint count = type == 0u ? vel_rt_bvh4_u32(args.source, uint64_t(VEL_RT_BVH4_HEADER_INSTANCE_COUNT)) : 0u;
+    uint64_t value = 0ul;
+    switch (args.query_type) {
+        case 1000150000u: /* COMPACTED_SIZE_KHR: same valid representation. */
+        case 1000386001u: /* SIZE_KHR */
+            value = physical_size;
+            break;
+        case 1000150001u: /* SERIALIZATION_SIZE_KHR */
+            value = vkrt_as_serialization_size(physical_size, count);
+            valid = valid && value != 0ul;
+            break;
+        case 1000386000u: /* SERIALIZATION_BOTTOM_LEVEL_POINTERS_KHR */
+            value = uint64_t(count);
+            valid = valid && type == 0u;
+            break;
+        default:
+            valid = false;
+            break;
+    }
+    store_value(valid ? value : 0ul, valid);
+}

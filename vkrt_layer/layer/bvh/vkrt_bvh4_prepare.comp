@@ -3,6 +3,7 @@
 #extension GL_EXT_buffer_reference : require
 #extension GL_EXT_scalar_block_layout : require
 #extension GL_EXT_shader_explicit_arithmetic_types_int64 : require
+#include "bvh4_abi.glsl"
 layout(local_size_x = 1) in;
 layout(buffer_reference, scalar, buffer_reference_align = 4) buffer Word { uint value; };
 layout(push_constant, scalar) uniform Prepare {
@@ -18,8 +19,8 @@ void main() {
       return;
    }
    for (uint offset = 0; offset < 128; offset += 4) put32(offset, 0);
-   put32(0, 0x344c4556u);
-   put32(4, 1);
+   put32(0, VEL_RT_BVH4_MAGIC);
+   put32(4, VEL_RT_BVH4_ABI_VERSION);
    put32(8, args.type);
    put32(16, 0xffffffffu);
    put64(48, args.nodes);

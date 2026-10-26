@@ -4,7 +4,7 @@
 #include "vkrt_layer.h"
 #include "vkrt_rt_capabilities.h"
 
-/* A conservative mask for the current AS/RQ prototype. This deliberately adds
+/* A conservative mask for the current AS/RQ/RTP prototype. This deliberately adds
  * no extension or base feature on a no-RT driver: full emulation discovery is
  * gated on the complete mandatory functionality/limits, not this component. */
 static VKAPI_ATTR void VKAPI_CALL GetPhysicalDeviceFeatures2(VkPhysicalDevice physical, VkPhysicalDeviceFeatures2 *features) {
@@ -17,6 +17,8 @@ static VKAPI_ATTR void VKAPI_CALL GetPhysicalDeviceFeatures2(VkPhysicalDevice ph
             ((VkPhysicalDeviceAccelerationStructureFeaturesKHR *)p)->accelerationStructure = VK_FALSE;
         if (p->sType == VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_QUERY_FEATURES_KHR)
             ((VkPhysicalDeviceRayQueryFeaturesKHR *)p)->rayQuery = VK_FALSE;
+        if (p->sType == VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_FEATURES_KHR)
+            ((VkPhysicalDeviceRayTracingPipelineFeaturesKHR *)p)->rayTracingPipeline = VK_FALSE;
     }
     if (queried) inst->vtable.GetPhysicalDeviceFeatures2(physical, features);
     for (VkBaseOutStructure *p = features->pNext; p; p = p->pNext) {
@@ -29,7 +31,8 @@ static VKAPI_ATTR VkResult VKAPI_CALL EnumerateDeviceExtensionProperties(VkPhysi
                                                                          uint32_t *count, VkExtensionProperties *properties) {
     if (!count) return VK_ERROR_INITIALIZATION_FAILED;
     /* Deferred operations are completed synchronously and need no native RT.
-     * Base AS/RQ advertisement still waits for the complete mandatory path. */
+     * Base AS/RQ/RTP advertisement still retains native driver truth until
+     * the complete mandatory path can support no-native-RT discovery. */
     if (layer && !strcmp(layer, "VK_LAYER_VKRT_SOFTWARE_RAY_QUERY")) {
         if (!properties) {
             *count = 1;

@@ -792,7 +792,7 @@ static void MesaCases(Context& ctx) {
     RunMesa(ctx, instances, {}, blas);
     RunMesa(ctx, instances, {}, {}, 0, {}, VEL_RT_MESA_GPU_IDENTITY_BLAS);
     RunMesa(ctx, instances, {}, blas, MesaGpuMetadata, {}, VEL_RT_MESA_GPU_IDENTITY_BLAS);
-    RunMesa(ctx, instances, {}, {}, MesaGpuMetadata, {}, 2u);
+    RunMesa(ctx, instances, {}, {}, MesaGpuMetadata, {}, 4u);
     auto bad = sparse;
     mesa_test::U32(bad.bytes, 112, 3);
     RunMesa(ctx, bad, flags, {}, MesaGpuMetadata);

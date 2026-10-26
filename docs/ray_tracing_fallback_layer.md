@@ -7,6 +7,13 @@ The active target is [complete mandatory Vulkan AS/RQ/RTP fallback](ray_tracing_
 
 This page records the executable RTP prototype and its limitations at baseline `f18c40d3`. Its D3D-derived builder and direct-call shader path are migration sources, not the final selected architecture. The [D3D12 port record](ray_tracing_fallback_port.md) preserves historical source and component-test evidence.
 
+Current typed RTP development is integrated into
+`VK_LAYER_VKRT_SOFTWARE_RAY_QUERY`, sharing its Mesa/BVH4 AS backend. Its
+invocation-private continuation scheduler, public RTP API, GPU SBT and selected
+external CTS evidence are recorded in the [current checkpoint](rt_cts_typed_runtime_2026-10-26.md).
+The baseline limitations below describe the older
+`VK_LAYER_HANYANG_ray_tracing_fallback` executable; they are retained as history.
+
 `VK_LAYER_HANYANG_ray_tracing_fallback` is an executable prototype of a Vulkan ray tracing pipeline implemented using compute shaders. It accepts ordinary raygen, miss and closest-hit SPIR-V modules, software-builds BLAS/TLAS, reads shader binding tables and translates `vkCmdTraceRaysKHR` into a compute dispatch. No hardware ray tracing instructions are used by the generated compute program.
 
 **This is a restricted experimental subset, not a conformant implementation of the complete KHR extensions and not a drop-in layer for arbitrary games.** The layer exposes the KHR names to exercise their calling convention, but several mandatory extension commands and shader cases remain outside this implementation. Enable it explicitly only for applications within the supported subset. Do not install it as an implicit system layer.

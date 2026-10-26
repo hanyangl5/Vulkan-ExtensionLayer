@@ -18,6 +18,7 @@ static_assert(offsetof(VelRtBvh4Header, node_offset) == 48);
 static_assert(sizeof(VelRtBvh4Triangle) == 48);
 static_assert(sizeof(VelRtBvh4Aabb) == 48);
 static_assert(sizeof(VelRtBvh4Instance) == 128);
+static_assert(offsetof(VelRtBvh4Instance, blas_public_address) == 120);
 
 static uint64_t Add(uint64_t a, uint64_t b) {
     if (b > std::numeric_limits<uint64_t>::max() - a) throw std::overflow_error("BVH4 size addition");

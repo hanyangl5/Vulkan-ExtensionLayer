@@ -4,9 +4,11 @@
 #extension GL_EXT_buffer_reference : require
 #extension GL_EXT_scalar_block_layout : require
 #extension GL_EXT_shader_explicit_arithmetic_types_int64 : require
+#include "as_address.glsl"
 
 layout(local_size_x = 64) in;
 layout(constant_id = 0) const uint phase = 0;
+layout(constant_id = 6) const uint64_t vkrt_as_registry_context = 0ul;
 layout(buffer_reference, scalar, buffer_reference_align = 4) buffer Word { uint value; };
 layout(push_constant, scalar) uniform Args {
     uint64_t source, source_size, output_as, mapping;
@@ -101,6 +103,8 @@ void emit_leaf(uint source_id, uint parent) {
         fail(32); return;
     }
     uint64_t blas = identity_blas ? read64(src + 24) : read64(args.runtime_blas + uint64_t(source_slot) * uint64_t(8));
+    uint64_t public_value = (args.options & 2u) != 0 ? blas : uint64_t(0);
+    if (public_value != uint64_t(0)) blas = vel_rt_resolve_as(vkrt_as_registry_context, public_value);
     if (blas == uint64_t(0) || (blas & uint64_t(3)) != uint64_t(0)) { fail(32); return; }
     write64(dst, blas);
     write32(dst + 8, read32(src + 32));
@@ -128,7 +132,8 @@ void emit_leaf(uint source_id, uint parent) {
         write32(dst + 76 + row * 16, floatBitsToUint(inverse_translation));
     }
     write32(dst + 112, read32(src + 88));
-    for (uint field = 116; field < 128; field += 4) write32(dst + field, 0);
+    write32(dst + 116, 0);
+    write64(dst + 120, public_value);
 }
 void main() {
     uint64_t index64 = args.first + uint64_t(gl_GlobalInvocationID.x);
@@ -148,7 +153,8 @@ void main() {
         write32(args.output_as + 28, 0);
         write32(args.output_as + 32, 0);
         for (uint field = 96; field < 120; field += 4) write32(args.output_as + field, 0);
-        if (args.source_size < uint64_t(128) || args.geometry_type > 2 || (args.options & ~1u) != 0 ||
+        if (args.source_size < uint64_t(128) || args.geometry_type > 2 || (args.options & ~3u) != 0 ||
+            ((args.options & 2u) != 0 && (args.options & 1u) == 0) ||
             ((args.options & 1u) != 0 && args.runtime_blas != uint64_t(0))) { fail(1); return; }
         uint live = active_count(), internals = internal_count();
         uint64_t root_end = box_base() + uint64_t(internals) * uint64_t(40);
