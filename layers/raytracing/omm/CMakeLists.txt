@@ -42,6 +42,12 @@ if(OMM_BUILD_NATIVE_PROOFS)
     target_compile_features(vel_omm_query_rewrite PUBLIC cxx_std_17)
     target_include_directories(vel_omm_query_rewrite PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
     target_link_libraries(vel_omm_query_rewrite PUBLIC SPIRV-Tools-static)
+    add_library(vel_omm_as_provenance STATIC omm_as_provenance.cpp)
+    target_link_libraries(vel_omm_as_provenance PUBLIC vel_omm_query_rewrite)
+    add_executable(test_omm_as_provenance tests/test_omm_as_provenance.cpp)
+    target_link_libraries(test_omm_as_provenance PRIVATE vel_omm_as_provenance)
+    add_test(NAME omm_as_provenance COMMAND test_omm_as_provenance)
+    set_tests_properties(omm_as_provenance PROPERTIES LABELS "offline;omm")
     find_library(OMM_SPIRV_LINK_LIBRARY NAMES SPIRV-Tools-link
         HINTS "${Vulkan_ROOT}/Lib" "$ENV{VULKAN_SDK}/Lib" REQUIRED)
     find_library(OMM_SPIRV_OPT_LIBRARY NAMES SPIRV-Tools-opt
@@ -77,14 +83,15 @@ if(OMM_BUILD_NATIVE_PROOFS)
     set_tests_properties(omm_native_query PROPERTIES LABELS "gpu;native_rt;omm;experimental" SKIP_RETURN_CODE 77
         FAIL_REGULAR_EXPRESSION "Validation Error;SYNC-HAZARD")
 
-    set(extra_shaders query_state.comp omm_build.comp omm_copy.comp omm_metadata.comp gpu_build_generate.comp gpu_lookup.comp layer_state.comp
-        classifier_library.comp classifier_query.comp composition_workgroup.comp)
+    set(extra_shaders query_state.comp omm_build.comp omm_copy.comp omm_metadata.comp omm_instances.comp omm_publish.comp omm_property.comp
+        gpu_build_generate.comp gpu_lookup.comp layer_state.comp classifier_library.comp classifier_query.comp
+        composition_workgroup.comp acceleration_probe.comp)
     foreach(stage rgen rmiss rahit rchit rint)
         list(APPEND extra_shaders native_pipeline.${stage})
     endforeach()
     set(shader_outputs)
     foreach(shader ${extra_shaders})
-        if(shader STREQUAL "omm_build.comp" OR shader STREQUAL "omm_copy.comp" OR shader STREQUAL "omm_metadata.comp")
+        if(shader MATCHES "^omm_(build|copy|metadata|instances|publish|property)\\.comp$")
             set(shader_source ${CMAKE_CURRENT_SOURCE_DIR}/${shader})
         else()
             set(shader_source ${CMAKE_CURRENT_SOURCE_DIR}/tests/${shader})
@@ -97,7 +104,7 @@ if(OMM_BUILD_NATIVE_PROOFS)
             COMMAND Vulkan::glslangValidator -V --target-env vulkan1.2 ${shader_flags} ${shader_source}
                 -o ${CMAKE_CURRENT_BINARY_DIR}/${shader}.spv
             COMMAND ${OMM_SPIRV_VALIDATOR} --target-env vulkan1.2 ${CMAKE_CURRENT_BINARY_DIR}/${shader}.spv
-            DEPENDS ${shader_source} tests/native_pipeline.glsl omm_opacity.glsl omm_lookup.glsl omm_classifier.glsl VERBATIM)
+            DEPENDS ${shader_source} tests/native_pipeline.glsl omm_opacity.glsl omm_lookup.glsl omm_classifier.glsl omm_context.glsl VERBATIM)
         list(APPEND shader_outputs ${CMAKE_CURRENT_BINARY_DIR}/${shader}.spv)
     endforeach()
     add_custom_target(omm_extra_spv DEPENDS ${shader_outputs})
@@ -123,6 +130,45 @@ if(OMM_BUILD_NATIVE_PROOFS)
         FAIL_REGULAR_EXPRESSION "Validation Error;SYNC-HAZARD")
     add_library(vel_omm_device STATIC omm_device.cpp)
     target_link_libraries(vel_omm_device PUBLIC vel_omm_core Vulkan::Vulkan)
+    add_library(vel_omm_acceleration STATIC omm_acceleration.cpp)
+    target_link_libraries(vel_omm_acceleration PUBLIC vel_omm_device vel_omm_metadata)
+    add_library(vel_omm_submissions STATIC omm_submissions.cpp)
+    target_link_libraries(vel_omm_submissions PUBLIC vel_omm_acceleration)
+    find_package(Threads REQUIRED)
+    add_executable(test_omm_submissions tests/test_omm_submissions.cpp omm_submissions.cpp)
+    target_compile_features(test_omm_submissions PRIVATE cxx_std_17)
+    target_link_libraries(test_omm_submissions PRIVATE Vulkan::Vulkan Threads::Threads)
+    add_library(vel_omm_properties STATIC omm_properties.cpp)
+    target_link_libraries(vel_omm_properties PUBLIC vel_omm_device)
+    add_executable(test_omm_properties tests/test_omm_properties.cpp)
+    target_link_libraries(test_omm_properties PRIVATE vel_omm_properties)
+    add_dependencies(test_omm_properties omm_extra_spv)
+    add_test(NAME omm_properties COMMAND test_omm_properties ${CMAKE_CURRENT_BINARY_DIR})
+    set_tests_properties(omm_properties PROPERTIES LABELS "gpu;native_rt;omm;experimental" SKIP_RETURN_CODE 77
+        FAIL_REGULAR_EXPRESSION "Validation Error;SYNC-HAZARD")
+    add_test(NAME omm_submissions COMMAND test_omm_submissions)
+    set_tests_properties(omm_submissions PROPERTIES LABELS "offline;omm")
+    add_executable(test_omm_acceleration tests/test_omm_acceleration.cpp)
+    target_link_libraries(test_omm_acceleration PRIVATE vel_omm_submissions)
+    add_dependencies(test_omm_acceleration omm_extra_spv)
+    add_test(NAME omm_acceleration COMMAND test_omm_acceleration ${CMAKE_CURRENT_BINARY_DIR})
+    set_tests_properties(omm_acceleration PROPERTIES LABELS "gpu;native_rt;omm;experimental" SKIP_RETURN_CODE 77
+        FAIL_REGULAR_EXPRESSION "Validation Error;SYNC-HAZARD")
+    add_library(vel_omm_descriptors STATIC omm_descriptors.cpp)
+    target_compile_features(vel_omm_descriptors PUBLIC cxx_std_17)
+    target_link_libraries(vel_omm_descriptors PUBLIC Vulkan::Vulkan)
+    add_executable(test_omm_descriptors tests/test_omm_descriptors.cpp)
+    target_link_libraries(test_omm_descriptors PRIVATE vel_omm_descriptors)
+    add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/descriptor_provider.comp.spv
+        COMMAND test_omm_descriptors --write-shader ${CMAKE_CURRENT_BINARY_DIR}/descriptor_provider.comp
+        COMMAND Vulkan::glslangValidator -V --target-env vulkan1.2 -I${CMAKE_CURRENT_SOURCE_DIR}
+            ${CMAKE_CURRENT_BINARY_DIR}/descriptor_provider.comp -o ${CMAKE_CURRENT_BINARY_DIR}/descriptor_provider.comp.spv
+        COMMAND ${OMM_SPIRV_VALIDATOR} --target-env vulkan1.2 ${CMAKE_CURRENT_BINARY_DIR}/descriptor_provider.comp.spv
+        DEPENDS test_omm_descriptors omm_context.glsl omm_lookup.glsl VERBATIM)
+    add_custom_target(omm_descriptor_spv ALL DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/descriptor_provider.comp.spv)
+    add_test(NAME omm_descriptors COMMAND test_omm_descriptors ${CMAKE_CURRENT_BINARY_DIR}/descriptor_provider.comp.spv)
+    set_tests_properties(omm_descriptors PROPERTIES LABELS "gpu;native_rt;omm;experimental" SKIP_RETURN_CODE 77
+        FAIL_REGULAR_EXPRESSION "Validation Error;SYNC-HAZARD")
     add_library(vel_omm_commands STATIC omm_command_state.cpp)
     target_compile_features(vel_omm_commands PUBLIC cxx_std_17)
     target_link_libraries(vel_omm_commands PUBLIC Vulkan::Vulkan)
@@ -162,18 +208,39 @@ if(OMM_BUILD_NATIVE_PROOFS)
         FAIL_REGULAR_EXPRESSION "Validation Error;SYNC-HAZARD")
     add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/omm_kernels.h
         COMMAND ${CMAKE_COMMAND} -DINPUT_build=${CMAKE_CURRENT_BINARY_DIR}/omm_build.comp.spv
-            -DINPUT_copy=${CMAKE_CURRENT_BINARY_DIR}/omm_copy.comp.spv -DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/omm_kernels.h
+            -DINPUT_copy=${CMAKE_CURRENT_BINARY_DIR}/omm_copy.comp.spv -DINPUT_metadata=${CMAKE_CURRENT_BINARY_DIR}/omm_metadata.comp.spv
+            -DINPUT_instances=${CMAKE_CURRENT_BINARY_DIR}/omm_instances.comp.spv -DINPUT_publish=${CMAKE_CURRENT_BINARY_DIR}/omm_publish.comp.spv
+            -DINPUT_classifier=${CMAKE_CURRENT_BINARY_DIR}/classifier_library.comp.spv -DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/omm_kernels.h
+            -DINPUT_property=${CMAKE_CURRENT_BINARY_DIR}/omm_property.comp.spv
             -P ${CMAKE_CURRENT_SOURCE_DIR}/embed_kernels.cmake
-        DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/omm_build.comp.spv ${CMAKE_CURRENT_BINARY_DIR}/omm_copy.comp.spv embed_kernels.cmake)
+        DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/omm_build.comp.spv ${CMAKE_CURRENT_BINARY_DIR}/omm_copy.comp.spv
+            ${CMAKE_CURRENT_BINARY_DIR}/omm_metadata.comp.spv ${CMAKE_CURRENT_BINARY_DIR}/omm_instances.comp.spv
+            ${CMAKE_CURRENT_BINARY_DIR}/omm_publish.comp.spv ${CMAKE_CURRENT_BINARY_DIR}/classifier_library.comp.spv
+            ${CMAKE_CURRENT_BINARY_DIR}/omm_property.comp.spv embed_kernels.cmake)
     find_library(OMM_SAFE_STRUCT_LIBRARY NAMES VulkanSafeStruct
         HINTS "${Vulkan_ROOT}/Lib" "$ENV{VULKAN_SDK}/Lib" REQUIRED)
+    add_library(vel_omm_consumers STATIC omm_consumers.cpp)
+    target_link_libraries(vel_omm_consumers PUBLIC vel_omm_descriptors vel_omm_as_provenance vel_omm_shader_compose ${OMM_SAFE_STRUCT_LIBRARY})
+    add_executable(test_omm_consumers tests/test_omm_consumers.cpp)
+    target_link_libraries(test_omm_consumers PRIVATE vel_omm_consumers vel_omm_metadata)
+    add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/consumer_application.comp.spv
+        COMMAND test_omm_consumers --write-shader ${CMAKE_CURRENT_BINARY_DIR}/consumer_application.comp
+        COMMAND Vulkan::glslangValidator -V --target-env vulkan1.2 --keep-uncalled ${CMAKE_CURRENT_BINARY_DIR}/consumer_application.comp
+            -o ${CMAKE_CURRENT_BINARY_DIR}/consumer_application.comp.spv
+        COMMAND ${OMM_SPIRV_VALIDATOR} --target-env vulkan1.2 ${CMAKE_CURRENT_BINARY_DIR}/consumer_application.comp.spv
+        DEPENDS test_omm_consumers VERBATIM)
+    add_custom_target(omm_consumer_spv ALL DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/consumer_application.comp.spv)
+    add_test(NAME omm_consumers COMMAND test_omm_consumers ${CMAKE_CURRENT_BINARY_DIR}/classifier_library.comp.spv
+        ${CMAKE_CURRENT_BINARY_DIR}/consumer_application.comp.spv)
+    set_tests_properties(omm_consumers PROPERTIES LABELS "gpu;native_rt;omm;experimental" SKIP_RETURN_CODE 77
+        FAIL_REGULAR_EXPRESSION "Validation Error;SYNC-HAZARD")
     add_library(VkLayer_VEL_opacity_micromap MODULE omm_layer.cpp ${CMAKE_CURRENT_BINARY_DIR}/omm_kernels.h)
     if(WIN32)
         target_sources(VkLayer_VEL_opacity_micromap PRIVATE omm_layer.def)
     endif()
     target_include_directories(VkLayer_VEL_opacity_micromap PRIVATE ${CMAKE_CURRENT_BINARY_DIR})
     target_compile_definitions(VkLayer_VEL_opacity_micromap PRIVATE NOMINMAX _CRT_SECURE_NO_WARNINGS)
-    target_link_libraries(VkLayer_VEL_opacity_micromap PRIVATE vel_omm_device vel_omm_commands vel_omm_sync ${OMM_SAFE_STRUCT_LIBRARY})
+    target_link_libraries(VkLayer_VEL_opacity_micromap PRIVATE vel_omm_device vel_omm_properties vel_omm_submissions vel_omm_consumers vel_omm_commands vel_omm_sync ${OMM_SAFE_STRUCT_LIBRARY})
     set_target_properties(VkLayer_VEL_opacity_micromap PROPERTIES
         RUNTIME_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/layers LIBRARY_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/layers)
     set(omm_layer_library_path "./$<TARGET_FILE_NAME:VkLayer_VEL_opacity_micromap>")
@@ -191,7 +258,7 @@ if(OMM_BUILD_NATIVE_PROOFS)
     add_executable(test_omm_layer_registry tests/test_omm_layer_registry.cpp ${CMAKE_CURRENT_BINARY_DIR}/omm_kernels.h)
     target_compile_definitions(test_omm_layer_registry PRIVATE _CRT_SECURE_NO_WARNINGS)
     target_include_directories(test_omm_layer_registry PRIVATE ${CMAKE_CURRENT_BINARY_DIR})
-    target_link_libraries(test_omm_layer_registry PRIVATE vel_omm_device vel_omm_commands vel_omm_sync ${OMM_SAFE_STRUCT_LIBRARY})
+    target_link_libraries(test_omm_layer_registry PRIVATE vel_omm_device vel_omm_properties vel_omm_submissions vel_omm_consumers vel_omm_commands vel_omm_sync ${OMM_SAFE_STRUCT_LIBRARY})
     add_test(NAME omm_layer_registry COMMAND test_omm_layer_registry)
     set_tests_properties(omm_layer_registry PROPERTIES LABELS "offline;omm")
     foreach(proof native_pipeline gpu_build gpu_lookup query_rewrite)

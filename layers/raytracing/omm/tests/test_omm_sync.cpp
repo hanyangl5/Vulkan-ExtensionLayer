@@ -52,7 +52,8 @@ void masks() {
     constexpr VkPipelineStageFlags2 otherStages = VK_PIPELINE_STAGE_2_HOST_BIT | VK_PIPELINE_STAGE_2_ALL_GRAPHICS_BIT |
                                                   VK_PIPELINE_STAGE_2_ALL_TRANSFER_BIT |
                                                   VK_PIPELINE_STAGE_2_ACCELERATION_STRUCTURE_BUILD_BIT_KHR | (1ull << 63);
-    expect(map_stage2(otherStages) == otherStages, "unrelated stages, ALL_GRAPHICS and unknown high bits preserved exactly");
+    expect(map_stage2(otherStages) == (otherStages | VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT),
+           "native AS stage gains compute and unrelated/unknown stages remain");
     expect(map_stage2(otherStages | microStage) == (otherStages | VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT),
            "mixed stage mask retains all unrelated bits");
     expect(map_stage2(VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT) == VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
@@ -61,7 +62,8 @@ void masks() {
                                            VK_ACCESS_2_SHADER_SAMPLED_READ_BIT | VK_ACCESS_2_SHADER_STORAGE_READ_BIT |
                                            VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT | VK_ACCESS_2_ACCELERATION_STRUCTURE_READ_BIT_KHR |
                                            (1ull << 63);
-    expect(map_access2(otherAccess) == otherAccess, "specific shader access aliases, global memory and unknown bits preserved");
+    expect(map_access2(otherAccess) == (otherAccess | VK_ACCESS_2_SHADER_READ_BIT),
+           "native AS read gains shader read and specific/global/unknown accesses remain");
     expect(map_access2(otherAccess | microRead | microWrite) ==
                (otherAccess | VK_ACCESS_2_SHADER_READ_BIT | VK_ACCESS_2_SHADER_WRITE_BIT),
            "mixed access masks remove only micromap accesses");
@@ -69,8 +71,12 @@ void masks() {
         const auto mask = VkPipelineStageFlags2(1) << bit;
         expect(map_stage2(map_stage2(mask)) == map_stage2(mask), "stage translation idempotent for every bit");
         expect(map_access2(map_access2(mask)) == map_access2(mask), "access translation idempotent for every bit");
-        if (!(mask & microStage)) expect(map_stage2(mask) == mask, "each unrelated stage bit survives");
-        if (!(mask & (microRead | microWrite))) expect(map_access2(mask) == mask, "each unrelated access bit survives");
+        if (!(mask & (microStage | VK_PIPELINE_STAGE_2_ACCELERATION_STRUCTURE_BUILD_BIT_KHR |
+                      VK_PIPELINE_STAGE_2_ACCELERATION_STRUCTURE_COPY_BIT_KHR)))
+            expect(map_stage2(mask) == mask, "each unrelated stage bit survives");
+        if (!(mask & (microRead | microWrite | VK_ACCESS_2_ACCELERATION_STRUCTURE_READ_BIT_KHR |
+                      VK_ACCESS_2_ACCELERATION_STRUCTURE_WRITE_BIT_KHR)))
+            expect(map_access2(mask) == mask, "each unrelated access bit survives");
     }
     const auto wire = static_cast<VkPipelineStageFlags>(microStage);
     expect(map_stage(wire | VK_PIPELINE_STAGE_HOST_BIT) == (VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_HOST_BIT),
@@ -79,6 +85,17 @@ void masks() {
                (VK_PIPELINE_STAGE_ALL_COMMANDS_BIT | VK_PIPELINE_STAGE_ALL_GRAPHICS_BIT),
            "legacy aggregate stage masks unchanged");
     expect(map_access(0xffffffffu) == 0xffffffffu, "legacy access has no representable micromap bits and is unchanged");
+    expect(map_stage2(VK_PIPELINE_STAGE_2_ACCELERATION_STRUCTURE_COPY_BIT_KHR) ==
+               (VK_PIPELINE_STAGE_2_ACCELERATION_STRUCTURE_COPY_BIT_KHR | VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT),
+           "native AS copy scope includes compute sidecar work while retaining native copy");
+    expect(map_stage(VK_PIPELINE_STAGE_ACCELERATION_STRUCTURE_BUILD_BIT_KHR) ==
+                   (VK_PIPELINE_STAGE_ACCELERATION_STRUCTURE_BUILD_BIT_KHR | VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT) &&
+               map_access(VK_ACCESS_ACCELERATION_STRUCTURE_WRITE_BIT_KHR) ==
+                   (VK_ACCESS_ACCELERATION_STRUCTURE_WRITE_BIT_KHR | VK_ACCESS_SHADER_WRITE_BIT),
+           "legacy AS build release includes native and private metadata writers");
+    expect(map_stage2(VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT | VK_PIPELINE_STAGE_2_ACCELERATION_STRUCTURE_BUILD_BIT_KHR) ==
+               (VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT | VK_PIPELINE_STAGE_2_ACCELERATION_STRUCTURE_BUILD_BIT_KHR),
+           "ALL_COMMANDS already covers private compute without extra stage bits");
 }
 struct Input {
     // Opaque extension sentinels are deliberately never interpreted by the
@@ -306,11 +323,154 @@ void failuresAndLegacy() {
                !empty.buffer_memory_barriers && !empty.image_memory_barriers,
            "legacy zero-count arrays neither allocate nor dereference ignored pointers");
 }
+void nativeSidecarScopes() {
+    VkBufferMemoryBarrier2 buffers[3]{};
+    for (auto& value : buffers) {
+        value = init<VkBufferMemoryBarrier2>(VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER_2);
+        value.buffer = handle<VkBuffer>(0x1234);
+        value.offset = 96;
+        value.size = 128;
+        value.srcQueueFamilyIndex = 1;
+        value.dstQueueFamilyIndex = 2;
+    }
+    // A release event source scope. The hidden buffers use concurrent sharing,
+    // so their availability must be global without inventing ownership changes.
+    buffers[0].srcStageMask = VK_PIPELINE_STAGE_2_ACCELERATION_STRUCTURE_BUILD_BIT_KHR;
+    buffers[0].srcAccessMask = VK_ACCESS_2_ACCELERATION_STRUCTURE_WRITE_BIT_KHR;
+    buffers[0].dstStageMask = VK_PIPELINE_STAGE_2_NONE;
+    buffers[0].dstAccessMask = 0;
+    // A distinct acquire destination, deliberately not paired with release0.
+    buffers[1].srcStageMask = VK_PIPELINE_STAGE_2_NONE;
+    buffers[1].srcAccessMask = 0;
+    buffers[1].dstStageMask = VK_PIPELINE_STAGE_2_RAY_TRACING_SHADER_BIT_KHR;
+    buffers[1].dstAccessMask = VK_ACCESS_2_ACCELERATION_STRUCTURE_READ_BIT_KHR;
+    buffers[2].srcStageMask = VK_PIPELINE_STAGE_2_TRANSFER_BIT;
+    buffers[2].srcAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT;
+    buffers[2].dstStageMask = VK_PIPELINE_STAGE_2_VERTEX_INPUT_BIT;
+    buffers[2].dstAccessMask = VK_ACCESS_2_VERTEX_ATTRIBUTE_READ_BIT;
+    const auto saved0 = buffers[0], saved1 = buffers[1], saved2 = buffers[2];
+    auto memory = init<VkMemoryBarrier2>(VK_STRUCTURE_TYPE_MEMORY_BARRIER_2);
+    memory.srcStageMask = VK_PIPELINE_STAGE_2_HOST_BIT;
+    memory.srcAccessMask = VK_ACCESS_2_HOST_WRITE_BIT;
+    memory.dstStageMask = VK_PIPELINE_STAGE_2_TRANSFER_BIT;
+    memory.dstAccessMask = VK_ACCESS_2_TRANSFER_READ_BIT;
+    auto image = init<VkImageMemoryBarrier2>(VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2);
+    auto dependency = init<VkDependencyInfo>(VK_STRUCTURE_TYPE_DEPENDENCY_INFO);
+    dependency.memoryBarrierCount = 1;
+    dependency.pMemoryBarriers = &memory;
+    dependency.bufferMemoryBarrierCount = 3;
+    dependency.pBufferMemoryBarriers = buffers;
+    dependency.imageMemoryBarrierCount = 1;
+    dependency.pImageMemoryBarriers = &image;
+    TranslatedDependency translated;
+    expect(translated.assign(dependency) == VK_SUCCESS, "AS release/acquire event dependency translates");
+    const auto view = translated.view();
+    expect(view.memoryBarrierCount == 3 && view.bufferMemoryBarrierCount == 3,
+           "each AS buffer scope adds global metadata barrier and keeps every original buffer record");
+    expect(!std::memcmp(view.pMemoryBarriers, &memory, sizeof(memory)),
+           "unrelated global host-to-transfer barrier remains exact and precedes appended metadata");
+    const auto& release = view.pMemoryBarriers[1];
+    expect(release.sType == VK_STRUCTURE_TYPE_MEMORY_BARRIER_2 && !release.pNext &&
+               release.srcStageMask ==
+                   (VK_PIPELINE_STAGE_2_ACCELERATION_STRUCTURE_BUILD_BIT_KHR | VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT) &&
+               release.srcAccessMask == VK_ACCESS_2_SHADER_WRITE_BIT && release.dstStageMask == 0 && release.dstAccessMask == 0,
+           "AS release makes hidden compute writes available globally and retains an empty event destination");
+    const auto& acquire = view.pMemoryBarriers[2];
+    expect(acquire.srcStageMask == 0 && acquire.srcAccessMask == 0 &&
+               acquire.dstStageMask == VK_PIPELINE_STAGE_2_RAY_TRACING_SHADER_BIT_KHR &&
+               acquire.dstAccessMask == VK_ACCESS_2_SHADER_READ_BIT,
+           "AS acquire reaches classifier shader reads without manufacturing a release-to-acquire pair");
+    expect(view.pBufferMemoryBarriers[0].srcAccessMask ==
+                   (VK_ACCESS_2_ACCELERATION_STRUCTURE_WRITE_BIT_KHR | VK_ACCESS_2_SHADER_WRITE_BIT) &&
+               view.pBufferMemoryBarriers[1].dstAccessMask ==
+                   (VK_ACCESS_2_ACCELERATION_STRUCTURE_READ_BIT_KHR | VK_ACCESS_2_SHADER_READ_BIT),
+           "native AS memory access bits remain in original buffer scopes");
+    for (unsigned i = 0; i < 3; ++i) {
+        const auto& actual = view.pBufferMemoryBarriers[i];
+        expect(actual.buffer == buffers[i].buffer && actual.offset == 96 && actual.size == 128 && actual.srcQueueFamilyIndex == 1 &&
+                   actual.dstQueueFamilyIndex == 2,
+               "native buffer ranges and ownership transfer indices are preserved");
+    }
+    expect(!std::memcmp(&view.pBufferMemoryBarriers[2], &saved2, sizeof(saved2)),
+           "unrelated transfer-to-vertex buffer barrier gains no shader scopes");
+    expect(!std::memcmp(&buffers[0], &saved0, sizeof(saved0)) && !std::memcmp(&buffers[1], &saved1, sizeof(saved1)),
+           "AS event dependency input arrays remain untouched");
+    for (int budget : {0, 1, 2}) {
+        allocationBudget = budget;
+        const auto result = translated.assign(dependency);
+        allocationBudget = -1;
+        const auto after = translated.view();
+        expect(result == VK_ERROR_OUT_OF_HOST_MEMORY && after.memoryBarrierCount == 3 &&
+                   after.pMemoryBarriers == view.pMemoryBarriers && after.pBufferMemoryBarriers == view.pBufferMemoryBarriers &&
+                   after.pImageMemoryBarriers == view.pImageMemoryBarriers &&
+                   after.pMemoryBarriers[1].srcAccessMask == VK_ACCESS_2_SHADER_WRITE_BIT,
+               "OOM including appended global scopes atomically preserves the prior complete dependency");
+    }
+    auto legacyBuffer = init<VkBufferMemoryBarrier>(VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER);
+    legacyBuffer.srcAccessMask = VK_ACCESS_ACCELERATION_STRUCTURE_WRITE_BIT_KHR;
+    legacyBuffer.dstAccessMask = VK_ACCESS_ACCELERATION_STRUCTURE_READ_BIT_KHR;
+    legacyBuffer.srcQueueFamilyIndex = 4;
+    legacyBuffer.dstQueueFamilyIndex = 8;
+    legacyBuffer.buffer = handle<VkBuffer>(0x4567);
+    legacyBuffer.offset = 192;
+    legacyBuffer.size = 256;
+    TranslatedLegacyBarriers legacy;
+    expect(legacy.assign(VK_PIPELINE_STAGE_ACCELERATION_STRUCTURE_BUILD_BIT_KHR, VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR, 0, 0,
+                         nullptr, 1, &legacyBuffer, 0, nullptr) == VK_SUCCESS,
+           "legacy AS barrier/wait-event translation succeeds");
+    const auto lv = legacy.view();
+    expect(lv.src_stage_mask == (VK_PIPELINE_STAGE_ACCELERATION_STRUCTURE_BUILD_BIT_KHR | VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT) &&
+               lv.dst_stage_mask == VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR && lv.memory_barrier_count == 1 &&
+               lv.memory_barriers[0].srcAccessMask == VK_ACCESS_SHADER_WRITE_BIT &&
+               lv.memory_barriers[0].dstAccessMask == VK_ACCESS_SHADER_READ_BIT,
+           "legacy AS buffer barrier globally synchronizes hidden compute writes with ray tracing classifier reads");
+    expect(lv.buffer_memory_barrier_count == 1 && lv.buffer_memory_barriers[0].buffer == legacyBuffer.buffer &&
+               lv.buffer_memory_barriers[0].offset == 192 && lv.buffer_memory_barriers[0].size == 256 &&
+               lv.buffer_memory_barriers[0].srcQueueFamilyIndex == 4 && lv.buffer_memory_barriers[0].dstQueueFamilyIndex == 8 &&
+               lv.buffer_memory_barriers[0].srcAccessMask ==
+                   (VK_ACCESS_ACCELERATION_STRUCTURE_WRITE_BIT_KHR | VK_ACCESS_SHADER_WRITE_BIT),
+           "legacy native AS barrier retains its range, ownership and native AS access");
+    for (int budget : {0, 1}) {
+        allocationBudget = budget;
+        const auto result =
+            legacy.assign(VK_PIPELINE_STAGE_ACCELERATION_STRUCTURE_BUILD_BIT_KHR, VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR, 0,
+                          0, nullptr, 1, &legacyBuffer, 0, nullptr);
+        allocationBudget = -1;
+        expect(result == VK_ERROR_OUT_OF_HOST_MEMORY && legacy.view().memory_barriers == lv.memory_barriers &&
+                   legacy.view().buffer_memory_barriers == lv.buffer_memory_barriers,
+               "legacy global sidecar barrier and native buffer copy commit atomically under OOM");
+    }
+    buffers[0].dstStageMask = VK_PIPELINE_STAGE_2_BOTTOM_OF_PIPE_BIT;
+    buffers[0].dstAccessMask = VK_ACCESS_2_ACCELERATION_STRUCTURE_READ_BIT_KHR;
+    buffers[1].srcStageMask = VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT;
+    buffers[1].srcAccessMask = VK_ACCESS_2_ACCELERATION_STRUCTURE_WRITE_BIT_KHR;
+    dependency.memoryBarrierCount = 0;
+    dependency.pMemoryBarriers = nullptr;
+    dependency.bufferMemoryBarrierCount = 2;
+    dependency.imageMemoryBarrierCount = 0;
+    dependency.pImageMemoryBarriers = nullptr;
+    expect(translated.assign(dependency) == VK_SUCCESS, "ownership scopes with ignored nonzero access masks translate");
+    const auto ignored = translated.view();
+    expect(ignored.memoryBarrierCount == 2 && ignored.pMemoryBarriers[0].dstStageMask == VK_PIPELINE_STAGE_2_BOTTOM_OF_PIPE_BIT &&
+               ignored.pMemoryBarriers[0].dstAccessMask == 0 &&
+               ignored.pMemoryBarriers[1].srcStageMask == VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT &&
+               ignored.pMemoryBarriers[1].srcAccessMask == 0 &&
+               ignored.pBufferMemoryBarriers[0].dstAccessMask ==
+                   (VK_ACCESS_2_ACCELERATION_STRUCTURE_READ_BIT_KHR | VK_ACCESS_2_SHADER_READ_BIT),
+           "global sidecar barriers empty ignored TOP/BOTTOM memory scopes while native ownership accesses stay preserved");
+    expect(legacy.assign(VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR, 0, 0, nullptr, 1,
+                         &legacyBuffer, 0, nullptr) == VK_SUCCESS &&
+               legacy.view().src_stage_mask == VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT &&
+               legacy.view().memory_barriers[0].srcAccessMask == 0 &&
+               legacy.view().memory_barriers[0].dstAccessMask == VK_ACCESS_SHADER_READ_BIT,
+           "legacy acquire keeps ignored source empty without expanding event execution scopes");
+}
 }  // namespace
 int main() {
     masks();
     dependencyCopies();
     failuresAndLegacy();
+    nativeSidecarScopes();
     std::printf("OMM synchronization translation: %u checks, %u failures\n", checks, failures);
     return failures ? 1 : 0;
 }

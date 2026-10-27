@@ -16,6 +16,8 @@
 namespace vel::omm {
 namespace {
 constexpr char kSymbol[] = "__vel_omm_scalar_classifier_v1";
+constexpr char kDescriptorSymbol[] = "__vel_omm_descriptor_fetch_v1";
+constexpr char kIntegerSymbol[] = "__vel_omm_integer_resolve_v1";
 struct Instruction {
     spv::Op op;
     std::vector<uint32_t> words;
@@ -58,11 +60,11 @@ std::vector<uint32_t> make(spv::Op op, const std::vector<uint32_t>& operands) {
 void emit(std::vector<uint32_t>& destination, const std::vector<uint32_t>& words) {
     destination.insert(destination.end(), words.begin(), words.end());
 }
-std::vector<uint32_t> export_decoration(uint32_t id) {
+std::vector<uint32_t> export_decoration(uint32_t id, std::string_view symbol = kSymbol) {
     std::vector<uint32_t> operands{id, uint32_t(spv::DecorationLinkageAttributes)};
     const size_t begin = operands.size();
-    operands.resize(begin + (sizeof(kSymbol) + 3) / 4, 0);
-    std::memcpy(operands.data() + begin, kSymbol, sizeof(kSymbol));
+    operands.resize(begin + (symbol.size() + 4) / 4, 0);
+    std::memcpy(operands.data() + begin, symbol.data(), symbol.size());
     operands.push_back(uint32_t(spv::LinkageTypeExport));
     return make(spv::OpDecorate, operands);
 }
@@ -73,9 +75,9 @@ bool scalar(const Module& module, uint32_t id, spv::Op type, uint32_t width = 0)
     if (type == spv::OpTypeInt) return definition.words.size() == 4 && definition.words[2] == width && definition.words[3] == 0;
     return definition.words.size() == 3 && definition.words[2] == width;
 }
-bool vector(const Module& module, uint32_t id, spv::Op element) {
+bool vector(const Module& module, uint32_t id, spv::Op element, uint32_t count = 2) {
     const auto& definition = module.get(id);
-    return definition.op == spv::OpTypeVector && definition.words.size() == 4 && definition.words[3] == 2 &&
+    return definition.op == spv::OpTypeVector && definition.words.size() == 4 && definition.words[3] == count &&
            scalar(module, definition.words[2], element, 32);
 }
 
@@ -157,12 +159,83 @@ std::vector<uint32_t> library_with_thunk(const std::vector<uint32_t>& library, c
     result[3] = bound;
     return result;
 }
+
+std::vector<uint32_t> append_provider(const std::vector<uint32_t>& library, uint32_t target, bool descriptor, uint64_t context) {
+    if (!target) return library;
+    const Module module(library);
+    const auto& function = module.get(target);
+    if (function.op != spv::OpFunction || !vector(module, function.words.at(1), spv::OpTypeInt, descriptor ? 4 : 2))
+        throw std::invalid_argument("Provider return type mismatch");
+    const auto& signature = module.get(function.words.at(4));
+    const size_t count = descriptor ? 4 : 2;
+    if (signature.op != spv::OpTypeFunction || signature.words.size() != count + 3)
+        throw std::invalid_argument("Provider parameter count mismatch");
+    std::vector<uint32_t> pointers(count), values(count);
+    for (size_t i = 0; i < count; ++i) {
+        pointers[i] = signature.words[3 + i];
+        const auto& pointer = module.get(pointers[i]);
+        if (pointer.op != spv::OpTypePointer || pointer.words.size() != 4 || pointer.words[2] != spv::StorageClassFunction)
+            throw std::invalid_argument("Provider parameters must be Function pointers");
+        values[i] = pointer.words[3];
+        const bool valid = i == 0           ? scalar(module, values[i], spv::OpTypeInt, 64)
+                           : i == count - 1 ? vector(module, values[i], spv::OpTypeInt)
+                                            : scalar(module, values[i], spv::OpTypeInt, 32);
+        if (!valid) throw std::invalid_argument("Provider parameter type mismatch");
+    }
+    uint32_t bound = library[3];
+    auto id = [&]() {
+        if (bound >= 0x3fffff) throw std::length_error("SPIR-V ID limit");
+        return bound++;
+    };
+    const uint32_t type = id(), thunk = id(), block = id(), returned = id(), context_value = id();
+    std::vector<uint32_t> parameters(count - 1), locals(count);
+    for (auto& parameter : parameters) parameter = id();
+    for (auto& local : locals) local = id();
+    std::vector<uint32_t> signature_values{type, function.words[1]};
+    signature_values.insert(signature_values.end(), values.begin() + 1, values.end());
+    std::vector<uint32_t> result(library.begin(), library.begin() + 5);
+    bool decorated = false, declared = false;
+    for (const auto& instruction : module.instructions) {
+        if (!decorated && instruction.op >= spv::OpTypeVoid && instruction.op <= spv::OpTypeForwardPointer) {
+            emit(result, export_decoration(thunk, descriptor ? kDescriptorSymbol : kIntegerSymbol));
+            decorated = true;
+        }
+        if (!declared && instruction.op == spv::OpFunction) {
+            emit(result, make(spv::OpConstant, {values[0], context_value, uint32_t(context), uint32_t(context >> 32)}));
+            emit(result, make(spv::OpTypeFunction, signature_values));
+            declared = true;
+        }
+        emit(result, instruction.words);
+    }
+    if (!decorated || !declared) throw std::invalid_argument("Missing provider module declarations");
+    emit(result, make(spv::OpFunction, {function.words[1], thunk, spv::FunctionControlMaskNone, type}));
+    for (size_t i = 0; i < parameters.size(); ++i) emit(result, make(spv::OpFunctionParameter, {values[i + 1], parameters[i]}));
+    emit(result, make(spv::OpLabel, {block}));
+    for (size_t i = 0; i < count; ++i) emit(result, make(spv::OpVariable, {pointers[i], locals[i], spv::StorageClassFunction}));
+    emit(result, make(spv::OpStore, {locals[0], context_value}));
+    for (size_t i = 0; i < parameters.size(); ++i) emit(result, make(spv::OpStore, {locals[i + 1], parameters[i]}));
+    std::vector<uint32_t> call{function.words[1], returned, target};
+    call.insert(call.end(), locals.begin(), locals.end());
+    emit(result, make(spv::OpFunctionCall, call));
+    emit(result, make(spv::OpReturnValue, {returned}));
+    emit(result, make(spv::OpFunctionEnd, {}));
+    result[3] = bound;
+    return result;
+}
 }  // namespace
 
 ShaderCompositionStatus compose_query_classifier(const std::vector<uint32_t>& source,
                                                  const std::vector<uint32_t>& classifier_library,
                                                  uint32_t library_classifier_function, ComposedQueryShader* output,
                                                  std::string* diagnostic) {
+    QueryLibraryOptions options;
+    options.classifier_function = library_classifier_function;
+    return compose_query_library(source, classifier_library, options, output, diagnostic);
+}
+
+ShaderCompositionStatus compose_query_library(const std::vector<uint32_t>& source, const std::vector<uint32_t>& classifier_library,
+                                              const QueryLibraryOptions& exports, ComposedQueryShader* output,
+                                              std::string* diagnostic) {
     auto fail = [&](ShaderCompositionStatus status, std::string_view reason) noexcept {
         if (diagnostic) {
             try {
@@ -201,7 +274,9 @@ ShaderCompositionStatus compose_query_classifier(const std::vector<uint32_t>& so
             if (instruction.op == spv::OpEntryPoint && instruction.words.at(1) != spv::ExecutionModelGLCompute)
                 return fail(ShaderCompositionStatus::InvalidLibrary, "Expected compute dummy entry point");
         }
-        auto library = library_with_thunk(classifier_library, helper, library_classifier_function, application.memory);
+        auto library = library_with_thunk(classifier_library, helper, exports.classifier_function, application.memory);
+        library = append_provider(library, exports.descriptor_fetch_function, true, exports.context_address);
+        library = append_provider(library, exports.integer_resolver_function, false, exports.context_address);
         auto prepared = source;
         for (size_t offset = 5; offset < prepared.size(); offset += prepared[offset] >> 16)
             if (spv::Op(prepared[offset] & 0xffffu) == spv::OpMemoryModel)
@@ -222,14 +297,20 @@ ShaderCompositionStatus compose_query_classifier(const std::vector<uint32_t>& so
         for (const auto& instruction : parsed.instructions) {
             if (instruction.op == spv::OpCapability && instruction.words.at(1) == spv::CapabilityLinkage) continue;
             if (instruction.op == spv::OpDecorate && instruction.words.at(2) == spv::DecorationLinkageAttributes) {
-                if (instruction.words != export_decoration(instruction.words.at(1)) || result.classifier_function)
-                    return fail(ShaderCompositionStatus::LinkFailed, "Unexpected linked classifier export");
-                result.classifier_function = instruction.words[1];
+                const auto id = instruction.words.at(1);
+                uint32_t* exported = nullptr;
+                if (instruction.words == export_decoration(id)) exported = &result.classifier_function;
+                if (instruction.words == export_decoration(id, kDescriptorSymbol)) exported = &result.descriptor_fetch_function;
+                if (instruction.words == export_decoration(id, kIntegerSymbol)) exported = &result.integer_resolver_function;
+                if (!exported || *exported) return fail(ShaderCompositionStatus::LinkFailed, "Unexpected linked classifier export");
+                *exported = id;
                 continue;
             }
             emit(result.words, instruction.words);
         }
-        if (!result.classifier_function) return fail(ShaderCompositionStatus::LinkFailed, "Classifier export lost during link");
+        if (!result.classifier_function || (exports.descriptor_fetch_function && !result.descriptor_fetch_function) ||
+            (exports.integer_resolver_function && !result.integer_resolver_function))
+            return fail(ShaderCompositionStatus::LinkFailed, "Shader library export lost during link");
         messages.clear();
         if (!validator.Validate(result.words)) return fail(ShaderCompositionStatus::LinkFailed, messages);
         *output = std::move(result);

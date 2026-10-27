@@ -34,9 +34,10 @@ void device_backend_destroy(DeviceBackend* backend);
 // Track original application sizes/usage. accessible_size optionally describes
 // native word padding added by the loader and must be >= original size. Bind
 // notification follows a successful native BindBufferMemory[2]. No BDA query is
-// made for an unbound buffer. Untrack before destroying its native handle.
+// made for an unbound buffer. native_usage records private usage promotion
+// separately; zero defaults to original usage. Untrack before native destroy.
 VkResult device_track_buffer(DeviceBackend* backend, VkBuffer buffer, const VkBufferCreateInfo* original_info,
-                             VkDeviceSize accessible_size = 0);
+                             VkDeviceSize accessible_size = 0, VkBufferUsageFlags2 native_usage = 0);
 void device_buffer_bound(DeviceBackend* backend, VkBuffer buffer);
 void device_untrack_buffer(DeviceBackend* backend, VkBuffer buffer);
 
@@ -46,6 +47,9 @@ void device_destroy_micromap(DeviceBackend* backend, VkMicromapEXT micromap, con
 VkResult device_get_build_sizes(DeviceBackend* backend, VkAccelerationStructureBuildTypeKHR build_type,
                                 const VkMicromapBuildInfoEXT* info, VkMicromapBuildSizesInfoEXT* sizes);
 VkResult device_micromap_storage(DeviceBackend* backend, VkMicromapEXT micromap, MicromapStorage* storage);
+// Known bound application BDA span, including explicitly tracked native word
+// padding. Does not map memory or inspect device contents.
+VkResult device_address_span(DeviceBackend* backend, VkDeviceAddress address, VkDeviceSize* logical, VkDeviceSize* accessible);
 
 // All static validation succeeds before recording any command. Recording uses
 // only a private compute pipeline and push constants; the layer's command-state

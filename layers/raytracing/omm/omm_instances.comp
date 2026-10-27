@@ -1,0 +1,53 @@
+// Copyright 2026 The Khronos Group Inc.
+// SPDX-License-Identifier: Apache-2.0
+#version 460
+#extension GL_EXT_buffer_reference2 : require
+#extension GL_EXT_shader_explicit_arithmetic_types_int64 : require
+layout(local_size_x=64) in;
+layout(buffer_reference,std430,buffer_reference_align=4) buffer Words { uint w[]; };
+// Registry is a snapshot of native BLAS identities known at command recording.
+// Native values are compared for equality, never aligned, masked, or dereferenced.
+layout(push_constant,std430) uniform Instances {
+    uint64_t inputAddress, outputAddress, bodyAddress, statusAddress;
+    uint64_t registryAddress, registryCount, count, generation;
+    uint buildFlags, phase;
+} p;
+uint r32(uint64_t a,uint64_t o) { return Words(a+o).w[0]; }
+uint64_t r64(uint64_t a,uint64_t o) { return uint64_t(r32(a,o))|uint64_t(r32(a,o+4ul))<<32u; }
+void w32(uint64_t a,uint64_t o,uint v) { Words(a+o).w[0]=v; }
+void w64(uint64_t a,uint64_t o,uint64_t v) { w32(a,o,uint(v)); w32(a,o+4ul,uint(v>>32u)); }
+void main() {
+    uint64_t index=uint64_t(gl_GlobalInvocationID.x);
+    if(p.phase==0u) {
+        if(index!=0ul) return;
+        w32(p.statusAddress,0ul,0u);
+        for(uint i=0u;i<16u;++i) w32(p.bodyAddress,uint64_t(i)*4ul,0u);
+        w32(p.bodyAddress,0ul,0x424d4d4fu); w32(p.bodyAddress,4ul,1u);
+        w32(p.bodyAddress,8ul,2u); w32(p.bodyAddress,12ul,32u);
+        w64(p.bodyAddress,16ul,64ul+p.count*32ul); w64(p.bodyAddress,24ul,64ul+p.count*32ul);
+        w64(p.bodyAddress,32ul,p.count); w64(p.bodyAddress,40ul,64ul);
+        w32(p.bodyAddress,48ul,p.buildFlags); w64(p.bodyAddress,56ul,p.generation);
+        return;
+    }
+    for(;index<p.count;index+=uint64_t(gl_NumWorkGroups.x)*64ul) {
+        uint64_t source=index*64ul, record=64ul+index*32ul;
+        uint originalFlags=r32(p.inputAddress,source+52ul)>>24u;
+        uint64_t nativeAddress=r64(p.inputAddress,source+56ul), root=0ul;
+        // Copy all 64 native instance bytes, changing exactly the two OMM bits.
+        for(uint i=0u;i<16u;++i) {
+            uint value=r32(p.inputAddress,source+uint64_t(i)*4ul);
+            if(i==13u) value&=~0x30000000u;
+            w32(p.outputAddress,source+uint64_t(i)*4ul,value);
+        }
+        if(nativeAddress!=0ul) {
+            for(uint64_t j=0ul;j<p.registryCount;++j)
+                if(r64(p.registryAddress,j*16ul)==nativeAddress) { root=r64(p.registryAddress,j*16ul+8ul); break; }
+            if(root==0ul) atomicOr(Words(p.statusAddress).w[0],1u);
+        }
+        if((originalFlags&~0x3fu)!=0u || (originalFlags&0xcu)==0xcu)
+            atomicOr(Words(p.statusAddress).w[0],1u);
+        w64(p.bodyAddress,record,root); w64(p.bodyAddress,record+8ul,nativeAddress);
+        w32(p.bodyAddress,record+16ul,originalFlags); w32(p.bodyAddress,record+20ul,nativeAddress==0ul?0u:1u);
+        w64(p.bodyAddress,record+24ul,0ul);
+    }
+}

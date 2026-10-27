@@ -1,0 +1,3931 @@
+{
+  "SPDX-FileCopyrightText": "2026 The Khronos Group Inc.",
+  "SPDX-License-Identifier": "CC-BY-4.0",
+  "schema_version": 1,
+  "date": "2026-10-28",
+  "source_base_commit": "980ac428c675b18034b4a4f11bfc06fc3090033a",
+  "source_state": "Current worktree bytes after the base commit. Primary CTS snapshots exactly match the current DLL; prior snapshots remain historical evidence.",
+  "complete_milestone": false,
+  "routing": "Native pass-through by default; explicit experimental software descriptor-sourced compute RQ, native AS BUILD, MM build/copy/size queries. Full mandatory goal remains active.",
+  "validation_environment": {
+    "VK_INSTANCE_LAYERS": "VK_LAYER_KHRONOS_validation",
+    "VK_LAYER_PATH": "C:/VulkanSDK/1.4.357.0/Bin",
+    "VK_LAYER_VALIDATE_SYNC": "1",
+    "VK_LOADER_LAYERS_DISABLE": "~implicit~",
+    "component_software_selector": "unset",
+    "public_loader": "Both explicit layer orders and software selector=1; exact CTS environments in immutable per-run summaries."
+  },
+  "results": {
+    "standalone_non_loader_ctest": {
+      "pass": 26,
+      "fail": 0,
+      "skip": 0,
+      "offline": 12,
+      "gpu": 14
+    },
+    "public_api_each_order": {
+      "checks": 54,
+      "fail": 0,
+      "validation_errors": 0,
+      "warnings": 0
+    },
+    "parent_omm_targets_build": "pass",
+    "parent_offline_ctest": {
+      "pass": 12,
+      "fail": 0
+    },
+    "parent_all_targets_build": "fails in existing unrelated layers on Windows min/max macro expansion",
+    "host_only_ctest": {
+      "pass": 3,
+      "fail": 0
+    },
+    "as_provenance_checks": 230,
+    "descriptor_checks": 1495,
+    "consumer_checks": 178,
+    "native_as_assertions": 1493,
+    "abandoned_record_reset_iterations": 100,
+    "submission_checks": 169,
+    "synchronization_checks": 317,
+    "native_property_assertions": 44,
+    "registry_checks": 77
+  },
+  "external_cts": {
+    "revision": "d18e4c68543103371715845cd914c71e5859963e",
+    "executable": {
+      "path": "D:/Codes/VK-GL-CTS/build/external/vulkancts/modules/vulkan/Release/deqp-vk.exe",
+      "bytes": 63076864,
+      "sha256": "8cf824c598181ef43ccd74d67acce89c9cc6fc47029a164440f0b0ea74af0380"
+    },
+    "primary_cases": "34 compute RQ plus two size-query cases; no RTP shader execution. Level12 cases launch 16777216 rays each.",
+    "runs": [
+      {
+        "run": "as-software-checkpoint-above",
+        "backend": "experimental-software",
+        "validation_order": "above",
+        "counts": {
+          "Pass": 36
+        },
+        "validation_errors": 0,
+        "library_sha256": "59b64d04dd3a21db728b8283329b4b3cf6b31edf8c9e5824f4f4fb7e1a5ab69c",
+        "primary_current_artifact": true
+      },
+      {
+        "run": "as-software-checkpoint-below",
+        "backend": "experimental-software",
+        "validation_order": "below",
+        "counts": {
+          "Pass": 36
+        },
+        "validation_errors": 0,
+        "library_sha256": "59b64d04dd3a21db728b8283329b4b3cf6b31edf8c9e5824f4f4fb7e1a5ab69c",
+        "primary_current_artifact": true
+      },
+      {
+        "run": "as-software-reviewed-above",
+        "backend": "experimental-software",
+        "validation_order": "above",
+        "counts": {
+          "Pass": 36
+        },
+        "validation_errors": 0,
+        "library_sha256": "a3d883f6e0d5b1e015ddcd74bb39df6b8db91d28f487d08663aa0347d7b78209",
+        "primary_current_artifact": false
+      },
+      {
+        "run": "as-software-reviewed-below",
+        "backend": "experimental-software",
+        "validation_order": "below",
+        "counts": {
+          "Pass": 36
+        },
+        "validation_errors": 0,
+        "library_sha256": "a3d883f6e0d5b1e015ddcd74bb39df6b8db91d28f487d08663aa0347d7b78209",
+        "primary_current_artifact": false
+      },
+      {
+        "run": "as-consumer-first",
+        "backend": "experimental-software",
+        "validation_order": "above",
+        "counts": {
+          "Crash": 3
+        },
+        "validation_errors": 0,
+        "library_sha256": "6611a832dd9c74f20b85d60ba551d1066874d7981936945a82cafd2926a4309e",
+        "primary_current_artifact": false
+      },
+      {
+        "run": "as-consumer-physical-dispatch",
+        "backend": "experimental-software",
+        "validation_order": "above",
+        "counts": {
+          "Pass": 2,
+          "Fail": 1
+        },
+        "validation_errors": 0,
+        "library_sha256": "4d74bedfe6e623416b822a9a8232010b57a8ca8c01a897fcf9fcbe19a1445b13",
+        "primary_current_artifact": false
+      },
+      {
+        "run": "as-consumer-properties",
+        "backend": "experimental-software",
+        "validation_order": "above",
+        "counts": {
+          "Pass": 3
+        },
+        "validation_errors": 0,
+        "library_sha256": "1c245b37c571ad419e2a60d65729c22cc998dc66d250abc936369346ef9a2aaa",
+        "primary_current_artifact": false
+      },
+      {
+        "run": "as-software-smoke-above",
+        "backend": "experimental-software",
+        "validation_order": "above",
+        "counts": {
+          "Pass": 8,
+          "Fail": 2
+        },
+        "validation_errors": 0,
+        "library_sha256": "1c245b37c571ad419e2a60d65729c22cc998dc66d250abc936369346ef9a2aaa",
+        "primary_current_artifact": false
+      },
+      {
+        "run": "as-software-smoke-below",
+        "backend": "experimental-software",
+        "validation_order": "below",
+        "counts": {
+          "Pass": 8,
+          "InternalError": 1,
+          "Fail": 1
+        },
+        "validation_errors": 1,
+        "library_sha256": "1c245b37c571ad419e2a60d65729c22cc998dc66d250abc936369346ef9a2aaa",
+        "primary_current_artifact": false
+      },
+      {
+        "run": "as-software-expanded-above",
+        "backend": "experimental-software",
+        "validation_order": "above",
+        "counts": {
+          "Pass": 36
+        },
+        "validation_errors": 0,
+        "library_sha256": "88ebc48262f5d9d6561bb44e3a8bac550457602cc8e70c77ac3c536c7bce9ec7",
+        "primary_current_artifact": false
+      },
+      {
+        "run": "as-software-expanded-below",
+        "backend": "experimental-software",
+        "validation_order": "below",
+        "counts": {
+          "Pass": 34,
+          "Crash": 2
+        },
+        "validation_errors": 0,
+        "library_sha256": "88ebc48262f5d9d6561bb44e3a8bac550457602cc8e70c77ac3c536c7bce9ec7",
+        "primary_current_artifact": false
+      },
+      {
+        "run": "as-software-level12-below-retry",
+        "backend": "experimental-software",
+        "validation_order": "below",
+        "counts": {
+          "Pass": 2
+        },
+        "validation_errors": 0,
+        "library_sha256": "a21212962c87031bbd1ac30698e6749bbd30956773bb3d3899db2d078499334d",
+        "primary_current_artifact": false
+      },
+      {
+        "run": "as-software-smoke-below-final",
+        "backend": "experimental-software",
+        "validation_order": "below",
+        "counts": {
+          "Pass": 8,
+          "Fail": 2
+        },
+        "validation_errors": 0,
+        "library_sha256": "a21212962c87031bbd1ac30698e6749bbd30956773bb3d3899db2d078499334d",
+        "primary_current_artifact": false
+      },
+      {
+        "run": "as-native-smoke-final",
+        "backend": "native",
+        "validation_order": "above",
+        "counts": {
+          "Pass": 8,
+          "Fail": 2
+        },
+        "validation_errors": 0,
+        "library_sha256": "a21212962c87031bbd1ac30698e6749bbd30956773bb3d3899db2d078499334d",
+        "primary_current_artifact": false
+      }
+    ],
+    "retained_environment_failure": "Expanded-below final two processes exited before initialization with 0xC000026B (STATUS_DLL_INIT_FAILED_LOGOFF); both passed fresh retry. Original failures preserved.",
+    "cts_compact_caveat": "The pinned copy.compact CTS case issues CLONE; not external COMPACT coverage."
+  },
+  "remaining_required": [
+    "integer AS runtime registry and late-created AS",
+    "graphics RQ and native RTP/SBT/recursion/callable/indirect integration",
+    "AS creation before buffer binding and descriptor update-before-bind identity resolution",
+    "external fence payload generation tracking",
+    "AS UPDATE/copy/serialization/relocation and generic/arrayOfPointers paths",
+    "MM public serialization execution and compatibility",
+    "query queues without timestamp/compute support where legal",
+    "complete feature/queue/event/lifetime/memory interaction and non-native-OMM qualification"
+  ],
+  "sources": [
+    {
+      "path": ".clang-format",
+      "bytes": 182,
+      "sha256": "0bd128e9a0b189d4b27fadb54fc7f31f34f278c4abd5d64e959b611637240a7e"
+    },
+    {
+      "path": "CMakeLists.txt",
+      "bytes": 3889,
+      "sha256": "3f2f59011f34f7463aaed6ef74e1d642b019d9d63ee93f6879ca8750ab953519"
+    },
+    {
+      "path": "layers/CMakeLists.txt",
+      "bytes": 6286,
+      "sha256": "f87937ec897fb568a71da2a3cf44bd5961a0d79961a877adc2c858a26617990f"
+    },
+    {
+      "path": "layers/raytracing/CMakeLists.txt",
+      "bytes": 396,
+      "sha256": "b1a69daf4f0b72128791e7d9f0b6b62f27f8d20250e9137de0663a461a943935"
+    },
+    {
+      "path": "layers/raytracing/omm/CMakeLists.txt",
+      "bytes": 22277,
+      "sha256": "daa73c56c517f704fcb5b6e4c870632ea13b12560ed81a65f30f1443f58c7405"
+    },
+    {
+      "path": "layers/raytracing/omm/embed_kernels.cmake",
+      "bytes": 656,
+      "sha256": "0f79412b3d11ab82058a43f511a2983af99d1468f44415804904aac07c8cdd9a"
+    },
+    {
+      "path": "layers/raytracing/omm/omm_acceleration.cpp",
+      "bytes": 33685,
+      "sha256": "c63590b251777ccb606b1cc546a9dee659cc0695c6b2e7bc59fc8844f1c4eec0"
+    },
+    {
+      "path": "layers/raytracing/omm/omm_acceleration.h",
+      "bytes": 4314,
+      "sha256": "26e0a56a0305bd6531d1197e1ac7e9acafaf94e240385d2f33a46d2a5c3d8157"
+    },
+    {
+      "path": "layers/raytracing/omm/omm_as_provenance.cpp",
+      "bytes": 31573,
+      "sha256": "eea52d8b80415c23b4253377fde0a400ba8ad125c6f56fbd1e411a50ff547377"
+    },
+    {
+      "path": "layers/raytracing/omm/omm_as_provenance.h",
+      "bytes": 1834,
+      "sha256": "0c9bed21d41ef2d9f78f47bf567b93ec839a5acd125707460b8255598661f988"
+    },
+    {
+      "path": "layers/raytracing/omm/omm_build.comp",
+      "bytes": 8735,
+      "sha256": "30f0a7093ac9bfbb275b9032172327e727619af12ee5a78cd5be6eab0d8aca12"
+    },
+    {
+      "path": "layers/raytracing/omm/omm_classifier.glsl",
+      "bytes": 7247,
+      "sha256": "692c9cb6a762e7278bed9066c4bade325e54429d3de6984ea780f3f184e06de1"
+    },
+    {
+      "path": "layers/raytracing/omm/omm_command_state.cpp",
+      "bytes": 3599,
+      "sha256": "8f5c68795b5a3a5c2a8d14a8ac627554da75f00e825cf6949f6b372877ed5bd9"
+    },
+    {
+      "path": "layers/raytracing/omm/omm_command_state.h",
+      "bytes": 2479,
+      "sha256": "c1b131056f930326e94bb64b760f12148a83a5e1e05a3844c445be131b20871a"
+    },
+    {
+      "path": "layers/raytracing/omm/omm_consumers.cpp",
+      "bytes": 31966,
+      "sha256": "ec4112600713879f99105a82d5696be20c2d7186cc00341a3670657808d17036"
+    },
+    {
+      "path": "layers/raytracing/omm/omm_consumers.h",
+      "bytes": 2641,
+      "sha256": "8510a2b9b598aa6b4b38369bba768fb6db11b06f9480eb71cc7280aa96ba0ccd"
+    },
+    {
+      "path": "layers/raytracing/omm/omm_context.glsl",
+      "bytes": 2898,
+      "sha256": "51dd452da42385570772e7456c5e11705d9137a9bcea08ef1597c1204494086c"
+    },
+    {
+      "path": "layers/raytracing/omm/omm_copy.comp",
+      "bytes": 2263,
+      "sha256": "f7a111390fa8f174cdf682a669eb6edba7265718a8da8615eb78bd3187d485ec"
+    },
+    {
+      "path": "layers/raytracing/omm/omm_descriptors.cpp",
+      "bytes": 29692,
+      "sha256": "649fa2a0b148d60a3353078cc1b27a2b17b7a8cddedb330e9ae047a92d1128e4"
+    },
+    {
+      "path": "layers/raytracing/omm/omm_descriptors.h",
+      "bytes": 5399,
+      "sha256": "b1ca00b63362ff4a310be2dc9df624620b4d1cec839ea5ea82bc33e90302d40e"
+    },
+    {
+      "path": "layers/raytracing/omm/omm_device.cpp",
+      "bytes": 23556,
+      "sha256": "143f268dd24552e8fecd309db4970539bfcb25a1cdd16ed181ba3f3f69f98311"
+    },
+    {
+      "path": "layers/raytracing/omm/omm_device.h",
+      "bytes": 3750,
+      "sha256": "2d89e8872b557cd5dfaaea14e97cbfa7c60f58574fff23efd5256b503ef7d477"
+    },
+    {
+      "path": "layers/raytracing/omm/omm_instances.comp",
+      "bytes": 2862,
+      "sha256": "b654eedd8b7605fa3f32e820062eb3c7beb53d3edc898c63b80e136fb3d656ea"
+    },
+    {
+      "path": "layers/raytracing/omm/omm_layer.cpp",
+      "bytes": 66529,
+      "sha256": "64916e05fec16bac4dffcda467ae40d89c2b723bba08bcdc180a67f0bb6d1dda"
+    },
+    {
+      "path": "layers/raytracing/omm/omm_layer.def",
+      "bytes": 216,
+      "sha256": "25147d8cf117f8d559270cfd725fd9ab917769d88157b3a81d204a8d56a88ac1"
+    },
+    {
+      "path": "layers/raytracing/omm/omm_layer_consumers.inc",
+      "bytes": 26157,
+      "sha256": "1765eca47da84a3c3839e5f4646171986e0d3d2e42554872a7c92a2a742f03ce"
+    },
+    {
+      "path": "layers/raytracing/omm/omm_lookup.glsl",
+      "bytes": 8733,
+      "sha256": "0c78323325873e3594a7e7f86bf13b9e104f792fec7e197e74676202f18076fd"
+    },
+    {
+      "path": "layers/raytracing/omm/omm_metadata.comp",
+      "bytes": 10599,
+      "sha256": "6a761f6dd9bf8ec73c9b6be2f7d7014d2c1d2cdadd941fc1a0b63a38a2277330"
+    },
+    {
+      "path": "layers/raytracing/omm/omm_metadata.cpp",
+      "bytes": 15788,
+      "sha256": "5ea7b0c58d8e35255993e27ec73ce05ba94d026215226c4f0e9e7740b70e7492"
+    },
+    {
+      "path": "layers/raytracing/omm/omm_metadata.h",
+      "bytes": 5208,
+      "sha256": "cd483e5f61b5caf4791b0f294db8d96a3b420c1f8709ec18f0591738b3a27e38"
+    },
+    {
+      "path": "layers/raytracing/omm/omm_opacity.cpp",
+      "bytes": 7863,
+      "sha256": "c305be71f81e92a76f1be4368691937ad41328c209cd6ac53f1ebee4d82b6d1e"
+    },
+    {
+      "path": "layers/raytracing/omm/omm_opacity.glsl",
+      "bytes": 1409,
+      "sha256": "730a10bb160fd3cbef92ecc1795ca5518bb4f3f6eef9a1cb862f8a6a773aab12"
+    },
+    {
+      "path": "layers/raytracing/omm/omm_opacity.h",
+      "bytes": 3599,
+      "sha256": "8ebe544b5baf09eec55d799e1c3883453da6bca6e870c7360d75a5d372ee301f"
+    },
+    {
+      "path": "layers/raytracing/omm/omm_properties.cpp",
+      "bytes": 26747,
+      "sha256": "2597e7d73f6c380a3b8af7717a5b25863ae6ad157add3bb0e80ef25bcc664363"
+    },
+    {
+      "path": "layers/raytracing/omm/omm_properties.h",
+      "bytes": 3117,
+      "sha256": "fe0070adb47a176ad3e3f2c1d83004edf0d38b3dfa9ea4be8f0a70337a38481e"
+    },
+    {
+      "path": "layers/raytracing/omm/omm_property.comp",
+      "bytes": 2607,
+      "sha256": "5e254ef9ff74708ff4c3a4f07082ab5b6a1111a7875c12916e88e3d4b290fa71"
+    },
+    {
+      "path": "layers/raytracing/omm/omm_publish.comp",
+      "bytes": 1347,
+      "sha256": "7e72c498cef0a42c5c05ce45e6f7fb82bd6c7df818bc4954db37ca62319856e7"
+    },
+    {
+      "path": "layers/raytracing/omm/omm_query_rewrite.cpp",
+      "bytes": 33505,
+      "sha256": "383584e066d3d09d44c5e383975b99099615a4505150900578ae9b3476f2e250"
+    },
+    {
+      "path": "layers/raytracing/omm/omm_query_rewrite.h",
+      "bytes": 3451,
+      "sha256": "48aaf1d4564514091a295329861b73a5ee3d7e39d840b64ef2f14922ce1ab1d6"
+    },
+    {
+      "path": "layers/raytracing/omm/omm_shader_compose.cpp",
+      "bytes": 19227,
+      "sha256": "588ce4d9c2b87214df5f5d4ee8eb2571f47c84bb63f80ebb17066ca582c83b51"
+    },
+    {
+      "path": "layers/raytracing/omm/omm_shader_compose.h",
+      "bytes": 2818,
+      "sha256": "effff27ee9f8eab650a55946a83c9c738c60d0bea8d1b4534d2e03e6a89c60de"
+    },
+    {
+      "path": "layers/raytracing/omm/omm_storage.cpp",
+      "bytes": 12151,
+      "sha256": "80ac0ae5fb70e7b64a0b4f8222599f7d3d0ab9295f4715bebc61ff094dfb502b"
+    },
+    {
+      "path": "layers/raytracing/omm/omm_storage.h",
+      "bytes": 2788,
+      "sha256": "7726e19868238919852fff50381672b541a8231ee4c3ac5eb917540663649c29"
+    },
+    {
+      "path": "layers/raytracing/omm/omm_submissions.cpp",
+      "bytes": 12602,
+      "sha256": "429946b3382b56c71ba08ee28048114afec8974303696124f8fd7bb43ab4ec19"
+    },
+    {
+      "path": "layers/raytracing/omm/omm_submissions.h",
+      "bytes": 2410,
+      "sha256": "a7a4c2dcc6ac66265ed689dccdd2639195c0d3b3768db2d2e8c78c2329c6bc05"
+    },
+    {
+      "path": "layers/raytracing/omm/omm_sync.cpp",
+      "bytes": 12254,
+      "sha256": "ad9960d9213369e6b6a7b9cc4f9a44db66f793f2747b70b7c76fd271eedb74f1"
+    },
+    {
+      "path": "layers/raytracing/omm/omm_sync.h",
+      "bytes": 2984,
+      "sha256": "02aa70386024bd49e624b34f88e17bb377d0a472181337e0addb43067a3170bc"
+    },
+    {
+      "path": "layers/raytracing/omm/tests/acceleration_probe.comp",
+      "bytes": 2010,
+      "sha256": "0f1a12ee645df4f2e209ccf311212a9c0e99ae5e93c993db1bab93851a82f9d7"
+    },
+    {
+      "path": "layers/raytracing/omm/tests/classifier_library.comp",
+      "bytes": 415,
+      "sha256": "694701d29b54ff4d3d4fedb8572a9dd5fe8d41a969dafd9bc282dcd9c49757b6"
+    },
+    {
+      "path": "layers/raytracing/omm/tests/classifier_query.comp",
+      "bytes": 2253,
+      "sha256": "b94bde7760b2a127bf5fe56ef9f0f300dd574ad9fba21d8f5b4827264e5dc13d"
+    },
+    {
+      "path": "layers/raytracing/omm/tests/composition_workgroup.comp",
+      "bytes": 374,
+      "sha256": "c45a38bd528d133269905d2d3c72407ef30cdaa1bb19f7e07b806bb13639553f"
+    },
+    {
+      "path": "layers/raytracing/omm/tests/gpu_build_generate.comp",
+      "bytes": 2231,
+      "sha256": "e5e5ead12d1ead327d45fff0ab1be57400c8a2ed615492017d6c64a8db7703be"
+    },
+    {
+      "path": "layers/raytracing/omm/tests/gpu_lookup.comp",
+      "bytes": 1634,
+      "sha256": "0e1d81cf6f7d0898036e9ec68f65b14d3ba4a7a0e6d3fc5913fb3a0ccc39bde2"
+    },
+    {
+      "path": "layers/raytracing/omm/tests/layer_state.comp",
+      "bytes": 881,
+      "sha256": "b06861a2cee5f5e886d1699f1c4371f3c341b51c898c609bb6ff156b39c6b006"
+    },
+    {
+      "path": "layers/raytracing/omm/tests/native_fixture.h",
+      "bytes": 15423,
+      "sha256": "09e7f69fe0d2fd3b05ceaa21fe967f10904dccec7c88b2b1a5dae54f02a2ed68"
+    },
+    {
+      "path": "layers/raytracing/omm/tests/native_pipeline.glsl",
+      "bytes": 1508,
+      "sha256": "9042756a56ecee494bf1c5591ffed74968712ad51260dab8cf74fd91c4453ead"
+    },
+    {
+      "path": "layers/raytracing/omm/tests/native_pipeline.rahit",
+      "bytes": 925,
+      "sha256": "b2fd9db654589d368b04b14295e4b26f53f33368055493c288722bf5abb359d3"
+    },
+    {
+      "path": "layers/raytracing/omm/tests/native_pipeline.rchit",
+      "bytes": 559,
+      "sha256": "e9332abf43e43658fd8f57db3ec67903af64ba6a782be3609fc681a294396c06"
+    },
+    {
+      "path": "layers/raytracing/omm/tests/native_pipeline.rgen",
+      "bytes": 1202,
+      "sha256": "8b857d76ad04d0e4295e6fa309af554f4951ecb39a78ae99adb04f2863d50ee9"
+    },
+    {
+      "path": "layers/raytracing/omm/tests/native_pipeline.rint",
+      "bytes": 740,
+      "sha256": "dbedc268e96bcc5a7b0c84e5ee90852736955c0286d5a9af620e038493e91d28"
+    },
+    {
+      "path": "layers/raytracing/omm/tests/native_pipeline.rmiss",
+      "bytes": 322,
+      "sha256": "5a19f40960a4775249ac38a9737167ee2042a7eb030d57256da64d90c4a657ea"
+    },
+    {
+      "path": "layers/raytracing/omm/tests/native_query.comp",
+      "bytes": 4790,
+      "sha256": "7049fcf510a35215d0cb72bf7e1651dd0bec097bdfcc0b2104a4b5e2c85e8db3"
+    },
+    {
+      "path": "layers/raytracing/omm/tests/query_state.comp",
+      "bytes": 1536,
+      "sha256": "d8015a1e3ce82ecb2abbfa7803c8f731f00c07ac4b6df10d6680355ac882f27f"
+    },
+    {
+      "path": "layers/raytracing/omm/tests/run_omm_cts.py",
+      "bytes": 6779,
+      "sha256": "4870e12dee17e87cc841fa2460dbf7ece0562d922228b093d3e2c25c768c5ece"
+    },
+    {
+      "path": "layers/raytracing/omm/tests/test_omm_acceleration.cpp",
+      "bytes": 26050,
+      "sha256": "882d07255d223abc66983b35775b0f76b409586a26e95a95fc97c37fad117a6e"
+    },
+    {
+      "path": "layers/raytracing/omm/tests/test_omm_as_provenance.cpp",
+      "bytes": 31404,
+      "sha256": "33865c8d324c37361d39537cdbc4c301e64acd35624ae52f307c408fe98a15cd"
+    },
+    {
+      "path": "layers/raytracing/omm/tests/test_omm_classifier.cpp",
+      "bytes": 28276,
+      "sha256": "bdcb10f0dca82d5d2b7eb6136e2796e5851f1aa82f580aa07dd03d06b50eec52"
+    },
+    {
+      "path": "layers/raytracing/omm/tests/test_omm_command_state.cpp",
+      "bytes": 17224,
+      "sha256": "7afafc329157b817dbc561e0381ae23902b7b16cbc6bd6f5ccedf33b27cc72fc"
+    },
+    {
+      "path": "layers/raytracing/omm/tests/test_omm_compose_workgroup.cpp",
+      "bytes": 5776,
+      "sha256": "c24587207bef6439ef1340299794778a25d5b969157dd88933bb1b458397d57f"
+    },
+    {
+      "path": "layers/raytracing/omm/tests/test_omm_consumers.cpp",
+      "bytes": 33310,
+      "sha256": "8b1cd3eb358f6e989fc5379418f85a94abf0fe889f57edad5a662ed8c9453f10"
+    },
+    {
+      "path": "layers/raytracing/omm/tests/test_omm_descriptors.cpp",
+      "bytes": 34000,
+      "sha256": "021a178cae1c687378470c61979cb71b6484d010a484bce378e0b942e2c27e16"
+    },
+    {
+      "path": "layers/raytracing/omm/tests/test_omm_device.cpp",
+      "bytes": 18863,
+      "sha256": "8ad5e4025abc8b9a80c08bca5961d4f2f3fc28702ac78061307a1428588326c6"
+    },
+    {
+      "path": "layers/raytracing/omm/tests/test_omm_gpu_build.cpp",
+      "bytes": 14702,
+      "sha256": "c0cf17967644d1855cc1e65362b8bff3edeabd5b198e52767efeb7f1797f31d4"
+    },
+    {
+      "path": "layers/raytracing/omm/tests/test_omm_gpu_lookup.cpp",
+      "bytes": 20192,
+      "sha256": "5e084c7c0fce35e093cd47577fcab0b8adf627d0279916bff2bd07540c88ef3c"
+    },
+    {
+      "path": "layers/raytracing/omm/tests/test_omm_layer.cpp",
+      "bytes": 25028,
+      "sha256": "fbd53855c5952df1b507b1c1d697cf11e62b06f3cd737dd3d33fc8d8f58ca76b"
+    },
+    {
+      "path": "layers/raytracing/omm/tests/test_omm_layer_registry.cpp",
+      "bytes": 11316,
+      "sha256": "955343dd4eea8b4327434c10b665c4aead30067970c090fa7643dcaf2891741e"
+    },
+    {
+      "path": "layers/raytracing/omm/tests/test_omm_metadata.cpp",
+      "bytes": 8337,
+      "sha256": "b716074e49e0292a0ae9e7a1895985633438bc4ffe6fced49c000b9eb72b42db"
+    },
+    {
+      "path": "layers/raytracing/omm/tests/test_omm_metadata_gpu.cpp",
+      "bytes": 18813,
+      "sha256": "7e953d8a4d94539dea4a3df958ed4d2cf6db42388ecf66a4076b2e2027a5d5b1"
+    },
+    {
+      "path": "layers/raytracing/omm/tests/test_omm_native_pipeline.cpp",
+      "bytes": 20865,
+      "sha256": "2b25d7e5808dd3434358285a0632fc9d00d1812c90ee2b693960ee46abaa9b05"
+    },
+    {
+      "path": "layers/raytracing/omm/tests/test_omm_native_query.cpp",
+      "bytes": 21254,
+      "sha256": "275e01be27be4069afc470e0a1080cc0aa0cf31946c8b67b07af74f2b0596f91"
+    },
+    {
+      "path": "layers/raytracing/omm/tests/test_omm_opacity.cpp",
+      "bytes": 16747,
+      "sha256": "17d1c2cf78249d2c54c1fd4c570f6b2269062e1fc4537f078ab13272170c84f5"
+    },
+    {
+      "path": "layers/raytracing/omm/tests/test_omm_properties.cpp",
+      "bytes": 20045,
+      "sha256": "d986b48feb4b4fde835554f40a832b8a2af730b358d32c023649a2efe695b0a2"
+    },
+    {
+      "path": "layers/raytracing/omm/tests/test_omm_query_graph.cpp",
+      "bytes": 25752,
+      "sha256": "5e6fbfb30394f11b91b8a35459fa710a0e9cc952f925ea6325d6380e9f68a179"
+    },
+    {
+      "path": "layers/raytracing/omm/tests/test_omm_query_proceed.cpp",
+      "bytes": 36117,
+      "sha256": "331233ac25db08e9948600b6fc8306d52c6d2296543639fddc4883cef6544cad"
+    },
+    {
+      "path": "layers/raytracing/omm/tests/test_omm_query_rewrite.cpp",
+      "bytes": 9281,
+      "sha256": "d171333a55e0232e4a78e8f33c740893394f2e8e9eb8884b298f5ca50f224ef4"
+    },
+    {
+      "path": "layers/raytracing/omm/tests/test_omm_shader_compose.cpp",
+      "bytes": 13827,
+      "sha256": "ce9aaeef296bf9a0c02ea8e3ba7f2482da605178e7593f1c4ffd6086127ab435"
+    },
+    {
+      "path": "layers/raytracing/omm/tests/test_omm_storage.cpp",
+      "bytes": 12932,
+      "sha256": "ff3e44748ca68df454d455a2e3c7771fe6c1eb5af4a1c060a77972820e9a1e4e"
+    },
+    {
+      "path": "layers/raytracing/omm/tests/test_omm_submissions.cpp",
+      "bytes": 25263,
+      "sha256": "fec2dc3060d2c70c4bad42e043bef4757bafd3e576b4b3ce90ce934006c9ea06"
+    },
+    {
+      "path": "layers/raytracing/omm/tests/test_omm_sync.cpp",
+      "bytes": 32089,
+      "sha256": "29c83c6cc8f5caec8069eb60f848dce1655aa07670b6844e850d6ce2cf2220f1"
+    }
+  ],
+  "artifacts": [
+    {
+      "path": "build-omm-integration/omm/acceleration_probe.comp.spv",
+      "bytes": 38768,
+      "sha256": "0e50c7f0366b4cb57333a454fabfc1063bd408b123011537d8b43d0fb95c429f"
+    },
+    {
+      "path": "build-omm-integration/omm/classifier_library.comp.spv",
+      "bytes": 49880,
+      "sha256": "528e133855822329b145035fd00cf262c1675ce637dc208c38ad63915d381552"
+    },
+    {
+      "path": "build-omm-integration/omm/classifier_query.comp.spv",
+      "bytes": 4620,
+      "sha256": "25f661e9913561da3cca030be348f8faef9e034ac8c8361c1baea3e98aae49e2"
+    },
+    {
+      "path": "build-omm-integration/omm/composition_workgroup.comp.spv",
+      "bytes": 804,
+      "sha256": "be3ff7ed66cd0fc00fc2b934e81c08be9790ca189e020f84a86225c3e5b870b4"
+    },
+    {
+      "path": "build-omm-integration/omm/consumer_application.comp.spv",
+      "bytes": 1560,
+      "sha256": "9f42fd781012df418598e08253fe5c2a22ee5a2452b212d79a54e8adda98729b"
+    },
+    {
+      "path": "build-omm-integration/omm/descriptor_provider.comp.spv",
+      "bytes": 11248,
+      "sha256": "0912cd882bf9875f6b5a047c1ee830513609ae023aef7059b09bf13549d87456"
+    },
+    {
+      "path": "build-omm-integration/omm/gpu_build_generate.comp.spv",
+      "bytes": 7096,
+      "sha256": "ae4c2c0800c9d830589fb4e7a2cec33ff25aefa4e15300885d8ba3ef6989367a"
+    },
+    {
+      "path": "build-omm-integration/omm/gpu_lookup.comp.spv",
+      "bytes": 25588,
+      "sha256": "0a1966ce50d637f5dc4fa4ec0206305de817bd3138b5ec3a363de9994ff91d88"
+    },
+    {
+      "path": "build-omm-integration/omm/layer_state.comp.spv",
+      "bytes": 1620,
+      "sha256": "5b34184accbfcb334bb8a2f5bf17334394f44c8a443e2845240543eb1d8ffd8c"
+    },
+    {
+      "path": "build-omm-integration/omm/layers/VkLayer_VEL_opacity_micromap.dll",
+      "bytes": 2866688,
+      "sha256": "59b64d04dd3a21db728b8283329b4b3cf6b31edf8c9e5824f4f4fb7e1a5ab69c"
+    },
+    {
+      "path": "build-omm-integration/omm/layers/VkLayer_VEL_opacity_micromap.json",
+      "bytes": 326,
+      "sha256": "b3896749f46eb8bb445c92ee7bbcd4ce1dc26ff839a945cb155c80411cb842b0"
+    },
+    {
+      "path": "build-omm-integration/omm/native_pipeline.rahit.spv",
+      "bytes": 7500,
+      "sha256": "b683ac6818f5df09745f970d5866d8511bfceed26034dcc63c2619c0dbc61446"
+    },
+    {
+      "path": "build-omm-integration/omm/native_pipeline.rchit.spv",
+      "bytes": 3188,
+      "sha256": "07e506d868af14d1374de9dd7b651a979eef53f52f0cf86d2ac5131a95974074"
+    },
+    {
+      "path": "build-omm-integration/omm/native_pipeline.rgen.spv",
+      "bytes": 4868,
+      "sha256": "63e4a79b5ee0c1273cf8a37839d1ddca343b5ea4e62393e2945f55c42e62f68f"
+    },
+    {
+      "path": "build-omm-integration/omm/native_pipeline.rint.spv",
+      "bytes": 6680,
+      "sha256": "1f603a28f1abe8c1ef1aabe7d89d7b11f1f093f0d267829b7782a8a73fd54a6c"
+    },
+    {
+      "path": "build-omm-integration/omm/native_pipeline.rmiss.spv",
+      "bytes": 2488,
+      "sha256": "2bb2f810856520304b9ca7216ee5d98baf566609c06c624b7bda9b80128d1e86"
+    },
+    {
+      "path": "build-omm-integration/omm/native_query.comp.spv",
+      "bytes": 32028,
+      "sha256": "a2ea7e40890ad0900d24620241c19500f0d32db391a7e76b1f747637b61cbf55"
+    },
+    {
+      "path": "build-omm-integration/omm/omm_build.comp.spv",
+      "bytes": 25400,
+      "sha256": "ead0fb559c825929f2e07183178079993f7af81a1b5155433fa4e4a5b9be7f02"
+    },
+    {
+      "path": "build-omm-integration/omm/omm_copy.comp.spv",
+      "bytes": 7608,
+      "sha256": "a5e1c2eada0e974567ac54ea97576584ddd689257f5ef950e29489253755b61a"
+    },
+    {
+      "path": "build-omm-integration/omm/omm_instances.comp.spv",
+      "bytes": 11508,
+      "sha256": "71ebf1adcc32bfa7982448359748badb5f85baeaa09a6dc80e166a69552c6a9b"
+    },
+    {
+      "path": "build-omm-integration/omm/omm_kernels.h",
+      "bytes": 483435,
+      "sha256": "80992baf58126cab67df1e2898450f01337cf52b76618dc491b6c42b3c29ccf0"
+    },
+    {
+      "path": "build-omm-integration/omm/omm_metadata.comp.spv",
+      "bytes": 36708,
+      "sha256": "1ce049e1158a19c411c9d57d570a98e2011727ec5537f668dd4bd2c34961d74b"
+    },
+    {
+      "path": "build-omm-integration/omm/omm_property.comp.spv",
+      "bytes": 11044,
+      "sha256": "d1fcf53ba40d816df421357beb3aae9dc0c5fe982236b51dcfdf3245931c12b6"
+    },
+    {
+      "path": "build-omm-integration/omm/omm_publish.comp.spv",
+      "bytes": 6456,
+      "sha256": "0cc800d81664fa0445e678648062e719bfa3b4e29f24437c2aa8180ff4d8e097"
+    },
+    {
+      "path": "build-omm-integration/omm/query_state.comp.spv",
+      "bytes": 2736,
+      "sha256": "172469229e888d4b429d0f01cde2e57f4591983031b3187690f833eb4061c0a2"
+    },
+    {
+      "path": "build-omm-integration/omm/test_omm_acceleration.exe",
+      "bytes": 133120,
+      "sha256": "6d639fcf433e2187ab4f32fd46f51aa79485626e8ecef3087f759ffaccadceb5"
+    },
+    {
+      "path": "build-omm-integration/omm/test_omm_as_provenance.exe",
+      "bytes": 2028032,
+      "sha256": "97729b934d638ad6013fc40cd628be74c188c13c303f4ee5772c49d5ba489c99"
+    },
+    {
+      "path": "build-omm-integration/omm/test_omm_classifier.exe",
+      "bytes": 2244096,
+      "sha256": "c7f9992d55e0a1d04a30d6478fcf21e9baa9daf25746e108504ec227780b1523"
+    },
+    {
+      "path": "build-omm-integration/omm/test_omm_command_state.exe",
+      "bytes": 37888,
+      "sha256": "4a3eb41792c338a1c076471e6cd5453b6711bb0cfd547a3218f24dcf9b613991"
+    },
+    {
+      "path": "build-omm-integration/omm/test_omm_compose_workgroup.exe",
+      "bytes": 2062336,
+      "sha256": "59f5d1d828e11a942f02b60ae9c08467598c01ad37c5c8d9e77a4fc19100552b"
+    },
+    {
+      "path": "build-omm-integration/omm/test_omm_consumers.exe",
+      "bytes": 2584576,
+      "sha256": "8d69e0aae0cca339f4e12f8672516bca168dfb6bc3df9904ebf506e5b452002b"
+    },
+    {
+      "path": "build-omm-integration/omm/test_omm_descriptors.exe",
+      "bytes": 113152,
+      "sha256": "cbe4e20cb4f7de54f8443e30ff875e381d8c18df0673f4df07fc4ac8d9c43992"
+    },
+    {
+      "path": "build-omm-integration/omm/test_omm_device.exe",
+      "bytes": 80384,
+      "sha256": "a168e01b1116b058a3e57c2465ed96ec2fb308c12a3b34efbfbc4587939313da"
+    },
+    {
+      "path": "build-omm-integration/omm/test_omm_gpu_build.exe",
+      "bytes": 53248,
+      "sha256": "faca5e7488cc89183d032cbb096f6616502a0de57f9a202bd54ece6bb7cad6d6"
+    },
+    {
+      "path": "build-omm-integration/omm/test_omm_gpu_lookup.exe",
+      "bytes": 60928,
+      "sha256": "0012eafa90cd7fcaab7ca7e95650941be6c84b04273aa30155bc2c6dcc78f26c"
+    },
+    {
+      "path": "build-omm-integration/omm/test_omm_layer.exe",
+      "bytes": 61952,
+      "sha256": "ca551f359a51f9d0e8fa1723f31de56eea55d3866ffa51836bcfd72e5e632dcd"
+    },
+    {
+      "path": "build-omm-integration/omm/test_omm_layer_registry.exe",
+      "bytes": 2875904,
+      "sha256": "9e556eafbdbda21962d548ce23604005f213d0a672ec27eb001307122476702b"
+    },
+    {
+      "path": "build-omm-integration/omm/test_omm_metadata.exe",
+      "bytes": 37888,
+      "sha256": "34689b382050af900320d6c9d5d79811efc0fddd06f4208079da9ae874b8c118"
+    },
+    {
+      "path": "build-omm-integration/omm/test_omm_metadata_gpu.exe",
+      "bytes": 79872,
+      "sha256": "8d058524103b6b9361e151d4d0fee37bf597bfaf7fc8cd5a51fb3ae10c67a8fa"
+    },
+    {
+      "path": "build-omm-integration/omm/test_omm_native_pipeline.exe",
+      "bytes": 51200,
+      "sha256": "1e0e422f1c8b7fe58226c8f16351d6521bcdad8f2c007e297e1b1c6b4272547b"
+    },
+    {
+      "path": "build-omm-integration/omm/test_omm_native_query.exe",
+      "bytes": 54272,
+      "sha256": "6d12b67046f245a15970b5d02d7a9f62ad713c2cfa63d90984b081538ebccdc4"
+    },
+    {
+      "path": "build-omm-integration/omm/test_omm_opacity.exe",
+      "bytes": 25088,
+      "sha256": "0207c4b120c6e871917a87eda02c8ae93edd67bdb6a035bf5fed4c0b2e6f393a"
+    },
+    {
+      "path": "build-omm-integration/omm/test_omm_properties.exe",
+      "bytes": 93184,
+      "sha256": "255b887e7b3fc4bb12ff0f6631ce7808b405df1026c346f6e6910418d89b598a"
+    },
+    {
+      "path": "build-omm-integration/omm/test_omm_query_graph.exe",
+      "bytes": 1951744,
+      "sha256": "26dcbb9dc69b72a4a02e2e0d600be32e880e0070ed22ccbdcf6a068cd18e6147"
+    },
+    {
+      "path": "build-omm-integration/omm/test_omm_query_proceed.exe",
+      "bytes": 1943552,
+      "sha256": "5ec71de80490d59b05d1eea2dbaa22deada491d687ef6834e4db339c2e6b11c7"
+    },
+    {
+      "path": "build-omm-integration/omm/test_omm_query_rewrite.exe",
+      "bytes": 1856512,
+      "sha256": "3f7ed3caf32f57e156d25867ac7bce5811515425e1e71e8ef03f2a9b279d48f7"
+    },
+    {
+      "path": "build-omm-integration/omm/test_omm_shader_compose.exe",
+      "bytes": 2155008,
+      "sha256": "0f08af20c275321e6d05a27a0d5ee0c3c1ece09fcd5c3f722b78171f745db123"
+    },
+    {
+      "path": "build-omm-integration/omm/test_omm_storage.exe",
+      "bytes": 35840,
+      "sha256": "01821fa5cdc401e458b0f548cc5841348f312d582e8fe5a3e789e31fcb66a7df"
+    },
+    {
+      "path": "build-omm-integration/omm/test_omm_submissions.exe",
+      "bytes": 95232,
+      "sha256": "e98317b2943fa6ebb569c7274ff2b6eea1cdd65b5deb126d5b9f5edad3dca6f3"
+    },
+    {
+      "path": "build-omm-integration/omm/test_omm_sync.exe",
+      "bytes": 45056,
+      "sha256": "6c12abb24208e14b1a584d751d92f4c83536518c6cdfa7b999d78ef13e453614"
+    }
+  ],
+  "evidence": [
+    {
+      "path": "build-omm-cts-evidence/as-consumer-first/0001-927fdc40d4a8.qpa",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-consumer-first/0001-927fdc40d4a8.stdout.txt",
+      "bytes": 161,
+      "sha256": "0b282174eb5dacb9a73e882c4277dc6abf167599f99edeee27d926e7b8fa6342"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-consumer-first/0002-9607468f29e7.qpa",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-consumer-first/0002-9607468f29e7.stdout.txt",
+      "bytes": 161,
+      "sha256": "0b282174eb5dacb9a73e882c4277dc6abf167599f99edeee27d926e7b8fa6342"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-consumer-first/0003-c585888dc0ff.qpa",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-consumer-first/0003-c585888dc0ff.stdout.txt",
+      "bytes": 161,
+      "sha256": "0b282174eb5dacb9a73e882c4277dc6abf167599f99edeee27d926e7b8fa6342"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-consumer-first/layer_snapshot/VkLayer_VEL_opacity_micromap.dll",
+      "bytes": 2822144,
+      "sha256": "6611a832dd9c74f20b85d60ba551d1066874d7981936945a82cafd2926a4309e"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-consumer-first/layer_snapshot/VkLayer_VEL_opacity_micromap.json",
+      "bytes": 468,
+      "sha256": "ed89cc2665d848c52c714f69d3a347cf6adf596b3c324190f24aa8c726dc214c"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-consumer-first/summary.json",
+      "bytes": 5719,
+      "sha256": "6732774cbbd834288ed79f11189b1213a1a7033a6b975803f45ea6b73c1328f6"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-consumer-physical-dispatch/0001-927fdc40d4a8.qpa",
+      "bytes": 9209,
+      "sha256": "ee67dbd7acdd1c726f9393693292881796b1fe3143b3504250b165b3155a42c7"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-consumer-physical-dispatch/0001-927fdc40d4a8.stdout.txt",
+      "bytes": 582,
+      "sha256": "a68f90613b5c8cf24dc691464f118fd7bbcdab357810b6dd13ee67b2bf41010a"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-consumer-physical-dispatch/0002-9607468f29e7.qpa",
+      "bytes": 9299,
+      "sha256": "5a7596c99a79be0e346b0b11c4b872034c5f6cd46f1d47c3f5e8088b72305d9f"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-consumer-physical-dispatch/0002-9607468f29e7.stdout.txt",
+      "bytes": 612,
+      "sha256": "fd70eeda8859dec12220f137d2b6c346f665b0dc721d1277d9db421c0fc94e43"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-consumer-physical-dispatch/0003-c585888dc0ff.qpa",
+      "bytes": 4215,
+      "sha256": "a1115c5c14967a1a952dcbc4e760a7e5db883e7d82925d2743c81afb81d14040"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-consumer-physical-dispatch/0003-c585888dc0ff.stdout.txt",
+      "bytes": 704,
+      "sha256": "561dcbbbbc3bd2807bcf59ed7fea5477a05c1ea4b43f80e828bcb76b9441e15c"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-consumer-physical-dispatch/layer_snapshot/VkLayer_VEL_opacity_micromap.dll",
+      "bytes": 2822144,
+      "sha256": "4d74bedfe6e623416b822a9a8232010b57a8ca8c01a897fcf9fcbe19a1445b13"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-consumer-physical-dispatch/layer_snapshot/VkLayer_VEL_opacity_micromap.json",
+      "bytes": 480,
+      "sha256": "00e0dc535b021e93b4564bdb5f0faf3e39a6a7632bc7699798b5f88bcc45d539"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-consumer-physical-dispatch/summary.json",
+      "bytes": 5758,
+      "sha256": "d696fed72a58712910503ace923ca884a8d52a51fc7c3c9cbcbaafceeca82957"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-consumer-properties/0001-927fdc40d4a8.qpa",
+      "bytes": 9202,
+      "sha256": "66f63341c3643e7522509bd14e94286b7f93a7341309791e0dd351c8dfc3abd3"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-consumer-properties/0001-927fdc40d4a8.stdout.txt",
+      "bytes": 575,
+      "sha256": "d1c12bd98f4e42f474216654ea79955e64c5b475125256a9dfd2c7f85f3331d3"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-consumer-properties/0002-9607468f29e7.qpa",
+      "bytes": 9293,
+      "sha256": "a6fea5221f4f22606f3eda78018998f05efadc84c4908b7b576addb0334669f9"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-consumer-properties/0002-9607468f29e7.stdout.txt",
+      "bytes": 605,
+      "sha256": "7b12ae18ba9cd1f3354a024851918c6fa44e2bd75dce5d43b2bc9737bc5134c6"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-consumer-properties/0003-c585888dc0ff.qpa",
+      "bytes": 3959,
+      "sha256": "468e5ecd213e327e9cd604d16654ed2f8f6be0c02b6262d1dc273d08019baa5d"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-consumer-properties/0003-c585888dc0ff.stdout.txt",
+      "bytes": 586,
+      "sha256": "459a7b489872e9724d767a4c30906ee5d04f1f90f9e4bd38f71fa8d415f7514c"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-consumer-properties/layer_snapshot/VkLayer_VEL_opacity_micromap.dll",
+      "bytes": 2865664,
+      "sha256": "1c245b37c571ad419e2a60d65729c22cc998dc66d250abc936369346ef9a2aaa"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-consumer-properties/layer_snapshot/VkLayer_VEL_opacity_micromap.json",
+      "bytes": 473,
+      "sha256": "52b264055f3fda90ae6753605ee1076db21b57e4302e4cbaaa54718881c68b7c"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-consumer-properties/summary.json",
+      "bytes": 5714,
+      "sha256": "184f29d3533fcaacd43aea938bb9249226287d670642abe7a9ce5a7860402076"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-native-smoke-final/0001-9607468f29e7.qpa",
+      "bytes": 9291,
+      "sha256": "640f8a1831af7bf38ef54d42a34ff164f66ed3e087c3cafa12a3982057583e93"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-native-smoke-final/0001-9607468f29e7.stdout.txt",
+      "bytes": 604,
+      "sha256": "15ff936e95dc334b2d414681e06f2bd67a155422db70cdaddbc821f22b2c204a"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-native-smoke-final/0002-62255fc217a3.qpa",
+      "bytes": 9333,
+      "sha256": "a9da06c89f95ff5dfb54530cdd503f915cec857c9651842681fa004b41e49254"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-native-smoke-final/0002-62255fc217a3.stdout.txt",
+      "bytes": 618,
+      "sha256": "cd3fd8a083785b04b2b19e54e7beb0c88cbac2e09a0cd7f71ecf9ad7222338c2"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-native-smoke-final/0003-fb835ab0dd03.qpa",
+      "bytes": 9251,
+      "sha256": "3f68cf9fdd824108688534e40e810ed5cc662be167cacf1405ea5345277accd8"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-native-smoke-final/0003-fb835ab0dd03.stdout.txt",
+      "bytes": 598,
+      "sha256": "6d8712f24d5dfc4550df99176b274e55ce89263eb3d75f34f5842f7cb056689d"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-native-smoke-final/0004-d806801a74c9.qpa",
+      "bytes": 9218,
+      "sha256": "28082bdfce72be0d2646b7805ad887cc6c510d85a0e5ed379108f119a0dafd6d"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-native-smoke-final/0004-d806801a74c9.stdout.txt",
+      "bytes": 587,
+      "sha256": "ff4e1e3f255dbd879db23b1848f0689f0f01dd253a38a22f65cae6da6aca753f"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-native-smoke-final/0005-927fdc40d4a8.qpa",
+      "bytes": 9201,
+      "sha256": "d781338b525f4985bbc092e137bbd87b9819f2801a0b1ab8abbac2fdb268d0fe"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-native-smoke-final/0005-927fdc40d4a8.stdout.txt",
+      "bytes": 574,
+      "sha256": "0d9756592b413286adeedabf4b144b1c1aa4559b768e3ba674c4214e5b86043d"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-native-smoke-final/0006-38865ac57c20.qpa",
+      "bytes": 9207,
+      "sha256": "4b5b08f55a824e97fc3a309fd8281892da4fb173b25841bd1dfe9d05c1fd5a78"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-native-smoke-final/0006-38865ac57c20.stdout.txt",
+      "bytes": 576,
+      "sha256": "0c8165e103f4c7bae92f948d979ae431dbad64a0a6b6575ed041f833feba6142"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-native-smoke-final/0007-00666b7486be.qpa",
+      "bytes": 14677,
+      "sha256": "4a99eb0b42020058ac3036ac6089bf1967cbf06f0fbc7c8730a5e13b9b06b8e9"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-native-smoke-final/0007-00666b7486be.stdout.txt",
+      "bytes": 603,
+      "sha256": "5539d5da93de74f81c7fe37396627731d88d3377ebaaa7d948db6d961eb3e97e"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-native-smoke-final/0008-2c43918a1ba0.qpa",
+      "bytes": 14533,
+      "sha256": "6c9e308cc0a39cabfc5d817c520c31cc72772d05c6ee0daceca2d437ab1b361e"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-native-smoke-final/0008-2c43918a1ba0.stdout.txt",
+      "bytes": 593,
+      "sha256": "bb46e4f7c6cd1591a947a4f66dca07ade97202e27e94542309e19daedd9e2b88"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-native-smoke-final/0009-c585888dc0ff.qpa",
+      "bytes": 4183,
+      "sha256": "28c703e05924816d2da1fb22093b03e0e6787a401b920b3dd2472f922b6d8ba4"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-native-smoke-final/0009-c585888dc0ff.stdout.txt",
+      "bytes": 684,
+      "sha256": "92b5e90d97d2981e1bd06a1a27e7ae4460a9f709f27a16a7a348d15bdafa1ac6"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-native-smoke-final/0010-55cd57923a93.qpa",
+      "bytes": 4195,
+      "sha256": "7cc5d68eb4a344dcd604f8c6b56be1cb5f63757f307e90d3d68e0464f1f04f3e"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-native-smoke-final/0010-55cd57923a93.stdout.txt",
+      "bytes": 688,
+      "sha256": "c71d7addc686006a92628875c296171d22c68b3e4ecb63c3b18e93850a26ba6a"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-native-smoke-final/layer_snapshot/VkLayer_VEL_opacity_micromap.dll",
+      "bytes": 2866688,
+      "sha256": "a21212962c87031bbd1ac30698e6749bbd30956773bb3d3899db2d078499334d"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-native-smoke-final/layer_snapshot/VkLayer_VEL_opacity_micromap.json",
+      "bytes": 472,
+      "sha256": "dd83b8b196e4f77564009c01c96667adeb1c6bef813f57e1085484be791eee6f"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-native-smoke-final/summary.json",
+      "bytes": 14959,
+      "sha256": "8c87102e82714d639338c8ec7da271fe36aa17188a7f692374a1997be698c909"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-checkpoint-above/0001-9607468f29e7.qpa",
+      "bytes": 9300,
+      "sha256": "e904c3d945f96157714fad8d7ae4fcdd4fd67c012fb1dcfb1520a8247bed84f5"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-checkpoint-above/0001-9607468f29e7.stdout.txt",
+      "bytes": 611,
+      "sha256": "8f547b15cd724bc621c06dc5a3e14b94fcc91ea3b509c89fde840fca4bb4f6d0"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-checkpoint-above/0002-ef3c1805a21b.qpa",
+      "bytes": 9299,
+      "sha256": "4ef743b24eb5b50000a2b270a326e6682b793e67c0cc9e6f68fb87c1d8d790c5"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-checkpoint-above/0002-ef3c1805a21b.stdout.txt",
+      "bytes": 611,
+      "sha256": "e800e2666617755a3b72c33dcf8ec82672b2430a9ac563d6bf404df82e3e6cf1"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-checkpoint-above/0003-9e36a3700d40.qpa",
+      "bytes": 9301,
+      "sha256": "7c7c6a6050cc0b9dc03c002ea0c60224e3b1b565171815368ea623ef98c81253"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-checkpoint-above/0003-9e36a3700d40.stdout.txt",
+      "bytes": 611,
+      "sha256": "ecf8e050c0cc32b485dfa7894977bb61e3b7e8ee9ea5f65933d448911f94b283"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-checkpoint-above/0004-6e45d7adeec5.qpa",
+      "bytes": 9302,
+      "sha256": "fc7de22d2b5dac7b8edf79a6105077e84088d92a6268a231adfd5fca122d4d6b"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-checkpoint-above/0004-6e45d7adeec5.stdout.txt",
+      "bytes": 611,
+      "sha256": "20283ddc73367e08b8aca01d09309733efbbd4aeb6a17ee67943fa0b218732a2"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-checkpoint-above/0005-ab1734795361.qpa",
+      "bytes": 9306,
+      "sha256": "d1d9c78e7b236c86db00d26c5405a161deb72a7bc4833fc242738afe75dfd076"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-checkpoint-above/0005-ab1734795361.stdout.txt",
+      "bytes": 611,
+      "sha256": "1933c6809c1d05a9fc9272ab3a7c93c4b1e7b3b96158a5322af9376cf7c0f812"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-checkpoint-above/0006-eab60ec8b517.qpa",
+      "bytes": 9305,
+      "sha256": "be854055093b3ce880bbda57ef10da94cdc3470626dc311fe97332f10f247276"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-checkpoint-above/0006-eab60ec8b517.stdout.txt",
+      "bytes": 611,
+      "sha256": "ca659cc98b9fa53f0df4aaded89be74fff762989665eeac85dbc33fff92a7706"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-checkpoint-above/0007-642096f19073.qpa",
+      "bytes": 9308,
+      "sha256": "0d77861fa8fca47405ff56ba03846c5c5706511d092da35c0969fd9295aff0f9"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-checkpoint-above/0007-642096f19073.stdout.txt",
+      "bytes": 611,
+      "sha256": "788a8a57f31ce94d918b34ba3ec19fa5998d8c88ab7505bc7ef422cc0efb98f8"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-checkpoint-above/0008-c52a9ad13f6b.qpa",
+      "bytes": 9308,
+      "sha256": "1e571b3905c86b95abfa1855721128b813de0fcae1344193dd8dd5fecaa0b4a6"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-checkpoint-above/0008-c52a9ad13f6b.stdout.txt",
+      "bytes": 611,
+      "sha256": "5a142cd2494e311278eee5c7688811df56e7d62e2cc519d308459d81e9c6444d"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-checkpoint-above/0009-d7d288778137.qpa",
+      "bytes": 9343,
+      "sha256": "4b1573fd90ef540b0ee308182a4b820efa5ad90f7ab80156396d9a2e483c0f45"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-checkpoint-above/0009-d7d288778137.stdout.txt",
+      "bytes": 625,
+      "sha256": "de8697a8d78fbb75aa15145dd36ffb52be7c542a5f93ed54b071d4459a24d77f"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-checkpoint-above/0010-105ee63a90de.qpa",
+      "bytes": 9344,
+      "sha256": "c2f61b1f05e9424563f598527cdb637255785c9768d5900fbddd4396795fe2a7"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-checkpoint-above/0010-105ee63a90de.stdout.txt",
+      "bytes": 625,
+      "sha256": "4e648db9569a2aca912ea8004984d9e2f283520a29aa75ec0f65ad2a9d340f03"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-checkpoint-above/0011-7e017d3c69a0.qpa",
+      "bytes": 9340,
+      "sha256": "51534fb3c7f66f335ae2e6879c228f55c48cc9ef1abfdc282040f9cb19c17c22"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-checkpoint-above/0011-7e017d3c69a0.stdout.txt",
+      "bytes": 624,
+      "sha256": "a61259c0256526c7eedafd1d0b054b4f3a49721a5535a03c5d42b0c5a2d41ee1"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-checkpoint-above/0012-64d0eb066fd7.qpa",
+      "bytes": 9341,
+      "sha256": "37887cccc50028bc24a618951aae6f60b0a6e7346f94521ca1f8c10b3e75448e"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-checkpoint-above/0012-64d0eb066fd7.stdout.txt",
+      "bytes": 624,
+      "sha256": "fedf0734f2e8063320e33488d54d64aeee3fdca069f5a031a7078e1b569b0c60"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-checkpoint-above/0013-7c6b862e2377.qpa",
+      "bytes": 9343,
+      "sha256": "a64ec269f184509387d2970df63b8e9d7d2efa80794e460f96e3a448f32b9db3"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-checkpoint-above/0013-7c6b862e2377.stdout.txt",
+      "bytes": 624,
+      "sha256": "f49970d6ddc8376d84de0779d2061472bce804abfcf844175b449b5cdb2d8368"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-checkpoint-above/0014-d0bb254db8f7.qpa",
+      "bytes": 9342,
+      "sha256": "8f4d07e79d048b24bc7e1e77e2e48f92819d9f27dc7af127256d80296bdb5312"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-checkpoint-above/0014-d0bb254db8f7.stdout.txt",
+      "bytes": 624,
+      "sha256": "724b0ad6166130728d2497f7d5a51cbd25e152cdec616d905f99363eb2bd21f0"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-checkpoint-above/0015-80384b400c98.qpa",
+      "bytes": 9376,
+      "sha256": "1ab51ca09397aee87c52c20c9ca94fee147e82a1b7d8cfc80820e7b1250092f4"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-checkpoint-above/0015-80384b400c98.stdout.txt",
+      "bytes": 636,
+      "sha256": "574023aefccb2519b27771eed8bd290f1d5c049531ea366579999b47df165706"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-checkpoint-above/0016-2693feed1f83.qpa",
+      "bytes": 9377,
+      "sha256": "af2138d80d64762eb4a41773becfebcbe52e910794039e9c929e880cf3060867"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-checkpoint-above/0016-2693feed1f83.stdout.txt",
+      "bytes": 636,
+      "sha256": "0e537495ffe8599b64bbce3552ac36fe813100b94df061632169e7abc7644d57"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-checkpoint-above/0017-8a5ce118de5b.qpa",
+      "bytes": 9344,
+      "sha256": "24cd0bc44686112de42c5daf494b597f15acdd14ccac62181c451a29c374a049"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-checkpoint-above/0017-8a5ce118de5b.stdout.txt",
+      "bytes": 625,
+      "sha256": "e41a4ad84d9741beb346fb200a265d2a234bf5fa0b403021fcfceba8bd8aa5df"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-checkpoint-above/0018-7732f7f470e6.qpa",
+      "bytes": 9343,
+      "sha256": "1d63d7c19ef9b71e517762ff411abac81b3be1a3ec432b56850ff445232889ea"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-checkpoint-above/0018-7732f7f470e6.stdout.txt",
+      "bytes": 625,
+      "sha256": "9700080bdff046286991fb26bc68bb6968bc728d6348f9a74618d7f93f546132"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-checkpoint-above/0019-4d7804f667ac.qpa",
+      "bytes": 9478,
+      "sha256": "4e87c7138acb579c5085321bab2a6c6176930c9190a016d5768db39febbca57c"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-checkpoint-above/0019-4d7804f667ac.stdout.txt",
+      "bytes": 625,
+      "sha256": "91f23bbed7122fcf874bfd77d071690e4b537900c6d838cf9ffbe052dfa8aa33"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-checkpoint-above/0020-ca17c263ae5d.qpa",
+      "bytes": 9477,
+      "sha256": "91773218b71b218fb76dac9f3ffe1e6868cadb52f7ac7e741697ffb37da25cf2"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-checkpoint-above/0020-ca17c263ae5d.stdout.txt",
+      "bytes": 625,
+      "sha256": "fb4b3a39d0b1824b1f2b1043aafc05172170c40ffe3c65c93cc1fd1b67d09f24"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-checkpoint-above/0021-d73ad93cb55a.qpa",
+      "bytes": 9265,
+      "sha256": "b43b2c15c093365969169039c1ae665a185fa071cd24788702c2722e45ef8dc4"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-checkpoint-above/0021-d73ad93cb55a.stdout.txt",
+      "bytes": 607,
+      "sha256": "3e31c4e8c2942edc4a5ecbf0c963ad9e947515cfe34a2cd40eed5e04554bba05"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-checkpoint-above/0022-241437963473.qpa",
+      "bytes": 9265,
+      "sha256": "ca2013d5f3cb94eb4824355f589a6a6d54c407fc61ea2dc8a1b42f4eed6b7de6"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-checkpoint-above/0022-241437963473.stdout.txt",
+      "bytes": 607,
+      "sha256": "becd0c7d9dfc3615af2428a440815ebb7e0dfb9cabd6b713c627e50825c90234"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-checkpoint-above/0023-22db3323917a.qpa",
+      "bytes": 9266,
+      "sha256": "2b09f70713b0da1f55887fc6fcfec3181ee64d830a060ec029259083f33f8846"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-checkpoint-above/0023-22db3323917a.stdout.txt",
+      "bytes": 607,
+      "sha256": "89ceee92916e9fc0f208e0d03405dda1ce472a48ddcce5dce612857d7eb1ccf4"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-checkpoint-above/0024-11e9ad4b4ef3.qpa",
+      "bytes": 9266,
+      "sha256": "f1e07567986db35bd2b336049503a78720808e403c386709448e608131e54513"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-checkpoint-above/0024-11e9ad4b4ef3.stdout.txt",
+      "bytes": 607,
+      "sha256": "75cd134d7ed9270aab7328dcde95f77cad3b1f1741ff803ec82da9c1114e5157"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-checkpoint-above/0025-fb835ab0dd03.qpa",
+      "bytes": 9260,
+      "sha256": "05fb8d1a5a667ff745b772647368f83de3799d577221ae6aebb69cbc42be33d8"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-checkpoint-above/0025-fb835ab0dd03.stdout.txt",
+      "bytes": 605,
+      "sha256": "88976269840ca3c51300639e296a535c04c1dd2b090355eba9c3b5c012488c1b"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-checkpoint-above/0026-74684ff8e6ba.qpa",
+      "bytes": 9260,
+      "sha256": "97f38d86aa286fe983c34e3058133d9fd9f557f31a3957d07ce3ae784ef3ba53"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-checkpoint-above/0026-74684ff8e6ba.stdout.txt",
+      "bytes": 605,
+      "sha256": "34d9c8d893d51b2a7342cba9134c1bfaa7d4b48532a09acc678b1741229d4d48"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-checkpoint-above/0027-c2d74e0a9e8a.qpa",
+      "bytes": 9263,
+      "sha256": "450906ba971a32c484d57a7a7cb9bc06965b65c1df3b5d5247ce80fe97ab32fb"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-checkpoint-above/0027-c2d74e0a9e8a.stdout.txt",
+      "bytes": 598,
+      "sha256": "41bda1beb10bfa611d7ae45694b094216d45e815d60cd01070fd30b90ce98790"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-checkpoint-above/0028-78b42fa80631.qpa",
+      "bytes": 9262,
+      "sha256": "a9641d540a6d2bb29eb9b5bea69a3e4a746ba306f42754b83e40a9aeb446af35"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-checkpoint-above/0028-78b42fa80631.stdout.txt",
+      "bytes": 598,
+      "sha256": "cb86cdf523ce848611995e04e83e198b199261584c6f8dc05c3ae4ffdc5fe1ce"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-checkpoint-above/0029-0ad08a88b93c.qpa",
+      "bytes": 9227,
+      "sha256": "b6bcdda73e8112aa488da53595b98a9af1793388473b8c40feb1d43f0259d03c"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-checkpoint-above/0029-0ad08a88b93c.stdout.txt",
+      "bytes": 594,
+      "sha256": "62a447427534898fa300d10df87dd0f02f89ff2f0aaf423a6465f9bd5362b23b"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-checkpoint-above/0030-d806801a74c9.qpa",
+      "bytes": 9227,
+      "sha256": "cceecd1ac87c3bfed087ee304abce82c5c0bae51546716a122365bc8b7d661de"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-checkpoint-above/0030-d806801a74c9.stdout.txt",
+      "bytes": 594,
+      "sha256": "ae6697f7af533546bcedd6e58efcfece2eb63bab9646150a19a8418be80ab334"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-checkpoint-above/0031-af3892c68d68.qpa",
+      "bytes": 9211,
+      "sha256": "0bb64b14a094f572f0612cc33d8b9a123473335677fad2ac8410f5b4fcdf04b4"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-checkpoint-above/0031-af3892c68d68.stdout.txt",
+      "bytes": 581,
+      "sha256": "02785af78bec8e2e2d8fd2a490baee2f427115657b2b02e0144a477be03c41c3"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-checkpoint-above/0032-3135061ccaf9.qpa",
+      "bytes": 9211,
+      "sha256": "a4d318254bec911a9ed27e569599209fbff6c88bb0e47ee3f82591741db5b66f"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-checkpoint-above/0032-3135061ccaf9.stdout.txt",
+      "bytes": 581,
+      "sha256": "34e1180b6936648284d3ec5794d30c2e57c947c14aa0d25d7f5b529b5363fd3b"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-checkpoint-above/0033-c585888dc0ff.qpa",
+      "bytes": 3965,
+      "sha256": "d08bafa1a15eab27cec16f0656e098c8da8d4c470919c3a59f3e8539673fed83"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-checkpoint-above/0033-c585888dc0ff.stdout.txt",
+      "bytes": 592,
+      "sha256": "4762a650f19532eb0beedaa992fb13897caac28fbf77a4e064e19be2402189ed"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-checkpoint-above/0034-55cd57923a93.qpa",
+      "bytes": 3977,
+      "sha256": "bc64368080a315ad65703fd0ebdee77b7aab24fdc9862243248ef0dc6a335ca5"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-checkpoint-above/0034-55cd57923a93.stdout.txt",
+      "bytes": 596,
+      "sha256": "f7b3342d2010738aa628952bbc5c9bd2ea2436e4f9189ca5e49feb4773e9947d"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-checkpoint-above/0035-a08bae022955.qpa",
+      "bytes": 9317,
+      "sha256": "daa0b7911e09b28246d2b77fdd70931f304db4b769824868cbcfa2b320d63e53"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-checkpoint-above/0035-a08bae022955.stdout.txt",
+      "bytes": 612,
+      "sha256": "9ad107b7822c20e8d6e38228a4cf8fc57c42deb554f0b17f4b325adf95390d7c"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-checkpoint-above/0036-7ad4600934c8.qpa",
+      "bytes": 9317,
+      "sha256": "36afd1acdd11f76f7da4e41e2ef0fecb1175f8ba67d69d409283878f05d53628"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-checkpoint-above/0036-7ad4600934c8.stdout.txt",
+      "bytes": 612,
+      "sha256": "3b420ab7d04430320b02a73b5707829bdb5fc57341b313da985f689b362dec7d"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-checkpoint-above/layer_snapshot/VkLayer_VEL_opacity_micromap.dll",
+      "bytes": 2866688,
+      "sha256": "59b64d04dd3a21db728b8283329b4b3cf6b31edf8c9e5824f4f4fb7e1a5ab69c"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-checkpoint-above/layer_snapshot/VkLayer_VEL_opacity_micromap.json",
+      "bytes": 479,
+      "sha256": "9fd510787c608c1cf2ab6a4d667f8a3e3be6d830d357b46d198c8045655856e0"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-checkpoint-above/summary.json",
+      "bytes": 50909,
+      "sha256": "f028a60e540e2dd5537f17389cd0865cfc8734a61da07d1b2cf0acee2af74fec"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-checkpoint-below/0001-9607468f29e7.qpa",
+      "bytes": 9300,
+      "sha256": "4235c89d9aab13998d14e1866670e8525d10851e091f8004d646b2224c8b61be"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-checkpoint-below/0001-9607468f29e7.stdout.txt",
+      "bytes": 611,
+      "sha256": "141109ea512433f740f4856f8e545715d5cfb3741f07cc79ebb6355720fa5c9e"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-checkpoint-below/0002-ef3c1805a21b.qpa",
+      "bytes": 9300,
+      "sha256": "6c6625483a2100e24ad101bb1b5c300c09028fb923c8456f7cb46264e3a56779"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-checkpoint-below/0002-ef3c1805a21b.stdout.txt",
+      "bytes": 611,
+      "sha256": "565f4d5ceac77f0c616aab4a9a7bbfaaba57c1f00b49655139b7df04829ad79a"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-checkpoint-below/0003-9e36a3700d40.qpa",
+      "bytes": 9301,
+      "sha256": "46fcc5481d5d0f05e8b12d756f24696e6c96e8e0371a45e40a421c61f785b31c"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-checkpoint-below/0003-9e36a3700d40.stdout.txt",
+      "bytes": 611,
+      "sha256": "7562bce0637ac33a8a0522e343784f22b0624c07a279480b5d5999a2593237e9"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-checkpoint-below/0004-6e45d7adeec5.qpa",
+      "bytes": 9301,
+      "sha256": "fee3dc72b60461d4535ca8013dd7cfbe083ac91f79912c62370df028af2c7a00"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-checkpoint-below/0004-6e45d7adeec5.stdout.txt",
+      "bytes": 611,
+      "sha256": "1bb544dba12cab35bab305b6a01dc1aed44061f36bc8a9f884210e90dfffea43"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-checkpoint-below/0005-ab1734795361.qpa",
+      "bytes": 9306,
+      "sha256": "4a91fcd2e853c4db8e36d33825a8128d246de351200feb254fb81c88c293847f"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-checkpoint-below/0005-ab1734795361.stdout.txt",
+      "bytes": 611,
+      "sha256": "8168f876d1448abfef7e1bbd06d545e89ee32288e61dd956550147f745f5cdae"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-checkpoint-below/0006-eab60ec8b517.qpa",
+      "bytes": 9305,
+      "sha256": "1f21317c00473338abdb1728155136a95a0b87ee725f2659124e79ed29d179e7"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-checkpoint-below/0006-eab60ec8b517.stdout.txt",
+      "bytes": 611,
+      "sha256": "66c41b80b43b6e31e64a66632076863a72f286759aff99dc367db97723d2726a"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-checkpoint-below/0007-642096f19073.qpa",
+      "bytes": 9308,
+      "sha256": "e61fff9ab85d452cac1e464cd737147c4b3f5a69405d37e25bdc6a6f5eb6261b"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-checkpoint-below/0007-642096f19073.stdout.txt",
+      "bytes": 611,
+      "sha256": "082e819cef938778d445ad30c11b48a749b050ba2e96b1c3cb39ec3004d8cb0c"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-checkpoint-below/0008-c52a9ad13f6b.qpa",
+      "bytes": 9308,
+      "sha256": "eb63bb3e24216294b22971f4c253ff19d93f1c180cc7f4e1d740832b091af20a"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-checkpoint-below/0008-c52a9ad13f6b.stdout.txt",
+      "bytes": 611,
+      "sha256": "8f44591c2a5e038cef3320e07703d7c4da61ace182642f23b674c9ee8d1e19b3"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-checkpoint-below/0009-d7d288778137.qpa",
+      "bytes": 9343,
+      "sha256": "f72445aea0191a9189e577f132a9e821bcd24ae370590b0d361dc66cf636bad0"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-checkpoint-below/0009-d7d288778137.stdout.txt",
+      "bytes": 625,
+      "sha256": "da2b8c6111ff0fbdc7227e0f7ff20a7c142728484bdcc4a038c1ef456c55ddef"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-checkpoint-below/0010-105ee63a90de.qpa",
+      "bytes": 9344,
+      "sha256": "ebe92c9745b561c61a1b0a7571c64dc0e8712160e0adcf45bafb906ea21585b1"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-checkpoint-below/0010-105ee63a90de.stdout.txt",
+      "bytes": 625,
+      "sha256": "9b10cd06a5c01b220ff08ab01bebce98fee820df845cddac310cb4f3253d2c93"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-checkpoint-below/0011-7e017d3c69a0.qpa",
+      "bytes": 9340,
+      "sha256": "da296d8dbdce4d34d49b2cba894f5d32f235ade28212c9268980423ea92eda8f"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-checkpoint-below/0011-7e017d3c69a0.stdout.txt",
+      "bytes": 624,
+      "sha256": "db853a34fd3074f1dc753a49ceeaa30e16f40f53f6f4dc7744df36e8a592b7fd"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-checkpoint-below/0012-64d0eb066fd7.qpa",
+      "bytes": 9341,
+      "sha256": "155569ce776d9f11b384d0327f1c880cee3e5d2064d12b92eaf3db56eb631d58"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-checkpoint-below/0012-64d0eb066fd7.stdout.txt",
+      "bytes": 624,
+      "sha256": "9f8ced2582485a0fb216e2b1175f02e47b63410c81bbc932056f61be407ecbc4"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-checkpoint-below/0013-7c6b862e2377.qpa",
+      "bytes": 9343,
+      "sha256": "8a2b54114a13f077356891fc50ee13fe8a62e45841e943affd9f447f9631a772"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-checkpoint-below/0013-7c6b862e2377.stdout.txt",
+      "bytes": 624,
+      "sha256": "6c7a1dec4dd98696f596e409dcee14f9baef137ac1d2ecfda687c56fa25696d2"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-checkpoint-below/0014-d0bb254db8f7.qpa",
+      "bytes": 9342,
+      "sha256": "2c0be829418d43ff3cffb6d7180af750f5b2e7f84e8a08af624b118ae03cbe57"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-checkpoint-below/0014-d0bb254db8f7.stdout.txt",
+      "bytes": 624,
+      "sha256": "4d8f0b0fc5e4354973291858a873ece201f8e90b54e53013c75af8a3f99194d2"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-checkpoint-below/0015-80384b400c98.qpa",
+      "bytes": 9377,
+      "sha256": "7d11e2cfd3fb302fb75278188b8d3ca889b93b26e0da61338e205ea729cc78ab"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-checkpoint-below/0015-80384b400c98.stdout.txt",
+      "bytes": 636,
+      "sha256": "009c1deb98fdde684707e99981fc27ac2a8f805f4cf9eed2eeba4338e7e23725"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-checkpoint-below/0016-2693feed1f83.qpa",
+      "bytes": 9377,
+      "sha256": "1400330d97ebe57dc8573c797d6a3c7a8268c6536b1dd97e753edfc317cb9ed6"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-checkpoint-below/0016-2693feed1f83.stdout.txt",
+      "bytes": 636,
+      "sha256": "2f52b52cd0c776b74b45379536ea084f86781f52e76c234067fb70d2faa898e6"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-checkpoint-below/0017-8a5ce118de5b.qpa",
+      "bytes": 9344,
+      "sha256": "913e8ab4388c8aeb9297af87c395482ed78014570c51cb53eae8a6d01ac3cf9f"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-checkpoint-below/0017-8a5ce118de5b.stdout.txt",
+      "bytes": 625,
+      "sha256": "2c29e24b9bcff3c41210b84acf318f0a933b02679779eb1a3fd3564080f7b4ac"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-checkpoint-below/0018-7732f7f470e6.qpa",
+      "bytes": 9344,
+      "sha256": "9200431024794716459ee4d4177de90a5525d328f9268faad86154725973098c"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-checkpoint-below/0018-7732f7f470e6.stdout.txt",
+      "bytes": 625,
+      "sha256": "ebcc4ec0e94ec5810090cca71e9cec97820dce3bbe6a4e5156967b03180585ed"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-checkpoint-below/0019-4d7804f667ac.qpa",
+      "bytes": 9478,
+      "sha256": "1dbbe89e189c416b9084e33d73171419155bbee27a2c2d650f4385715a8e2c69"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-checkpoint-below/0019-4d7804f667ac.stdout.txt",
+      "bytes": 625,
+      "sha256": "e12105541c90e0186e84d634eff1e9644e5ae5dd8763dc714c3cceffc8624918"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-checkpoint-below/0020-ca17c263ae5d.qpa",
+      "bytes": 9477,
+      "sha256": "5cf906fa29e69d723d8d14a4326d0087a4874fbcdd909a20b2f0d4b8767d79f2"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-checkpoint-below/0020-ca17c263ae5d.stdout.txt",
+      "bytes": 625,
+      "sha256": "42605030f5343cf6b1f8a4e5de53a3a2aea27e3b914e9f4739f8111cf8a3417e"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-checkpoint-below/0021-d73ad93cb55a.qpa",
+      "bytes": 9266,
+      "sha256": "2aff7323cfb01c715fe6d943f4c688a05ec0fb59b6b30cee1a4c317941c35aba"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-checkpoint-below/0021-d73ad93cb55a.stdout.txt",
+      "bytes": 607,
+      "sha256": "f04fb0a909c5fb31e31e9df3fc83d5d415db9bf7529e3fe7cbe6a87f15e86f04"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-checkpoint-below/0022-241437963473.qpa",
+      "bytes": 9265,
+      "sha256": "f9e574227330b34dc20c46b0e62ce26afd3ec0261da2824615438d996442c726"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-checkpoint-below/0022-241437963473.stdout.txt",
+      "bytes": 607,
+      "sha256": "e759aa01aaa414dd5ebbdbf2810eed7d479c2ca1645eb93e412067d9cac80c15"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-checkpoint-below/0023-22db3323917a.qpa",
+      "bytes": 9266,
+      "sha256": "4a45242a1cf2bd46da7c748cc9da38864355f0a313734658ea276cc7fae0926c"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-checkpoint-below/0023-22db3323917a.stdout.txt",
+      "bytes": 607,
+      "sha256": "3c2005f4db117894741bce8b55eee40fc6f610d7951371ada45ba38c6a1b2e7a"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-checkpoint-below/0024-11e9ad4b4ef3.qpa",
+      "bytes": 9266,
+      "sha256": "4ea886caa058ba29de9037fe5e148334aa3e19b797add342b3b918bbbe69e179"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-checkpoint-below/0024-11e9ad4b4ef3.stdout.txt",
+      "bytes": 607,
+      "sha256": "77295abbd7a0de859f92cb491bd1d5a88353c9ad1e878b19e6f5ab67e6175ed7"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-checkpoint-below/0025-fb835ab0dd03.qpa",
+      "bytes": 9259,
+      "sha256": "b0518b8617ac43620bc2ed3d050003b1c21041af9a18db7e8a5c60e4b32708da"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-checkpoint-below/0025-fb835ab0dd03.stdout.txt",
+      "bytes": 605,
+      "sha256": "9fecb4884238f1fef23e236e9625964af8dbc49e722cd75a01dfe0f1bd170de4"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-checkpoint-below/0026-74684ff8e6ba.qpa",
+      "bytes": 9260,
+      "sha256": "5107fd75b22c0185b6a5d121832cb44fc323eded32b51fd7d8f3d457cd9eafdb"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-checkpoint-below/0026-74684ff8e6ba.stdout.txt",
+      "bytes": 605,
+      "sha256": "110927bb4f281da2c326f1d90ae47b37bc9edb16ff5fb6966a22c7cccda4e1c6"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-checkpoint-below/0027-c2d74e0a9e8a.qpa",
+      "bytes": 9263,
+      "sha256": "e6e791a8c92258129e72994c3784a3107ed59f8953d5d204dede580202f43549"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-checkpoint-below/0027-c2d74e0a9e8a.stdout.txt",
+      "bytes": 598,
+      "sha256": "390f2f9ff6fea84ed5811ca81c96fd94ac41683580efbcbeae4eb436ebd4134a"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-checkpoint-below/0028-78b42fa80631.qpa",
+      "bytes": 9263,
+      "sha256": "20916afc2162108284aef3a426c261fe63e65ae26c04af55b9091b96caf2bdc7"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-checkpoint-below/0028-78b42fa80631.stdout.txt",
+      "bytes": 598,
+      "sha256": "924ba123f920d12138543ebff733977697afc9f8e05ff8409de2f19780afc13c"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-checkpoint-below/0029-0ad08a88b93c.qpa",
+      "bytes": 9227,
+      "sha256": "dd582a8c37c2a72f8b4aae18edb8a73998a9b2c7ad2801b52a194410f36f7011"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-checkpoint-below/0029-0ad08a88b93c.stdout.txt",
+      "bytes": 594,
+      "sha256": "ec8bf98a594db54051e4dc2605e80e3a4b20694b80431da0b483d2547f676733"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-checkpoint-below/0030-d806801a74c9.qpa",
+      "bytes": 9227,
+      "sha256": "69b7e07ba1dd41e5662f1fade70d1f784ad24642ac97ade4f01c048d48afab67"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-checkpoint-below/0030-d806801a74c9.stdout.txt",
+      "bytes": 594,
+      "sha256": "f829d0024269d60c656200568f8cc3574c60c32d6eaa3f9942daca888c92ebfe"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-checkpoint-below/0031-af3892c68d68.qpa",
+      "bytes": 9211,
+      "sha256": "f6db29929ad9fc469e676aa8f71ae1aee9cc9d23cd1425123c8ef06fc3d76118"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-checkpoint-below/0031-af3892c68d68.stdout.txt",
+      "bytes": 581,
+      "sha256": "b29c007d9b0ce1a727a2eacbaab05a7d96dd89e1c6c37a3ad35b33e474f5919d"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-checkpoint-below/0032-3135061ccaf9.qpa",
+      "bytes": 9211,
+      "sha256": "299fbd04158b606386ba4ec56bea31756415cfac9ecaf1b4ceec7634ad678de7"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-checkpoint-below/0032-3135061ccaf9.stdout.txt",
+      "bytes": 581,
+      "sha256": "eb12a6137a85d13cc4a5df5e92c0159eef550bb0d947784400328f2583173f08"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-checkpoint-below/0033-c585888dc0ff.qpa",
+      "bytes": 3966,
+      "sha256": "cd4daf9d51618fb5845bb982bc248499ba681f811ffe4bbe5605e4d000e72fe6"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-checkpoint-below/0033-c585888dc0ff.stdout.txt",
+      "bytes": 592,
+      "sha256": "c07dba0322d6826aeaac5ed17bc4a7a0b039665239d324dcde87d22e5b4ef152"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-checkpoint-below/0034-55cd57923a93.qpa",
+      "bytes": 3977,
+      "sha256": "0b269bb2318bf932681d8cd8ee8175210ca29d7c5615d2c81ecb4287a0514ddc"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-checkpoint-below/0034-55cd57923a93.stdout.txt",
+      "bytes": 596,
+      "sha256": "f383bcbf049523178c8d08cc666df2f53412daa1215df88a572c90399f5c9780"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-checkpoint-below/0035-a08bae022955.qpa",
+      "bytes": 9317,
+      "sha256": "663eb1cfdb10a40fd50377b2f89b9a70d03f58d0bb8df25dc43a84b17ad6a207"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-checkpoint-below/0035-a08bae022955.stdout.txt",
+      "bytes": 612,
+      "sha256": "8941ad6664ae20cf0918f48160aa49abc54fab35fd8be5674afabc1d7db13093"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-checkpoint-below/0036-7ad4600934c8.qpa",
+      "bytes": 9317,
+      "sha256": "b5d968309636aaf0d2d6bcb99418808eb97127a235956df94cf6a40276603b25"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-checkpoint-below/0036-7ad4600934c8.stdout.txt",
+      "bytes": 612,
+      "sha256": "57c1052ad07965a59e69383ab0a19b94e3f6158fd8ae8a01488fd6705b13cea0"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-checkpoint-below/layer_snapshot/VkLayer_VEL_opacity_micromap.dll",
+      "bytes": 2866688,
+      "sha256": "59b64d04dd3a21db728b8283329b4b3cf6b31edf8c9e5824f4f4fb7e1a5ab69c"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-checkpoint-below/layer_snapshot/VkLayer_VEL_opacity_micromap.json",
+      "bytes": 479,
+      "sha256": "1723b966aa04949bd1168a5afd3ca12e687f6976579c455b08867fd907aa03f6"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-checkpoint-below/summary.json",
+      "bytes": 50909,
+      "sha256": "5431b788b40fdaee09cb4eb74365049a13e6f3835b621d5743d1933997c2e6d7"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-expanded-above/0001-9607468f29e7.qpa",
+      "bytes": 9297,
+      "sha256": "140ae51ed456cefd3e62f77c30f52ed52f0a9ea64b33e10b4923078080dc55b8"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-expanded-above/0001-9607468f29e7.stdout.txt",
+      "bytes": 609,
+      "sha256": "bece336e41a151f7d396b4d350982dcca117a99bfb198f3cd732c900800ca5ef"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-expanded-above/0002-ef3c1805a21b.qpa",
+      "bytes": 9296,
+      "sha256": "0701c09d41b6c56e4aded8056ccda253667f99b48165ee1904eff126f2c8c6b4"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-expanded-above/0002-ef3c1805a21b.stdout.txt",
+      "bytes": 609,
+      "sha256": "820ea9e8f369b4ea3fd78970e5825e18c5ad9e3892f6c748eb1b2d920584364c"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-expanded-above/0003-9e36a3700d40.qpa",
+      "bytes": 9299,
+      "sha256": "09f08c7666850f68ec830f14fe42e2c64c0f93b0b3f71dbd65632f7a5f5cf3e9"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-expanded-above/0003-9e36a3700d40.stdout.txt",
+      "bytes": 609,
+      "sha256": "9530867a6b40d0a11819bc84d4f2d1502a45c0e1f07b757ccacb4ca104676c8f"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-expanded-above/0004-6e45d7adeec5.qpa",
+      "bytes": 9298,
+      "sha256": "8e6266fe75900ba1a286266c04321039458d3cfb004e22c393f07651541fab76"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-expanded-above/0004-6e45d7adeec5.stdout.txt",
+      "bytes": 609,
+      "sha256": "5b068c1d81a49767bd006d373a416f36d04578b4183649344d1b7b437dbfd388"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-expanded-above/0005-ab1734795361.qpa",
+      "bytes": 9303,
+      "sha256": "9e074f44a7a71eac068ac2265a1c47052b1407a120a19d694d5e933a9d7c5542"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-expanded-above/0005-ab1734795361.stdout.txt",
+      "bytes": 609,
+      "sha256": "9ad89676dc75653ebb4badca642ee2fb5a824af6c99801d1c717c84ab83d1072"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-expanded-above/0006-eab60ec8b517.qpa",
+      "bytes": 9302,
+      "sha256": "d978d513451818133d2ebcd7678362705e7e81d361e4b4adb53a05cf5d0c6576"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-expanded-above/0006-eab60ec8b517.stdout.txt",
+      "bytes": 609,
+      "sha256": "cd7f77149b65617344a486cf09195d9a1ce079f4ed45ef27cf0da0b44b72eeb1"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-expanded-above/0007-642096f19073.qpa",
+      "bytes": 9304,
+      "sha256": "321e9d0eb58cbcf736d660f03d9efd75fb9f8de55d8206aa020fcf088cac2af1"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-expanded-above/0007-642096f19073.stdout.txt",
+      "bytes": 609,
+      "sha256": "be6cf720539b67a2be25a9b20aad9d702d7d2a9e3da62ed42c48206ca8bdf626"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-expanded-above/0008-c52a9ad13f6b.qpa",
+      "bytes": 9305,
+      "sha256": "b6def227e16951bfaadba5c21a48acc9f41930fa169c7cb03bf887049224aca2"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-expanded-above/0008-c52a9ad13f6b.stdout.txt",
+      "bytes": 609,
+      "sha256": "173e8a61f8c1bd4e89b2f8a609ebf557263396974c9710e30f414aae413eb6ad"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-expanded-above/0009-d7d288778137.qpa",
+      "bytes": 9340,
+      "sha256": "14ad9479787ca90239e82dd77f8c7bc3848622c0938b88cb69c29dc3fb239160"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-expanded-above/0009-d7d288778137.stdout.txt",
+      "bytes": 623,
+      "sha256": "028a361be1b64309c8b947a699092d52387ea45f45e2e06849f8920c22a5e891"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-expanded-above/0010-105ee63a90de.qpa",
+      "bytes": 9340,
+      "sha256": "d41e9045b8f231eb41b97d164bc5510cee822efcca7253edcbc61b3a0233f5e3"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-expanded-above/0010-105ee63a90de.stdout.txt",
+      "bytes": 623,
+      "sha256": "f20a1272d85b0a985e8d8a4fc1a95ec5e5874775498aba3fd5d033d9360cf96e"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-expanded-above/0011-7e017d3c69a0.qpa",
+      "bytes": 9337,
+      "sha256": "042a651c356aa037c6be65245b6671fdf1297efcdf4c0fe54134b8f04dd5ffcb"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-expanded-above/0011-7e017d3c69a0.stdout.txt",
+      "bytes": 622,
+      "sha256": "bb417f61151afaf570e36b275e14f6441d5cfc020451044316ca6f5840a3464a"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-expanded-above/0012-64d0eb066fd7.qpa",
+      "bytes": 9337,
+      "sha256": "e36edc2b4301a9d6a74c54a225f7e52768a1aebce11498788a121f797057f57f"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-expanded-above/0012-64d0eb066fd7.stdout.txt",
+      "bytes": 622,
+      "sha256": "71605836782b41ca2a5bc2b4941a9bc154c89c7a01bac7077e7d58364d07ad25"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-expanded-above/0013-7c6b862e2377.qpa",
+      "bytes": 9339,
+      "sha256": "ae006a99b60287e53ae1651ec87bcf84f8044dea9951a3dfc556aea0e65de5bf"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-expanded-above/0013-7c6b862e2377.stdout.txt",
+      "bytes": 622,
+      "sha256": "d2708a347600292ece0c5d710d5e9ef61e1453374bb8b7bd7038b7ff20932ee8"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-expanded-above/0014-d0bb254db8f7.qpa",
+      "bytes": 9339,
+      "sha256": "f5b9ab54efd3d7675a3b2403e9182e2d1e7bbbafec5af4ac7e5541d5a37b866a"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-expanded-above/0014-d0bb254db8f7.stdout.txt",
+      "bytes": 622,
+      "sha256": "a95050c05ea87c5b31b6648bfdfba79e03b5c7731c1633785921808597bb6047"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-expanded-above/0015-80384b400c98.qpa",
+      "bytes": 9373,
+      "sha256": "6f2542dd19f059d5745f221259263b0b49f5f81761085dcfdfaf6c113a153f20"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-expanded-above/0015-80384b400c98.stdout.txt",
+      "bytes": 634,
+      "sha256": "e9f0ab09e08afcec6f629f18ed8628d34b343ec014277c481e62bc9a6c524e15"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-expanded-above/0016-2693feed1f83.qpa",
+      "bytes": 9373,
+      "sha256": "52a2da9cb8e1bb0294e2eef82d276a0d8f03a20f511ab632b2e3f1d17f280f20"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-expanded-above/0016-2693feed1f83.stdout.txt",
+      "bytes": 634,
+      "sha256": "989bdd4157bd1e0af1a920d9271c5dac36538ec5d7b5dad4e89bdde32ec0e58c"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-expanded-above/0017-8a5ce118de5b.qpa",
+      "bytes": 9340,
+      "sha256": "f9a73fb4c6f452d90cf6ab728933df262ebffc62d8b983718d38b0506bac3b83"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-expanded-above/0017-8a5ce118de5b.stdout.txt",
+      "bytes": 623,
+      "sha256": "dc592ede478286745e36e7877647f7bf7fe18a6d71da497bdcec2c6725f7bce5"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-expanded-above/0018-7732f7f470e6.qpa",
+      "bytes": 9341,
+      "sha256": "ad4f2870cb59cfa8c0007f6000094babaacb1f8740ed951c5665b24ead66a160"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-expanded-above/0018-7732f7f470e6.stdout.txt",
+      "bytes": 623,
+      "sha256": "4def05ea0d4f6100258c81f47d13d852e1918779ae29741ef982535d7f3cb2bf"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-expanded-above/0019-4d7804f667ac.qpa",
+      "bytes": 9474,
+      "sha256": "4acdb92f104273a503a27547bfa18e1ee2886fc8517be786029e887b941bf7c3"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-expanded-above/0019-4d7804f667ac.stdout.txt",
+      "bytes": 623,
+      "sha256": "abbb128e7e621b9b367c5f4bfafcb5f624a0a068d97c5f1ff53146e26b6c4bcc"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-expanded-above/0020-ca17c263ae5d.qpa",
+      "bytes": 9475,
+      "sha256": "f2ece2179ead8141936dd8a167ee41c65bc484a3704ebbcbf81cb3677b0ba76f"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-expanded-above/0020-ca17c263ae5d.stdout.txt",
+      "bytes": 623,
+      "sha256": "68809be561bd862ec88f9088b634804a8fe9ea56b251b5aeab26454018ce43cd"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-expanded-above/0021-d73ad93cb55a.qpa",
+      "bytes": 9263,
+      "sha256": "8de537e19109b98a81fa8b0ea1abccf31ae703aa29b103c905c5bb188297f4d4"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-expanded-above/0021-d73ad93cb55a.stdout.txt",
+      "bytes": 605,
+      "sha256": "24f30f364aced9746d0fdaabc1d90cc70e32f45d75b76cdc20f75f4c70e7491b"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-expanded-above/0022-241437963473.qpa",
+      "bytes": 9262,
+      "sha256": "78b046c29beafc0397c42835a002c1e8cc48c19ae84925e633b85fdc6434fc53"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-expanded-above/0022-241437963473.stdout.txt",
+      "bytes": 605,
+      "sha256": "89e8cadd257ef8a5d688413a555ee84dee1614921297fe05bc6868a04ad4244b"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-expanded-above/0023-22db3323917a.qpa",
+      "bytes": 9262,
+      "sha256": "b81518be28f9054bb518cd30ab9faaed34ec0cb57b1aa8d67043ab4c56c15e7d"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-expanded-above/0023-22db3323917a.stdout.txt",
+      "bytes": 605,
+      "sha256": "2b9df9a8a5e943ce2cb31c194ef813b5fd02fe8623313e09f71c0e7094cf917f"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-expanded-above/0024-11e9ad4b4ef3.qpa",
+      "bytes": 9262,
+      "sha256": "466f4f69285150b6a8fc59bb7fa82e1e78bfe5780cc2a83d578d0fb8fed94661"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-expanded-above/0024-11e9ad4b4ef3.stdout.txt",
+      "bytes": 605,
+      "sha256": "1d3c321da6835fb148fd300cb177e89b73f85370ae09b928c1161281259c24d9"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-expanded-above/0025-fb835ab0dd03.qpa",
+      "bytes": 9256,
+      "sha256": "a0d68cf4535435f39224f9318b4b11d6ee99e01e4b871a19cbc302fb2b7845e2"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-expanded-above/0025-fb835ab0dd03.stdout.txt",
+      "bytes": 603,
+      "sha256": "edbb898d186a15e4ea5585dab295ab82d2d421fb94c5d6586dd219dd5029e415"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-expanded-above/0026-74684ff8e6ba.qpa",
+      "bytes": 9257,
+      "sha256": "930710936e6f67b9f6c3b65144ad1150723711e0995f288f385e0820c01ec580"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-expanded-above/0026-74684ff8e6ba.stdout.txt",
+      "bytes": 603,
+      "sha256": "d203634a04e9591201a06e79d82c24d922d3d1dffd95a1b5c0d39dbd3aeaf135"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-expanded-above/0027-c2d74e0a9e8a.qpa",
+      "bytes": 9259,
+      "sha256": "aef872cf03e18f93f8d0c66bd6504fee5ed29788de3a3215bc28e86e7a2d25fa"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-expanded-above/0027-c2d74e0a9e8a.stdout.txt",
+      "bytes": 596,
+      "sha256": "3f0b39712003ade7a2848dfb7eaf012fa1fb9ffa8e996fda12927aae20142e5c"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-expanded-above/0028-78b42fa80631.qpa",
+      "bytes": 9260,
+      "sha256": "c2f1a9ba2e0744b4064dd2c22369cfae08d6db366f8e644d4d212eec21cdd107"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-expanded-above/0028-78b42fa80631.stdout.txt",
+      "bytes": 596,
+      "sha256": "2838d77300edbf4092f25aa70c2465b46a5510d24497e42704f6702752a689c3"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-expanded-above/0029-0ad08a88b93c.qpa",
+      "bytes": 9224,
+      "sha256": "e5ef0ce020f2b279a328abbec19d7f422014e39b85d6660677599b536c2d5f42"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-expanded-above/0029-0ad08a88b93c.stdout.txt",
+      "bytes": 592,
+      "sha256": "d63e8d3e8aab98e31702b09526f8767ab97a41850601b004ae73ca403b852e23"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-expanded-above/0030-d806801a74c9.qpa",
+      "bytes": 9223,
+      "sha256": "f90c8abb268442eb3d964ed58f71de9d51fd9ed61e8f9490e0b3c5b2ed2641bd"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-expanded-above/0030-d806801a74c9.stdout.txt",
+      "bytes": 592,
+      "sha256": "2c4ebc14a31577b0c0968cabbc75fed1cfdef816d2302c2bbf3266adcddf06a0"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-expanded-above/0031-af3892c68d68.qpa",
+      "bytes": 9208,
+      "sha256": "610a34503a7339cbb2a48ac39cdd945bee3f8a9795319ffaab8d1e8528c3bbf4"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-expanded-above/0031-af3892c68d68.stdout.txt",
+      "bytes": 579,
+      "sha256": "a2eab11e788c16069577a3e9f35a3391e59d7280ac62c159ce7f8b59e32c7208"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-expanded-above/0032-3135061ccaf9.qpa",
+      "bytes": 9209,
+      "sha256": "ed1c0e2cb18e5aa59bf558c1e553c2efc04d60c14ae93bad719742b32f7dd9c6"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-expanded-above/0032-3135061ccaf9.stdout.txt",
+      "bytes": 579,
+      "sha256": "fb953df2758c3b0b10e65e04de3c044ed5b112a0d00a09bac80b5c912bcde102"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-expanded-above/0033-c585888dc0ff.qpa",
+      "bytes": 3963,
+      "sha256": "8b7d17f360ae32d3e4278174871c96f23c68124e3f3521195f2f67d28d8769a1"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-expanded-above/0033-c585888dc0ff.stdout.txt",
+      "bytes": 590,
+      "sha256": "ec08d21ad32f2bdcf4efcbc2f8893372985dad4139162b3d0987dcc47fc7816d"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-expanded-above/0034-55cd57923a93.qpa",
+      "bytes": 3975,
+      "sha256": "20b3f9d716eabe8fdc17b77431f61cbcd3a923a0c6b482fd861c13f85f37b3d0"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-expanded-above/0034-55cd57923a93.stdout.txt",
+      "bytes": 594,
+      "sha256": "3ce340df40c5f82eb6ca691585f86047b08ce1de8dbedf52f1886949ee8bff33"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-expanded-above/0035-a08bae022955.qpa",
+      "bytes": 9315,
+      "sha256": "47a833f8a448d7e6e7c56d2de65083922b34b7f1b7471a7e7c9ac8ef5f2ed44f"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-expanded-above/0035-a08bae022955.stdout.txt",
+      "bytes": 610,
+      "sha256": "ce3d795be62756ce7ff14643ae651db8b006bb23b984ac6b86a35acc4b981aa7"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-expanded-above/0036-7ad4600934c8.qpa",
+      "bytes": 9314,
+      "sha256": "aa37c2465b76e837ae973bf01c1c6f4d6479b98584abb96f765d59e826ba734b"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-expanded-above/0036-7ad4600934c8.stdout.txt",
+      "bytes": 610,
+      "sha256": "3f6033328a9dcc440787616a1591bb81379dd9b48d503966a2d2c66911c8cc42"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-expanded-above/layer_snapshot/VkLayer_VEL_opacity_micromap.dll",
+      "bytes": 2866688,
+      "sha256": "88ebc48262f5d9d6561bb44e3a8bac550457602cc8e70c77ac3c536c7bce9ec7"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-expanded-above/layer_snapshot/VkLayer_VEL_opacity_micromap.json",
+      "bytes": 477,
+      "sha256": "3add92e938ff8dad2b6adce1c5e95d9f4be12d7a7e5b1bd73f48773b1d01887f"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-expanded-above/summary.json",
+      "bytes": 50835,
+      "sha256": "5965d0b89d59ae6b3dc7070c4e653cb6e32c6b63231b1d3e9dc4600e9dd9d867"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-expanded-below/0001-9607468f29e7.qpa",
+      "bytes": 9296,
+      "sha256": "a8e12730b29bb68c987fe732a5676d6bb71e9ce6212965e3321ed63fe4796367"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-expanded-below/0001-9607468f29e7.stdout.txt",
+      "bytes": 609,
+      "sha256": "939e48922d659fdab546014491e1b3aadf0f6811790cd95f2e6c3b047dae375f"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-expanded-below/0002-ef3c1805a21b.qpa",
+      "bytes": 9296,
+      "sha256": "eb67111977ffba2c8c8a023c17cf05afcb135aa091e96734b2b0c33539885005"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-expanded-below/0002-ef3c1805a21b.stdout.txt",
+      "bytes": 609,
+      "sha256": "e57f4a2e56f2b3c530e247a9c9b29905a980d1fb901d0836fb6da55757fea6db"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-expanded-below/0003-9e36a3700d40.qpa",
+      "bytes": 9298,
+      "sha256": "565c5b9494dc740d40b66783af5bf7e5aa4009707a4c7dab72d07095edf4ccbe"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-expanded-below/0003-9e36a3700d40.stdout.txt",
+      "bytes": 609,
+      "sha256": "a71453950029d613ece9b794289b44a64932fa05d5f6dc48cdfe4b5ecbd5d75e"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-expanded-below/0004-6e45d7adeec5.qpa",
+      "bytes": 9298,
+      "sha256": "f23261e1efd4c12fc83ddf6893bb89c0ab18e5b23f9a2368def42e4b051d7400"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-expanded-below/0004-6e45d7adeec5.stdout.txt",
+      "bytes": 609,
+      "sha256": "cfbb535c78c2305efcfdd9f824a9346fa7214c32aa603c2a53caaeebdd5f5b4b"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-expanded-below/0005-ab1734795361.qpa",
+      "bytes": 9303,
+      "sha256": "4df20eddfe746b3d71b85b3475331c9713439f011579936e2cb934be82135906"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-expanded-below/0005-ab1734795361.stdout.txt",
+      "bytes": 609,
+      "sha256": "ab6a7bc723161aee49e71ec6c4cc9f2d422d43bfc39dcebbba0be27b0e28a35e"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-expanded-below/0006-eab60ec8b517.qpa",
+      "bytes": 9302,
+      "sha256": "d35781d5778064c1cf8e3947ae28bc4276b3abfa4a1aa4b91a581a37885a6fd7"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-expanded-below/0006-eab60ec8b517.stdout.txt",
+      "bytes": 609,
+      "sha256": "4889c995dadd98168b361a5a51a60d9f556d3ac49be390182dd4bbb1868594a9"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-expanded-below/0007-642096f19073.qpa",
+      "bytes": 9305,
+      "sha256": "5ff08b6346c68da165c669b82952b98a111470d0db26cce60738445f6239b20f"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-expanded-below/0007-642096f19073.stdout.txt",
+      "bytes": 609,
+      "sha256": "2d425b24354a3c457467a1ac2b8bf279dddfd828210728a3e5c2954e2b0cd8be"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-expanded-below/0008-c52a9ad13f6b.qpa",
+      "bytes": 9304,
+      "sha256": "c4e8608aedc20591358fd3e526faad946e34fbf33b3645592b57876de64592b4"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-expanded-below/0008-c52a9ad13f6b.stdout.txt",
+      "bytes": 609,
+      "sha256": "ecd2b313ad98465807caa571996ce04a323a8a0f5d9e5cea10c1f2f5c2d19bf2"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-expanded-below/0009-d7d288778137.qpa",
+      "bytes": 9340,
+      "sha256": "58b3f707ffbe15d8f95ee9a074d216b2bbbda13d7ac274925bac83852376725e"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-expanded-below/0009-d7d288778137.stdout.txt",
+      "bytes": 623,
+      "sha256": "192eb2ff983d99eacb7b8c300d907b67b8c9d59bd9e197dbefb54db8b5221159"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-expanded-below/0010-105ee63a90de.qpa",
+      "bytes": 9340,
+      "sha256": "35e2c9006c136edca8687e6e1b42a84dbe61b6562b8cbdadd68c652783c75e85"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-expanded-below/0010-105ee63a90de.stdout.txt",
+      "bytes": 623,
+      "sha256": "7e9cc99091273557214f49547edc022354d782bef8a3dba263e1f767b1df1e9f"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-expanded-below/0011-7e017d3c69a0.qpa",
+      "bytes": 9338,
+      "sha256": "ee0be9049c8085c949d5881cd435ee45d8e77914462eeff792f61ddce85822cd"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-expanded-below/0011-7e017d3c69a0.stdout.txt",
+      "bytes": 622,
+      "sha256": "be043d96c4acd01b6b89202d661d2e0eb49af7f01421a113d3676c308f44550b"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-expanded-below/0012-64d0eb066fd7.qpa",
+      "bytes": 9338,
+      "sha256": "f65a5b365f8a5e98b8e20f7649238486381eeacef6acf1756e1cf66e6e5f7be9"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-expanded-below/0012-64d0eb066fd7.stdout.txt",
+      "bytes": 622,
+      "sha256": "80f8455fbfe8b362b6f611efe0d66bc9e2770e17c260e20591efbab8331bda68"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-expanded-below/0013-7c6b862e2377.qpa",
+      "bytes": 9341,
+      "sha256": "2f0f128c7a1f16f9173c3ac978622327bbffb490b8344366aa4c0d2572b09fd9"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-expanded-below/0013-7c6b862e2377.stdout.txt",
+      "bytes": 622,
+      "sha256": "6c3ea98fa2a8e0603f0c6fb66571f3674cc4afd45a45c52367991f41f39b2a3a"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-expanded-below/0014-d0bb254db8f7.qpa",
+      "bytes": 9339,
+      "sha256": "035a56e056f1a9a2f285d4eec2b4890201026eaa82d008572ed39dad5e65fd51"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-expanded-below/0014-d0bb254db8f7.stdout.txt",
+      "bytes": 622,
+      "sha256": "5466f94f8b6a91d29e67d373375ffd9a364788ec54d86060b62f82f53c1b9af6"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-expanded-below/0015-80384b400c98.qpa",
+      "bytes": 9374,
+      "sha256": "34b1972d871b51e2bad8e32ec364b359fd54a593be5872c0d24232ac9cc59348"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-expanded-below/0015-80384b400c98.stdout.txt",
+      "bytes": 634,
+      "sha256": "e3714f8e21c6cf10243e4755880dc11e6e49c60ee26b7acd2dcbbda3ef0e8ea8"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-expanded-below/0016-2693feed1f83.qpa",
+      "bytes": 9373,
+      "sha256": "97a419ecb20da91297abf947095408fd2ccb49b8d96b716a31306a8563ba3272"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-expanded-below/0016-2693feed1f83.stdout.txt",
+      "bytes": 634,
+      "sha256": "e7cc00b04825500299142bce83d890505990e4630d729b8e99af2590cc716a0b"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-expanded-below/0017-8a5ce118de5b.qpa",
+      "bytes": 9341,
+      "sha256": "dbc40840f4a58a870604c9afa39d9bd0d2fdfbc2fa0ffe6881cc461c493a4565"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-expanded-below/0017-8a5ce118de5b.stdout.txt",
+      "bytes": 623,
+      "sha256": "9fe7a381b0efa7b8623a17a014ff6d298dcaadae4072b121f02f3021017df547"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-expanded-below/0018-7732f7f470e6.qpa",
+      "bytes": 9340,
+      "sha256": "955dfa6dae5ddc82fb6a5afb17e4eec6c3be5cff09baef07269f6639d9c9bdfa"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-expanded-below/0018-7732f7f470e6.stdout.txt",
+      "bytes": 623,
+      "sha256": "3d902ffe7cea8805e9687b308eb6853f21acc1c6b6187ffee6172a1a5db75ed5"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-expanded-below/0019-4d7804f667ac.qpa",
+      "bytes": 9474,
+      "sha256": "9111f5a11048c299e5cfdd17b91ee3fe28432539ae26caac4507858cf51a635a"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-expanded-below/0019-4d7804f667ac.stdout.txt",
+      "bytes": 623,
+      "sha256": "9dcf4d3d0ecd7a6a7c783491077008fa1a8ffbc8b00d97211406e6a627a36443"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-expanded-below/0020-ca17c263ae5d.qpa",
+      "bytes": 9474,
+      "sha256": "46f3701b0a99e6c8eef5623a14f2b56a10e5e1fb62cd1d0ac73915ac8b47d299"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-expanded-below/0020-ca17c263ae5d.stdout.txt",
+      "bytes": 623,
+      "sha256": "281697d0e3fb362bc26ce544ccc0a7e3597dcef726a94fcce09febfd0231e001"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-expanded-below/0021-d73ad93cb55a.qpa",
+      "bytes": 9262,
+      "sha256": "ec38dd5ff938ccd15d05a9805eb73d4454518fc591b3d7e21ab9785282ccab4c"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-expanded-below/0021-d73ad93cb55a.stdout.txt",
+      "bytes": 605,
+      "sha256": "b13722d77420da0b5fd73b1f8b61d56191ae1d0867a03fd98c164304fa16ba2c"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-expanded-below/0022-241437963473.qpa",
+      "bytes": 9262,
+      "sha256": "89cf9975ce37de8254db8b78e8682c8f2fc8ea7150958b92f13e08ed5c15399c"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-expanded-below/0022-241437963473.stdout.txt",
+      "bytes": 605,
+      "sha256": "723683ad1daab40eb087d95042e58cf6c01a4c18cd0bee65188660d4f4ffdce4"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-expanded-below/0023-22db3323917a.qpa",
+      "bytes": 9262,
+      "sha256": "c0addf69cc4e20ad927f789f771687169281f212f60ad617667cccf2abbc54f8"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-expanded-below/0023-22db3323917a.stdout.txt",
+      "bytes": 605,
+      "sha256": "17b94797363e8ce88ba88e38d9c540d84da9225079afb45d3eecde684880d1be"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-expanded-below/0024-11e9ad4b4ef3.qpa",
+      "bytes": 9262,
+      "sha256": "cb13b51a615cd26e236df19ca13c4d096c80c630651087c7ea4a678ef18fa042"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-expanded-below/0024-11e9ad4b4ef3.stdout.txt",
+      "bytes": 605,
+      "sha256": "3c7ea496c95911c5d3affb46d09b72fe36d476298cd38ffe3b6f3fcaa5bb806a"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-expanded-below/0025-fb835ab0dd03.qpa",
+      "bytes": 9256,
+      "sha256": "b1b3f53c595338bfc16ec18e6a87e39d982582cd218e66d36b28cded42b41845"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-expanded-below/0025-fb835ab0dd03.stdout.txt",
+      "bytes": 603,
+      "sha256": "2ec0c5c4168fab69196737e211d46b84cd7717aad7c06adf072c3edad328c028"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-expanded-below/0026-74684ff8e6ba.qpa",
+      "bytes": 9258,
+      "sha256": "fa3db8a24488779c01acf8a06f86b51cd630842bf504fd24a0fabcc4a18d9273"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-expanded-below/0026-74684ff8e6ba.stdout.txt",
+      "bytes": 603,
+      "sha256": "274dad0a8a462e2b295603eab3c3dc8b1b8a7dfb776dc3ab7f7b6ecd06c268d5"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-expanded-below/0027-c2d74e0a9e8a.qpa",
+      "bytes": 9259,
+      "sha256": "fb5208aaaf35b5cbf4ebb365f1508851bccdeaf17b336a929862c5236312f849"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-expanded-below/0027-c2d74e0a9e8a.stdout.txt",
+      "bytes": 596,
+      "sha256": "8b8195ec15316d7d359827a07ec8d4224edb583572faaffa01c3b9fa835ce640"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-expanded-below/0028-78b42fa80631.qpa",
+      "bytes": 9259,
+      "sha256": "83b3036bb2ef305e6d0bf3041d9d4caeda17d65501d34cd46277cd0bc1e5fbfc"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-expanded-below/0028-78b42fa80631.stdout.txt",
+      "bytes": 596,
+      "sha256": "8ee116b13212cb1e172787835272a2e768fb3f305d51efc6478db2020841abe4"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-expanded-below/0029-0ad08a88b93c.qpa",
+      "bytes": 9223,
+      "sha256": "ff625c5ad62d25aef360a6e02739d618df479a77995967b265ea0e66ca1e8a72"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-expanded-below/0029-0ad08a88b93c.stdout.txt",
+      "bytes": 592,
+      "sha256": "5703701ccffaf89ce742b68e70278f8c10c25ccc46ff120018273fbdb53648ea"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-expanded-below/0030-d806801a74c9.qpa",
+      "bytes": 9223,
+      "sha256": "404c486f53295d723886c0b03d69e4a4da10aaab5f69a3208892865395f3e4fc"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-expanded-below/0030-d806801a74c9.stdout.txt",
+      "bytes": 592,
+      "sha256": "df1fbfe3bb3bc84ff901d5484808938bb555987383e0f16520645147afe975ea"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-expanded-below/0031-af3892c68d68.qpa",
+      "bytes": 9208,
+      "sha256": "a0b8a877d5331fecf834bcbcb3c708e5e2ea4213a8a2d8a60140140ce5f28346"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-expanded-below/0031-af3892c68d68.stdout.txt",
+      "bytes": 579,
+      "sha256": "4ff43b057becb37c95850e5983fd6f05171aa18a4b90d8f5833574e545a36e78"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-expanded-below/0032-3135061ccaf9.qpa",
+      "bytes": 9208,
+      "sha256": "90c6b660ba5fee251a42da58e22103a3fcb4253ad0d518b7d1d5f85a9fccadf0"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-expanded-below/0032-3135061ccaf9.stdout.txt",
+      "bytes": 579,
+      "sha256": "761e0d40a95bee371206dace7a9bb052b10cd60f7c4bcc097f48f46481351e39"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-expanded-below/0033-c585888dc0ff.qpa",
+      "bytes": 3963,
+      "sha256": "021bacd9604cfcce9de5e7647e20bbcde1ac48e0a5a41b61cadde0566cf6109b"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-expanded-below/0033-c585888dc0ff.stdout.txt",
+      "bytes": 590,
+      "sha256": "da3cf8b12b57da4c799885fe202bb943b5833b73d48535ee7478a1686bb58c4d"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-expanded-below/0034-55cd57923a93.qpa",
+      "bytes": 3975,
+      "sha256": "d71a36c22b2636a584bb5ff1de94c23433785f4116551a31fc0b9855f7ee94c2"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-expanded-below/0034-55cd57923a93.stdout.txt",
+      "bytes": 594,
+      "sha256": "3f557fe98a677923e22ed4ba88d517fd34d047b6d39ff0d25a2610b6a334ee70"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-expanded-below/0035-a08bae022955.stdout.txt",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-expanded-below/0036-7ad4600934c8.stdout.txt",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-expanded-below/layer_snapshot/VkLayer_VEL_opacity_micromap.dll",
+      "bytes": 2866688,
+      "sha256": "88ebc48262f5d9d6561bb44e3a8bac550457602cc8e70c77ac3c536c7bce9ec7"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-expanded-below/layer_snapshot/VkLayer_VEL_opacity_micromap.json",
+      "bytes": 477,
+      "sha256": "320f0b72ba7218f708fbf05ee6bc2ee09f4787e1b70ec9f952ecd407e9d8a5ba"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-expanded-below/summary.json",
+      "bytes": 50744,
+      "sha256": "fbf534b978d153f9502f5aadbdec31e4c9b962c02efe0cabb53aec711229945f"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-level12-below-retry/0001-a08bae022955.qpa",
+      "bytes": 9319,
+      "sha256": "704848ae0a540eac44b769c5825699f5220a7386d40c95e2d160faf27f8bbfe8"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-level12-below-retry/0001-a08bae022955.stdout.txt",
+      "bytes": 615,
+      "sha256": "c4a3efbce60c6af01e34da7fe27ed97c3a0322afbd74140ebcb0a01e937095f4"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-level12-below-retry/0002-7ad4600934c8.qpa",
+      "bytes": 9319,
+      "sha256": "c7c5a256d0c61472b463825300fdc2b04a0994b7c26476e077388023b43d5d4b"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-level12-below-retry/0002-7ad4600934c8.stdout.txt",
+      "bytes": 615,
+      "sha256": "ebc1bd36a07eb694811a1a14fe97d59b0ea9a3770ede7854e4ed905e7e22bd2d"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-level12-below-retry/layer_snapshot/VkLayer_VEL_opacity_micromap.dll",
+      "bytes": 2866688,
+      "sha256": "a21212962c87031bbd1ac30698e6749bbd30956773bb3d3899db2d078499334d"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-level12-below-retry/layer_snapshot/VkLayer_VEL_opacity_micromap.json",
+      "bytes": 482,
+      "sha256": "0b749531ab19b8d3cc8d9d3768d568eaf13909305a5b19a84256e4a0e14b8101"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-level12-below-retry/summary.json",
+      "bytes": 4538,
+      "sha256": "0a1dd5960d3b543c076f87df59aedf9a2b339013857793216e5fbb0cc35e133a"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-reviewed-above/0001-9607468f29e7.qpa",
+      "bytes": 9298,
+      "sha256": "737f37e0f6b716c5b6f65bb9653f992547fef507c68ab6a7cec15651b36531d2"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-reviewed-above/0001-9607468f29e7.stdout.txt",
+      "bytes": 609,
+      "sha256": "d07f34334bea881bab9f4fb17e98c653005da9241290608c46840f3a17192170"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-reviewed-above/0002-ef3c1805a21b.qpa",
+      "bytes": 9297,
+      "sha256": "d91d7ec0b853f8a841d8855876e39e6caf63cc41252d407c696373971e3f05c9"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-reviewed-above/0002-ef3c1805a21b.stdout.txt",
+      "bytes": 609,
+      "sha256": "ecf7dc801de0f1d9b24fc2bbccdba3a8fafbd2b187d0ed84e0139abfb3a0051a"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-reviewed-above/0003-9e36a3700d40.qpa",
+      "bytes": 9299,
+      "sha256": "0c6671cdc4a278031789f47185a2a45d1712fb5df7bfc00575fca412010c32cc"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-reviewed-above/0003-9e36a3700d40.stdout.txt",
+      "bytes": 609,
+      "sha256": "e0ec716b9110b1d426cf3fd181b79997bf73b44cd9ed00483e10d14dc53f96a9"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-reviewed-above/0004-6e45d7adeec5.qpa",
+      "bytes": 9299,
+      "sha256": "10eac5632543229939b89f6a667dc0ef3abc36da417e2c652364ca24167a8341"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-reviewed-above/0004-6e45d7adeec5.stdout.txt",
+      "bytes": 609,
+      "sha256": "2db7fba68ca670877938e3ed6583a9f91d3a218c1d5bec89271f7481c29a1734"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-reviewed-above/0005-ab1734795361.qpa",
+      "bytes": 9304,
+      "sha256": "8c1cf79cc24db7b9ec2827b54d1e5dd27d6a7bb6a0bdcfe0eea39cd9406642da"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-reviewed-above/0005-ab1734795361.stdout.txt",
+      "bytes": 609,
+      "sha256": "70d03bc4f346401966c21bdd2821ca9bbecce742e38c6210ce37211d67e6f253"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-reviewed-above/0006-eab60ec8b517.qpa",
+      "bytes": 9304,
+      "sha256": "a1f65b6c830dff1587b44c787a099235cad65193e44197b4be5ce78a82ef998e"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-reviewed-above/0006-eab60ec8b517.stdout.txt",
+      "bytes": 609,
+      "sha256": "d443ba70b34da895c01f69469ce079376a3e52f7c4430f75315696e5681c13b1"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-reviewed-above/0007-642096f19073.qpa",
+      "bytes": 9305,
+      "sha256": "77399219bd707b35a45ea21a6ac5dea1dbbd3f393f7c4aae4f5b8a1b31de1a6f"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-reviewed-above/0007-642096f19073.stdout.txt",
+      "bytes": 609,
+      "sha256": "f1fa9aa92a59980067e5bcd6f0584b1c119d6167cc10b8bac2d15ff767f6154d"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-reviewed-above/0008-c52a9ad13f6b.qpa",
+      "bytes": 9306,
+      "sha256": "6a46a92209776388762205f35cfa50a97bee74f1b163b00a9d2fc396563c084a"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-reviewed-above/0008-c52a9ad13f6b.stdout.txt",
+      "bytes": 609,
+      "sha256": "4920a8f24cba536ca7eb71f3e23bc5f8cf1f760665f0acc05fbc0c2ead5ff72b"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-reviewed-above/0009-d7d288778137.qpa",
+      "bytes": 9342,
+      "sha256": "73f36e264fe07e8235346e41a7d9ea7ecf1ba028ec1f27f28e8e2aef8fddfda6"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-reviewed-above/0009-d7d288778137.stdout.txt",
+      "bytes": 623,
+      "sha256": "584e17bfb8b17c5c69f83837492a925cac6c9d25bd863bd7f6870fe7564da9d9"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-reviewed-above/0010-105ee63a90de.qpa",
+      "bytes": 9342,
+      "sha256": "3fea196a3049e414b3944c1fc3a12280f698297f38b7796a9b8e002c1c4b5582"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-reviewed-above/0010-105ee63a90de.stdout.txt",
+      "bytes": 623,
+      "sha256": "8cc76907219982abcc0fd5f352c3673466bec9c345817d6abacb5dc21a945d3b"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-reviewed-above/0011-7e017d3c69a0.qpa",
+      "bytes": 9339,
+      "sha256": "a3783ae7bba60947b0ee6e012cef2d0b4b2ff9d5ad3f569daeb863f6dc154057"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-reviewed-above/0011-7e017d3c69a0.stdout.txt",
+      "bytes": 622,
+      "sha256": "f7ba77c69a8d193e931525a99373da3c1231be46b27cc57619091c8149a93eaa"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-reviewed-above/0012-64d0eb066fd7.qpa",
+      "bytes": 9339,
+      "sha256": "ea07282ddc1b29079b601bb77428348d4845067794848040eef306048c479444"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-reviewed-above/0012-64d0eb066fd7.stdout.txt",
+      "bytes": 622,
+      "sha256": "e61d4d2d07c1d472bb491486e5e8a46ed4f8e9dc95fe82689f9a4c64b5ebd151"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-reviewed-above/0013-7c6b862e2377.qpa",
+      "bytes": 9340,
+      "sha256": "6485971e7b804ee6d3fd1b176893e176cfa5c955b43346a310a588908925bed7"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-reviewed-above/0013-7c6b862e2377.stdout.txt",
+      "bytes": 622,
+      "sha256": "99ed22f8af259e3b9c70f4495cdc833e867f04da2d0dda2e350ae93f853cf53a"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-reviewed-above/0014-d0bb254db8f7.qpa",
+      "bytes": 9341,
+      "sha256": "7e1faaf1bb7899348088075b749075e958d0a62c281e2dab680aa53e5aa2c8c8"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-reviewed-above/0014-d0bb254db8f7.stdout.txt",
+      "bytes": 622,
+      "sha256": "97726701014525a9fa2b4bcd5fb9231b830dc0282111c5501b7a611de05a8e28"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-reviewed-above/0015-80384b400c98.qpa",
+      "bytes": 9374,
+      "sha256": "e017baac8976023d0deaca5b732af775ac8c2a4f2f56f8ff7671bed36d399eda"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-reviewed-above/0015-80384b400c98.stdout.txt",
+      "bytes": 634,
+      "sha256": "c0e3fafbbcd263c2afde9403b7d0bb3ef8c60c0caca117ae32563b274acffff7"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-reviewed-above/0016-2693feed1f83.qpa",
+      "bytes": 9375,
+      "sha256": "011173fc61db69b00e825e0b20a27e45e1a202867bf9d097b75b774929b547aa"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-reviewed-above/0016-2693feed1f83.stdout.txt",
+      "bytes": 634,
+      "sha256": "eecca302ec02a7c2725676511f92fd72908cfa0cdd91928d32429a641a99c056"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-reviewed-above/0017-8a5ce118de5b.qpa",
+      "bytes": 9341,
+      "sha256": "e350a9859dacbe849daf1b43eacea1650b8ba73f7de071a3e1208a3e37aff7ec"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-reviewed-above/0017-8a5ce118de5b.stdout.txt",
+      "bytes": 623,
+      "sha256": "71667fe4d33015cc214272cbd5639080801aef48a348cba551b6e2395727f2e5"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-reviewed-above/0018-7732f7f470e6.qpa",
+      "bytes": 9341,
+      "sha256": "ce23bd73f9c173a048adb961c8d897ae55e80262f42410640b3bb42efbd3f9ba"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-reviewed-above/0018-7732f7f470e6.stdout.txt",
+      "bytes": 623,
+      "sha256": "a448279320deeecd655dd73e570dc790a4c16174341166a59d8e4b56f87c855a"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-reviewed-above/0019-4d7804f667ac.qpa",
+      "bytes": 9475,
+      "sha256": "bce462d48272fed39bc863fd7b9b87b6da3482d7921778b20843d96bf3377586"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-reviewed-above/0019-4d7804f667ac.stdout.txt",
+      "bytes": 623,
+      "sha256": "568ad5f11076e0e316baec20c1a0915e47b3c92174ac0a1dd415dfe4e4c340c6"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-reviewed-above/0020-ca17c263ae5d.qpa",
+      "bytes": 9475,
+      "sha256": "5e00f5588ba0e5954b29ed3a6d41d6ecbf88ea2e0a0a57fa84b92931805481ef"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-reviewed-above/0020-ca17c263ae5d.stdout.txt",
+      "bytes": 623,
+      "sha256": "e1930fe18becb8df244220e11275ee29ca59b86c8b17c9aa16d7f16008626f81"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-reviewed-above/0021-d73ad93cb55a.qpa",
+      "bytes": 9264,
+      "sha256": "7f35fe4a1a4f9eefe77feb4fb52a9af3b2e8d5694c9b762656948a22b69ea502"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-reviewed-above/0021-d73ad93cb55a.stdout.txt",
+      "bytes": 605,
+      "sha256": "dade7ade23e859ee2593f68b379e067cb32d4cb056f50289a9858273d539b041"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-reviewed-above/0022-241437963473.qpa",
+      "bytes": 9264,
+      "sha256": "7a46a2bb62549b05cdacff6230745009e880462247c822bd37ccf9d6b29e471a"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-reviewed-above/0022-241437963473.stdout.txt",
+      "bytes": 605,
+      "sha256": "5fe36e6ee28b2affee4c9357206ebb3ddaa96404b55b98cae4f6e9e79d83fca9"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-reviewed-above/0023-22db3323917a.qpa",
+      "bytes": 9264,
+      "sha256": "5eebf79d50338ff922e28a2dad04ef0a6a21ee58ccacb7f172f9b54b9d197271"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-reviewed-above/0023-22db3323917a.stdout.txt",
+      "bytes": 605,
+      "sha256": "6c77dd679edd5f646e0c6be2c53539ec636e8e4114b41043b271cc70a4b2e95b"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-reviewed-above/0024-11e9ad4b4ef3.qpa",
+      "bytes": 9264,
+      "sha256": "9ab38fc9ef640dc054e2c3a15845e2a401d729457555b225a6167b743b56ec6b"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-reviewed-above/0024-11e9ad4b4ef3.stdout.txt",
+      "bytes": 605,
+      "sha256": "ff4fa5ca7128b4599598056e43601a069a6c4cd74e9e41ec45fe153915b02a6f"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-reviewed-above/0025-fb835ab0dd03.qpa",
+      "bytes": 9258,
+      "sha256": "3db2d40d2aa639a5c34177073d1a41f70659075a5e091429312a2ca18827b98c"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-reviewed-above/0025-fb835ab0dd03.stdout.txt",
+      "bytes": 603,
+      "sha256": "7e102f228ca222086a0593ff8c784906dabf36b93e107ffec41f91ea8bcd1582"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-reviewed-above/0026-74684ff8e6ba.qpa",
+      "bytes": 9257,
+      "sha256": "444bbe54ecb58dc4a57b9386b15d21ee1389cb1c4cb3f0ef6fa90dee21ee8fbf"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-reviewed-above/0026-74684ff8e6ba.stdout.txt",
+      "bytes": 603,
+      "sha256": "db157aadfd2ad803bcbd086d668c37f9fbbe20d3d38135e99595f0a3c6022cc7"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-reviewed-above/0027-c2d74e0a9e8a.qpa",
+      "bytes": 9260,
+      "sha256": "e4d68dbdb1255ac2acbb3102d940b945b54aa6f11fe33dae0000250589459378"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-reviewed-above/0027-c2d74e0a9e8a.stdout.txt",
+      "bytes": 596,
+      "sha256": "043ed44c83539215aacab79d829717de5cb6172905682871e024114402139f54"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-reviewed-above/0028-78b42fa80631.qpa",
+      "bytes": 9260,
+      "sha256": "d83c03930b23beba28eb419120c7a933aea16b13b530cb917a0c56cd49ad1f7b"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-reviewed-above/0028-78b42fa80631.stdout.txt",
+      "bytes": 596,
+      "sha256": "0891d272cb6b5f93da28d5325f52160bab899e6b59cb0c7e9220d8c0d6341184"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-reviewed-above/0029-0ad08a88b93c.qpa",
+      "bytes": 9225,
+      "sha256": "7b2116d7bcd340a1f1520208cdc5d58037a127d076a52df49b41873b4b613811"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-reviewed-above/0029-0ad08a88b93c.stdout.txt",
+      "bytes": 592,
+      "sha256": "ba8e59fa3829587a5130f1d83386a7eae66d222d3a099e38339551e619aaebbd"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-reviewed-above/0030-d806801a74c9.qpa",
+      "bytes": 9224,
+      "sha256": "23f6fc0bf3355b842e6092dfe1ba395296acb9bc6bbc1cc2fd3e55269e50c029"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-reviewed-above/0030-d806801a74c9.stdout.txt",
+      "bytes": 592,
+      "sha256": "c2c38776e1fef52ce89310577f1bf312bc31c3e992b9a65efe5854e786b213bc"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-reviewed-above/0031-af3892c68d68.qpa",
+      "bytes": 9209,
+      "sha256": "25032f4b7a6a5c5ebe1ec6f0eb6cf26ddccc499e254b06296c874ef2422269f6"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-reviewed-above/0031-af3892c68d68.stdout.txt",
+      "bytes": 579,
+      "sha256": "4fda9d58c8f43d8e6b2d62fc079c8404682b1bb7b95ac6124a2d5f1ef38c776a"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-reviewed-above/0032-3135061ccaf9.qpa",
+      "bytes": 9209,
+      "sha256": "b6613517c3e5d61717c44ecd5ce3425c5fbac3bc3c0263d43bb896346e417347"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-reviewed-above/0032-3135061ccaf9.stdout.txt",
+      "bytes": 579,
+      "sha256": "8f3b99a3d1da77971a8e120e3d99e471eda8a49d8777360e8331eda6fe563d4b"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-reviewed-above/0033-c585888dc0ff.qpa",
+      "bytes": 3963,
+      "sha256": "cc90496284154e2681375d9c91f7c089ca665402f2563aafa6b6aa101d8108ab"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-reviewed-above/0033-c585888dc0ff.stdout.txt",
+      "bytes": 590,
+      "sha256": "032f87b0477deee8e556a794ad34efb5db4961a75d6da08d832374c3756fade6"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-reviewed-above/0034-55cd57923a93.qpa",
+      "bytes": 3975,
+      "sha256": "a4e25551b35052a6304bae56c738f18e3e4d129356f251ff90f2bbe1db7a82d4"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-reviewed-above/0034-55cd57923a93.stdout.txt",
+      "bytes": 594,
+      "sha256": "e353f391544a7e557e8ffc8d60d82ccc4e307556ae4df7e723b01f9c53b3447f"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-reviewed-above/0035-a08bae022955.qpa",
+      "bytes": 9315,
+      "sha256": "fd33daaef9c64266696ded9f2cd333f668c8f845e5475de43e7e521f9c110578"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-reviewed-above/0035-a08bae022955.stdout.txt",
+      "bytes": 610,
+      "sha256": "9823c715f5dea7fa02f07fdebdedff342bcb70996cecd4748da75683c4cf7dc5"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-reviewed-above/0036-7ad4600934c8.qpa",
+      "bytes": 9315,
+      "sha256": "0db15ddc77f4c92a7a6e7b62fff7b09a237656f7264d7b06a1d6dc2db91edaca"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-reviewed-above/0036-7ad4600934c8.stdout.txt",
+      "bytes": 610,
+      "sha256": "75421d738a052ea3603462050d5a795484a6552efbff447d64a1e2d261203f0a"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-reviewed-above/layer_snapshot/VkLayer_VEL_opacity_micromap.dll",
+      "bytes": 2866688,
+      "sha256": "a3d883f6e0d5b1e015ddcd74bb39df6b8db91d28f487d08663aa0347d7b78209"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-reviewed-above/layer_snapshot/VkLayer_VEL_opacity_micromap.json",
+      "bytes": 477,
+      "sha256": "5b188da8039684504ee2ee99d55a0f1b6c62d889f71ec4052de6af7429a6b305"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-reviewed-above/summary.json",
+      "bytes": 50835,
+      "sha256": "0578d7c44309c3ec6f7df866c7928f4913c2b70262525e9051749aa055605bfa"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-reviewed-below/0001-9607468f29e7.qpa",
+      "bytes": 9298,
+      "sha256": "24e941e8f660a9c2365aeb895897a18d9887bb1add742ada3db800cf8318931a"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-reviewed-below/0001-9607468f29e7.stdout.txt",
+      "bytes": 609,
+      "sha256": "128cb6f4f1579c2d520c97abd011c08ac1aae9829b5008d9c2340b5a9e99c74e"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-reviewed-below/0002-ef3c1805a21b.qpa",
+      "bytes": 9297,
+      "sha256": "545203297c1a0159172358a001cc6fa8669178b8c5125c234c6a0b5da0b96607"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-reviewed-below/0002-ef3c1805a21b.stdout.txt",
+      "bytes": 609,
+      "sha256": "81a34daa3773fed3133262ce8577cab9f34ede99e3e1e871e1b48ea429d861c6"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-reviewed-below/0003-9e36a3700d40.qpa",
+      "bytes": 9299,
+      "sha256": "77745e42a36b4092709250017d0731750e2b1e8ff7c08815049a50d1e80473e5"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-reviewed-below/0003-9e36a3700d40.stdout.txt",
+      "bytes": 609,
+      "sha256": "c417c852269ab97f9fc196e7b46f1179a7ddd31d2af7ec93fcadef7ed2cc6330"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-reviewed-below/0004-6e45d7adeec5.qpa",
+      "bytes": 9299,
+      "sha256": "aaf1ee4e7eb7ec60329dbc70619dfef09fb66285d86fe84f58c4384bdc22282b"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-reviewed-below/0004-6e45d7adeec5.stdout.txt",
+      "bytes": 609,
+      "sha256": "dcfcddf16ec79e15856e921ff55ef78b1fac67fdce44eab218dfe085985016ee"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-reviewed-below/0005-ab1734795361.qpa",
+      "bytes": 9304,
+      "sha256": "489e713a6a0ddaf9d7532049ce652cb0a1af902473bcdf5c370c62428097a762"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-reviewed-below/0005-ab1734795361.stdout.txt",
+      "bytes": 609,
+      "sha256": "e6444a1630ec62090c12e1338f1fa9458b5c394a5bdeabf2918b7beb9e319882"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-reviewed-below/0006-eab60ec8b517.qpa",
+      "bytes": 9304,
+      "sha256": "99400544d5451cce3a4e08632433b7bac1276640c3dbc93d48dc2070307cc520"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-reviewed-below/0006-eab60ec8b517.stdout.txt",
+      "bytes": 609,
+      "sha256": "78612be8dc74c52434f4dc7904723e898ef21d223a651a4d914746c9bb085a82"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-reviewed-below/0007-642096f19073.qpa",
+      "bytes": 9306,
+      "sha256": "9769951b2f91d5c0022a8a9c254f7c81d53e35d83088d157be26c71164b0ab4a"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-reviewed-below/0007-642096f19073.stdout.txt",
+      "bytes": 609,
+      "sha256": "2ce15cb4279753d3926dde1aca9732edd0bb50bb72ee09175314e818c703cb45"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-reviewed-below/0008-c52a9ad13f6b.qpa",
+      "bytes": 9306,
+      "sha256": "b28b376be6deadbeb9439dd92bd37e18cfaa39ed6926ba55b62fa2102655f72d"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-reviewed-below/0008-c52a9ad13f6b.stdout.txt",
+      "bytes": 609,
+      "sha256": "0ad63ceb7882129732dd97ae84f96b88344226eebee742defdbbb190386c54bf"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-reviewed-below/0009-d7d288778137.qpa",
+      "bytes": 9342,
+      "sha256": "c55a3455e800cf290a0ded38e20ff69cb3b07c4211e3cdf584976baa2fabf958"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-reviewed-below/0009-d7d288778137.stdout.txt",
+      "bytes": 623,
+      "sha256": "0dec8c609db93649d541ec252a5d454b77a0f4ae9ac3ff8843b8494df6f1e79f"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-reviewed-below/0010-105ee63a90de.qpa",
+      "bytes": 9342,
+      "sha256": "a38f744c9a75d7008abbed425db43e42d2f5196fac809f0b19b9bdace8e42fa2"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-reviewed-below/0010-105ee63a90de.stdout.txt",
+      "bytes": 623,
+      "sha256": "2426ca8d587f8d10f3f5f87da52e38847a01fa1c45ebf47ca738be47ff70b54f"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-reviewed-below/0011-7e017d3c69a0.qpa",
+      "bytes": 9339,
+      "sha256": "20d94aa066807ea0b3c2c16395cbbba43c04e17adb5866d3d74e01ce0e825514"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-reviewed-below/0011-7e017d3c69a0.stdout.txt",
+      "bytes": 622,
+      "sha256": "84c040927ee6e3f4cbfab6809abab76144dcbc2c6131d05296a06401cd4dd297"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-reviewed-below/0012-64d0eb066fd7.qpa",
+      "bytes": 9338,
+      "sha256": "6399e26a86313d5a5062f95eb8cc70c04193dcaa4967519a16bd3fb86bf1e8cc"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-reviewed-below/0012-64d0eb066fd7.stdout.txt",
+      "bytes": 622,
+      "sha256": "f68fe632629a3503fa3dcf675c26e141ec577ecc2bfda446f066ebc0a9ad2100"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-reviewed-below/0013-7c6b862e2377.qpa",
+      "bytes": 9341,
+      "sha256": "5a889e6d0bea9167af9229d09e38a760c3b515a3d7216725fdbd6704d2c19633"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-reviewed-below/0013-7c6b862e2377.stdout.txt",
+      "bytes": 622,
+      "sha256": "b11443aa9303275fc15dca230b2de63e6681e7d2973c1b9c9ba36d8f888634ae"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-reviewed-below/0014-d0bb254db8f7.qpa",
+      "bytes": 9341,
+      "sha256": "31e200b312834b58f4e9d75e011b81b47b90a3793d07f9fac0ec10ee4d855833"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-reviewed-below/0014-d0bb254db8f7.stdout.txt",
+      "bytes": 622,
+      "sha256": "a2b85af2a8bbbe0465adf7aa6a711d349661144225bf8af03a0818eaf2da94fc"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-reviewed-below/0015-80384b400c98.qpa",
+      "bytes": 9374,
+      "sha256": "b882b6f718cf35aa1d7e02f46eb8ae9b0e6b429f0f18390039a83746ec164a95"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-reviewed-below/0015-80384b400c98.stdout.txt",
+      "bytes": 634,
+      "sha256": "2eab2645345fa66ca685be33ee62ecf5b46f731714f632591fde64541468e4cb"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-reviewed-below/0016-2693feed1f83.qpa",
+      "bytes": 9375,
+      "sha256": "3df72f4b9d18cf9a51be2f0996b5ccd096cfc82b7c278f241dddb639be196cc0"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-reviewed-below/0016-2693feed1f83.stdout.txt",
+      "bytes": 634,
+      "sha256": "0c70418e1e51edfded6dad4a8ce14a382444d43da4c634e47aa6afad3bf53f44"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-reviewed-below/0017-8a5ce118de5b.qpa",
+      "bytes": 9341,
+      "sha256": "f0a614b85215e7c3406e1f5d28184b2ccf0cc35976b643623c4580464d1331cf"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-reviewed-below/0017-8a5ce118de5b.stdout.txt",
+      "bytes": 623,
+      "sha256": "2ca9fc0806bcaf061060ada2a9a0dba440f4850f5960447c7466ddb62376936c"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-reviewed-below/0018-7732f7f470e6.qpa",
+      "bytes": 9342,
+      "sha256": "db7704b968ae60bf1d0affb0230e01681a5dee7bbd902a7417b5c5041dc94fb1"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-reviewed-below/0018-7732f7f470e6.stdout.txt",
+      "bytes": 623,
+      "sha256": "16c99b43fd4f55ee5314f9e89ddb7ace160477afdbbe259d8c25d0a3b46d01f9"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-reviewed-below/0019-4d7804f667ac.qpa",
+      "bytes": 9475,
+      "sha256": "0bf620766239ce1a30ef5218fc9659c6941c675446240c4f0c198c2f4a3f437e"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-reviewed-below/0019-4d7804f667ac.stdout.txt",
+      "bytes": 623,
+      "sha256": "5cc33095d75c7e3f3b12e6e0f42b07f5ca2344d1f4f85fa83e76f20c9aa9c190"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-reviewed-below/0020-ca17c263ae5d.qpa",
+      "bytes": 9475,
+      "sha256": "5ebbd2f30b8644e09e0105aaaf36ef46c09273990a5cd9cb8d0d056a858e4f4c"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-reviewed-below/0020-ca17c263ae5d.stdout.txt",
+      "bytes": 623,
+      "sha256": "6dafaadf955aa776e6fae76735ac854cbe91ddc76176dd23db3f427a3bcd5276"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-reviewed-below/0021-d73ad93cb55a.qpa",
+      "bytes": 9264,
+      "sha256": "cf6e094297757b0fe11d02730974b96d5ac4b88c3a4254659c8d342bbcd63697"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-reviewed-below/0021-d73ad93cb55a.stdout.txt",
+      "bytes": 605,
+      "sha256": "f9e2301631e0e2e26b30c24be78df50d3c4e9986ab3a408c269cedad2f33a270"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-reviewed-below/0022-241437963473.qpa",
+      "bytes": 9264,
+      "sha256": "024e1383160de0f1b9dd79cfd39d60340d390f6efab2e60b7290a056ee232b62"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-reviewed-below/0022-241437963473.stdout.txt",
+      "bytes": 605,
+      "sha256": "c761c1044fae64b8e98745d5020094e29c9dfb77f46ac30be208c77032c465c7"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-reviewed-below/0023-22db3323917a.qpa",
+      "bytes": 9264,
+      "sha256": "73f0c11df2edfb9b453f758d5b6892b0a45d6fdc81ba6f8637fbd12c2ea09822"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-reviewed-below/0023-22db3323917a.stdout.txt",
+      "bytes": 605,
+      "sha256": "ddf18395c8214d429973320b3a3e4d1cd2ac8fb5cd8395b47bc4fb584c8cdd4e"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-reviewed-below/0024-11e9ad4b4ef3.qpa",
+      "bytes": 9264,
+      "sha256": "5a1beed133ce081f16c3f8cf6d9728236f880b6281264405d931f45d6a6629a2"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-reviewed-below/0024-11e9ad4b4ef3.stdout.txt",
+      "bytes": 605,
+      "sha256": "78156360602927140a8de9757a4d01de84efe43964eb2e041c00fcbc82e8d873"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-reviewed-below/0025-fb835ab0dd03.qpa",
+      "bytes": 9258,
+      "sha256": "00015a8f57287780b062c7d9a428491855ad9405281a3972e5a978fc69a4a3df"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-reviewed-below/0025-fb835ab0dd03.stdout.txt",
+      "bytes": 603,
+      "sha256": "8e6c473b02f1dfcbaa7dfdd2242e2938e9f3dcd647fd00df3e16c37ae67b9e47"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-reviewed-below/0026-74684ff8e6ba.qpa",
+      "bytes": 9257,
+      "sha256": "1ba193137f8e2f0e014786826e73542fc68fae3f25bda5cf23ec56d2ecdf700f"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-reviewed-below/0026-74684ff8e6ba.stdout.txt",
+      "bytes": 603,
+      "sha256": "15ad928b485074a869103b29d5ab514a29dd14157c07582a9cdde240f49b6dab"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-reviewed-below/0027-c2d74e0a9e8a.qpa",
+      "bytes": 9260,
+      "sha256": "68fd451680c762d06a907d7549a36220e0984fe4d28ab776a6ca4ce3c30b4db3"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-reviewed-below/0027-c2d74e0a9e8a.stdout.txt",
+      "bytes": 596,
+      "sha256": "be9099602db7f392b82a8c804bac7e738939521499db5daf58e71a2a5b2f4f1e"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-reviewed-below/0028-78b42fa80631.qpa",
+      "bytes": 9260,
+      "sha256": "849ce7911b368ed85d051ffd9bba8f1d42d867113e18c1dbc525aecf8e828ee7"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-reviewed-below/0028-78b42fa80631.stdout.txt",
+      "bytes": 596,
+      "sha256": "b60db2a6867fe5e7c5a8f58611c96c4cd75081331950d03e8549c7771fe72144"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-reviewed-below/0029-0ad08a88b93c.qpa",
+      "bytes": 9225,
+      "sha256": "bdac41d0fc7674b4def1b83f1a5882e799b7accf1d492afeffd0c16391d20bd6"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-reviewed-below/0029-0ad08a88b93c.stdout.txt",
+      "bytes": 592,
+      "sha256": "34419fa5640287570f40d5615f6662f91ea8116da05c5369c5c8bb6291f6da83"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-reviewed-below/0030-d806801a74c9.qpa",
+      "bytes": 9225,
+      "sha256": "3b1fde632df29cc0df6035ce741aede21753204d7fb976725fe3d23d223b2809"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-reviewed-below/0030-d806801a74c9.stdout.txt",
+      "bytes": 592,
+      "sha256": "81869f1c5837ee07f14dca348a78f14fc6f063f00e96e99a50d85c48bac619d1"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-reviewed-below/0031-af3892c68d68.qpa",
+      "bytes": 9210,
+      "sha256": "d35f40a6821668561502587cd8929f723bc86b00f83f70c449a6060c68465cae"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-reviewed-below/0031-af3892c68d68.stdout.txt",
+      "bytes": 579,
+      "sha256": "28e25bf1ff708ccfc5b4226fe7147e2805a836a82dcd4929755a3326651c3195"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-reviewed-below/0032-3135061ccaf9.qpa",
+      "bytes": 9210,
+      "sha256": "b339df0faf5093f3301cf33840815c3d3e34a986774412a8eb2b54d761a83afe"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-reviewed-below/0032-3135061ccaf9.stdout.txt",
+      "bytes": 579,
+      "sha256": "9ade14d0f04492b3473b558f7201710dd5b23b9eb8d5fb3b32b3184ade6f844e"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-reviewed-below/0033-c585888dc0ff.qpa",
+      "bytes": 3963,
+      "sha256": "81496a4942ae8a501ad064ba172c7d9f65a03f4a7d412fc1fd447df8a3fbf10f"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-reviewed-below/0033-c585888dc0ff.stdout.txt",
+      "bytes": 590,
+      "sha256": "72b0242aeb5b2ece9d75d737bd4c2b5bbda67eb868fe5755cd5bc4b5de521594"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-reviewed-below/0034-55cd57923a93.qpa",
+      "bytes": 3975,
+      "sha256": "67901c84394429a8b90e9b5549e70f2c450dbe5c1f615ea4f09544b6a6593007"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-reviewed-below/0034-55cd57923a93.stdout.txt",
+      "bytes": 594,
+      "sha256": "b5dab66e21bd0520f35680cbd8689b9f55ca1689c0863a262b89fffbbcd18206"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-reviewed-below/0035-a08bae022955.qpa",
+      "bytes": 9315,
+      "sha256": "19df4258fee68250c3956ae5163965c5abe2972c03fa79344f112c4f4b4b8c6a"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-reviewed-below/0035-a08bae022955.stdout.txt",
+      "bytes": 610,
+      "sha256": "a46586ba2f066397bb0410c8ff4dd193891b3ed4760aa12f726b5542b21eea1b"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-reviewed-below/0036-7ad4600934c8.qpa",
+      "bytes": 9315,
+      "sha256": "b21848c0f978bbcdb0e53188fbee727ac8e99676d369f6e340805b39d9c83854"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-reviewed-below/0036-7ad4600934c8.stdout.txt",
+      "bytes": 610,
+      "sha256": "f6ddf2eee80689b0170383edde5e35ea34c134c24a1354c8c9dabf8bb78fcfe4"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-reviewed-below/layer_snapshot/VkLayer_VEL_opacity_micromap.dll",
+      "bytes": 2866688,
+      "sha256": "a3d883f6e0d5b1e015ddcd74bb39df6b8db91d28f487d08663aa0347d7b78209"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-reviewed-below/layer_snapshot/VkLayer_VEL_opacity_micromap.json",
+      "bytes": 477,
+      "sha256": "ffb84c38784d3d8ddd812500118c254ac540577a2ba91bcdf00077cc8539fab2"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-reviewed-below/summary.json",
+      "bytes": 50835,
+      "sha256": "8ddba943625a69308f4eeaa0d32d7eae4865245a84be80f4f6c561ab4e1ab327"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-smoke-above/0001-9607468f29e7.qpa",
+      "bytes": 9294,
+      "sha256": "40b65228c47d1ab44a119af9df74d543aaef6c71105c53c62fb9075030a420ee"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-smoke-above/0001-9607468f29e7.stdout.txt",
+      "bytes": 606,
+      "sha256": "ca5ebbc40e24cf4dfb0cf2a0c12f0620442ed7389820df4a725528f15b92af24"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-smoke-above/0002-62255fc217a3.qpa",
+      "bytes": 9336,
+      "sha256": "7b93547d7c0c899c621fb7ff25b0cd9daef3da379a2541e69f86afd2f6991c2d"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-smoke-above/0002-62255fc217a3.stdout.txt",
+      "bytes": 620,
+      "sha256": "4a572b324139002600a7f3f37105128d4419e05d3722ef9475d88b2f9a9a2230"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-smoke-above/0003-fb835ab0dd03.qpa",
+      "bytes": 9254,
+      "sha256": "9fb17a35fcf94248a624d8e3b947e93959b3587eb453023af4a535ed82b31cbd"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-smoke-above/0003-fb835ab0dd03.stdout.txt",
+      "bytes": 600,
+      "sha256": "3a618447938a939328f11b79972329ba353c7ceb03b2587179e2dccf7644ee48"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-smoke-above/0004-d806801a74c9.qpa",
+      "bytes": 9221,
+      "sha256": "2cb4725bceeb78bd862ec621c920d5bae3e1b5bbb393aa5a1c25d69684170463"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-smoke-above/0004-d806801a74c9.stdout.txt",
+      "bytes": 589,
+      "sha256": "dde6489b67b202368d73e797a077cb17f29b86f98e360a4aa9de07797f158c4e"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-smoke-above/0005-927fdc40d4a8.qpa",
+      "bytes": 9204,
+      "sha256": "e26219c5d25d4ed0096d5bea4835fdb791f998ed016cf13699d53635441bd117"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-smoke-above/0005-927fdc40d4a8.stdout.txt",
+      "bytes": 576,
+      "sha256": "0c659a33dd594eb6970b7f8e9c5772c573c46ee618faa2a7cc64d758d5dbbfbe"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-smoke-above/0006-38865ac57c20.qpa",
+      "bytes": 9210,
+      "sha256": "d1020370442f6fdda752b59404ab8f92ce08da999d8f6898e83dbf4b23ed5e08"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-smoke-above/0006-38865ac57c20.stdout.txt",
+      "bytes": 578,
+      "sha256": "f7a259d5dc76bbcd434f93d60e4f10dc7039119525957e343fceaf888e132dd9"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-smoke-above/0007-00666b7486be.qpa",
+      "bytes": 14820,
+      "sha256": "9307cdb7aecf0fdc056b9dff249c24a5218f0f9267622efe60b79b3e0a925f6f"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-smoke-above/0007-00666b7486be.stdout.txt",
+      "bytes": 656,
+      "sha256": "294eb3ca86ab3577d1fc904717c99a24bc367da2370164bcb7d5fa773b12dd9b"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-smoke-above/0008-2c43918a1ba0.qpa",
+      "bytes": 14676,
+      "sha256": "cb0e18cdcd39c974a5293d8c172519fa3bd1c34f7c9f979341df54444f353fc7"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-smoke-above/0008-2c43918a1ba0.stdout.txt",
+      "bytes": 646,
+      "sha256": "afcb7d7f38c6d311ff0dc6f2bbbfeca7eb84f352d8df24079cfeefabb6b9083e"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-smoke-above/0009-c585888dc0ff.qpa",
+      "bytes": 3960,
+      "sha256": "31d2f5b61f6d61dcdbe1483984bdd27ec0356e03a893eb83f5d59a63f47f5860"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-smoke-above/0009-c585888dc0ff.stdout.txt",
+      "bytes": 587,
+      "sha256": "bc05ca0a0e027cb975238945b52b9a8f96ba2a1d6b9c112715e349a1f1f84673"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-smoke-above/0010-55cd57923a93.qpa",
+      "bytes": 3972,
+      "sha256": "1940546ce2519dc91ad051e55b7f18c3860e4a94f840869388a284ed657c2648"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-smoke-above/0010-55cd57923a93.stdout.txt",
+      "bytes": 591,
+      "sha256": "2bef5e62e3f30abf862e3c42c3e9522138de87f9821194fa197ec9358fbd12a8"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-smoke-above/layer_snapshot/VkLayer_VEL_opacity_micromap.dll",
+      "bytes": 2865664,
+      "sha256": "1c245b37c571ad419e2a60d65729c22cc998dc66d250abc936369346ef9a2aaa"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-smoke-above/layer_snapshot/VkLayer_VEL_opacity_micromap.json",
+      "bytes": 474,
+      "sha256": "8c48de954ff6591af4a7f57cf3271da6ea28f54eaa8eb15d7c5149c3d843f904"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-smoke-above/summary.json",
+      "bytes": 15042,
+      "sha256": "b31c5aa193334d451a21d9bba4aa4b9b052c68f7cf8f1dfb90840019d337e5e5"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-smoke-below/0001-9607468f29e7.qpa",
+      "bytes": 9294,
+      "sha256": "57b052b7c4179b12c80178be3339d6f4b14fdc9bce81b9d63265533363ed3c95"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-smoke-below/0001-9607468f29e7.stdout.txt",
+      "bytes": 606,
+      "sha256": "af64be8f3bbcdd3e150f2ee490b667fc34ef594529393d5209961378d839be49"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-smoke-below/0002-62255fc217a3.qpa",
+      "bytes": 9336,
+      "sha256": "9cd7daae8b3014e433c7b114cb64e94cc275e13dcae05a2da086e53018d16eb8"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-smoke-below/0002-62255fc217a3.stdout.txt",
+      "bytes": 620,
+      "sha256": "f398de04b83280510ef00f84fd8af32c6eacbc3f84e07344e0c378adc67dec64"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-smoke-below/0003-fb835ab0dd03.qpa",
+      "bytes": 9254,
+      "sha256": "5a3b8d29217edd3ec5317068f44370eb09521a3cfd933b43ddc4616da8f0e21f"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-smoke-below/0003-fb835ab0dd03.stdout.txt",
+      "bytes": 600,
+      "sha256": "f6712d32a48ab78b3998a6f97cd80c3da36d2b25df2a641f9c79adf83df96556"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-smoke-below/0004-d806801a74c9.qpa",
+      "bytes": 9221,
+      "sha256": "67eca802d830309adbea40c4e48923cef93af0788dfe39217c0a4d642ef50a3d"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-smoke-below/0004-d806801a74c9.stdout.txt",
+      "bytes": 589,
+      "sha256": "90f9062f244394e3614fcec83c5b95e6ab16e18be42cf99792f939d3c1b0b983"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-smoke-below/0005-927fdc40d4a8.qpa",
+      "bytes": 9204,
+      "sha256": "948384d1679f18b7151342df85bc627776522a3ae536431f6f4b1069abac1f84"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-smoke-below/0005-927fdc40d4a8.stdout.txt",
+      "bytes": 576,
+      "sha256": "06bd8efede861c59ce5b3eb750dbf94529cb3d94568622d7ff3e43c2612f51ce"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-smoke-below/0006-38865ac57c20.qpa",
+      "bytes": 9210,
+      "sha256": "561f2ae77cd6699eddbe8f4ec3fd67a06e7c7193c657372c4ba1fdb3227d0976"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-smoke-below/0006-38865ac57c20.stdout.txt",
+      "bytes": 578,
+      "sha256": "2a9328f0bd8c7739d718ae860549260d24850e2cb506ccabc89e36f38340d871"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-smoke-below/0007-00666b7486be.qpa",
+      "bytes": 15728,
+      "sha256": "7a4c26c63573f0ad9d7f8b9987ab86d234506aab329663aa98e13984f22cd106"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-smoke-below/0007-00666b7486be.stdout.txt",
+      "bytes": 1558,
+      "sha256": "7a8842acbb4bf69ac526d953b8e92946c1df872e879f063d0b4b65c243517a55"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-smoke-below/0008-2c43918a1ba0.qpa",
+      "bytes": 14676,
+      "sha256": "d7f584d1e4f20da588c6536d7a9d39b6d69d4a94b3a82b4588032db4d4e20a8b"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-smoke-below/0008-2c43918a1ba0.stdout.txt",
+      "bytes": 646,
+      "sha256": "657e586e5884b7a7d7f5e63c9832dfa7086ef71d0a1e9268a9fff9e989e6411d"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-smoke-below/0009-c585888dc0ff.qpa",
+      "bytes": 3960,
+      "sha256": "c7eb447e6c91fdf08d51ff3aac19cb12c60af0616129fe9bb6eb8132579d507e"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-smoke-below/0009-c585888dc0ff.stdout.txt",
+      "bytes": 587,
+      "sha256": "11ac27f47b6793103cc697423894b04edaaed25bb6a5ce1d8d0c743a03ef3a54"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-smoke-below/0010-55cd57923a93.qpa",
+      "bytes": 3972,
+      "sha256": "6e0694aeafdcb52785533c1e96bd56bbc3886f51280ea22533be14a4b9e43964"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-smoke-below/0010-55cd57923a93.stdout.txt",
+      "bytes": 591,
+      "sha256": "e87dd61000726af12fdfb88bd27bd570d4580fcacda3b4368a13a04e948526cd"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-smoke-below/layer_snapshot/VkLayer_VEL_opacity_micromap.dll",
+      "bytes": 2865664,
+      "sha256": "1c245b37c571ad419e2a60d65729c22cc998dc66d250abc936369346ef9a2aaa"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-smoke-below/layer_snapshot/VkLayer_VEL_opacity_micromap.json",
+      "bytes": 474,
+      "sha256": "4dc830679dfcbeb6428f7bf35d35fae3147861a7245dc7ad400715b6fee42bf9"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-smoke-below/summary.json",
+      "bytes": 15084,
+      "sha256": "093a2e094e5aaa69c44c62dc691c29ebe3fcd2c65d5d8678f1de8a9dda967006"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-smoke-below-final/0001-9607468f29e7.qpa",
+      "bytes": 9299,
+      "sha256": "0c550382e9c7e239fce7cd941793eea8056b0bf3b9c2fd24aaed70b5d631849d"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-smoke-below-final/0001-9607468f29e7.stdout.txt",
+      "bytes": 612,
+      "sha256": "cd5014de415f42ea9b5fdeea36726b1019b6c30ec98a0645babb74cf3314d085"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-smoke-below-final/0002-62255fc217a3.qpa",
+      "bytes": 9341,
+      "sha256": "9021ec57a584db3e174819255fd993810f86d9a3ce1f2da5341346866060ac30"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-smoke-below-final/0002-62255fc217a3.stdout.txt",
+      "bytes": 626,
+      "sha256": "8b96e1b0cbb45f2f2ef88f8e5406c311a403f753abfb3d81060f33eea0d79bcc"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-smoke-below-final/0003-fb835ab0dd03.qpa",
+      "bytes": 9259,
+      "sha256": "f07bd8164e7be8a5af1b90ee067c7306087d91f87fb9e867ca1e56948acd7050"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-smoke-below-final/0003-fb835ab0dd03.stdout.txt",
+      "bytes": 606,
+      "sha256": "4247bba7f107d6474dba15c7ef5a6fedd3d3ba1d2ce3151847a7dfa659be23e3"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-smoke-below-final/0004-d806801a74c9.qpa",
+      "bytes": 9227,
+      "sha256": "eb35a6ecca8fb6ddfcce424bd9201f02536ebf41110cf596e505a4301c6cceca"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-smoke-below-final/0004-d806801a74c9.stdout.txt",
+      "bytes": 595,
+      "sha256": "68465c02f12077fc245b17d484af10129107be59db8e6edb374e6469ec49b9fc"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-smoke-below-final/0005-927fdc40d4a8.qpa",
+      "bytes": 9210,
+      "sha256": "cd92a1bf15d01d33435512390d8ee7245aabf012fda71f47fa944db9a65e5c12"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-smoke-below-final/0005-927fdc40d4a8.stdout.txt",
+      "bytes": 582,
+      "sha256": "1c212b13d9c69f2b3c93903ab347cdee4a4faa9d81d58dff8319a85f22d4cee6"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-smoke-below-final/0006-38865ac57c20.qpa",
+      "bytes": 9215,
+      "sha256": "34e4a08fd069d28b686e4051157ca3e3195d67ff959c3acf0ad64b3003406a23"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-smoke-below-final/0006-38865ac57c20.stdout.txt",
+      "bytes": 584,
+      "sha256": "0fc66d432c0223884c717fbe6031457a875651a4653425f1cb81b9894cc7a2e0"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-smoke-below-final/0007-00666b7486be.qpa",
+      "bytes": 14939,
+      "sha256": "f7efbf175381432abeb65d361f73ae4b7ea1cc9158b6ac72bcb892fdb89502e1"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-smoke-below-final/0007-00666b7486be.stdout.txt",
+      "bytes": 725,
+      "sha256": "2209a7867a6ff202d222bdf88b944b09fa3bd1d859e116919d91af31836f857e"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-smoke-below-final/0008-2c43918a1ba0.qpa",
+      "bytes": 14796,
+      "sha256": "5549b33a48b9733a220cb0a4cc2e19941e9383bccb57e81eb3b5f923dc566bfe"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-smoke-below-final/0008-2c43918a1ba0.stdout.txt",
+      "bytes": 715,
+      "sha256": "ae29101370d0e173c397a2eadbe5b7ed8b44cb68e8b562ff125892497424fa40"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-smoke-below-final/0009-c585888dc0ff.qpa",
+      "bytes": 3966,
+      "sha256": "6cb010247353b500c83fc9e98ecf4338cb79c6541a99a12f50b73d384e4d16d5"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-smoke-below-final/0009-c585888dc0ff.stdout.txt",
+      "bytes": 593,
+      "sha256": "f322f5d726a0679ff0d2d68c379120069d64ae559ee84357ae9dc3bdcaf44099"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-smoke-below-final/0010-55cd57923a93.qpa",
+      "bytes": 3978,
+      "sha256": "f89e8d008aedfe4c60e02f743ff427107ab205fd1ab8a4746dab1de9c16f28c5"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-smoke-below-final/0010-55cd57923a93.stdout.txt",
+      "bytes": 597,
+      "sha256": "bf76453d8248fdd3cddc9a457ce9b7da2841d91ee815ec1413fba1d27dce7084"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-smoke-below-final/layer_snapshot/VkLayer_VEL_opacity_micromap.dll",
+      "bytes": 2866688,
+      "sha256": "a21212962c87031bbd1ac30698e6749bbd30956773bb3d3899db2d078499334d"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-smoke-below-final/layer_snapshot/VkLayer_VEL_opacity_micromap.json",
+      "bytes": 480,
+      "sha256": "c2acd9465f7a99a8139944ea4a3b2b23350765ec1583adaed9dac60443e5cd08"
+    },
+    {
+      "path": "build-omm-cts-evidence/as-software-smoke-below-final/summary.json",
+      "bytes": 15108,
+      "sha256": "5a2d585ea0f585a47c87a5375b75997358625d2dd4947c2c98593d899d183c1a"
+    },
+    {
+      "path": "build-omm-host-only/consumer-host-details.log",
+      "bytes": 2448,
+      "sha256": "f378c976edec09f44741f4915d79e71fa9612f846dc5124aca69fca3fac67783"
+    },
+    {
+      "path": "build-omm-host-only/consumer-host.log",
+      "bytes": 574,
+      "sha256": "0579125ddc54013578213c9f005fea49c0de81240479f1b330fe790f10d3de93"
+    },
+    {
+      "path": "build-omm-integration/consumer-checkpoint-components-details.log",
+      "bytes": 38992,
+      "sha256": "dc8a2ff9c4b5fa26a3e79527249f929dc4e5feaac62181dd5fd200af55a0add6"
+    },
+    {
+      "path": "build-omm-integration/consumer-checkpoint-components.log",
+      "bytes": 3203,
+      "sha256": "5e13864fcc242df79458330e03e488322fe73b57f1c20ef50df19349989e3d52"
+    },
+    {
+      "path": "build-omm-integration/consumer-checkpoint-public-above-details.log",
+      "bytes": 2345,
+      "sha256": "f32226baae1f67c91b697c19995c4e6d19d36454669463dcf75301c0f686448e"
+    },
+    {
+      "path": "build-omm-integration/consumer-checkpoint-public-above.log",
+      "bytes": 523,
+      "sha256": "43a5d6dcb4e0b9e301b272f4497545c9e3780174b431e21e372ff27d71f78dad"
+    },
+    {
+      "path": "build-omm-integration/consumer-checkpoint-public-below-details.log",
+      "bytes": 2345,
+      "sha256": "0e0f80b9750442490c19c549de52282cc662c7b23d1b5594071a3626f6d15244"
+    },
+    {
+      "path": "build-omm-integration/consumer-checkpoint-public-below.log",
+      "bytes": 523,
+      "sha256": "9a1ab37d4dd9273bb3e4e137189bf8bac067a861b4caf7db9ee38f8a12b3b5a9"
+    },
+    {
+      "path": "build-omm-integration/consumer-vulkaninfo-summary.log",
+      "bytes": 4044,
+      "sha256": "9dcec9fab44e0279d4742bba3b4244216581e39046c66eabffc4034bd67488ec"
+    },
+    {
+      "path": "build-omm-parent/consumer-checkpoint-offline-details.log",
+      "bytes": 12194,
+      "sha256": "2de1828d3ebdc8d0d687e46dddc2167e85d75f721eb4301f78f7cbc035cf0a52"
+    },
+    {
+      "path": "build-omm-parent/consumer-checkpoint-offline.log",
+      "bytes": 1553,
+      "sha256": "9a01ae4e1321f4540a8f7b362e8cfc4c86045e5d66d3847388acb705ceeeda86"
+    },
+    {
+      "path": "build-omm-provenance-proof/integer-runtime-plan.txt",
+      "bytes": 16757,
+      "sha256": "9ff96e1aab902c3d3be7b772cad7f8a99fb15f01029bffc489ed6e512e237f1c"
+    }
+  ],
+  "documents": [
+    {
+      "path": "docs/omm_consumer_integration_2026-10-28.md",
+      "bytes": 9810,
+      "sha256": "1ee37f7661788278eccd409a9f298f3d073a533fc34fb4550453ec4b9cb639e6"
+    },
+    {
+      "path": "docs/omm_cts_rq_consumer_cases.txt",
+      "bytes": 4625,
+      "sha256": "ee11be3eb38ccc7375f3a484305312e35d824f352a773809c3eee126a851997f"
+    },
+    {
+      "path": "docs/omm_cts_smoke_cases.txt",
+      "bytes": 1042,
+      "sha256": "5e5bb093aa827d77656f46ece308aac2d895a69286e1bc17f4dd38cba6f4dff7"
+    },
+    {
+      "path": "docs/opacity_micromap_layer.md",
+      "bytes": 16148,
+      "sha256": "b754886d57c7c2553b0d3ba5d7580fe767ee20ab9b297a6ac14335513ce3d37c"
+    },
+    {
+      "path": "docs/opacity_micromap_plan.md",
+      "bytes": 8490,
+      "sha256": "6ce6435e667e65d8a768134fef17c4bfe00ed8366f324246964c3afbb2130dae"
+    },
+    {
+      "path": "docs/opacity_micromap_status.md",
+      "bytes": 16487,
+      "sha256": "07041f8370b96bfeb4ce09d5b23ea876194d38ffbf4b8706fdd3b31c24ef71f3"
+    }
+  ],
+  "runtime_dependencies": [
+    {
+      "path": "C:/VulkanSDK/1.4.357.0/Bin/VkLayer_khronos_validation.dll",
+      "bytes": 21681592,
+      "sha256": "9725ce7a9225f42f8961c433dacae4cc8fae3a16e95ef1d0a7c7e8bc09132c40"
+    },
+    {
+      "path": "C:/VulkanSDK/1.4.357.0/Bin/VkLayer_khronos_validation.json",
+      "bytes": 129847,
+      "sha256": "20d3ef44fe96aa41fceefab2308892f9d4b346d23eebfe8b5e1690715f23f472"
+    },
+    {
+      "path": "C:/VulkanSDK/1.4.357.0/Lib/SPIRV-Tools-link.lib",
+      "bytes": 4560562,
+      "sha256": "cdbdba1737ac5cbccd7dc81659174e3b3cf9b9b7ef22d3f4bbc12d87da22455a"
+    },
+    {
+      "path": "C:/VulkanSDK/1.4.357.0/Lib/SPIRV-Tools-opt.lib",
+      "bytes": 66578852,
+      "sha256": "945005788d020341ffa256c8ddeefdc0b3dfd2027786fc698db6a8ce4680373b"
+    },
+    {
+      "path": "C:/VulkanSDK/1.4.357.0/Lib/SPIRV-Tools.lib",
+      "bytes": 25389086,
+      "sha256": "fa78c21d828afca6e2018a5bfddf849cfa761ae71b58a2ccca6b4f04afb1bda1"
+    },
+    {
+      "path": "C:/VulkanSDK/1.4.357.0/Lib/VulkanSafeStruct.lib",
+      "bytes": 17781716,
+      "sha256": "e725abd79ee110efeb046e5667ca20e13b189901c243b43354dd74d132ba3096"
+    }
+  ]
+}

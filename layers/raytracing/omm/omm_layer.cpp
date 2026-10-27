@@ -7,10 +7,15 @@
 #include <vulkan/utility/vk_struct_helper.hpp>
 #include "omm_command_state.h"
 #include "omm_device.h"
+#include "omm_acceleration.h"
+#include "omm_consumers.h"
+#include "omm_submissions.h"
+#include "omm_properties.h"
 #include "omm_sync.h"
 #include "omm_kernels.h"
 
 #include <algorithm>
+#include <atomic>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -31,7 +36,20 @@ struct Instance {
 };
 struct Command {
     VkCommandPool pool{};
+    uint32_t queue_family = UINT32_MAX;
     CommandState state;
+    ConsumerBindingState compute, graphics;
+    std::vector<AccelerationRecordingRef> accelerations;
+    std::vector<PropertyRecordingRef> properties;
+    std::vector<std::shared_ptr<Command>> secondary;
+    void reset() {
+        state.reset();
+        compute.reset();
+        graphics.reset();
+        accelerations.clear();
+        properties.clear();
+        secondary.clear();
+    }
 };
 struct LayoutEntry {
     PushLayoutRef snapshot;
@@ -41,15 +59,33 @@ struct Device {
     VkDevice handle{};
     PFN_vkGetDeviceProcAddr next{};
     DeviceBackend* backend{};
+    AccelerationBackend* accelerations{};
+    DescriptorBackend* descriptors{};
+    ConsumerBackend* consumers{};
+    SubmissionTracker* submissions{};
+    PropertyBackend* properties{};
+    std::atomic<int32_t> error{VK_SUCCESS};
     bool software = false;
     VkAllocationCallbacks allocator{};
     bool has_allocator = false;
     std::mutex mutex;
     std::unordered_map<VkCommandBuffer, std::shared_ptr<Command>> commands;
+    std::unordered_map<VkCommandPool, uint32_t> pool_families;
     std::unordered_map<VkPipelineLayout, LayoutEntry> layouts;
     const VkAllocationCallbacks* allocation() const { return has_allocator ? &allocator : nullptr; }
     void finish() {
+        if (submissions) submissions_destroy(submissions);
+        submissions = nullptr;
         commands.clear();
+        pool_families.clear();
+        properties_destroy(properties);
+        properties = nullptr;
+        consumer_backend_destroy(consumers);
+        consumers = nullptr;
+        descriptor_backend_destroy(descriptors);
+        descriptors = nullptr;
+        acceleration_backend_destroy(accelerations);
+        accelerations = nullptr;
         layouts.clear();
         device_backend_destroy(backend);
         backend = nullptr;
@@ -106,7 +142,48 @@ void finish_internal(Device& dev, VkCommandBuffer cb, VkResult result) {
     state->state.fail(result);
     if (result == VK_SUCCESS) state->state.restore(cb, compute_dispatch(dev));
 }
+void fail_command(Device& dev, VkCommandBuffer cb, VkResult result);
+void fail_device(Device& dev, VkResult result) {
+    int32_t expected = VK_SUCCESS;
+    dev.error.compare_exchange_strong(expected, result);
+}
+VkResult resolve_as(void* data, VkAccelerationStructureKHR handle, DescriptorASIdentity* identity) {
+    auto& dev = *static_cast<Device*>(data);
+    return acceleration_identity(dev.accelerations, handle, &identity->native_address, &identity->root_cell_address,
+                                 &identity->lifetime);
+}
+void refresh_compute(Device& dev, VkCommandBuffer cb) {
+    if (!dev.consumers) return;
+    auto entry = command(dev, cb);
+    if (!entry || entry->state.status() != VK_SUCCESS || !entry->compute.logical_pipeline) return;
+    VkPipeline actual{};
+    const auto result = consumer_pipeline(dev.consumers, entry->compute, entry->compute.logical_pipeline, &actual);
+    if (result != VK_SUCCESS) {
+        entry->state.fail(result);
+        return;
+    }
+    native<PFN_vkCmdBindPipeline>(dev, "vkCmdBindPipeline")(cb, VK_PIPELINE_BIND_POINT_COMPUTE, actual);
+    entry->state.bind_pipeline(VK_PIPELINE_BIND_POINT_COMPUTE, actual);
+}
 
+template <typename Call>
+void record_property(Device& dev, VkCommandBuffer cb, Call&& call) {
+    auto entry = command(dev, cb);
+    if (!entry || !dev.properties) {
+        fail_command(dev, cb, VK_ERROR_FEATURE_NOT_PRESENT);
+        return;
+    }
+    if (entry->state.status() != VK_SUCCESS) return;
+    try {
+        entry->properties.reserve(entry->properties.size() + 1);
+        PropertyRecordingRef recording;
+        const auto result = call(entry->queue_family, &recording);
+        if (result == VK_SUCCESS) entry->properties.push_back(std::move(recording));
+        finish_internal(dev, cb, result);
+    } catch (const std::bad_alloc&) {
+        fail_command(dev, cb, VK_ERROR_OUT_OF_HOST_MEMORY);
+    }
+}
 VKAPI_ATTR VkResult VKAPI_CALL CreateInstance(const VkInstanceCreateInfo* info, const VkAllocationCallbacks* allocator,
                                               VkInstance* out) {
     auto* link = const_cast<VkLayerInstanceCreateInfo*>(reinterpret_cast<const VkLayerInstanceCreateInfo*>(info->pNext));
@@ -206,12 +283,10 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateDevice(VkPhysicalDevice physical, const VkD
             if (inheritance && inheritance->commandBufferInheritance) return VK_ERROR_FEATURE_NOT_PRESENT;
 #endif
             const auto* micromap = vku::FindStructInPNextChain<VkPhysicalDeviceOpacityMicromapFeaturesEXT>(info->pNext);
-            const auto* rq = vku::FindStructInPNextChain<VkPhysicalDeviceRayQueryFeaturesKHR>(info->pNext);
-            const auto* rtp = vku::FindStructInPNextChain<VkPhysicalDeviceRayTracingPipelineFeaturesKHR>(info->pNext);
-            // Consumer registration is deliberately fail-closed during this
-            // device-API checkpoint. No missing emulated feature is advertised.
-            if ((micromap && (micromap->micromapCaptureReplay || micromap->micromapHostCommands)) || (rq && rq->rayQuery) ||
-                (rtp && rtp->rayTracingPipeline))
+            // RQ consumers are now registered through actual shader/pipeline
+            // interception. Unimplemented independent consumers fail at their
+            // own creation/recording boundary, not for an unused enabled feature.
+            if (micromap && (micromap->micromapCaptureReplay || micromap->micromapHostCommands))
                 return VK_ERROR_FEATURE_NOT_PRESENT;
             VkPhysicalDeviceBufferDeviceAddressFeatures bda{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_BUFFER_DEVICE_ADDRESS_FEATURES};
             VkPhysicalDeviceFeatures2 features{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2, &bda};
@@ -263,7 +338,69 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateDevice(VkPhysicalDevice physical, const VkD
                                                       vel_omm_copy_spv,
                                                       sizeof(vel_omm_copy_spv)};
                 result = device_backend_create(backend, &state->backend);
+                if (result == VK_SUCCESS) {
+                    const AccelerationBackendCreateInfo acceleration{
+                        physical,
+                        *out,
+                        next,
+                        state->backend,
+                        state->allocation(),
+                        vel_omm_metadata_spv,
+                        sizeof(vel_omm_metadata_spv),
+                        vel_omm_instances_spv,
+                        sizeof(vel_omm_instances_spv),
+                        vel_omm_publish_spv,
+                        sizeof(vel_omm_publish_spv),
+                        reinterpret_cast<PFN_vkGetPhysicalDeviceMemoryProperties>(
+                            parent->next(parent->handle, "vkGetPhysicalDeviceMemoryProperties")),
+                        reinterpret_cast<PFN_vkGetPhysicalDeviceQueueFamilyProperties>(
+                            parent->next(parent->handle, "vkGetPhysicalDeviceQueueFamilyProperties"))};
+                    result = acceleration_backend_create(acceleration, &state->accelerations);
+                }
+                if (result == VK_SUCCESS) {
+                    const DescriptorBackendCreateInfo descriptors{
+                        physical,
+                        *out,
+                        next,
+                        state->allocation(),
+                        resolve_as,
+                        state.get(),
+                        reinterpret_cast<PFN_vkGetPhysicalDeviceMemoryProperties>(
+                            parent->next(parent->handle, "vkGetPhysicalDeviceMemoryProperties")),
+                        reinterpret_cast<PFN_vkGetPhysicalDeviceQueueFamilyProperties>(
+                            parent->next(parent->handle, "vkGetPhysicalDeviceQueueFamilyProperties"))};
+                    result = descriptor_backend_create(descriptors, &state->descriptors);
+                }
+                if (result == VK_SUCCESS) {
+                    const ConsumerBackendCreateInfo consumers{*out,
+                                                              next,
+                                                              state->descriptors,
+                                                              state->allocation(),
+                                                              vel_omm_classifier_spv,
+                                                              sizeof(vel_omm_classifier_spv)};
+                    result = consumer_backend_create(consumers, &state->consumers);
+                }
+                if (result == VK_SUCCESS) {
+                    const SubmissionTrackerCreateInfo submissions{*out, next, state->accelerations, state->allocation()};
+                    result = submissions_create(submissions, &state->submissions);
+                }
+                if (result == VK_SUCCESS) {
+                    const PropertyBackendCreateInfo properties{
+                        physical,
+                        *out,
+                        next,
+                        state->backend,
+                        state->allocation(),
+                        vel_omm_property_spv,
+                        sizeof(vel_omm_property_spv),
+                        reinterpret_cast<PFN_vkGetPhysicalDeviceMemoryProperties>(
+                            parent->next(parent->handle, "vkGetPhysicalDeviceMemoryProperties")),
+                        reinterpret_cast<PFN_vkGetPhysicalDeviceQueueFamilyProperties>(
+                            parent->next(parent->handle, "vkGetPhysicalDeviceQueueFamilyProperties"))};
+                    result = properties_create(properties, &state->properties);
+                }
                 if (result != VK_SUCCESS) {
+                    state->finish();
                     destroy(*out, allocator);
                     *out = VK_NULL_HANDLE;
                     return result;
@@ -301,7 +438,9 @@ VkBufferUsageFlags2 effective_usage(const VkBufferCreateInfo& info) {
 }
 bool translate_buffer(vku::safe_VkBufferCreateInfo& local) {
     auto usage = effective_usage(*local.ptr());
-    if (!(usage & micromap_usage)) return true;
+    constexpr auto as_usage = VK_BUFFER_USAGE_2_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR |
+                              VK_BUFFER_USAGE_2_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR;
+    if (!(usage & (micromap_usage | as_usage | VK_BUFFER_USAGE_2_TRANSFER_DST_BIT))) return true;
     if (local.size > UINT64_MAX - 3) return false;
     local.size = (local.size + 3) & ~VkDeviceSize(3);
     usage = (usage & ~micromap_usage) | VK_BUFFER_USAGE_2_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_2_SHADER_DEVICE_ADDRESS_BIT;
@@ -321,7 +460,7 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateBuffer(VkDevice handle, const VkBufferCreat
         if (result != VK_SUCCESS) return result;
         VkBufferCreateInfo original = *info;
         original.usage = VkBufferUsageFlags(effective_usage(*info));
-        result = device_track_buffer(state->backend, *out, &original, local.size);
+        result = device_track_buffer(state->backend, *out, &original, local.size, effective_usage(*local.ptr()));
         if (result != VK_SUCCESS) {
             native<PFN_vkDestroyBuffer>(*state, "vkDestroyBuffer")(handle, *out, allocator);
             *out = VK_NULL_HANDLE;
@@ -409,6 +548,8 @@ VKAPI_ATTR VkResult VKAPI_CALL AllocateCommandBuffers(VkDevice handle, const VkC
         for (uint32_t i = 0; i < info->commandBufferCount; ++i) {
             auto entry = std::make_shared<Command>();
             entry->pool = info->commandPool;
+            const auto family = state->pool_families.find(info->commandPool);
+            if (family != state->pool_families.end()) entry->queue_family = family->second;
             state->commands.emplace(out[i], std::move(entry));
         }
         return VK_SUCCESS;
@@ -434,6 +575,7 @@ VKAPI_ATTR void VKAPI_CALL DestroyCommandPool(VkDevice handle, VkCommandPool poo
     auto state = device(handle);
     if (state->software) {
         std::lock_guard<std::mutex> lock(state->mutex);
+        state->pool_families.erase(pool);
         for (auto i = state->commands.begin(); i != state->commands.end();) {
             if (i->second->pool == pool)
                 i = state->commands.erase(i);
@@ -449,7 +591,7 @@ VKAPI_ATTR VkResult VKAPI_CALL ResetCommandPool(VkDevice handle, VkCommandPool p
     if (result == VK_SUCCESS && state->software) {
         std::lock_guard<std::mutex> lock(state->mutex);
         for (const auto& pair : state->commands)
-            if (pair.second->pool == pool) pair.second->state.reset();
+            if (pair.second->pool == pool) pair.second->reset();
     }
     return result;
 }
@@ -457,25 +599,31 @@ VKAPI_ATTR VkResult VKAPI_CALL BeginCommandBuffer(VkCommandBuffer cb, const VkCo
     auto state = device(cb);
     VkResult result = native<PFN_vkBeginCommandBuffer>(*state, "vkBeginCommandBuffer")(cb, info);
     if (result == VK_SUCCESS && state->software)
-        if (auto entry = command(*state, cb)) entry->state.begin();
+        if (auto entry = command(*state, cb)) entry->reset();
     return result;
 }
 VKAPI_ATTR VkResult VKAPI_CALL ResetCommandBuffer(VkCommandBuffer cb, VkCommandBufferResetFlags flags) {
     auto state = device(cb);
     VkResult result = native<PFN_vkResetCommandBuffer>(*state, "vkResetCommandBuffer")(cb, flags);
     if (result == VK_SUCCESS && state->software)
-        if (auto entry = command(*state, cb)) entry->state.reset();
+        if (auto entry = command(*state, cb)) entry->reset();
     return result;
 }
 VKAPI_ATTR VkResult VKAPI_CALL EndCommandBuffer(VkCommandBuffer cb) {
     auto state = device(cb);
     VkResult result = native<PFN_vkEndCommandBuffer>(*state, "vkEndCommandBuffer")(cb);
     if (result == VK_SUCCESS && state->software)
-        if (auto entry = command(*state, cb)) return entry->state.status();
+        if (auto entry = command(*state, cb))
+            return state->error.load() != VK_SUCCESS ? VkResult(state->error.load()) : entry->state.status();
     return result;
 }
 VKAPI_ATTR void VKAPI_CALL CmdBindPipeline(VkCommandBuffer cb, VkPipelineBindPoint point, VkPipeline pipeline) {
     auto state = device(cb);
+    if (state->consumers && point == VK_PIPELINE_BIND_POINT_COMPUTE) {
+        if (auto entry = command(*state, cb)) entry->compute.logical_pipeline = pipeline;
+        refresh_compute(*state, cb);
+        return;
+    }
     native<PFN_vkCmdBindPipeline>(*state, "vkCmdBindPipeline")(cb, point, pipeline);
     if (state->software)
         if (auto entry = command(*state, cb)) entry->state.bind_pipeline(point, pipeline);
@@ -493,6 +641,14 @@ VKAPI_ATTR VkResult VKAPI_CALL CreatePipelineLayout(VkDevice handle, const VkPip
     auto create = native<PFN_vkCreatePipelineLayout>(*state, "vkCreatePipelineLayout");
     VkResult result = create(handle, info, allocator, out);
     if (result != VK_SUCCESS || !state->software) return result;
+    if (state->consumers) {
+        result = consumer_track_layout(state->consumers, *out, info);
+        if (result != VK_SUCCESS) {
+            native<PFN_vkDestroyPipelineLayout>(*state, "vkDestroyPipelineLayout")(handle, *out, allocator);
+            *out = VK_NULL_HANDLE;
+            return result;
+        }
+    }
     VkPipelineLayout snapshot{};
     VkPipelineLayoutCreateInfo private_info{VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO};
     private_info.pushConstantRangeCount = info->pushConstantRangeCount;
@@ -500,6 +656,7 @@ VKAPI_ATTR VkResult VKAPI_CALL CreatePipelineLayout(VkDevice handle, const VkPip
     auto destroy = native<PFN_vkDestroyPipelineLayout>(*state, "vkDestroyPipelineLayout");
     result = create(handle, &private_info, state->allocation(), &snapshot);
     if (result != VK_SUCCESS) {
+        if (state->consumers) consumer_untrack_layout(state->consumers, *out);
         destroy(handle, *out, allocator);
         *out = VK_NULL_HANDLE;
         return result;
@@ -524,6 +681,7 @@ VKAPI_ATTR VkResult VKAPI_CALL CreatePipelineLayout(VkDevice handle, const VkPip
         return VK_SUCCESS;
     } catch (const std::bad_alloc&) {
         if (snapshot) destroy(handle, snapshot, state->allocation());
+        if (state->consumers) consumer_untrack_layout(state->consumers, *out);
         destroy(handle, *out, allocator);
         *out = VK_NULL_HANDLE;
         return VK_ERROR_OUT_OF_HOST_MEMORY;
@@ -531,6 +689,7 @@ VKAPI_ATTR VkResult VKAPI_CALL CreatePipelineLayout(VkDevice handle, const VkPip
 }
 VKAPI_ATTR void VKAPI_CALL DestroyPipelineLayout(VkDevice handle, VkPipelineLayout layout, const VkAllocationCallbacks* allocator) {
     auto state = device(handle);
+    if (state->consumers) consumer_untrack_layout(state->consumers, layout);
     if (state->software) {
         std::lock_guard<std::mutex> lock(state->mutex);
         auto found = state->layouts.find(layout);
@@ -619,7 +778,9 @@ VKAPI_ATTR void VKAPI_CALL CmdWriteMicromapsPropertiesEXT(VkCommandBuffer cb, ui
                                                           VkQueryType type, VkQueryPool pool, uint32_t first) {
     auto state = device(cb);
     if (state->software) {
-        if (auto entry = command(*state, cb)) entry->state.fail(VK_ERROR_FEATURE_NOT_PRESENT);
+        record_property(*state, cb, [&](uint32_t family, PropertyRecordingRef* out) {
+            return properties_cmd_write(state->properties, cb, family, count, micromaps, type, pool, first, out);
+        });
     } else
         native<PFN_vkCmdWriteMicromapsPropertiesEXT>(*state, "vkCmdWriteMicromapsPropertiesEXT")(cb, count, micromaps, type, pool,
                                                                                                  first);
@@ -748,7 +909,9 @@ VKAPI_ATTR void VKAPI_CALL CmdWriteTimestamp2(VkCommandBuffer cb, VkPipelineStag
     auto state = device(cb);
     auto call = native<PFN_vkCmdWriteTimestamp2>(*state, "vkCmdWriteTimestamp2");
     if (!call) call = native<PFN_vkCmdWriteTimestamp2>(*state, "vkCmdWriteTimestamp2KHR");
-    call(cb, state->software ? map_stage2(stages) : stages, pool, query);
+    call(cb,
+         state->software && stages == VK_PIPELINE_STAGE_2_MICROMAP_BUILD_BIT_EXT ? VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT : stages,
+         pool, query);
 }
 VKAPI_ATTR void VKAPI_CALL CmdSetEvent(VkCommandBuffer cb, VkEvent event, VkPipelineStageFlags stages) {
     auto state = device(cb);
@@ -781,13 +944,33 @@ VKAPI_ATTR void VKAPI_CALL CmdWaitEvents(VkCommandBuffer cb, uint32_t count, con
 VKAPI_ATTR void VKAPI_CALL CmdWriteTimestamp(VkCommandBuffer cb, VkPipelineStageFlagBits stage, VkQueryPool pool, uint32_t query) {
     auto state = device(cb);
     native<PFN_vkCmdWriteTimestamp>(*state, "vkCmdWriteTimestamp")(
-        cb, state->software ? VkPipelineStageFlagBits(map_stage(stage)) : stage, pool, query);
+        cb,
+        state->software && uint64_t(stage) == VK_PIPELINE_STAGE_2_MICROMAP_BUILD_BIT_EXT ? VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT
+                                                                                         : stage,
+        pool, query);
+}
+VkResult collect_command_tokens(Device& dev, VkCommandBuffer cb, std::vector<AccelerationRecordingRef>& tokens,
+                                uint32_t depth = 0) {
+    auto entry = command(dev, cb);
+    if (!entry || depth > 64) return VK_ERROR_INITIALIZATION_FAILED;
+    if (entry->state.status() != VK_SUCCESS) return entry->state.status();
+    tokens.insert(tokens.end(), entry->accelerations.begin(), entry->accelerations.end());
+    for (const auto& child : entry->secondary) {
+        if (child->state.status() != VK_SUCCESS) return child->state.status();
+        tokens.insert(tokens.end(), child->accelerations.begin(), child->accelerations.end());
+        // Ordinary Vulkan permits one secondary level; inherited/nested command
+        // buffer extensions need an independent state adapter.
+        if (!child->secondary.empty()) return VK_ERROR_FEATURE_NOT_PRESENT;
+    }
+    return VK_SUCCESS;
 }
 VKAPI_ATTR VkResult VKAPI_CALL QueueSubmit(VkQueue queue, uint32_t count, const VkSubmitInfo* infos, VkFence fence) {
     auto state = device(queue);
     auto call = native<PFN_vkQueueSubmit>(*state, "vkQueueSubmit");
     if (!state->software) return call(queue, count, infos, fence);
+    if (state->error.load() != VK_SUCCESS) return VkResult(state->error.load());
     try {
+        std::vector<AccelerationRecordingRef> tokens;
         std::vector<vku::safe_VkSubmitInfo> owned;
         std::vector<VkSubmitInfo> views;
         owned.reserve(count);
@@ -797,12 +980,14 @@ VKAPI_ATTR VkResult VKAPI_CALL QueueSubmit(VkQueue queue, uint32_t count, const 
             auto& submit = owned.back();
             for (uint32_t j = 0; j < submit.waitSemaphoreCount; ++j)
                 const_cast<VkPipelineStageFlags*>(submit.pWaitDstStageMask)[j] = map_stage(submit.pWaitDstStageMask[j]);
-            for (uint32_t j = 0; j < submit.commandBufferCount; ++j)
-                if (auto entry = command(*state, submit.pCommandBuffers[j]))
-                    if (entry->state.status() != VK_SUCCESS) return entry->state.status();
+            for (uint32_t j = 0; j < submit.commandBufferCount; ++j) {
+                const auto result = collect_command_tokens(*state, submit.pCommandBuffers[j], tokens);
+                if (result != VK_SUCCESS) return result;
+            }
             views.push_back(*submit.ptr());
         }
-        return call(queue, count, views.data(), fence);
+        return state->submissions ? submissions_queue_submit(state->submissions, queue, count, views.data(), fence, tokens)
+                                  : call(queue, count, views.data(), fence);
     } catch (const std::bad_alloc&) {
         return VK_ERROR_OUT_OF_HOST_MEMORY;
     }
@@ -812,7 +997,9 @@ VKAPI_ATTR VkResult VKAPI_CALL QueueSubmit2(VkQueue queue, uint32_t count, const
     auto call = native<PFN_vkQueueSubmit2>(*state, "vkQueueSubmit2");
     if (!call) call = native<PFN_vkQueueSubmit2>(*state, "vkQueueSubmit2KHR");
     if (!state->software) return call(queue, count, infos, fence);
+    if (state->error.load() != VK_SUCCESS) return VkResult(state->error.load());
     try {
+        std::vector<AccelerationRecordingRef> tokens;
         std::vector<vku::safe_VkSubmitInfo2> owned;
         std::vector<VkSubmitInfo2> views;
         owned.reserve(count);
@@ -824,37 +1011,38 @@ VKAPI_ATTR VkResult VKAPI_CALL QueueSubmit2(VkQueue queue, uint32_t count, const
                 submit.pWaitSemaphoreInfos[j].stageMask = map_stage2(submit.pWaitSemaphoreInfos[j].stageMask);
             for (uint32_t j = 0; j < submit.signalSemaphoreInfoCount; ++j)
                 submit.pSignalSemaphoreInfos[j].stageMask = map_stage2(submit.pSignalSemaphoreInfos[j].stageMask);
-            for (uint32_t j = 0; j < submit.commandBufferInfoCount; ++j)
-                if (auto entry = command(*state, submit.pCommandBufferInfos[j].commandBuffer))
-                    if (entry->state.status() != VK_SUCCESS) return entry->state.status();
+            for (uint32_t j = 0; j < submit.commandBufferInfoCount; ++j) {
+                const auto result = collect_command_tokens(*state, submit.pCommandBufferInfos[j].commandBuffer, tokens);
+                if (result != VK_SUCCESS) return result;
+            }
             views.push_back(*submit.ptr());
         }
-        return call(queue, count, views.data(), fence);
+        return state->submissions ? submissions_queue_submit2(state->submissions, queue, count, views.data(), fence, tokens)
+                                  : call(queue, count, views.data(), fence);
     } catch (const std::bad_alloc&) {
         return VK_ERROR_OUT_OF_HOST_MEMORY;
     }
-}
-bool omm_geometry(const VkAccelerationStructureBuildGeometryInfoKHR& info) {
-    constexpr auto flags = VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_OPACITY_MICROMAP_UPDATE_BIT_EXT |
-                           VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_DISABLE_OPACITY_MICROMAPS_BIT_EXT |
-                           VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_OPACITY_MICROMAP_DATA_UPDATE_BIT_EXT;
-    if (info.flags & flags) return true;
-    for (uint32_t i = 0; i < info.geometryCount; ++i) {
-        const auto& geometry = info.pGeometries ? info.pGeometries[i] : *info.ppGeometries[i];
-        if (geometry.geometryType == VK_GEOMETRY_TYPE_TRIANGLES_KHR &&
-            vku::FindStructInPNextChain<VkAccelerationStructureTrianglesOpacityMicromapEXT>(geometry.geometry.triangles.pNext))
-            return true;
-    }
-    return false;
 }
 VKAPI_ATTR void VKAPI_CALL CmdBuildAccelerationStructuresKHR(VkCommandBuffer cb, uint32_t count,
                                                              const VkAccelerationStructureBuildGeometryInfoKHR* infos,
                                                              const VkAccelerationStructureBuildRangeInfoKHR* const* ranges) {
     auto state = device(cb);
-    // GPU instance inputs can carry OMM flags even without a visible geometry
-    // association. No software AS build is forwarded until that adapter exists.
     if (state->software) {
-        fail_command(*state, cb, VK_ERROR_FEATURE_NOT_PRESENT);
+        auto entry = command(*state, cb);
+        if (!entry || !state->accelerations) {
+            fail_command(*state, cb, VK_ERROR_FEATURE_NOT_PRESENT);
+            return;
+        }
+        if (entry->state.status() != VK_SUCCESS) return;
+        try {
+            entry->accelerations.reserve(entry->accelerations.size() + 1);
+            AccelerationRecordingRef recording;
+            const auto result = acceleration_cmd_build(state->accelerations, cb, count, infos, ranges, &recording);
+            if (result == VK_SUCCESS) entry->accelerations.push_back(std::move(recording));
+            finish_internal(*state, cb, result);
+        } catch (const std::bad_alloc&) {
+            fail_command(*state, cb, VK_ERROR_OUT_OF_HOST_MEMORY);
+        }
         return;
     }
     native<PFN_vkCmdBuildAccelerationStructuresKHR>(*state, "vkCmdBuildAccelerationStructuresKHR")(cb, count, infos, ranges);
@@ -884,9 +1072,12 @@ VKAPI_ATTR void VKAPI_CALL GetAccelerationStructureBuildSizesKHR(VkDevice handle
                                                                  const uint32_t* counts,
                                                                  VkAccelerationStructureBuildSizesInfoKHR* sizes) {
     auto state = device(handle);
-    if (state->software && omm_geometry(*info)) {
-        // No layer-owned micromap identity is ever forwarded to the driver.
-        sizes->accelerationStructureSize = sizes->buildScratchSize = sizes->updateScratchSize = 0;
+    if (state->software) {
+        const auto result = acceleration_get_build_sizes(state->accelerations, type, info, counts, sizes);
+        if (result != VK_SUCCESS) {
+            sizes->accelerationStructureSize = sizes->buildScratchSize = sizes->updateScratchSize = 0;
+            std::fprintf(stderr, "OMM AS build-size path unsupported: %d\n", result);
+        }
         return;
     }
     native<PFN_vkGetAccelerationStructureBuildSizesKHR>(*state, "vkGetAccelerationStructureBuildSizesKHR")(handle, type, info,
@@ -897,11 +1088,12 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateQueryPool(VkDevice handle, const VkQueryPoo
     auto state = device(handle);
     if (state->software && (info->queryType == VK_QUERY_TYPE_MICROMAP_COMPACTED_SIZE_EXT ||
                             info->queryType == VK_QUERY_TYPE_MICROMAP_SERIALIZATION_SIZE_EXT)) {
-        *out = VK_NULL_HANDLE;
-        return VK_ERROR_FEATURE_NOT_PRESENT;
+        return properties_create_pool(state->properties, info, allocator, out);
     }
     return native<PFN_vkCreateQueryPool>(*state, "vkCreateQueryPool")(handle, info, allocator, out);
 }
+
+#include "omm_layer_consumers.inc"
 
 VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL GetInstanceProcAddr(VkInstance, const char*);
 VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL GetDeviceProcAddr(VkDevice, const char*);
@@ -913,6 +1105,55 @@ struct Hook {
 const Hook hooks[] = {
     HOOK(DestroyDevice),
     HOOK(GetDeviceProcAddr),
+    HOOK(CreateCommandPool),
+    HOOK(DestroyQueryPool),
+    HOOK(CmdResetQueryPool),
+    HOOK(ResetQueryPool),
+    HOOK(GetQueryPoolResults),
+    HOOK(CmdCopyQueryPoolResults),
+    {"vkResetQueryPoolEXT", reinterpret_cast<PFN_vkVoidFunction>(ResetQueryPool)},
+    HOOK(CreateAccelerationStructureKHR),
+    HOOK(DestroyAccelerationStructureKHR),
+    HOOK(CreateDescriptorSetLayout),
+    HOOK(DestroyDescriptorSetLayout),
+    HOOK(CreateDescriptorPool),
+    HOOK(DestroyDescriptorPool),
+    HOOK(ResetDescriptorPool),
+    HOOK(AllocateDescriptorSets),
+    HOOK(FreeDescriptorSets),
+    HOOK(UpdateDescriptorSets),
+    HOOK(CmdBindDescriptorSets),
+    HOOK(CmdBindDescriptorSets2),
+    HOOK(CmdPushConstants2),
+    HOOK(CreateShaderModule),
+    HOOK(DestroyShaderModule),
+    HOOK(CreateComputePipelines),
+    HOOK(CreateGraphicsPipelines),
+    HOOK(CreateRayTracingPipelinesKHR),
+    HOOK(CreateShadersEXT),
+    HOOK(DestroyPipeline),
+    HOOK(CmdDispatch),
+    HOOK(CmdDispatchBase),
+    HOOK(CmdDispatchIndirect),
+    HOOK(CmdExecuteCommands),
+    HOOK(CreateDescriptorUpdateTemplate),
+    HOOK(WaitForFences),
+    HOOK(GetFenceStatus),
+    HOOK(ResetFences),
+    HOOK(DestroyFence),
+    HOOK(QueueWaitIdle),
+    HOOK(DeviceWaitIdle),
+    HOOK(CmdCopyAccelerationStructureKHR),
+    HOOK(CmdCopyAccelerationStructureToMemoryKHR),
+    HOOK(CmdCopyMemoryToAccelerationStructureKHR),
+    HOOK(CopyAccelerationStructureKHR),
+    HOOK(CopyAccelerationStructureToMemoryKHR),
+    HOOK(CopyMemoryToAccelerationStructureKHR),
+    HOOK(GetDeviceAccelerationStructureCompatibilityKHR),
+    {"vkCmdDispatchBaseKHR", reinterpret_cast<PFN_vkVoidFunction>(CmdDispatchBase)},
+    {"vkCmdBindDescriptorSets2KHR", reinterpret_cast<PFN_vkVoidFunction>(CmdBindDescriptorSets2)},
+    {"vkCmdPushConstants2KHR", reinterpret_cast<PFN_vkVoidFunction>(CmdPushConstants2)},
+    {"vkCreateDescriptorUpdateTemplateKHR", reinterpret_cast<PFN_vkVoidFunction>(CreateDescriptorUpdateTemplate)},
     HOOK(CreateBuffer),
     HOOK(DestroyBuffer),
     HOOK(AllocateMemory),
@@ -990,7 +1231,8 @@ VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL GetInstanceProcAddr(VkInstance handle, 
     for (const auto& hook : instance_hooks)
         if (!std::strcmp(symbol, hook.symbol)) return available ? hook.function : nullptr;
     for (const auto& hook : hooks)
-        if (!std::strcmp(symbol, hook.symbol)) return available ? hook.function : nullptr;
+        if (!std::strcmp(symbol, hook.symbol))
+            return (available || (state->experimental_software && std::strstr(symbol, "Micromap"))) ? hook.function : nullptr;
     return available;
 }
 VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL GetDeviceProcAddr(VkDevice handle, const char* symbol) {

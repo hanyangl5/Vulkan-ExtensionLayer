@@ -44,7 +44,7 @@ struct BufferRecord {
     BufferRecord* next = nullptr;
     VkBuffer handle{};
     VkDeviceSize size = 0, accessible = 0;
-    VkBufferUsageFlags2KHR usage = 0;
+    VkBufferUsageFlags2KHR usage = 0, native_usage = 0;
     bool bound = false;
 };
 struct Micromap {
@@ -139,7 +139,7 @@ struct DeviceBackend {
     }
     bool buffer_address(BufferRecord* entry, VkDeviceAddress* address) {
         if (!entry || !entry->bound ||
-            !(entry->usage & (VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT | VK_BUFFER_USAGE_MICROMAP_STORAGE_BIT_EXT)))
+            !(entry->native_usage & (VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT | VK_BUFFER_USAGE_MICROMAP_STORAGE_BIT_EXT)))
             return false;
         VkBufferDeviceAddressInfo info{VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO};
         info.buffer = entry->handle;
@@ -315,7 +315,8 @@ void device_backend_destroy(DeviceBackend* backend) {
     release(allocator, backend);
 }
 
-VkResult device_track_buffer(DeviceBackend* backend, VkBuffer handle, const VkBufferCreateInfo* info, VkDeviceSize accessible) {
+VkResult device_track_buffer(DeviceBackend* backend, VkBuffer handle, const VkBufferCreateInfo* info, VkDeviceSize accessible,
+                             VkBufferUsageFlags2 native_usage) {
     if (!backend || !handle || !info || info->sType != VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO || !info->size ||
         (accessible && accessible < info->size))
         return VK_ERROR_VALIDATION_FAILED_EXT;
@@ -331,6 +332,7 @@ VkResult device_track_buffer(DeviceBackend* backend, VkBuffer handle, const VkBu
     for (auto* next = reinterpret_cast<const VkBaseInStructure*>(info->pNext); next; next = next->pNext)
         if (next->sType == VK_STRUCTURE_TYPE_BUFFER_USAGE_FLAGS_2_CREATE_INFO_KHR)
             entry->usage = reinterpret_cast<const VkBufferUsageFlags2CreateInfoKHR*>(next)->usage;
+    entry->native_usage = native_usage ? native_usage : entry->usage;
     entry->next = backend->buffers;
     backend->buffers = entry;
     return VK_SUCCESS;
@@ -410,6 +412,11 @@ VkResult device_micromap_storage(DeviceBackend* backend, VkMicromapEXT handle, M
     if (!backend || !output) return VK_ERROR_VALIDATION_FAILED_EXT;
     std::lock_guard<std::mutex> lock(backend->mutex);
     return backend->storage(handle, output);
+}
+VkResult device_address_span(DeviceBackend* backend, VkDeviceAddress address, VkDeviceSize* logical, VkDeviceSize* accessible) {
+    if (!backend || !logical || !accessible) return VK_ERROR_VALIDATION_FAILED_EXT;
+    std::lock_guard<std::mutex> lock(backend->mutex);
+    return backend->address_range(address, logical, accessible) ? VK_SUCCESS : VK_ERROR_VALIDATION_FAILED_EXT;
 }
 VkResult device_cmd_build(DeviceBackend* backend, VkCommandBuffer command, uint32_t count, const VkMicromapBuildInfoEXT* infos) {
     if (!backend || !command || (count && !infos)) return VK_ERROR_VALIDATION_FAILED_EXT;

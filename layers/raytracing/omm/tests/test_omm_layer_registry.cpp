@@ -82,6 +82,7 @@ VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL get_proc(VkDevice, const char* name) {
     if (!std::strcmp(name, "vkDestroyDevice")) return reinterpret_cast<PFN_vkVoidFunction>(destroy_device);
     return nullptr;
 }
+VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL get_instance_proc(VkInstance, const char* name) { return get_proc(fake_device, name); }
 std::shared_ptr<layer::Device> install() {
     native_state = {};
     auto device = std::make_shared<layer::Device>();
@@ -162,6 +163,13 @@ void allocation_failures() {
 }
 void procedure_surface() {
     auto device = install();
+    Dispatchable instance_object{0x5a003000};
+    const auto fake_instance = reinterpret_cast<VkInstance>(&instance_object);
+    auto instance = std::make_shared<layer::Instance>();
+    instance->handle = fake_instance;
+    instance->next = get_instance_proc;
+    instance->experimental_software = true;
+    layer::instances.emplace(layer::key(fake_instance), instance);
     require(!layer::GetDeviceProcAddr(fake_device, "vkCmdBindShadersEXT"), "unavailable shader-object command remains null");
     require(!layer::GetDeviceProcAddr(fake_device, "vkCmdPipelineBarrier2"), "unavailable core command remains null");
     require(!layer::GetDeviceProcAddr(fake_device, "vkCmdPipelineBarrier2KHR"), "unavailable extension alias remains null");
@@ -172,10 +180,22 @@ void procedure_surface() {
                 layer::GetDeviceProcAddr(fake_device, "vkCmdPushConstants") != reinterpret_cast<PFN_vkVoidFunction>(push),
             "available ordinary command is intercepted");
     require(!layer::GetInstanceProcAddr(VK_NULL_HANDLE, "vkCmdPushConstants"), "null-instance device command remains null");
+    for (const auto& hook : layer::hooks)
+        if (std::strstr(hook.symbol, "Micromap"))
+            require(layer::GetInstanceProcAddr(fake_instance, hook.symbol) == hook.function &&
+                        layer::GetDeviceProcAddr(fake_device, hook.symbol) == hook.function,
+                    "GIPA/GDPA expose every software micromap hook without a native implementation");
+    require(!layer::GetInstanceProcAddr(fake_instance, "vkCmdBindShadersEXT") &&
+                !layer::GetInstanceProcAddr(fake_instance, "vkCmdPipelineBarrier2KHR"),
+            "software GIPA preserves availability gating for unrelated commands");
     device->software = false;
+    instance->experimental_software = false;
     require(!layer::GetDeviceProcAddr(fake_device, "vkCreateMicromapEXT") &&
                 layer::GetDeviceProcAddr(fake_device, "vkCmdPushConstants") == reinterpret_cast<PFN_vkVoidFunction>(push),
             "native mode preserves original procedure availability and identity");
+    require(!layer::GetInstanceProcAddr(fake_instance, "vkCreateMicromapEXT"),
+            "native instance preserves unavailable micromap command");
+    layer::instances.erase(layer::key(fake_instance));
     finish(device);
 }
 }  // namespace

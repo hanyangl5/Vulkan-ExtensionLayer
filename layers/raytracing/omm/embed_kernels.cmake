@@ -1,16 +1,11 @@
 # Copyright 2026 The Khronos Group Inc.
 # SPDX-License-Identifier: Apache-2.0
-file(WRITE "${OUTPUT}" "// Generated from validated SPIR-V.\n#pragma once\n#include <cstdint>\n")
-foreach(kernel build copy)
+set(source "// Generated from validated SPIR-V.\n#pragma once\n#include <cstdint>\n")
+foreach(kernel build copy metadata instances publish classifier property)
     file(READ "${INPUT_${kernel}}" bytes HEX)
-    string(REGEX MATCHALL "........" words "${bytes}")
-    file(APPEND "${OUTPUT}" "inline constexpr uint32_t vel_omm_${kernel}_spv[] = {\n")
-    foreach(word ${words})
-        string(SUBSTRING ${word} 6 2 a)
-        string(SUBSTRING ${word} 4 2 b)
-        string(SUBSTRING ${word} 2 2 c)
-        string(SUBSTRING ${word} 0 2 d)
-        file(APPEND "${OUTPUT}" "0x${a}${b}${c}${d},\n")
-    endforeach()
-    file(APPEND "${OUTPUT}" "};\n")
+    # Convert little-endian words in memory instead of opening the generated
+    # header once per SPIR-V word (particularly costly on Windows).
+    string(REGEX REPLACE "(..)(..)(..)(..)" "0x\\4\\3\\2\\1,\n" words "${bytes}")
+    string(APPEND source "inline constexpr uint32_t vel_omm_${kernel}_spv[] = {\n${words}};\n")
 endforeach()
+file(WRITE "${OUTPUT}" "${source}")

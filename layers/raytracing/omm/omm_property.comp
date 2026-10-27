@@ -1,0 +1,48 @@
+// Copyright 2026 The Khronos Group Inc.
+// SPDX-License-Identifier: Apache-2.0
+#version 460
+#extension GL_EXT_buffer_reference2 : require
+#extension GL_EXT_shader_explicit_arithmetic_types_int64 : require
+layout(local_size_x=64) in;
+layout(buffer_reference,std430,buffer_reference_align=4) buffer Words { uint words[]; };
+layout(push_constant,std430) uniform Property {
+    uint64_t source,capacity,values,nativeResults,destination,stride;
+    uint count,flags,phase,reserved;
+} p;
+uint r32(uint64_t a,uint64_t o) { return Words(a+o).words[0]; }
+uint64_t r64(uint64_t a,uint64_t o) { return uint64_t(r32(a,o))|uint64_t(r32(a,o+4ul))<<32u; }
+void w32(uint64_t a,uint64_t o,uint v) { Words(a+o).words[0]=v; }
+void w64(uint64_t a,uint64_t o,uint64_t v) { w32(a,o,uint(v)); w32(a,o+4ul,uint(v>>32u)); }
+void main() {
+    uint64_t index=uint64_t(gl_GlobalInvocationID.x),step=uint64_t(gl_NumWorkGroups.x)*64ul;
+    if(p.phase==1u) {
+        if(index!=0ul) return;
+        uint64_t result=0ul;
+        if(p.capacity>=64ul && r32(p.source,0ul)==0x4f4c4556u && r32(p.source,4ul)==0x00004d4du &&
+           r32(p.source,8ul)==1u && r32(p.source,12ul)==64u && r64(p.source,32ul)==64ul &&
+           r64(p.source,48ul)==0ul && r64(p.source,56ul)==0ul) {
+            uint64_t activeBytes=r64(p.source,16ul),triangles=r64(p.source,24ul),dataOffset=r64(p.source,40ul);
+            if(activeBytes>=64ul && activeBytes<=p.capacity && (activeBytes&15ul)==0ul &&
+               triangles<=(0xfffffffffffffffful-79ul)/24ul && dataOffset==((64ul+triangles*24ul+15ul)&~15ul) &&
+               dataOffset<=activeBytes && (p.flags==0u || activeBytes<=0xfffffffffffffffful-32ul))
+                result=activeBytes+(p.flags!=0u?32ul:0ul);
+        }
+        w64(p.values,0ul,result);
+        return;
+    }
+    for(;index<uint64_t(p.count);index+=step) {
+        if(p.phase==0u) { w64(p.values,index*8ul,0ul); continue; }
+        uint64_t available=r64(p.nativeResults,index*16ul+8ul);
+        bool wide=(p.flags&1u)!=0u,withAvailability=(p.flags&4u)!=0u,partial=(p.flags&8u)!=0u;
+        uint64_t bytes=wide?8ul:4ul,offset=index*p.stride;
+        // Never read logical data while native query availability is zero.
+        if(available!=0ul || partial) {
+            uint64_t value=available!=0ul?r64(p.values,index*8ul):0ul;
+            if(wide) w64(p.destination,offset,value); else w32(p.destination,offset,uint(value));
+        }
+        if(withAvailability) {
+            if(wide) w64(p.destination,offset+bytes,available!=0ul?1ul:0ul);
+            else w32(p.destination,offset+bytes,available!=0ul?1u:0u);
+        }
+    }
+}

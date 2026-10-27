@@ -5,18 +5,23 @@
 #include <vector>
 
 namespace vel::omm {
-// EXT micromap build/copy executes in compute in this backend. Other bits,
-// including ALL_COMMANDS/ALL_GRAPHICS, zero masks and unknown bits, are retained.
+// EXT micromap build/copy executes in compute. Native AS build/copy also has
+// compute metadata work: retain its native stage/access bits and add shader
+// scopes. ALL_COMMANDS/ALL_GRAPHICS, zero masks and unknown bits are retained.
 VkPipelineStageFlags2 map_stage2(VkPipelineStageFlags2 stages) noexcept;
 VkAccessFlags2 map_access2(VkAccessFlags2 accesses) noexcept;
-// Micromap has no legacy access enumerants. Its stage wire bit fits in 32 bits;
-// mapping it is defensive support, not a claim that it is a legacy enumerant.
+// Micromap/AS-copy stage wire bits fit in 32 bits; mapping these defensively is
+// not a claim that synchronization2-only names are legacy enumerants. Stage
+// mapping can return multiple bits and must not be used for a single-bit API.
 VkPipelineStageFlags map_stage(VkPipelineStageFlags stages) noexcept;
 VkAccessFlags map_access(VkAccessFlags accesses) noexcept;
 
 // Owns barrier arrays. Every pNext remains borrowed, unchanged, and must remain
 // live through the downstream command call. This does not translate pNext data.
 // view() refreshes owned array pointers, so copies/moves have independent views.
+// AS-access buffer barriers additionally produce global metadata memory barriers:
+// their original VkBuffers do not cover separate private sidecar allocations.
+// The original buffer ranges and queue-family ownership indices are preserved.
 class TranslatedDependency {
   public:
     TranslatedDependency() noexcept;

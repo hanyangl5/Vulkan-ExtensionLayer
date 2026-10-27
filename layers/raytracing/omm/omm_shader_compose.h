@@ -10,7 +10,25 @@ enum class ShaderCompositionStatus { Success, InvalidSource, InvalidLibrary, Uns
 struct ComposedQueryShader {
     std::vector<uint32_t> words;
     uint32_t classifier_function = 0;
+    uint32_t descriptor_fetch_function = 0;
+    uint32_t integer_resolver_function = 0;
 };
+struct QueryLibraryOptions {
+    uint32_t classifier_function = 0;
+    // Optional GLSL pointer-parameter helpers taking context first:
+    // uvec4 fetch(uint64 context, uint set, uint binding, uvec2 elementIndex)
+    // uvec2 resolve(uint64 context, uvec2 nativeAddress).
+    uint32_t descriptor_fetch_function = 0;
+    uint32_t integer_resolver_function = 0;
+    uint64_t context_address = 0;
+};
+
+// Provider thunks expose fetch(uint,uint,uvec2) and resolve(uvec2) with scalar
+// arguments. Context is an ordinary constant belonging to an immutable pipeline
+// variant, never an application specialization ID or shared current binding.
+ShaderCompositionStatus compose_query_library(const std::vector<uint32_t>& source, const std::vector<uint32_t>& classifier_library,
+                                              const QueryLibraryOptions& options, ComposedQueryShader* output,
+                                              std::string* diagnostic = nullptr);
 
 // Inject a resource-independent classifier library before AS provenance and
 // rewrite_query_consumers. The library is an ordinary Vulkan 1.2 compute module

@@ -5,11 +5,12 @@ SPDX-License-Identifier: Apache-2.0
 
 # Software opacity micromap implementation status
 
-Updated 2026-10-27. The active goal is the complete native-RT EXT implementation
+Updated 2026-10-28. The active goal is the complete native-RT EXT implementation
 in [the specification](opacity_micromap_layer.md), following
 [the implementation plan](opacity_micromap_plan.md). No full milestone is complete.
-An experimental loader now connects public build/copy operations to the device
-backend. Default operation remains native pass-through. The layer does not add
+The experimental loader now connects public micromap build/copy/query operations,
+native AS metadata and descriptor-sourced compute Ray Query consumers. Default
+operation remains native pass-through. The layer does not add
 OMM discovery to devices without native OMM while the full consumer contract is
 unfinished. The complete application-facing adapter remains in progress.
 
@@ -33,18 +34,21 @@ there is no `vkrt_layer` hierarchy or fallback build dependency.
 | Native RQ mechanism proof | Actual native BLAS/TLAS builds and traversal; transparent filtering, opaque auto-confirm, logical culling, unknown/force-two-state, ordinary triangles and AABB candidates |
 | Native RTP mechanism proof | Native TraceRay, injected Any-Hit, procedural Intersection guarding, payload/attributes, Ignore/Terminate and legal zero triangle hit groups |
 | Query compiler preparation | SPIR-V shadow state for query objects, fixed arrays/structs and function parameters; logical flags saved at initialization and restored by getter rewriting |
-| Automatic RQ consumer | Typed parallel state, inline Proceed filtering and flags/AABB getter restoration; explicit metadata/classifier bridge remains required |
-| Native metadata component | Checked BVH-independent RootCell/TLAS/BLAS layout, normalized 64-bit association and GPU-owned inline OMM snapshots; AS interception/publication remains open |
+| Automatic RQ consumer | Typed parallel state, inline Proceed filtering and flags/AABB getter restoration; production descriptor provenance and bound-set pipeline variants now connect compute RQ |
+| Native metadata component | Checked BVH-independent RootCell/TLAS/BLAS layout, normalized 64-bit association, GPU-owned OMM snapshots, native AS interception and GPU root publication |
 | Packed classifier composition | Resource-free classifier closure linked into ordinary application SPIR-V; actual GPU packed-data/native-RQ chain passes 4,506 traces with explicit scene RootCell |
-| Experimental public API | Public create/destroy/sizes/build/clone/compact, buffer translation, compute/push restoration and sync translation; mandatory queries/serialization remain open |
+| Experimental public API | Public create/destroy/sizes/build/clone/compact and compacted/serialization-size queries, buffer translation, state restoration and sync translation; serialization execution remains open |
+| AS provenance compiler | Descriptor arrays, scalar AS phi/copy, integer conversions and helper argument/return propagation; compiler provider ABI passes 230 checks, integer runtime provider remains open |
+| Descriptor contexts | Native identity plus RootCell in coherent shadow records, ordinary writes/copies, variable counts, immutable per-binding contexts; no extra application set or push range |
+| Native AS lifecycle | Device BUILD for BLAS/TLAS, GPU instance capture/sanitization, replay tokens and fence-driven per-AS retirement; update/copy/serialization remain open |
 
 The CPU evaluator reports 396,693 checks and the storage suite reports 786 checks.
 Storage tests include truncated and corrupted blobs, size overflow, source-input
 mutation/release, canonical padding and round trips. Planner arithmetic limits
 are not advertised device limits. The internal storage blob is not the Vulkan
 public serialization envelope. The experimental device adapter now tracks
-objects and connects public build/copy commands; mandatory query and serialization
-operations remain required.
+objects and connects public build/copy/query commands; mandatory serialization
+execution and compatibility operations remain required.
 
 Device build now runs two GPU phases: validate and plan records, then encode
 payload words in parallel with an intervening compute dependency. Twenty-five
@@ -79,11 +83,11 @@ AS provenance transform, a full-layout resource proof, or a cache/binary ABI.
 The candidate helper is manually written GLSL, not a general SPIR-V rewrite.
 
 The manual proof observes rewritten native ray flags using the native getter.
-The new compiler preparation pass separately saves logical flags and rewrites
+The compiler preparation pass separately saves logical flags and rewrites
 `GetRayFlags`; actual GPU arrays/helpers/reinitialization pass in both capture-only
 and candidate-exposure modes. Exposure is an internal preparation step that still
-requires a candidate wrapper before general shader execution. Native OMM
-capability removal and AS provenance are not yet integrated. Its logical AABB
+requires a candidate wrapper before general shader execution. This older fixture
+predates the production provenance/composition bridge. Its logical AABB
 opacity result is computed by the wrapper; the native getter is not mistaken for
 the original logical value. Original logical instance flags in the sweep come
 from fixture metadata; this does not test GPU-generated instance capture.
@@ -108,17 +112,21 @@ production, source-buffer destruction, classifier composition and automatic
 Proceed filtering before 4,506 actual native traces. Metadata host tests pass
 1,643 checks; the GPU producer passes 35 assertions and eight invalid-input cases,
 including replay after active source size changes from 2608 to 1104 bytes.
-The native fixture still explicitly supplies RootCells and CPU-known TLAS
-identity metadata. AS descriptor/integer provenance, GPU-generated TLAS capture,
-safe root publication and private allocation/retirement remain required.
+That component fixture still explicitly supplies RootCells and CPU-known TLAS
+identity metadata. The newer production integration separately implements
+descriptor provenance, GPU-generated TLAS capture, root publication and private
+allocation/retirement. Integer-derived AS runtime lookup remains required.
 See [the metadata/classifier report](omm_metadata_classifier_2026-10-27.md) and
 [exact CTS consumer bridge audit](omm_cts_consumer_bridge_2026-10-27.md).
 
-The loader/device checkpoint and its actual public API tests are documented in
-[the 2026-10-27 report](omm_layer_api_2026-10-27.md). Explicit experimental mode
-currently admits device-operation tests without RQ/RTP features; it rejects
-consumer-enabled device creation and software AS builds until the bridge exists.
-These gates are incomplete implementation, not a smaller final goal.
+The earlier loader/device checkpoint is documented in
+[the 2026-10-27 report](omm_layer_api_2026-10-27.md). Its consumer-device admission
+gate has now been replaced by operation-level guards. Explicit experimental mode
+admits native RQ/RTP features and supports descriptor-sourced compute RQ through
+the public API. Graphics RQ, RTP pipelines and shader objects still fail closed at
+their respective creation boundaries. These are temporary implementation gaps,
+not a smaller final goal. See the current
+[consumer integration report](omm_consumer_integration_2026-10-28.md).
 
 Independent query graph tests pass 720 checks across 15 valid graph shapes and
 four Vulkan-prohibited pointer graphs. Coverage includes Function/Private mixed
@@ -131,10 +139,10 @@ compiler preparation without accepting that invalid frontend output.
 
 ## Verification and external CTS
 
-Standalone CMake build with LLVM 20.1.3 and Vulkan SDK 1.4.357.0 passes fifteen
-component CTests. The public loader test separately passes 54 checks with
+Standalone CMake build with LLVM 20.1.3 and Vulkan SDK 1.4.357.0 passes 26
+component CTests (12 offline, 14 GPU). The public loader test separately passes 54 checks with
 validation above and below the layer. Parent VEL configuration builds the new
-targets and passes eight offline targets; the host-only configuration passes two without
+OMM targets and passes 12 offline targets; the host-only configuration passes three without
 Vulkan dependencies. The native GPU proofs pass with `VK_LAYER_KHRONOS_validation` and
 `VK_LAYER_VALIDATE_SYNC=1`, with no validation or synchronization diagnostics.
 The generated SPIR-V is checked with the SDK validator.
@@ -163,8 +171,18 @@ formats. `VK_VEL_OMM_EXPERIMENTAL_SOFTWARE=1` explicitly selects the incomplete
 development backend when the EXT extension is enabled. The mode is captured at
 instance creation. Its software API fixture checks canonical storage magic to
 confirm emulation. Newly run native-through-layer CTS retains the 8 Pass/2 Fail
-baseline. Three software CTS admission probes terminate at device creation with
-`VK_ERROR_FEATURE_NOT_PRESENT`; there are no software CTS qualification passes.
+baseline. The final reviewed software matrix passes 36/36 exact cases in each
+validation-layer order: 34 compute RQ cases and two micromap size queries. In an
+earlier below-order run, 34 passed and the final two level-12 processes could not
+initialize during Windows logoff
+(`0xC000026B`, empty stdout and no QPA), and both passed in a fresh retry. Keep
+the original failures and retry evidence; the final full rerun passes all 36.
+The software smoke matrix has 8 Pass
+and 2 Fail: both actual RTP rendering cases still return
+`VK_ERROR_FEATURE_NOT_PRESENT`. The size queries live in the RTP namespace but
+exercise no RTP shader. The pinned CTS `copy.compact` case actually records
+CLONE; it is not external COMPACT coverage. These results establish the tested
+compute RQ path, not complete EXT conformance.
 
 ## Open milestone gates
 
@@ -180,25 +198,36 @@ baseline. Three software CTS admission probes terminate at device creation with
   barriers/events/queues, replay, feature interaction and lifetime matrix.
 - [ ] M5: complete supported-contract CTS/regressions and unmodified applications.
 
-Next, implement descriptor/integer AS provenance and connect the query compiler
-preparation to general candidate wrapping and the public API. Extend native RTP
-context transport to nested/callable/indirect execution. Keep the shared
-core independent of native BVH internals and the separate software RT backend.
+Next, implement integer-derived AS runtime lookup and graphics RQ, then extend
+native RTP context transport to general SBT, nested/callable/indirect execution.
+Complete public micromap serialization, AS update/copy/relocation and the full
+synchronization/lifetime matrix. The current AS registry snapshot also needs a
+solution for BLAS objects created after a TLAS command was recorded. Query
+execution currently requires compute and timestamps on its command queue; the
+fallback for other legal queues remains required. Keep the shared core independent
+of native BVH internals and the separate software RT backend.
+
+Review also identified AS creation before buffer binding and external-fence
+payload changes as concrete remaining lifecycle defects; the passing matrix
+does not cover them. See the current consumer report for details. Abandoned
+record/reset-only AS bodies, consumer bind OOM transactions, derivative batch
+failure handling and GIPA software-entry availability are now fixed with
+independent regressions.
 
 ## Reproduction
 
 ```powershell
-cmake -S layers/raytracing -B build-omm -G Ninja `
+cmake -S layers/raytracing -B build-omm-integration -G Ninja `
   -DCMAKE_MAKE_PROGRAM=C:/FILES/ninja-win/ninja.exe `
   '-DCMAKE_CXX_COMPILER=C:/Program Files/LLVM/bin/clang++.exe' `
   -DCMAKE_BUILD_TYPE=Release -DVulkan_ROOT=C:/VulkanSDK/1.4.357.0
-cmake --build build-omm --parallel 8
+cmake --build build-omm-integration --parallel 8
 $env:VK_INSTANCE_LAYERS = 'VK_LAYER_KHRONOS_validation'
 $env:VK_LAYER_PATH = 'C:/VulkanSDK/1.4.357.0/Bin'
 Remove-Item Env:VK_LAYER_ENABLES -ErrorAction SilentlyContinue
 $env:VK_LAYER_VALIDATE_SYNC = '1'
 $env:VK_LOADER_LAYERS_DISABLE = '~implicit~'
-ctest --test-dir build-omm -LE loader --output-on-failure
+ctest --test-dir build-omm-integration -LE loader --output-on-failure
 ```
 
 See the loader report for the explicit software API test environment. Running all

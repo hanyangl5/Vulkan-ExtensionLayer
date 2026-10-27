@@ -3,6 +3,7 @@
 #version 460
 #extension GL_GOOGLE_include_directive : require
 #include "../omm_classifier.glsl"
+#include "../omm_context.glsl"
 
 // Compile with --keep-uncalled. The composer removes this dummy entry point and
 // links the classifier closure into application stages without global resources.

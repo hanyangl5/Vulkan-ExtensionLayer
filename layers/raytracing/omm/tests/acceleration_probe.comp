@@ -1,0 +1,38 @@
+// Copyright 2026 The Khronos Group Inc.
+// SPDX-License-Identifier: Apache-2.0
+#version 460
+#extension GL_GOOGLE_include_directive : require
+#extension GL_EXT_ray_query : require
+#include "../omm_classifier.glsl"
+layout(local_size_x=1) in;
+layout(push_constant,std430) uniform Probe { uint64_t nativeAddress, rootAddress, outputAddress; } p;
+layout(buffer_reference,std430,buffer_reference_align=4) buffer Output { uint words[]; };
+void main() {
+    Output o=Output(p.outputAddress);
+    if(ommLookupRead32(p.rootAddress,12ul)!=1u) {
+        for(uint i=0u;i<8u;++i) o.words[i]=0u;
+        o.words[1]=0xffffffffu;
+        return;
+    }
+    uint hit=0u, status=99u, decision=99u, candidate=0u, custom=0u;
+    rayQueryEXT q;
+    rayQueryInitializeEXT(q,accelerationStructureEXT(p.nativeAddress),gl_RayFlagsNoOpaqueEXT,255,
+                          vec3(0.2,0.2,1),0.0,vec3(0,0,-1),2.0);
+    while(rayQueryProceedEXT(q)) {
+        candidate++;
+        uint index=rayQueryGetIntersectionInstanceIdEXT(q,false);
+        custom=rayQueryGetIntersectionInstanceCustomIndexEXT(q,false);
+        decision=0u;
+        status=ommClassifyChecked(uvec2(p.rootAddress,uint(p.rootAddress>>32u)),index,
+                                  rayQueryGetIntersectionGeometryIndexEXT(q,false),
+                                  rayQueryGetIntersectionPrimitiveIndexEXT(q,false),
+                                  rayQueryGetIntersectionBarycentricsEXT(q,false),true,0u,decision);
+        if(status==0u && decision==1u) rayQueryConfirmIntersectionEXT(q);
+    }
+    if(rayQueryGetIntersectionTypeEXT(q,true)!=gl_RayQueryCommittedIntersectionNoneEXT) hit=1u;
+    o.words[0]=hit; o.words[1]=status; o.words[2]=decision; o.words[3]=candidate; o.words[4]=custom;
+    uint64_t body=ommLookupRead64(p.rootAddress,16ul);
+    o.words[5]=ommLookupRead32(body,80ul); // Instance flags, from GPU metadata.
+    o.words[6]=ommLookupRead32(p.rootAddress,12ul);
+    o.words[7]=ommLookupRead32(body,56ul)==ommLookupRead32(p.rootAddress,32ul)?1u:0u;
+}
