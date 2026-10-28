@@ -60,6 +60,7 @@ class Generator:
         available_commands = set(re.findall(r"\bPFN_(vkCmd\w+)\b", self.header_text))
         self.all_commands = {}
         self.commands = []
+        self.header_missing_commands = []
         for c in self.root.findall("./commands/command"):
             if vulkan(c):
                 self.all_commands[c.get("name") or c.findtext("./proto/name")] = c
@@ -68,15 +69,102 @@ class Generator:
             while target.get("alias"):
                 target = self.all_commands[target.get("alias")]
             params = [p for p in target.findall("param") if vulkan(p)]
-            if n in available_commands and params and params[0].findtext("type") == "VkCommandBuffer":
-                self.commands.append((n, target, params))
+            if n and n.startswith("vkCmd") and params and params[0].findtext("type") == "VkCommandBuffer":
+                if n in available_commands:
+                    self.commands.append((n, target, params))
+                else:
+                    self.header_missing_commands.append((n, target, params))
         self.commands.sort()
+        self.header_missing_commands.sort()
         self.reachable = set()
         self.walked = set()
         self.struct_reasons = {}
         self.command_reasons = {}
         self.selected_unions = set()
         self.count = 0
+        self.abi_declarations = {}
+        self.abi_types = {}
+        self.abi_rejections = {}
+
+    def forwarding_type(self, n, pointer):
+        """Prove just the call ABI; never inspect an unavailable pointee.
+
+        Private aliases avoid colliding with optional beta/platform headers.
+        Struct/union tags can be forward declared without knowing their layout.
+        By-value aggregate layouts cannot be guessed and remain rejected.
+        """
+        if n in self.available or n in ("void", "char", "float", "double", "int", "uint8_t", "uint16_t", "uint32_t", "uint64_t", "int32_t", "int64_t", "size_t"):
+            return n
+        if n in self.abi_types:
+            if self.category(n) in ("struct", "union") and not pointer:
+                raise ValueError("unavailable by-value aggregate ABI " + n)
+            return self.abi_types[n]
+        canonical = self.canonical(n)
+        node = self.types.get(canonical)
+        if node is None:
+            raise ValueError("unknown external ABI type " + n)
+        category = node.get("category")
+        if category in ("struct", "union"):
+            if not pointer:
+                raise ValueError("unavailable by-value aggregate ABI " + n)
+            # Vulkan uses the same identifier for the typedef and aggregate tag.
+            # Repeating an identical typedef is valid C11 when a beta header also
+            # declares the type, while the private PFN name never collides.
+            self.abi_declarations[n] = "typedef " + category + " " + canonical + " " + n + ";"
+            self.abi_types[n] = n
+            return n
+        private = "VKRT_ABI_" + n
+        if category == "handle":
+            spelling = "".join(node.itertext())
+            macro = "VK_DEFINE_NON_DISPATCHABLE_HANDLE" if "VK_DEFINE_NON_DISPATCHABLE_HANDLE" in spelling else "VK_DEFINE_HANDLE" if "VK_DEFINE_HANDLE" in spelling else None
+            if not macro:
+                raise ValueError("unrecognized handle ABI " + n)
+            self.abi_declarations[n] = macro + "(" + private + ")"
+        elif category in ("basetype", "bitmask"):
+            underlying = node.findtext("type")
+            if not underlying:
+                raise ValueError("unrecognized scalar ABI " + n)
+            base = self.forwarding_type(underlying, False)
+            self.abi_declarations[n] = "typedef " + base + " " + private + ";"
+        elif category == "enum":
+            values = self.root.find("./enums[@name='" + canonical + "']")
+            if values is None or values.get("bitwidth", "32") not in ("32", "64"):
+                raise ValueError("unrecognized enum ABI " + n)
+            base = "uint64_t" if values.get("bitwidth") == "64" else "int32_t"
+            self.abi_declarations[n] = "typedef " + base + " " + private + ";"
+        else:
+            raise ValueError("unsupported ABI category " + str(category) + " for " + n)
+        self.abi_types[n] = private
+        return private
+
+    def forwarding_signature(self, c, params):
+        ret = c.findtext("./proto/type")
+        if ret not in ("void", "VkResult"):
+            raise ValueError("unrecognized return ABI " + ret)
+        declarations = []
+        for p in params:
+            t, _, decl, depth, dims = self.shape(p)
+            replacement = self.forwarding_type(t, bool(depth or dims))
+            declarations.append(re.sub(r"\b" + re.escape(t) + r"\b", replacement, decl, count=1))
+        return ret, ", ".join(declarations)
+
+    def forwarding_command(self, n, c, params, ret, signature):
+        args = [name_of(p) for p in params]
+        lines = ["typedef " + ret + " (VKAPI_PTR *VKRT_PFN_" + n + ")(" + signature + ");",
+                 "static VKAPI_ATTR " + ret + " VKAPI_CALL replay_record_" + n + "(" + signature + ") {",
+                 "    struct vkrt_replay_context *context = vkrt_replay_lookup_context(" + args[0] + ");",
+                 "    if (context && context->journal) {",
+                 "        struct replay_arena arena = replay_capture_begin(context);",
+                 "        replay_unsupported(&arena);",
+                 "        replay_capture_end(context, \"" + n + "\", NULL, NULL, &arena);",
+                 "    }",
+                 "    VKRT_PFN_" + n + " proc = context && context->resolve ? (VKRT_PFN_" + n + ")context->resolve(context->user, \"" + n + "\") : NULL;"]
+        if ret == "void":
+            lines.append("    if (proc) proc(" + ", ".join(args) + ");")
+        else:
+            lines.append("    return proc ? proc(" + ", ".join(args) + ") : VK_ERROR_FEATURE_NOT_PRESENT;")
+        lines.append("}")
+        return lines
 
     def canonical(self, n):
         seen = set()
@@ -486,12 +574,20 @@ class Generator:
         return lines
 
     def generate(self):
+        forwarding = []
+        for n, c, params in self.header_missing_commands:
+            try:
+                ret, signature = self.forwarding_signature(c, params)
+                forwarding.append((n, c, params, ret, signature))
+            except ValueError as exc:
+                self.abi_rejections[n] = str(exc)
         self.add_type("VkCommandBufferBeginInfo")
         for _, _, params in self.commands:
             for p in params[1:]:
                 self.add_type(p.findtext("type"))
         lines = ["/* Generated by generate_command_replay.py; do not edit. */",
                  "static void *replay_clone_chain(struct replay_arena *arena, const void *source);"]
+        lines.extend(self.abi_declarations.values())
         for n in sorted(self.reachable):
             lines.append("static inline void replay_clone_" + n + "(struct replay_arena *, " + n + " *, const " + n + " *);")
         for n in sorted(self.reachable):
@@ -522,8 +618,12 @@ class Generator:
                       "    return copy;", "}"])
         for n, c, params in self.commands:
             lines.extend(self.command(n, c, params))
+        for n, c, params, ret, signature in forwarding:
+            lines.extend(self.forwarding_command(n, c, params, ret, signature))
         lines.extend(["PFN_vkVoidFunction vkrt_replay_proc(const char *name) {", "    if (!name) return NULL;"])
         for n, _, _ in self.commands:
+            lines.append("    if (!strcmp(name, \"" + n + "\")) return (PFN_vkVoidFunction)replay_record_" + n + ";")
+        for n, _, _, _, _ in forwarding:
             lines.append("    if (!strcmp(name, \"" + n + "\")) return (PFN_vkVoidFunction)replay_record_" + n + ";")
         lines.extend(["    return NULL;", "}", ""])
         # Attribute conditional restrictions to each command as well as listing
@@ -554,17 +654,26 @@ class Generator:
                                      "capture": "unsupported" if n in self.command_reasons else "typed_with_runtime_schema_checks",
                                      "reasons": self.command_reasons.get(n, []),
                                      "conditional_schema_restrictions": restrictions})
+        for n, _, _, _, _ in forwarding:
+            command_manifest.append({"name": n, "capture": "unsupported",
+                                     "reasons": ["ABI-only forwarding: command is absent from the selected core header; actual invocation fails capture without reading opaque inputs"],
+                                     "conditional_schema_restrictions": {}})
+        command_manifest.sort(key=lambda x: x["name"])
+        wrapped_names = {c[0] for c in self.commands} | {c[0] for c in forwarding}
         manifest = {"registry_sha256": hashlib.sha256(self.registry.read_bytes()).hexdigest(),
                     "header_sha256": hashlib.sha256(self.header.read_bytes()).hexdigest(),
                     "policy": "Typed command inputs are owned; unknown pNext, opaque schemas, and unsupported union cases fail capture. Native handles obey Vulkan object lifetimes. Pipeline layouts are normalized by the caller callback. Device-address unions retain address bits, opaque checkpoint markers retain identity.",
-                    "command_count": len(self.commands), "typed_struct_count": len(self.reachable),
+                    "command_count": len(wrapped_names), "typed_struct_count": len(self.reachable),
                     "commands": command_manifest,
                     "conditional_struct_restrictions": self.struct_reasons,
                     "manual_pointer_rules": self.MANUAL_POINTER_RULES,
                     "inactive_dynamic_inheritance_skips": sorted(self.INACTIVE_DYNAMIC_INHERITANCE),
                     "selected_union_schemas": sorted(self.selected_unions | {"VkAccelerationStructureGeometryDataKHR"}),
                     "unsupported_union_schemas": sorted(n for n in self.walked if self.category(n) == "union" and not self.pod_union(n) and n != "VkAccelerationStructureGeometryDataKHR" and n not in self.selected_unions),
-                    "unavailable_commands": sorted(n for n in self.all_commands if n and n.startswith("vkCmd") and n not in {c[0] for c in self.commands})}
+                    "header_unavailable_commands": [n for n, _, _ in self.header_missing_commands],
+                    "unsupported_forwarding_commands": [n for n, _, _, _, _ in forwarding],
+                    "abi_rejections": self.abi_rejections,
+                    "unavailable_commands": sorted(n for n in self.all_commands if n and n.startswith("vkCmd") and n not in wrapped_names)}
         return "\n".join(lines), manifest
 
 
@@ -578,8 +687,10 @@ def main():
     output, manifest = Generator(args.registry, args.header).generate()
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.coverage.parent.mkdir(parents=True, exist_ok=True)
-    args.output.write_text(output, encoding="utf-8")
     args.coverage.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+    if manifest["abi_rejections"]:
+        parser.error("Cannot generate ABI-safe command admission blockers: " + json.dumps(manifest["abi_rejections"]))
+    args.output.write_text(output, encoding="utf-8")
     unsupported = sum(c["capture"] == "unsupported" for c in manifest["commands"])
     print(f"command replay: {manifest['command_count']} typed wrappers, {unsupported} explicit unsupported commands, {manifest['typed_struct_count']} struct schemas")
 

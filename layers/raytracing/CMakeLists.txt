@@ -73,6 +73,7 @@ add_library(${VKRT_LAYER_NAME} SHARED
    src/vkrt_descriptor_layout.c
    src/vkrt_memory_queries.c
    src/vkrt_query_pool.c
+   src/vkrt_execution_replay.c
    src/vkrt_shader_objects.c
    src/vkrt_shader_interface.c
    src/vkrt_deferred.c
@@ -567,6 +568,38 @@ if(BUILD_TESTING)
    set_target_properties(test_command_replay PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED ON)
    add_test(NAME vkrt.command_replay COMMAND test_command_replay)
    set_tests_properties(vkrt.command_replay PROPERTIES LABELS "offline;no_native_rt")
+   add_executable(test_execution_replay tests/execution_replay_host.c src/vkrt_execution_replay.c)
+   target_link_libraries(test_execution_replay PRIVATE vkrt_command_replay Threads::Threads)
+   set_target_properties(test_execution_replay PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED ON)
+   add_test(NAME vkrt.execution_replay COMMAND test_execution_replay)
+   set_tests_properties(vkrt.execution_replay PROPERTIES LABELS "offline;no_native_rt")
+   add_executable(test_sync_execution tests/sync_execution_host.c src/vkrt_sync.c)
+   target_include_directories(test_sync_execution PRIVATE src ${CMAKE_CURRENT_BINARY_DIR} ${Vulkan_INCLUDE_DIRS})
+   target_link_libraries(test_sync_execution PRIVATE Threads::Threads)
+   set_target_properties(test_sync_execution PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED ON)
+   add_test(NAME vkrt.sync_execution COMMAND test_sync_execution)
+   set_tests_properties(vkrt.sync_execution PROPERTIES LABELS "offline;no_native_rt")
+   add_executable(test_query_replay tests/test_query_replay.c)
+   target_include_directories(test_query_replay PRIVATE src tests ${Vulkan_INCLUDE_DIRS})
+   target_link_libraries(test_query_replay PRIVATE ${Vulkan_LIBRARIES} Threads::Threads)
+   set_target_properties(test_query_replay PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED ON)
+   add_test(NAME vkrt.query_replay.software COMMAND test_query_replay)
+   set_tests_properties(vkrt.query_replay.software PROPERTIES
+      ENVIRONMENT "VK_LAYER_PATH=${CMAKE_BINARY_DIR}/layers;VK_INSTANCE_LAYERS=VK_LAYER_VKRT_SOFTWARE_RAY_QUERY;VK_LOADER_LAYERS_DISABLE=~implicit~"
+      LABELS "gpu;query_publication" SKIP_RETURN_CODE 77 TIMEOUT 180)
+   add_executable(test_query_signal_order tests/test_query_signal_order.c)
+   target_include_directories(test_query_signal_order PRIVATE src tests ${Vulkan_INCLUDE_DIRS})
+   target_link_libraries(test_query_signal_order PRIVATE ${Vulkan_LIBRARIES} Threads::Threads)
+   set_target_properties(test_query_signal_order PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED ON)
+   add_test(NAME vkrt.query_signal_order.oracle COMMAND test_query_signal_order --oracle)
+   set_tests_properties(vkrt.query_signal_order.oracle PROPERTIES LABELS "offline;no_native_rt")
+   add_test(NAME vkrt.query_signal_order.software COMMAND test_query_signal_order)
+   set_tests_properties(vkrt.query_signal_order.software PROPERTIES
+      ENVIRONMENT "VK_LAYER_PATH=${CMAKE_BINARY_DIR}/layers;VK_INSTANCE_LAYERS=VK_LAYER_VKRT_SOFTWARE_RAY_QUERY;VK_LOADER_LAYERS_DISABLE=~implicit~"
+      LABELS "gpu;query_publication" SKIP_RETURN_CODE 77 TIMEOUT 90)
+   add_test(NAME vkrt.query_signal_order.native COMMAND test_query_signal_order)
+   set_tests_properties(vkrt.query_signal_order.native PROPERTIES
+      ENVIRONMENT "VK_INSTANCE_LAYERS=;VK_LOADER_LAYERS_DISABLE=~implicit~" LABELS "gpu;native_rt" SKIP_RETURN_CODE 77 TIMEOUT 90)
    add_executable(test_stage_schedule tests/test_stage_schedule.c src/vkrt_stage_schedule.c)
    target_include_directories(test_stage_schedule PRIVATE src ${Vulkan_INCLUDE_DIRS})
    set_target_properties(test_stage_schedule PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED ON)
@@ -577,7 +610,7 @@ if(BUILD_TESTING)
    target_link_libraries(test_memory_queries PRIVATE Threads::Threads)
    set_target_properties(test_memory_queries PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED ON)
    add_test(NAME vkrt.memory_queries COMMAND test_memory_queries)
-   add_executable(test_query_pool_publication tests/test_query_pool_publication.c)
+   add_executable(test_query_pool_publication tests/test_query_pool_publication.c src/vkrt_private_pool.c)
    target_include_directories(test_query_pool_publication PRIVATE src ${CMAKE_CURRENT_BINARY_DIR} ${CMAKE_CURRENT_BINARY_DIR}/bvh ${Vulkan_INCLUDE_DIRS})
    target_link_libraries(test_query_pool_publication PRIVATE Threads::Threads)
    set_target_properties(test_query_pool_publication PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED ON)

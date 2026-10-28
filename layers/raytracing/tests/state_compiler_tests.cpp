@@ -864,7 +864,7 @@ bool LogicalPointerSnapshots(bool execute, bool array_pointers = false) {
                  "inlined pointer helper, independent root/index snapshots and repeated suspend/resume\n";
     return true;
 }
-std::string MutablePointerSource(bool module_private) {
+std::string MutablePointerSource(bool module_private, bool stride_views = false) {
     std::string source(kPointerSource);
     Replace(source, "OpDecorate %array ArrayStride 4", "OpDecorate %word_ptr ArrayStride 4\nOpDecorate %array ArrayStride 4");
     Replace(source, "OpMemberDecorate %block 1 Offset 128", "OpMemberDecorate %block 1 Offset 512");
@@ -881,7 +881,7 @@ std::string MutablePointerSource(bool module_private) {
     Replace(source, "%entry = OpLabel",
             "%entry = OpLabel\n%table = OpVariable %table_type Function\n"
             "%other = OpVariable %slot_type Function %null\n"
-            "%record = OpVariable %record_pointer Function");
+            "%record = OpVariable %record_pointer Function\n%record_backup = OpVariable %record_pointer Function");
     Replace(source, "%a = OpAccessChain %word_ptr %output %zero %id",
             "%base_index = OpIMul %uint %id %four\n%a = OpAccessChain %word_ptr %output %zero %base_index");
     Replace(source, "%b = OpAccessChain %word_ptr %output %one %id",
@@ -893,28 +893,34 @@ std::string MutablePointerSource(bool module_private) {
     Replace(source, "%pb = OpPhi %word_ptr %b %entry %pa %continue", "%pb = OpPhi %word_ptr %b %entry %advance_b %continue");
     Replace(source, "%round_float = OpConvertUToF",
             "OpSelectionMerge %stored None\nOpBranchConditional %even %store_yes %store_no\n"
-            "%store_yes = OpLabel\nOpStore %alias_copy %selected\n%yes_pointer = OpLoad %word_ptr %alias\nOpBranch %stored\n"
-            "%store_no = OpLabel\nOpStore %other %selected\n%no_pointer = OpLoad %word_ptr %other\nOpBranch %stored\n"
+            "%store_yes = OpLabel\nOpStore %alias_copy %selected\nOpCopyMemory %other %alias\n"
+            "%yes_pointer = OpLoad %word_ptr %other\nOpBranch %stored\n"
+            "%store_no = OpLabel\nOpStore %other %selected\nOpCopyMemory %alias %other\n"
+            "%no_pointer = OpLoad %word_ptr %alias_copy\nOpBranch %stored\n"
             "%stored = OpLabel\n%loaded = OpPhi %word_ptr %yes_pointer %store_yes %no_pointer %store_no\n"
             "%record_slot = OpAccessChain %slot_type %record %zero\n%round_slot = OpAccessChain %round_slot_type %record %one\n"
-            "OpStore %record_slot %loaded\nOpStore %round_slot %round\n"
+            "OpStore %record_slot %loaded\nOpStore %round_slot %round\nOpCopyMemory %record_backup %record\n"
             "%record_copy = OpLoad %record_type %record\n%from_record = OpLoad %word_ptr %record_slot\n"
             "%round_float = OpConvertUToF");
     Replace(source, "%helper %selected %delta", "%helper %from_record %delta");
     Replace(source, "OpBranch %continue\n%continue = OpLabel",
             "%saved_round = OpCompositeExtract %uint %record_copy 1\n"
             "%same_round = OpIEqual %bool %saved_round %round\n"
-            "OpStore %record %record_copy\n%late_pointer = OpLoad %word_ptr %record_slot\n"
-            "%same_pointer = OpPtrEqual %bool %late_pointer %loaded\n%correct = OpLogicalAnd %bool %same_round %same_pointer\n"
+            "OpStore %record %record_copy\nOpStore %record_slot %null\nOpStore %round_slot %memory_count\n"
+            "OpCopyMemory %record %record_backup\n%late_pointer = OpLoad %word_ptr %record_slot\n"
+            "%late_round = OpLoad %uint %round_slot\n%memory_round = OpIEqual %bool %late_round %round\n"
+            "%same_pointer = OpPtrEqual %bool %late_pointer %loaded\n"
+            "%copy_correct = OpLogicalAnd %bool %memory_round %same_pointer\n"
+            "%correct = OpLogicalAnd %bool %same_round %copy_correct\n"
             "OpSelectionMerge %checked None\nOpBranchConditional %correct %checked %wrong\n"
-            "%wrong = OpLabel\nOpStore %late_pointer %memory_count\nOpBranch %checked\n%checked = OpLabel\n"
+            "%wrong = OpLabel\nOpStore %a %memory_count\nOpBranch %checked\n%checked = OpLabel\n"
             "OpBranch %continue\n%continue = OpLabel\n"
             "%forward_a = OpPtrAccessChain %word_ptr %pa %one\n"
             "%back_a = OpPtrAccessChain %word_ptr %forward_a %negative_one\n"
             "%advance_a = OpPtrAccessChain %word_ptr %back_a %one\n"
             "%advance_b = OpPtrAccessChain %word_ptr %pb %one\n");
     if (module_private) {
-        Replace(source, "%launch %output", "%launch %output %table %other %record");
+        Replace(source, "%launch %output", "%launch %output %table %other %record %record_backup");
         Replace(source, "%table_type = OpTypePointer Function", "%table_type = OpTypePointer Private");
         Replace(source, "%slot_type = OpTypePointer Function", "%slot_type = OpTypePointer Private");
         Replace(source, "%round_slot_type = OpTypePointer Function", "%round_slot_type = OpTypePointer Private");
@@ -922,17 +928,63 @@ std::string MutablePointerSource(bool module_private) {
         Replace(source, "%table = OpVariable %table_type Function\n", "");
         Replace(source, "%other = OpVariable %slot_type Function %null\n", "");
         Replace(source, "%record = OpVariable %record_pointer Function\n", "");
+        Replace(source, "%record_backup = OpVariable %record_pointer Function\n", "");
         Replace(source, "%entry_type = OpTypeFunction",
                 "%table = OpVariable %table_type Private\n%other = OpVariable %slot_type Private %null\n"
-                "%record = OpVariable %record_pointer Private\n%entry_type = OpTypeFunction");
+                "%record = OpVariable %record_pointer Private\n%record_backup = OpVariable %record_pointer Private\n"
+                "%entry_type = OpTypeFunction");
+    }
+    if (stride_views) {
+        // ArrayStride is optional on ordinary access-chain results. The two
+        // real arrays below have different strides; both can use the same
+        // unadorned pointer type. Restore each actual array's stride before
+        // arithmetic, including after pointer-valued memory loads.
+        for (size_t offset = 0; (offset = source.find("%word_ptr", offset)) != std::string::npos;) {
+            source.replace(offset, 9, "%unstrided_word");
+            offset += 15;
+        }
+        Replace(source, "OpDecorate %unstrided_word ArrayStride 4", "OpDecorate %word_ptr ArrayStride 4");
+        Replace(source, "OpDecorate %array ArrayStride 4",
+                "OpDecorate %array ArrayStride 4\nOpDecorate %array8 ArrayStride 8\nOpDecorate %word_ptr8 ArrayStride 8");
+        Replace(source, "%block = OpTypeStruct %array %array",
+                "%array8 = OpTypeArray %uint %count\n%block = OpTypeStruct %array %array8");
+        Replace(source, "%unstrided_word = OpTypePointer StorageBuffer %uint",
+                "%unstrided_word = OpTypePointer StorageBuffer %uint\n%word_ptr = OpTypePointer StorageBuffer %uint\n"
+                "%word_ptr8 = OpTypePointer StorageBuffer %uint");
+        Replace(source, "OpCapability Shader", "OpCapability Shader\nOpCapability Int64\nOpCapability ShaderNonUniform");
+        Replace(source, "OpDecorate %array ArrayStride 4", "OpDecorate %a_drop NonUniform\nOpDecorate %array ArrayStride 4");
+        Replace(source, "%float = OpTypeFloat 32",
+                "%float = OpTypeFloat 32\n%uint64 = OpTypeInt 64 0\n"
+                "%one64 = OpConstant %uint64 1\n%minus_one64 = OpConstant %uint64 18446744073709551615");
+        Replace(source, "%a = OpAccessChain %unstrided_word %output %zero %base_index",
+                "%a_origin = OpAccessChain %word_ptr %output %zero %base_index\n"
+                "%a_drop = OpAccessChain %unstrided_word %a_origin\n%a = OpAccessChain %unstrided_word %a_drop");
+        Replace(source, "%yes_pointer = OpLoad %unstrided_word %other",
+                "%yes_raw = OpLoad %unstrided_word %other\n%yes_typed = OpAccessChain %word_ptr %yes_raw\n"
+                "%yes_pointer = OpAccessChain %unstrided_word %yes_typed");
+        Replace(source, "%no_pointer = OpLoad %unstrided_word %alias_copy",
+                "%no_raw = OpLoad %unstrided_word %alias_copy\n%no_typed = OpAccessChain %word_ptr8 %no_raw\n"
+                "%no_pointer = OpAccessChain %unstrided_word %no_typed");
+        Replace(source, "%forward_a = OpPtrAccessChain %unstrided_word %pa %one",
+                "%pa_typed = OpAccessChain %word_ptr %pa\n"
+                "%forward_a = OpPtrAccessChain %unstrided_word %pa_typed %one64");
+        Replace(source, "%back_a = OpPtrAccessChain %unstrided_word %forward_a %negative_one",
+                "%forward_typed = OpAccessChain %word_ptr %forward_a\n"
+                "%back_a = OpPtrAccessChain %unstrided_word %forward_typed %minus_one64");
+        Replace(source, "%advance_a = OpPtrAccessChain %unstrided_word %back_a %one",
+                "%back_typed = OpAccessChain %word_ptr %back_a\n"
+                "%advance_a = OpPtrAccessChain %unstrided_word %back_typed %one64");
+        Replace(source, "%advance_b = OpPtrAccessChain %unstrided_word %pb %one",
+                "%pb_typed = OpAccessChain %word_ptr8 %pb\n"
+                "%advance_b = OpPtrAccessChain %unstrided_word %pb_typed %one");
     }
     return source;
 }
-bool MutablePointerMemory(bool execute, bool module_private) {
-    // Zero-advance stride views are accepted by the source validator and can
-    // participate in a loop without changing any address. Until byte-offset
-    // normalization handles these views, reject before route fixed-point
-    // analysis rather than append alternating stride segments indefinitely.
+bool MutablePointerMemory(bool execute, bool module_private, bool stride_views = false) {
+    // SDK357's source validator misses this pointer decoration mismatch. A
+    // zero advance still names an element of the original stride4 array; its
+    // result cannot claim that array has stride8. Keep the explicit compiler
+    // diagnostic and finite route planning for this invalid source layout.
     std::string stride_cycle(kPointerSource);
     Replace(stride_cycle, "OpDecorate %array ArrayStride 4",
             "OpDecorate %word_ptr ArrayStride 4\nOpDecorate %stride_view_type ArrayStride 8\nOpDecorate %array ArrayStride 4");
@@ -947,15 +999,58 @@ bool MutablePointerMemory(bool execute, bool module_private) {
     try {
         CompileTypedContinuationSteps(Source(stride_cycle), "main", spv::ExecutionModelIntersectionKHR);
     } catch (const std::exception &error) {
-        Require(std::string(error.what()).find("ArrayStride changes require byte-offset") != std::string::npos,
+        Require(std::string(error.what()).find("ArrayStride changes require a matching array origin") != std::string::npos,
                 "Stride-changing pointer view rejected for an unrelated reason: " + std::string(error.what()));
         stride_rejected = true;
     }
     Require(stride_rejected, "Stride-changing pointer cycle entered unbounded route planning");
-    const auto words = Source(MutablePointerSource(module_private));
+    std::string indirect_stride_cycle(stride_cycle);
+    Replace(indirect_stride_cycle, "%stride_view_type = OpTypePointer StorageBuffer %uint",
+            "%stride_view_type = OpTypePointer StorageBuffer %uint\n%bare_view_type = OpTypePointer StorageBuffer %uint");
+    Replace(indirect_stride_cycle,
+            "%stride_view = OpPtrAccessChain %stride_view_type %pa %zero\n"
+            "%stride_back = OpPtrAccessChain %word_ptr %stride_view %zero",
+            "%bare_a = OpAccessChain %bare_view_type %pa\n%stride_view = OpAccessChain %stride_view_type %bare_a\n"
+            "%bare_b = OpAccessChain %bare_view_type %stride_view\n%stride_back = OpAccessChain %word_ptr %bare_b");
+    stride_rejected = false;
+    try {
+        CompileTypedContinuationSteps(Source(indirect_stride_cycle), "main", spv::ExecutionModelIntersectionKHR);
+    } catch (const std::exception &error) {
+        Require(std::string(error.what()).find("ArrayStride disagrees with its originating array") != std::string::npos,
+                "An unadorned view hid the original array layout: " + std::string(error.what()));
+        stride_rejected = true;
+    }
+    Require(stride_rejected, "Unadorned intermediate view accepted a mismatching restored array stride");
+    if (!module_private && !stride_views) {
+        auto volatile_copy = MutablePointerSource(false);
+        Replace(volatile_copy, "OpCopyMemory %other %alias", "OpCopyMemory %other %alias Volatile");
+        bool rejected = false;
+        try {
+            CompileTypedContinuationSteps(Source(volatile_copy), "main", spv::ExecutionModelIntersectionKHR);
+        } catch (const std::exception &error) {
+            Require(std::string(error.what()).find("CopyMemory memory operands require explicit frame-codec support") !=
+                        std::string::npos,
+                    "Volatile CopyMemory rejected for an unrelated reason: " + std::string(error.what()));
+            rejected = true;
+        }
+        Require(rejected, "Persistent CopyMemory silently discarded its Volatile operand");
+    }
+    const auto words = Source(MutablePointerSource(module_private, stride_views));
     const auto program = CompileTypedContinuationSteps(words, "main", spv::ExecutionModelIntersectionKHR);
     Require(program.frames.options.logical_pointer_words >= 4 && program.frame_stride_bytes > 8193 * 16,
             "Pointer memory/arithmetic lacks checked selector identity backing");
+    if (stride_views) {
+        std::set<uint32_t> decorated;
+        for (size_t p = 5; p < program.spirv.size(); p += program.spirv[p] >> 16)
+            if ((program.spirv[p] & 65535) == spv::OpDecorate && program.spirv[p + 2] == spv::DecorationNonUniform)
+                decorated.insert(program.spirv[p + 1]);
+        bool nonuniform_load = false;
+        for (size_t p = 5; p < program.spirv.size(); p += program.spirv[p] >> 16) {
+            const auto op = program.spirv[p] & 65535;
+            if (op == spv::OpLoad && decorated.count(program.spirv[p + 3])) nonuniform_load = true;
+        }
+        Require(nonuniform_load, "Stride-view recovery lost NonUniform on the actual memory access");
+    }
     const auto physical =
         CompileTypedPipelineStage(words, "main", VK_SHADER_STAGE_INTERSECTION_BIT_KHR, nullptr, "mutable_pointer_bda");
     TypedContinuationCompileOptions options;
@@ -968,20 +1063,21 @@ bool MutablePointerMemory(bool execute, bool module_private) {
             "Mutable pointer memory has inconsistent transport layout");
     if (!execute) return true;
     constexpr uint32_t count = 16, array_size = 128;
+    const auto output_words = array_size * (stride_views ? 3u : 2u);
     const auto frame_bytes = program.frame_stride_words * count * 4;
     const auto output_offset = (frame_bytes + 255u) & ~255u;
     GPU gpu;
-    std::cout << "Creating mutable logical " << (module_private ? "Private" : "Function")
+    std::cout << "Creating mutable logical " << (module_private ? "Private" : "Function") << (stride_views ? " stride views" : "")
               << " pointer GPU pipeline: " << program.spirv.size() << " words, frame " << program.frame_stride_bytes << " bytes\n"
               << std::flush;
-    if (!gpu.Init(program.spirv, output_offset + array_size * 8, output_offset, true, frame_bytes, VK_WHOLE_SIZE, true)) {
+    if (!gpu.Init(program.spirv, output_offset + output_words * 4, output_offset, true, frame_bytes, VK_WHOLE_SIZE, true)) {
         std::cout << "Mutable-pointer GPU fixture skipped: required scalar/variable-pointer features unavailable\n";
         return false;
     }
     for (uint32_t activation = 0; activation < 2; ++activation) {
         for (uint32_t id = 0; id < count; ++id)
             std::fill_n(gpu.mapped + id * program.frame_stride_words + program.control_word, 7, 0);
-        for (uint32_t n = 0; n < array_size * 2; ++n) gpu.mapped[output_offset / 4 + n] = 1000 + n;
+        for (uint32_t n = 0; n < output_words; ++n) gpu.mapped[output_offset / 4 + n] = 1000 + n;
         for (uint32_t round = 0; round < 4; ++round) {
             gpu.Dispatch(0, 0, count);
             for (uint32_t id = 0; id < count; ++id) {
@@ -998,19 +1094,21 @@ bool MutablePointerMemory(bool execute, bool module_private) {
                 control[2] = 1;
             }
         }
-        std::vector<uint32_t> expected(array_size * 2);
+        std::vector<uint32_t> expected(output_words);
         for (uint32_t n = 0; n < expected.size(); ++n) expected[n] = 1000 + n;
         for (uint32_t id = 0; id < count; ++id)
             for (uint32_t round = 0; round < 3; ++round) {
-                const auto index = (id & 1) * array_size + id * 4 + round;
+                const auto element = id * 4 + round;
+                const auto index = (id & 1) * array_size + element * (stride_views && (id & 1) ? 2 : 1);
                 expected[index] += round + 1 + ((id + round) % 3 != 0 ? 7 : 11);
             }
         Require(std::equal(expected.begin(), expected.end(), gpu.mapped + output_offset / 4),
                 "Pointer memory alias/aggregate or signed PtrAccessChain changed independent expected writes");
     }
     std::cout << "Mutable pointer " << (module_private ? "Private" : "Function")
+              << (stride_views ? " actual stride4/8 through unadorned pointer views" : "")
               << " storage executed: 8193-cell array, dynamic indices above4096, aliases/branch stores, "
-                 "typed pointer aggregate across suspension, signed loop-carried PtrAccessChain\n";
+                 "pointer/aggregate CopyMemory across suspension, signed loop-carried PtrAccessChain\n";
     return true;
 }
 struct Event {
@@ -1057,6 +1155,8 @@ int main(int argc, char **argv) {
                 if (!LogicalPointerSnapshots(true, array_pointers)) return 77;
             for (bool module_private : {false, true})
                 if (!MutablePointerMemory(true, module_private)) return 77;
+            for (bool module_private : {false, true})
+                if (!MutablePointerMemory(true, module_private, true)) return 77;
             return 0;
         }
         BoundariesAndSourcePreservation();
@@ -1069,6 +1169,8 @@ int main(int argc, char **argv) {
             if (!LogicalPointerSnapshots(!compile_only, array_pointers)) return 77;
         for (bool module_private : {false, true})
             if (!MutablePointerMemory(!compile_only, module_private)) return 77;
+        for (bool module_private : {false, true})
+            if (!MutablePointerMemory(!compile_only, module_private, true)) return 77;
         if (compile_only) {
             std::cout << "Typed source and logical pointer compile/validation checks passed; GPU execution not requested\n";
             return 0;

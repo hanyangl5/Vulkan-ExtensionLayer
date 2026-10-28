@@ -5,6 +5,7 @@
 #include "vkrt_layer.h"
 #include "vkrt_chain.h"
 #include "vkrt_query_pool.h"
+#include "vkrt_execution_replay.h"
 
 static VkPipelineStageFlags2 stages(VkPipelineStageFlags2 mask)
 {
@@ -367,30 +368,90 @@ static VKAPI_ATTR void VKAPI_CALL GetDeviceQueue2(VkDevice device, const VkDevic
 static VKAPI_ATTR VkResult VKAPI_CALL QueueWaitIdle(VkQueue queue) {
     struct vkrt_device_data *dev = VKRT_FIND(struct vkrt_device_data, queue);
     if (!dev || !dev->vtable.QueueWaitIdle) return VK_ERROR_INITIALIZATION_FAILED;
+    uint64_t checkpoint = vkrt_execution_checkpoint(dev);
+    uint64_t query_checkpoint = vkrt_query_queue_checkpoint(dev);
     VkResult result = dev->vtable.QueueWaitIdle(queue);
-    if (result == VK_SUCCESS) vkrt_query_queue_idle(dev, queue);
+    if (result == VK_SUCCESS) {
+        vkrt_query_queue_idle(dev, queue, query_checkpoint);
+        vkrt_execution_queue_completed(dev, queue, checkpoint);
+        result = vkrt_execution_collect(dev, NULL);
+    }
     return result;
 }
 static VKAPI_ATTR VkResult VKAPI_CALL DeviceWaitIdle(VkDevice device) {
     struct vkrt_device_data *dev = VKRT_FIND(struct vkrt_device_data, device);
     if (!dev || !dev->vtable.DeviceWaitIdle) return VK_ERROR_INITIALIZATION_FAILED;
+    uint64_t checkpoint = vkrt_execution_checkpoint(dev);
+    uint64_t query_checkpoint = vkrt_query_queue_checkpoint(dev);
     VkResult result = dev->vtable.DeviceWaitIdle(device);
-    if (result == VK_SUCCESS) vkrt_query_queue_idle(dev, VK_NULL_HANDLE);
+    if (result == VK_SUCCESS) {
+        vkrt_query_queue_idle(dev, VK_NULL_HANDLE, query_checkpoint);
+        vkrt_execution_queue_completed(dev, VK_NULL_HANDLE, checkpoint);
+        result = vkrt_execution_collect(dev, NULL);
+    }
     return result;
 }
 static bool query_wait_protects_compute(VkPipelineStageFlags2 mask) {
     return (stages(mask) & (VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT |
                             VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT)) != 0;
 }
+static bool needs_replay(struct vkrt_device_data *dev, VkCommandBuffer command) {
+    if (!dev->executions) return false;
+    struct vkrt_cmd_buffer_data *cb = VKRT_FIND(struct vkrt_cmd_buffer_data, command);
+    return vkrt_query_command_requires_replay(cb);
+}
+static VkResult remap_commands(struct vkrt_device_data *dev, VkQueue queue, struct vkrt_execution_batch **batch, uint32_t count,
+                               const VkCommandBuffer *commands, VkCommandBuffer **owned) {
+    *owned = NULL;
+    bool replay = false;
+    for (uint32_t i = 0; i < count; ++i) replay |= needs_replay(dev, commands[i]);
+    if (!replay) return VK_SUCCESS;
+    if (!*batch) {
+        VkResult result = vkrt_execution_batch_create(dev, queue, batch);
+        if (result != VK_SUCCESS) return result;
+    }
+    *owned = copy_array(commands, count, sizeof(**owned));
+    if (count && !*owned) return VK_ERROR_OUT_OF_HOST_MEMORY;
+    for (uint32_t i = 0; i < count; ++i) {
+        VkResult result = vkrt_execution_batch_clone(*batch, commands[i], &(*owned)[i]);
+        if (result != VK_SUCCESS) return result;
+    }
+    return VK_SUCCESS;
+}
+static VkResult finish_submission(struct vkrt_device_data *dev, struct vkrt_query_submission *transaction,
+                                  struct vkrt_execution_batch *batch, bool native_called, VkResult result) {
+    /* Roll back per-op prepared flags before freeing an unsubmitted recording.
+     * OOM guarantees no device side effects. Lost/unknown native outcomes stay
+     * retained until a real completion acquire or final device teardown. */
+    vkrt_query_submit_result(dev, transaction, result);
+    vkrt_query_submit_end(dev, transaction);
+    if (!batch) return result;
+    if (native_called && result == VK_SUCCESS) {
+        result = vkrt_execution_batch_submitted(batch);
+        /* SUCCESS already cleared preparation ownership. A lost observer only
+         * latches device loss; it cannot roll back accepted source work. */
+        if (result == VK_ERROR_DEVICE_LOST) vkrt_query_submit_result(dev, transaction, result);
+    } else if (native_called && result != VK_ERROR_OUT_OF_HOST_MEMORY && result != VK_ERROR_OUT_OF_DEVICE_MEMORY) {
+        vkrt_execution_batch_quarantine(batch);
+    } else {
+        vkrt_execution_batch_discard(batch);
+    }
+    return result;
+}
 static VKAPI_ATTR VkResult VKAPI_CALL QueueSubmit(VkQueue queue, uint32_t count,
    const VkSubmitInfo *infos, VkFence fence)
 {
    struct vkrt_device_data *dev = VKRT_FIND(struct vkrt_device_data, queue);
    if (!dev) return VK_ERROR_INITIALIZATION_FAILED;
-   VkSubmitInfo *local = copy_array(infos, count, sizeof(*infos));
+   VkResult result = vkrt_execution_collect(dev, NULL);
+   if (result != VK_SUCCESS) return result;
+   if ((uint64_t)count > SIZE_MAX / sizeof(*infos)) return VK_ERROR_OUT_OF_HOST_MEMORY;
+   VkSubmitInfo *local = count ? calloc(count, sizeof(*local)) : NULL;
    if (count && !local) return VK_ERROR_OUT_OF_HOST_MEMORY;
-   VkResult result = VK_SUCCESS;
+   if (count) memcpy(local, infos, count * sizeof(*local));
    struct vkrt_query_submission transaction = {0};
+   struct vkrt_execution_batch *batch = NULL;
+   bool native_called = false;
    uint32_t copied = 0;
    for (; copied < count; ++copied) {
       VkPipelineStageFlags *m = copy_array(infos[copied].pWaitDstStageMask,
@@ -399,6 +460,7 @@ static VKAPI_ATTR VkResult VKAPI_CALL QueueSubmit(VkQueue queue, uint32_t count,
       local[copied].pWaitDstStageMask = m;
       for (uint32_t j = 0; j < infos[copied].waitSemaphoreCount; ++j) m[j] = (VkPipelineStageFlags)stages(m[j]);
    }
+   if (result == VK_SUCCESS) result = vkrt_query_submit_begin(dev, &transaction, queue);
    for (uint32_t i = 0; i < count && result == VK_SUCCESS; ++i) {
        bool unsafe_wait = false;
        for (uint32_t j = 0; j < infos[i].waitSemaphoreCount; ++j)
@@ -406,12 +468,22 @@ static VKAPI_ATTR VkResult VKAPI_CALL QueueSubmit(VkQueue queue, uint32_t count,
        result =
            vkrt_query_submit_qualify(dev, &transaction, queue, unsafe_wait, infos[i].commandBufferCount, infos[i].pCommandBuffers);
    }
+   for (uint32_t i = 0; i < count && result == VK_SUCCESS; ++i) {
+       VkCommandBuffer *commands = NULL;
+       result = remap_commands(dev, queue, &batch, infos[i].commandBufferCount, infos[i].pCommandBuffers, &commands);
+       if (commands) local[i].pCommandBuffers = commands;
+   }
    if (result == VK_SUCCESS)
        for (uint32_t i = 0; i < count && result == VK_SUCCESS; ++i)
-           result = vkrt_query_submit_prepare(dev, &transaction, infos[i].commandBufferCount, infos[i].pCommandBuffers);
-   if (result == VK_SUCCESS) result = dev->vtable.QueueSubmit(queue, count, local, fence);
-   vkrt_query_submit_result(dev, &transaction, result);
+           result = vkrt_query_submit_prepare(dev, &transaction, local[i].commandBufferCount, local[i].pCommandBuffers);
+   if (result == VK_SUCCESS) {
+       native_called = true;
+       result = dev->vtable.QueueSubmit(queue, count, local, fence);
+   }
+   result = finish_submission(dev, &transaction, batch, native_called, result);
    for (uint32_t i = 0; i < copied; ++i) free((void *)local[i].pWaitDstStageMask);
+   for (uint32_t i = 0; i < count; ++i)
+       if (local[i].pCommandBuffers != infos[i].pCommandBuffers) free((void *)local[i].pCommandBuffers);
    free(local);
    return result;
 }
@@ -420,10 +492,15 @@ static VKAPI_ATTR VkResult VKAPI_CALL QueueSubmit2(VkQueue queue, uint32_t count
 {
    struct vkrt_device_data *dev = VKRT_FIND(struct vkrt_device_data, queue);
    if (!dev || !dev->vtable.QueueSubmit2) return VK_ERROR_FEATURE_NOT_PRESENT;
-   VkSubmitInfo2 *local = copy_array(infos, count, sizeof(*infos));
+   VkResult result = vkrt_execution_collect(dev, NULL);
+   if (result != VK_SUCCESS) return result;
+   if ((uint64_t)count > SIZE_MAX / sizeof(*infos)) return VK_ERROR_OUT_OF_HOST_MEMORY;
+   VkSubmitInfo2 *local = count ? calloc(count, sizeof(*local)) : NULL;
    if (count && !local) return VK_ERROR_OUT_OF_HOST_MEMORY;
-   VkResult result = VK_SUCCESS;
+   if (count) memcpy(local, infos, count * sizeof(*local));
    struct vkrt_query_submission transaction = {0};
+   struct vkrt_execution_batch *batch = NULL;
+   bool native_called = false;
    uint32_t copied = 0;
    for (; copied < count; ++copied) {
       const VkSubmitInfo2 *s = &infos[copied];
@@ -436,6 +513,7 @@ static VKAPI_ATTR VkResult VKAPI_CALL QueueSubmit2(VkQueue queue, uint32_t count
       for (uint32_t j = 0; j < s->signalSemaphoreInfoCount; ++j) sig[j].stageMask = stages(sig[j].stageMask);
       local[copied].pWaitSemaphoreInfos = w; local[copied].pSignalSemaphoreInfos = sig;
    }
+   if (result == VK_SUCCESS) result = vkrt_query_submit_begin(dev, &transaction, queue);
    for (uint32_t i = 0; i < count && result == VK_SUCCESS; ++i) {
        bool unsafe_wait = false;
        for (uint32_t j = 0; j < infos[i].waitSemaphoreInfoCount; ++j)
@@ -444,15 +522,37 @@ static VKAPI_ATTR VkResult VKAPI_CALL QueueSubmit2(VkQueue queue, uint32_t count
        for (uint32_t j = 0; j < infos[i].commandBufferInfoCount && result == VK_SUCCESS; ++j)
            result = vkrt_query_submit_qualify(dev, &transaction, queue, false, 1, &infos[i].pCommandBufferInfos[j].commandBuffer);
    }
+   for (uint32_t i = 0; i < count && result == VK_SUCCESS; ++i) {
+       bool replay = false;
+       for (uint32_t j = 0; j < infos[i].commandBufferInfoCount; ++j)
+           replay |= needs_replay(dev, infos[i].pCommandBufferInfos[j].commandBuffer);
+       if (!replay) continue;
+       if (!batch) result = vkrt_execution_batch_create(dev, queue, &batch);
+       if (result != VK_SUCCESS) break;
+       VkCommandBufferSubmitInfo *commands =
+           copy_array(infos[i].pCommandBufferInfos, infos[i].commandBufferInfoCount, sizeof(*commands));
+       if (!commands) {
+           result = VK_ERROR_OUT_OF_HOST_MEMORY;
+           break;
+       }
+       local[i].pCommandBufferInfos = commands;
+       for (uint32_t j = 0; j < infos[i].commandBufferInfoCount && result == VK_SUCCESS; ++j)
+           result = vkrt_execution_batch_clone(batch, infos[i].pCommandBufferInfos[j].commandBuffer, &commands[j].commandBuffer);
+   }
    if (result == VK_SUCCESS)
        for (uint32_t i = 0; i < count && result == VK_SUCCESS; ++i)
-           for (uint32_t j = 0; j < infos[i].commandBufferInfoCount && result == VK_SUCCESS; ++j)
-               result = vkrt_query_submit_prepare(dev, &transaction, 1, &infos[i].pCommandBufferInfos[j].commandBuffer);
-   if (result == VK_SUCCESS) result = dev->vtable.QueueSubmit2(queue, count, local, fence);
-   vkrt_query_submit_result(dev, &transaction, result);
+           for (uint32_t j = 0; j < local[i].commandBufferInfoCount && result == VK_SUCCESS; ++j)
+               result = vkrt_query_submit_prepare(dev, &transaction, 1, &local[i].pCommandBufferInfos[j].commandBuffer);
+   if (result == VK_SUCCESS) {
+       native_called = true;
+       result = dev->vtable.QueueSubmit2(queue, count, local, fence);
+   }
+   result = finish_submission(dev, &transaction, batch, native_called, result);
    for (uint32_t i = 0; i < copied; ++i) {
       free((void *)local[i].pWaitSemaphoreInfos); free((void *)local[i].pSignalSemaphoreInfos);
    }
+   for (uint32_t i = 0; i < count; ++i)
+       if (local[i].pCommandBufferInfos != infos[i].pCommandBufferInfos) free((void *)local[i].pCommandBufferInfos);
    free(local);
    return result;
 }

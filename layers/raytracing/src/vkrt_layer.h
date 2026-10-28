@@ -59,6 +59,8 @@ struct vkrt_device_data {
    struct vkrt_deferred_state *deferred;
    struct vkrt_serialization_state *serialization;
    struct vkrt_query_device *queries;
+   struct vkrt_execution_device *executions;
+   PFN_vkSetDeviceLoaderData set_loader_data;
    bool query_backend_enabled;
    struct vkrt_rtp_state *rtp;
    /* Immutable enabled queue families. Hidden AS cells are shared across
@@ -92,6 +94,8 @@ struct vkrt_cmd_buffer_data {
     struct vkrt_query_command *queries;
     VkCommandBufferUsageFlags usage_flags;
     uint32_t native_active_queries;
+    bool has_virtual_queries;
+    bool has_virtual_query_copy;
     struct vkrt_rtp_command *rtp;
     VkCommandBuffer cmd;
     struct vkrt_device_data *device_data;

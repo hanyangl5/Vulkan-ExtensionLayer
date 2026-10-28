@@ -60,10 +60,11 @@ static VkResult chunk_create(struct vkrt_private_pool *pool, VkDeviceSize size, 
     struct vkrt_private_chunk *chunk = allocate(pool, sizeof(*chunk), _Alignof(struct vkrt_private_chunk));
     if (!chunk) return VK_ERROR_OUT_OF_HOST_MEMORY;
     chunk->size = size;
-    VkBufferCreateInfo info = {.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
-                               .size = size,
-                               .usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
-                               .sharingMode = VK_SHARING_MODE_EXCLUSIVE};
+    VkBufferCreateInfo info = {
+        .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
+        .size = size,
+        .usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+        .sharingMode = VK_SHARING_MODE_EXCLUSIVE};
     if (dev->queue_family_count > 1) {
         info.sharingMode = VK_SHARING_MODE_CONCURRENT;
         info.queueFamilyIndexCount = dev->queue_family_count;
@@ -119,7 +120,7 @@ static VkResult chunk_create(struct vkrt_private_pool *pool, VkDeviceSize size, 
         result = VK_ERROR_INITIALIZATION_FAILED;
         goto fail;
     }
-    VKRT_LOG_DBG("AS address pool arena: bytes=%llu nativeAllocationBytes=%llu", (unsigned long long)size,
+    VKRT_LOG_DBG("Private storage pool arena: bytes=%llu nativeAllocationBytes=%llu", (unsigned long long)size,
                  (unsigned long long)requirements.size);
     *out = chunk;
     return VK_SUCCESS;

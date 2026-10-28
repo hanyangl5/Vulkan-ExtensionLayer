@@ -23,6 +23,8 @@ static VkPipelineLayout emit_layout = HANDLE(VkPipelineLayout, 300);
 static const void *original_array;
 static bool replaying;
 static const char *last_resolved;
+struct VkCudaLaunchInfoNV;
+static const void *expected_opaque_pointer;
 
 struct vkrt_replay_context *vkrt_replay_lookup_context(VkCommandBuffer command) {
     return command == source_command ? &source_context : command == target_command ? &target_context : NULL;
@@ -165,6 +167,16 @@ static VKAPI_ATTR void VKAPI_CALL update(VkCommandBuffer command, VkBuffer buffe
     (void)size;
     (void)data;
 }
+static VKAPI_ATTR void VKAPI_CALL unavailable_cuda(VkCommandBuffer command, const struct VkCudaLaunchInfoNV *info) {
+    called(command);
+    assert((const void *)info == expected_opaque_pointer);
+}
+static VKAPI_ATTR void VKAPI_CALL unavailable_graph(VkCommandBuffer command, VkDeviceAddress scratch, VkDeviceSize scratch_size,
+                                                    VkDeviceAddress count_info) {
+    called(command);
+    assert(scratch == UINT64_C(0x123456789abcdef0) && scratch_size == UINT64_C(0x100000002) &&
+           count_info == UINT64_C(0x777788889999aaaa));
+}
 static PFN_vkVoidFunction resolve(void *user, const char *name) {
     (void)user;
     last_resolved = name;
@@ -183,6 +195,8 @@ static PFN_vkVoidFunction resolve(void *user, const char *name) {
     if (!strcmp(name, "vkCmdBeginGpaSampleAMD")) return (PFN_vkVoidFunction)gpa;
     if (!strcmp(name, "vkCmdPushDescriptorSetWithTemplateKHR")) return (PFN_vkVoidFunction)opaque;
     if (!strcmp(name, "vkCmdUpdateBuffer")) return (PFN_vkVoidFunction)update;
+    if (!strcmp(name, "vkCmdCudaLaunchKernelNV")) return (PFN_vkVoidFunction)unavailable_cuda;
+    if (!strcmp(name, "vkCmdDispatchGraphIndirectCountAMDX")) return (PFN_vkVoidFunction)unavailable_graph;
     return NULL;
 }
 static VkResult remap(void *user, VkCommandBuffer child, VkCommandBuffer *target) {
@@ -489,6 +503,40 @@ static void test_rejected_inputs(void) {
                                                                                     &sample) == VK_SUCCESS);
     assert(sample == 77 && record_calls == 1 && vkrt_replay_journal_status(source_context.journal) == VK_ERROR_FEATURE_NOT_PRESENT);
 }
+static void test_header_unavailable_commands(void) {
+    reset();
+    const char *names[] = {"vkCmdCudaLaunchKernelNV",
+                           "vkCmdDispatchGraphAMDX",
+                           "vkCmdDispatchGraphIndirectAMDX",
+                           "vkCmdDispatchGraphIndirectCountAMDX",
+                           "vkCmdInitializeGraphScratchMemoryAMDX",
+                           "vkCmdRefreshObjectsKHR"};
+    for (size_t i = 0; i < sizeof(names) / sizeof(names[0]); ++i) {
+        assert(vkrt_replay_proc(names[i]));
+        assert(vkrt_replay_journal_status(source_context.journal) == VK_SUCCESS);
+    }
+    typedef void(VKAPI_PTR * cuda_proc)(VkCommandBuffer, const struct VkCudaLaunchInfoNV *);
+    cuda_proc cuda = (cuda_proc)vkrt_replay_proc("vkCmdCudaLaunchKernelNV");
+    expected_opaque_pointer = (void *)(uintptr_t)1;
+    cuda(source_command, expected_opaque_pointer);
+    assert(record_calls == 1 && vkrt_replay_journal_status(source_context.journal) == VK_ERROR_FEATURE_NOT_PRESENT);
+    assert(!strcmp(vkrt_replay_journal_error_command(source_context.journal), "vkCmdCudaLaunchKernelNV"));
+    assert(vkrt_replay_emit(source_context.journal, target_command, resolve, NULL, NULL) == VK_ERROR_FEATURE_NOT_PRESENT);
+    assert(emit_calls == 0);
+    reset();
+    struct vkrt_replay_journal *saved = source_context.journal;
+    source_context.journal = NULL;
+    expected_opaque_pointer = (void *)(uintptr_t)2;
+    cuda(source_command, expected_opaque_pointer);
+    source_context.journal = saved;
+    assert(record_calls == 1 && vkrt_replay_journal_status(saved) == VK_SUCCESS && vkrt_replay_journal_count(saved) == 0);
+    reset();
+    typedef void(VKAPI_PTR * graph_proc)(VkCommandBuffer, VkDeviceAddress, VkDeviceSize, VkDeviceAddress);
+    ((graph_proc)vkrt_replay_proc("vkCmdDispatchGraphIndirectCountAMDX"))(source_command, UINT64_C(0x123456789abcdef0),
+                                                                          UINT64_C(0x100000002), UINT64_C(0x777788889999aaaa));
+    assert(record_calls == 1 && vkrt_replay_journal_status(source_context.journal) == VK_ERROR_FEATURE_NOT_PRESENT);
+    assert(!strcmp(vkrt_replay_journal_error_command(source_context.journal), "vkCmdDispatchGraphIndirectCountAMDX"));
+}
 struct allocation_state {
     unsigned live, calls, fail_after;
 };
@@ -551,7 +599,10 @@ int main(void) {
     test_children();
     test_stride_and_selector();
     test_rejected_inputs();
+    test_header_unavailable_commands();
     test_oom();
-    puts("command replay host: begin/chain/arrays/AS/descriptors/layout/children/stride/selector/rejections/OOM passed");
+    puts(
+        "command replay host: begin/chain/arrays/AS/descriptors/layout/children/stride/selector/ABI blockers/rejections/OOM "
+        "passed");
     return 0;
 }

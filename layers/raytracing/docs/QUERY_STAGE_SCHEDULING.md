@@ -8,7 +8,7 @@ submission**. `vkrt_stage_schedule.c` does not remove the query backend's unsafe
 wait rejection. Command replay and per-execution query storage are necessary
 building blocks, but they do not provide a correct native scheduling executor.
 
-## The progress constraint
+## Scope hazards and progress limits
 
 An AS property write executes logically at `ACCELERATION_STRUCTURE_BUILD`. A
 query-result copy executes logically at `COPY`/legacy `TRANSFER`, even though its
@@ -16,44 +16,62 @@ private result formatter uses `COMPUTE_SHADER`. AS building and ray tracing also
 use physical compute in this layer. Physical stage equality therefore does not
 imply a source-program execution dependency.
 
-Consider one source queue and a host-signaled timeline semaphore S:
+Consider this dependency-model experiment with one source queue and a
+host-signaled timeline semaphore S:
 
 1. Submission A waits for S at `TRANSFER`. Its commands write an AS property to
    query P, then copy P's result to a buffer.
 2. Submission B, arriving later, independently writes an AS property to query Q.
 3. The host waits for Q's availability, then signals S.
 
-The source stage scopes leave B's AS write ungated by S. Promoting A's wait to
-compute creates a cycle: S -> compute -> Q availability -> host signal S.
-Splitting A immediately before its copy protects P, but still leaves the same
-cycle if the suffix's unresolved compute wait is enqueued before B. This failure
-does not require simultaneous command-buffer use, aliasing query pools, or reuse
-of a query payload.
+The source stage scopes do not directly gate B's AS write on S. In the model,
+promoting A's wait to compute adds a cycle: S -> compute -> Q availability ->
+host signal S. Splitting A immediately before its copy still adds that cycle if
+the suffix's unresolved compute wait is enqueued before B. This exposes an
+extra dependency caused by physical-stage aliasing; it does not prove that the
+host may rely on Q becoming available before S on every Vulkan implementation.
 
-The first host test executes the legal feedback schedule and uses a separate,
-small physical-engine event simulation to demonstrate the widened suffix's
-deadlock. It is a progress oracle for the planner, not a claim about GPU behavior
-or a substitute for CTS.
+The first host test selects a progressing schedule permitted by its explicit
+dependency graph and compares it with a widened-wait physical-engine model.
+Neither a permitted schedule nor the absence of a graph edge establishes
+bounded early signaling, concurrency, or unconditional queue progress. Each
+source scenario must satisfy the pinned specification's forward-progress
+requirements before it can serve as a mandatory correctness counterexample.
 
 ## Normative constraints used by the interface
 
-Submission order alone creates no execution dependency. Wait scopes reach
-commands in their batch and later submissions; source and destination stage
+The normative references here use Vulkan-Docs revision
+[`d184375dcc5da2b06ca375a8d7d1f9d21ca64a76`](https://github.com/KhronosGroup/Vulkan-Docs/tree/d184375dcc5da2b06ca375a8d7d1f9d21ca64a76),
+matching the workspace's SDK 1.4.357 contract. Submission order alone creates no
+execution dependency. Wait scopes reach commands in their batch and later
+submissions; source and destination stage
 scopes include logically earlier and later stages respectively. The frontend
-must expand those scopes before graph construction. See the Khronos
-[synchronization chapter](https://docs.vulkan.org/spec/latest/chapters/synchronization.html#synchronization-pipeline-stages-order)
-and [legacy submit scopes](https://docs.vulkan.org/refpages/latest/refpages/source/vkQueueSubmit.html).
+must expand those scopes before graph construction. See the pinned
+[synchronization rules][stage-rules] and [submit scopes][submit-scopes].
 
-Submit2 limits each signal's first scope with its stage mask. It cannot always be
-implemented by waiting for whole-submission completion. See
-[vkQueueSubmit2](https://docs.vulkan.org/refpages/latest/refpages/source/vkQueueSubmit2.html)
-and [VkSemaphoreSubmitInfo](https://docs.vulkan.org/refpages/latest/refpages/source/VkSemaphoreSubmitInfo.html).
+Submit2 limits each signal's first scope with its stage mask; this is a
+dependency guarantee, not an early-signal deadline. The stage-substitution note
+permits logically later source stages or earlier destination stages while
+preserving dependency semantics; it does not justify arbitrary scope widening.
+Whole-submission joins therefore require a separate equivalence proof. Timeline
+wait-before-signal also does not remove the application's obligation to execute
+the corresponding signal before forward progress. See
+[VkSemaphoreSubmitInfo][signal-scope] and [Queue Forward Progress][queue-progress].
 
 Binary waits consume a signal, and host counter queries apply to timeline
 semaphores. The planner consequently makes no binary-readiness inference. Fence
 joins must also preserve semaphore/fence signal ordering. See
-[semaphore waiting](https://docs.vulkan.org/spec/latest/chapters/synchronization.html#synchronization-semaphores-waiting)
-and [fences](https://docs.vulkan.org/spec/latest/chapters/synchronization.html#synchronization-fences).
+[semaphore waiting and host operations][semaphore-waits] and
+[signal operation ordering][signal-order].
+
+The native control in
+`build-query-execution-2026-10-28/signal-order-native.log` timed out before gate
+release with both a null and non-null caller fence. This is not a software-only
+failure or proof of an ICD defect. `tests/test_query_signal_order.c` now records
+whether the scoped signal arrived early, accepts either early success or timeout,
+releases the gate, and requires signal/fence completion and correct query/buffer
+results afterward. Its CPU model demonstrates the added earlier-semaphore-signal
+edge; it does not turn that edge into a portable early-progress test.
 
 ## Planner representation
 
@@ -94,9 +112,12 @@ appropriate for full completion fences, not arbitrary stage-scoped signals.
 The planner refuses any operation or signal scope that only partially covers
 an indivisible work item. For example, a vertex-plus-fragment render-pass block
 under a fragment-only wait returns `VKRT_STAGE_PARTIAL_SCOPE`; delaying the entire
-block could suppress legal vertex-stage progress. Grouping native query scopes
-or multi-stage indirect operations has the same rule. Rejection is independent
-of whether a particular wait happens to be ready at graph construction time.
+block adds a gate absent from that source scope. Grouping native query scopes or
+multi-stage indirect operations has the same rule. This rejection marks an
+executor representation gap, not permission to reject these legal applications
+in a complete fallback. Native rendering can remain intact with its original
+stage gates; supporting that route requires stage-specific completion and
+dependency information beyond the planner's current indivisible-work model.
 
 ## Emission and acquire tokens
 
@@ -114,21 +135,29 @@ An observed timeline counter value alone is insufficient. This component never
 enqueues the acquisition, reads a GPU result, waits for queue idle, or guesses
 that a binary semaphore is ready. It cannot verify an executor's certificate.
 
-A correct future executor must obtain these acquisitions without placing an
-unresolved wait on a physical stage used by logically ungated work. Possible
-infrastructure includes nonblocking observation plus a proved-safe acquire
-bridge, or genuinely isolated native execution resources with truthful queue
-virtualization. Merely having an extra native queue on one development GPU is
-not a supported-device predicate or a general solution. An internal completion
-token must also identify the correct signal point; waiting for an entire
-producer submission can recreate the prefix-progress deadlock.
+A candidate first prototype observes timeline readiness without blocking, then
+performs a real native wait on the same payload and value to establish the
+device memory dependency. It must supply a valid acquire certificate, preserve
+wait history across later submissions, and prove that existing physical waits
+or whole-prefix completion do not introduce an extra gate. The counter
+observation itself is not the acquire. This remains an executor proof obligation,
+not a completed route from this planner to full transparency.
 
-Each binary semaphore must be consumed once. The executor can then fan out an
-internal dependency token to multiple slices instead of issuing one binary wait
-per slice. Imported semaphore payloads and external signal sources require an
-explicit readiness/acquisition path. Until that exists, their unresolved waits
-remain deferred or the source submission is rejected before native side
-effects. A host boolean is not an acquisition certificate.
+Isolated native resources may help particular devices, but an extra queue is
+not a portable assumption. Internal completion tokens must identify the
+required signal point, rather than silently replacing a scoped producer with a
+whole-submission dependency. Private barriers and signal operations require the
+same dependency review; a selected CPU schedule is not a native progress proof.
+
+Each binary semaphore must be consumed once. A layer-owned producer may provide
+a tracked signal token, which can fan out after acquisition instead of consuming
+the binary payload once per slice. Arbitrary imported payloads have no general
+host readiness query; they require a separately proved acquisition path. An
+empty wait plus fence can inherit older work and is not automatically an
+independent acquire bridge. Binary/external acquisition and partially gated
+native blocks remain architecture gates. Rejecting legal inputs is only an
+explicit intermediate limitation, not a final solution. No impossibility proof
+for public Vulkan is claimed here.
 
 The graph is intended to live with a bounded set of retained submission
 records. It does not yet garbage-collect completed prefixes or own native
@@ -153,7 +182,8 @@ callbacks. The scheduler needs a metadata extraction layer on top of that data:
   rendering boundaries, plus inheritance and device masks. A native active-query
   or rendering scope must stay intact unless a separately proved transformation
   preserves its behavior. Native multi-stage work needs stage-granular native
-  gating or explicit rejection when the planner cannot split it.
+  gating; current rejection when the planner cannot split it remains an
+  implementation gap.
 - A state preamble for each independently replayable suffix: bound pipeline and
   shader objects, descriptor state and dynamic offsets, push descriptors,
   descriptor-buffer bindings/offsets, push constants, dynamic graphics state,
@@ -163,8 +193,9 @@ callbacks. The scheduler needs a metadata extraction layer on top of that data:
   dependencies, and query scopes have observable effects.
 - Exact per-submit wait and signal operation ordering, stage-scope expansion,
   external/binary/timeline signal-point tracking, fence joins, and native
-  completion-token fanout. Source signals must not use a private full-submit
-  fence when their source scope permits earlier signaling.
+  completion-token fanout. Replacing source signals with a private full-submit
+  fence join needs an equivalence proof, including signal operation ordering
+  and the progress guarantees actually required by the pinned specification.
 - Independently owned query payloads/markers and native replay CBs for each
   execution, with resource retention and failure rollback. Repeated secondary
   execution and recording reuse must not deduplicate these instances.
@@ -172,13 +203,13 @@ callbacks. The scheduler needs a metadata extraction layer on top of that data:
 Private lowering barriers must be included in executor review. A broad private
 `ALL_COMMANDS -> COMPUTE` dependency can spread a stalled native transfer stage
 into a logically independent AS action even if the planner's source graph is
-correct. The executor must preserve required private-resource dependencies
-without adding those cross-domain progress cycles.
+correct. The executor must preserve required private-resource dependencies;
+adding a cross-domain dependency needs proof beyond physical stage equality.
 
 ## Local validation
 
 The standalone host test is `tests/test_stage_schedule.c`. It covers the timeline
-feedback counterexample, later-submission wait history, AS/RTP/native-compute
+feedback dependency model, later-submission wait history, AS/RTP/native-compute
 domain separation, blocked-predecessor propagation, exact COPY versus CLEAR
 scopes, expanded full scopes, scoped signal first-scope joins, wait-only full
 joins, partially covered native scopes, 130 simultaneous waits, duplicate
@@ -195,7 +226,15 @@ On Windows with the SDK used by this workspace:
 & ./build-source-layout/test_stage_schedule.exe
 ```
 
-No CMake wiring, native queue execution, GPU test, or CTS result is claimed by
-this component. Runtime qualification must remain bounded until the missing
+The planner is wired as the offline CMake test `vkrt.stage_schedule`. It does
+not establish native executor, GPU progress, or CTS qualification. Runtime
+qualification must remain bounded until the missing
 capture, acquire/progress, and retirement contracts are implemented and tested
 against Vulkan workloads.
+
+[stage-rules]: https://github.com/KhronosGroup/Vulkan-Docs/blob/d184375dcc5da2b06ca375a8d7d1f9d21ca64a76/chapters/synchronization.adoc#L749
+[submit-scopes]: https://github.com/KhronosGroup/Vulkan-Docs/blob/d184375dcc5da2b06ca375a8d7d1f9d21ca64a76/chapters/cmdbuffers.adoc#L1713
+[signal-scope]: https://github.com/KhronosGroup/Vulkan-Docs/blob/d184375dcc5da2b06ca375a8d7d1f9d21ca64a76/chapters/cmdbuffers.adoc#L2041
+[queue-progress]: https://github.com/KhronosGroup/Vulkan-Docs/blob/d184375dcc5da2b06ca375a8d7d1f9d21ca64a76/chapters/cmdbuffers.adoc#L2868
+[semaphore-waits]: https://github.com/KhronosGroup/Vulkan-Docs/blob/d184375dcc5da2b06ca375a8d7d1f9d21ca64a76/chapters/synchronization.adoc#L4132
+[signal-order]: https://github.com/KhronosGroup/Vulkan-Docs/blob/d184375dcc5da2b06ca375a8d7d1f9d21ca64a76/chapters/synchronization.adoc#L1875

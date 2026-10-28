@@ -1,10 +1,11 @@
 /* SPDX-License-Identifier: MIT
- * Initial public query backend. Per-recorded-operation storage is reused only
- * after a non-simultaneous CB's old execution has been acquired and harvested.
- * The mandatory replay/stage-scheduling backend remains separate unfinished work.
+ * Public query publication. Owned recordings defer virtual operations to fresh
+ * per-execution CBs; the compatibility host adapter retains a non-simultaneous
+ * recorded-operation path. Logical-stage execution remains unfinished work.
  */
 #include "vkrt_layer.h"
 #include "vkrt_query_pool.h"
+#include "vkrt_execution_replay.h"
 #include "vkrt_queries.h"
 #include "vkrt_as_registry.h"
 #include "vkrt_as_query.spv.h"
@@ -15,10 +16,11 @@
 #define QUERY_POOL_MAGIC UINT64_C(0x56514b5254504f4f)
 struct query_buffer {
     VkBuffer buffer;
-    VkDeviceMemory memory;
     VkDeviceAddress address;
     void *mapped;
     VkDeviceSize size;
+    VkDeviceSize offset;
+    struct vkrt_private_slice allocation;
 };
 struct query_host_slot {
     uint64_t value, serial;
@@ -65,10 +67,16 @@ struct vkrt_query_command {
     struct query_scratch *scratch;
     struct query_child *children;
 };
+struct vkrt_query_admission {
+    vkrt_mutex_t lock;
+};
 struct query_queue {
     struct query_queue *next;
     VkQueue queue;
     bool unsafe_waits;
+    bool unsafe_unbounded;
+    uint64_t unsafe_epoch;
+    struct vkrt_query_admission admission;
 };
 struct vkrt_query_device {
     vkrt_mutex_t lock;
@@ -81,6 +89,7 @@ struct vkrt_query_device {
     VkPipelineLayout layout;
     VkPipeline property, publish, format;
     VkResult error;
+    uint64_t unsafe_epoch;
 };
 struct publish_args {
     uint64_t publication, serials, state, counters;
@@ -102,59 +111,24 @@ static const VkAllocationCallbacks *pool_allocator(struct query_pool *pool) {
     return pool->has_allocator ? &pool->allocator : NULL;
 }
 static void destroy_buffer(struct vkrt_device_data *dev, struct query_buffer *buffer) {
-    if (buffer->mapped) dev->vtable.UnmapMemory(dev->device, buffer->memory);
-    if (buffer->buffer) dev->vtable.DestroyBuffer(dev->device, buffer->buffer, NULL);
-    if (buffer->memory) dev->vtable.FreeMemory(dev->device, buffer->memory, NULL);
+    vkrt_private_pool_release(dev, &buffer->allocation);
     *buffer = (struct query_buffer){0};
 }
-static VkResult create_buffer(struct vkrt_device_data *dev, VkDeviceSize size, struct query_buffer *buffer) {
+static VkResult create_buffer(struct vkrt_device_data *dev, VkDeviceSize size, bool native_copy, struct query_buffer *buffer) {
     if (size > SIZE_MAX) return VK_ERROR_OUT_OF_HOST_MEMORY;
-    buffer->size = size;
-    VkBufferCreateInfo info = {
-        .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
-        .size = size,
-        .usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
-        .sharingMode = dev->queue_family_count > 1 ? VK_SHARING_MODE_CONCURRENT : VK_SHARING_MODE_EXCLUSIVE,
-        .queueFamilyIndexCount = dev->queue_family_count > 1 ? dev->queue_family_count : 0,
-        .pQueueFamilyIndices = dev->queue_family_count > 1 ? dev->queue_families : NULL};
-    VkResult result = dev->vtable.CreateBuffer(dev->device, &info, NULL, &buffer->buffer);
+    struct vkrt_private_slice slice;
+    /* BDA state/payload needs physical 8-byte alignment. Native copy scratch
+     * needs aligned buffer offsets instead; its formatter stores individual
+     * bytes and does not assume an aligned native buffer device address. */
+    VkResult result = vkrt_private_pool_allocate(dev, size, native_copy, &slice);
     if (result != VK_SUCCESS) return result;
-    VkMemoryRequirements req;
-    dev->vtable.GetBufferMemoryRequirements(dev->device, buffer->buffer, &req);
-    VkPhysicalDeviceMemoryProperties properties;
-    dev->instance_data->vtable.GetPhysicalDeviceMemoryProperties(dev->physical_device, &properties);
-    uint32_t type = UINT32_MAX;
-    for (uint32_t i = 0; i < properties.memoryTypeCount; ++i)
-        if ((req.memoryTypeBits & (1u << i)) && (properties.memoryTypes[i].propertyFlags &
-                                                 (VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT)) ==
-                                                    (VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT)) {
-            type = i;
-            break;
-        }
-    if (type == UINT32_MAX) {
-        result = VK_ERROR_FEATURE_NOT_PRESENT;
-        goto fail;
-    }
-    VkMemoryAllocateFlagsInfo flags = {VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_FLAGS_INFO, NULL, VK_MEMORY_ALLOCATE_DEVICE_ADDRESS_BIT,
-                                       0};
-    VkMemoryAllocateInfo allocation = {VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO, &flags, req.size, type};
-    result = dev->vtable.AllocateMemory(dev->device, &allocation, NULL, &buffer->memory);
-    if (result != VK_SUCCESS) goto fail;
-    result = dev->vtable.BindBufferMemory(dev->device, buffer->buffer, buffer->memory, 0);
-    if (result != VK_SUCCESS) goto fail;
-    result = dev->vtable.MapMemory(dev->device, buffer->memory, 0, size, 0, &buffer->mapped);
-    if (result != VK_SUCCESS) goto fail;
-    memset(buffer->mapped, 0, (size_t)size);
-    VkBufferDeviceAddressInfo address = {VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO, NULL, buffer->buffer};
-    buffer->address = dev->vtable.GetBufferDeviceAddress(dev->device, &address);
-    if (!buffer->address) {
-        result = VK_ERROR_OUT_OF_DEVICE_MEMORY;
-        goto fail;
-    }
+    *buffer = (struct query_buffer){.buffer = slice.buffer,
+                                    .address = slice.address,
+                                    .mapped = slice.mapping,
+                                    .size = size,
+                                    .offset = slice.offset,
+                                    .allocation = slice};
     return VK_SUCCESS;
-fail:
-    destroy_buffer(dev, buffer);
-    return result;
 }
 static VkResult make_pipeline(struct vkrt_device_data *dev, const uint32_t *words, size_t size, VkPipeline *pipeline) {
     VkShaderModuleCreateInfo shader = {.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO, .codeSize = size, .pCode = words};
@@ -184,11 +158,8 @@ static VkResult initialize_pipelines(struct vkrt_device_data *dev) {
     if (result == VK_SUCCESS)
         result = make_pipeline(dev, vkrt_spv_vkrt_query_format, sizeof(vkrt_spv_vkrt_query_format), &q->format);
     if (result != VK_SUCCESS) {
-        while (q->queues) {
-            struct query_queue *next = q->queues->next;
-            free(q->queues);
-            q->queues = next;
-        }
+        /* Queue admission/history belongs to the device, not these pipelines.
+         * An initialization retry must not forget already accepted waits. */
         if (q->property) dev->vtable.DestroyPipeline(dev->device, q->property, NULL);
         if (q->publish) dev->vtable.DestroyPipeline(dev->device, q->publish, NULL);
         if (q->layout) dev->vtable.DestroyPipelineLayout(dev->device, q->layout, NULL);
@@ -233,12 +204,14 @@ static VkResult harvest(struct vkrt_device_data *dev, struct query_operation *op
         dev->vtable.GetQueryPoolResults(dev->device, op->marker, 0, 1, sizeof(marker), marker, 16,
                                         VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WITH_AVAILABILITY_BIT | VK_QUERY_RESULT_WAIT_BIT);
     if (result != VK_SUCCESS) return result;
-    const struct vkrt_as_query_value *values = op->payload.mapped;
-    const uint64_t *serials = (const void *)((const uint8_t *)op->payload.mapped + (size_t)op->count * 16);
     for (uint32_t i = 0; i < op->count; ++i) {
+        struct vkrt_as_query_value value;
+        uint64_t serial;
+        memcpy(&value, (const uint8_t *)op->payload.mapped + (size_t)i * 16, sizeof(value));
+        memcpy(&serial, (const uint8_t *)op->payload.mapped + (size_t)op->count * 16 + (size_t)i * 8, sizeof(serial));
         struct query_host_slot *slot = &op->pool->slots[op->first + i];
-        if (!slot->initialized || later(serials[i], slot->serial))
-            *slot = (struct query_host_slot){values[i].value, serials[i], true, values[i].valid != 0};
+        if (!slot->initialized || later(serial, slot->serial))
+            *slot = (struct query_host_slot){value.value, serial, true, value.valid != 0};
     }
     op->harvested = true;
     return VK_SUCCESS;
@@ -269,23 +242,17 @@ static struct vkrt_query_command *command_state(struct vkrt_cmd_buffer_data *cb)
 }
 static bool record_allowed(struct vkrt_cmd_buffer_data *cb) {
     if (!cb || cb->record_result != VK_SUCCESS) return false;
-    if (!cb->device_data->queries || (cb->usage_flags & VK_COMMAND_BUFFER_USAGE_SIMULTANEOUS_USE_BIT) ||
+    const bool execution_owned = cb->replaying || (cb->replay.journal && cb->device_data->executions);
+    if (!cb->device_data->queries || (!execution_owned && (cb->usage_flags & VK_COMMAND_BUFFER_USAGE_SIMULTANEOUS_USE_BIT)) ||
         cb->native_active_queries) {
-        VKRT_LOG_ERR("AS query backend requires non-simultaneous recording without active native queries");
+        VKRT_LOG_ERR("AS queries require isolated execution storage and no active native query");
         cb->record_result = VK_ERROR_FEATURE_NOT_PRESENT;
         return false;
     }
-    struct vkrt_query_device *q = cb->device_data->queries;
     uint32_t family = UINT32_MAX;
     VkCommandPoolCreateFlags flags = 0;
-    vkrt_mutex_lock(&q->lock);
-    for (struct query_command_pool *pool = q->command_pools; pool; pool = pool->next)
-        if (pool->pool == cb->pool) {
-            family = pool->family;
-            flags = pool->flags;
-            break;
-        }
-    vkrt_mutex_unlock(&q->lock);
+    vkrt_query_command_pool_info(cb->device_data, cb->pool, &family, &flags);
+    struct vkrt_query_device *q = cb->device_data->queries;
     if ((flags & VK_COMMAND_POOL_CREATE_PROTECTED_BIT) || family >= q->family_count || !q->families[family].timestampValidBits ||
         !(q->families[family].queueFlags & VK_QUEUE_COMPUTE_BIT)) {
         cb->record_result = VK_ERROR_FEATURE_NOT_PRESENT;
@@ -293,6 +260,14 @@ static bool record_allowed(struct vkrt_cmd_buffer_data *cb) {
         return false;
     }
     return true;
+}
+static bool capture_only(struct vkrt_cmd_buffer_data *cb, bool copy) {
+    cb->has_virtual_queries = true;
+    cb->has_virtual_query_copy |= copy;
+    return !cb->replaying && cb->replay.journal && cb->device_data->executions;
+}
+bool vkrt_query_command_requires_replay(const struct vkrt_cmd_buffer_data *cb) {
+    return cb && !cb->replaying && cb->has_virtual_queries;
 }
 static void dependency(struct vkrt_device_data *dev, VkCommandBuffer command) {
     VkMemoryBarrier barrier = {VK_STRUCTURE_TYPE_MEMORY_BARRIER, NULL, VK_ACCESS_MEMORY_READ_BIT | VK_ACCESS_MEMORY_WRITE_BIT,
@@ -313,7 +288,7 @@ static struct query_operation *new_operation(struct vkrt_cmd_buffer_data *cb, st
     op->pool = pool;
     op->first = first;
     op->count = count;
-    VkResult result = create_buffer(cb->device_data, (VkDeviceSize)count * 24, &op->payload);
+    VkResult result = create_buffer(cb->device_data, (VkDeviceSize)count * 24, false, &op->payload);
     VkQueryPoolCreateInfo info = {
         .sType = VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO, .queryType = VK_QUERY_TYPE_TIMESTAMP, .queryCount = 1};
     if (result == VK_SUCCESS) result = cb->device_data->vtable.CreateQueryPool(cb->device_data->device, &info, NULL, &op->marker);
@@ -399,7 +374,7 @@ static VKAPI_ATTR VkResult VKAPI_CALL CreateQueryPool(VkDevice device, const VkQ
                             : malloc(slot_bytes);
     if (pool->slots) memset(pool->slots, 0, slot_bytes);
     VkResult result =
-        pool->slots ? create_buffer(dev, (VkDeviceSize)pool->count * 24, &pool->storage) : VK_ERROR_OUT_OF_HOST_MEMORY;
+        pool->slots ? create_buffer(dev, (VkDeviceSize)pool->count * 24, false, &pool->storage) : VK_ERROR_OUT_OF_HOST_MEMORY;
     vkrt_mutex_lock(&dev->queries->lock);
     if (result == VK_SUCCESS) result = initialize_pipelines(dev);
     if (result == VK_SUCCESS) {
@@ -463,6 +438,8 @@ static VKAPI_ATTR VkResult VKAPI_CALL GetQueryPoolResults(VkDevice device, VkQue
     struct vkrt_device_data *dev = VKRT_FIND(struct vkrt_device_data, device);
     struct query_pool *pool = find_pool(handle);
     if (!pool) return dev->vtable.GetQueryPoolResults(device, handle, first, count, size, data, stride, flags);
+    VkResult completion = vkrt_execution_collect(dev, NULL);
+    if (completion != VK_SUCCESS) return completion;
     size_t width = flags & VK_QUERY_RESULT_64_BIT ? 8 : 4;
     size_t bytes = width * (flags & VK_QUERY_RESULT_WITH_AVAILABILITY_BIT ? 2 : 1);
     if (first >= pool->count || count > pool->count - first ||
@@ -501,18 +478,24 @@ static VKAPI_ATTR void VKAPI_CALL ResetQueryPool(VkDevice device, VkQueryPool ha
         dev->vtable.ResetQueryPool(device, handle, first, count);
         return;
     }
+    VkResult completion = vkrt_execution_collect(dev, NULL);
+    if (completion != VK_SUCCESS) {
+        vkrt_mutex_lock(&dev->queries->lock);
+        dev->queries->error = completion;
+        vkrt_mutex_unlock(&dev->queries->lock);
+        return;
+    }
     vkrt_mutex_lock(&dev->queries->lock);
     VkResult result = poll_device(dev);
     if (result == VK_SUCCESS) {
-        struct vkrt_as_query_value *values = pool->storage.mapped;
-        uint64_t *counters = (void *)((uint8_t *)pool->storage.mapped + (size_t)pool->count * 16);
         for (uint32_t i = first; i < first + count; ++i) {
             struct query_host_slot *slot = &pool->slots[i];
-            slot->serial = counters[i] = slot->initialized ? slot->serial + 1 : 1;
+            slot->serial = slot->initialized ? slot->serial + 1 : 1;
+            memcpy((uint8_t *)pool->storage.mapped + (size_t)pool->count * 16 + (size_t)i * 8, &slot->serial, sizeof(slot->serial));
             slot->initialized = true;
             slot->available = false;
             slot->value = 0;
-            values[i] = (struct vkrt_as_query_value){0};
+            memset((uint8_t *)pool->storage.mapped + (size_t)i * 16, 0, sizeof(struct vkrt_as_query_value));
         }
     }
     vkrt_mutex_unlock(&dev->queries->lock);
@@ -524,6 +507,8 @@ static VKAPI_ATTR void VKAPI_CALL CmdResetQueryPool(VkCommandBuffer command, VkQ
         cb->device_data->vtable.CmdResetQueryPool(command, handle, first, count);
         return;
     }
+    if (!record_allowed(cb)) return;
+    if (capture_only(cb, false)) return;
     struct query_operation *op = new_operation(cb, pool, first, count);
     if (op) publish_operation(cb, op, true);
 }
@@ -537,6 +522,8 @@ static VKAPI_ATTR void VKAPI_CALL CmdWriteAccelerationStructuresPropertiesKHR(Vk
         if (cb) cb->record_result = VK_ERROR_INITIALIZATION_FAILED;
         return;
     }
+    if (!record_allowed(cb)) return;
+    if (capture_only(cb, false)) return;
     struct query_operation *op = new_operation(cb, pool, first, count);
     if (!op) return;
     struct vkrt_device_data *dev = cb->device_data;
@@ -565,6 +552,7 @@ static VKAPI_ATTR void VKAPI_CALL CmdCopyQueryPoolResults(VkCommandBuffer comman
         return;
     }
     if (!record_allowed(cb) || !count) return;
+    if (capture_only(cb, true)) return;
     struct vkrt_query_command *q = command_state(cb);
     if (!q) return;
     VkDeviceSize width = flags & VK_QUERY_RESULT_64_BIT ? 8 : 4;
@@ -582,7 +570,7 @@ static VKAPI_ATTR void VKAPI_CALL CmdCopyQueryPoolResults(VkCommandBuffer comman
         cb->record_result = VK_ERROR_OUT_OF_HOST_MEMORY;
         return;
     }
-    VkResult result = create_buffer(cb->device_data, required, &scratch->buffer);
+    VkResult result = create_buffer(cb->device_data, required, true, &scratch->buffer);
     if (result != VK_SUCCESS) {
         free(scratch);
         free(regions);
@@ -612,7 +600,7 @@ static VKAPI_ATTR void VKAPI_CALL CmdCopyQueryPoolResults(VkCommandBuffer comman
     dev->vtable.CmdPipelineBarrier(command, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 1, &barrier, 0,
                                    NULL, 0, NULL);
     for (uint32_t i = 0; i < count; ++i)
-        regions[i] = (VkBufferCopy){(VkDeviceSize)i * stride, offset + (VkDeviceSize)i * stride, bytes};
+        regions[i] = (VkBufferCopy){scratch->buffer.offset + (VkDeviceSize)i * stride, offset + (VkDeviceSize)i * stride, bytes};
     dev->vtable.CmdCopyBuffer(command, scratch->buffer.buffer, destination, count, regions);
     free(regions);
     vkrt_replay_compute_binding(cb);
@@ -661,29 +649,74 @@ VkResult vkrt_query_command_reset(struct vkrt_cmd_buffer_data *cb) {
  * acquire, instead of broadening waits and potentially blocking a query prefix. */
 static bool command_has_copy(VkCommandBuffer command) {
     struct vkrt_cmd_buffer_data *cb = VKRT_FIND(struct vkrt_cmd_buffer_data, command);
-    if (!cb || !cb->queries) return false;
+    if (!cb) return false;
+    if (cb->has_virtual_query_copy) return true;
+    if (!cb->queries) return false;
     if (cb->queries->scratch) return true;
     for (struct query_child *child = cb->queries->children; child; child = child->next)
         if (command_has_copy(child->command)) return true;
     return false;
 }
+/* Caller holds queries->lock. Queue nodes live until device finish, so a
+ * transaction can release that list lock before waiting on its admission. */
+static struct query_queue *query_queue_get(struct vkrt_query_device *q, VkQueue queue) {
+    struct query_queue *state = q->queues;
+    while (state && state->queue != queue) state = state->next;
+    if (state) return state;
+    state = calloc(1, sizeof(*state));
+    if (!state) return NULL;
+#ifdef _WIN32
+    vkrt_mutex_init(&state->admission.lock);
+#else
+    if (pthread_mutex_init(&state->admission.lock, NULL)) {
+        free(state);
+        return NULL;
+    }
+#endif
+    state->queue = queue;
+    state->next = q->queues;
+    q->queues = state;
+    return state;
+}
+static void query_queue_destroy(struct query_queue *state) {
+#ifndef _WIN32
+    pthread_mutex_destroy(&state->admission.lock);
+#endif
+    free(state);
+}
+VkResult vkrt_query_submit_begin(struct vkrt_device_data *dev, struct vkrt_query_submission *transaction, VkQueue queue) {
+    if (!dev || !transaction || transaction->admission || !queue) return VK_ERROR_INITIALIZATION_FAILED;
+    if (!dev->queries) return VK_SUCCESS;
+    vkrt_mutex_lock(&dev->queries->lock);
+    struct query_queue *state = query_queue_get(dev->queries, queue);
+    VkResult result = state ? dev->queries->error : VK_ERROR_OUT_OF_HOST_MEMORY;
+    vkrt_mutex_unlock(&dev->queries->lock);
+    if (result != VK_SUCCESS) return result;
+    vkrt_mutex_lock(&state->admission.lock);
+    vkrt_mutex_lock(&dev->queries->lock);
+    result = dev->queries->error;
+    vkrt_mutex_unlock(&dev->queries->lock);
+    if (result != VK_SUCCESS) {
+        vkrt_mutex_unlock(&state->admission.lock);
+        return result;
+    }
+    transaction->admission = &state->admission;
+    transaction->queue = queue;
+    return VK_SUCCESS;
+}
+void vkrt_query_submit_end(struct vkrt_device_data *dev, struct vkrt_query_submission *transaction) {
+    (void)dev;
+    if (!transaction || !transaction->admission) return;
+    struct vkrt_query_admission *admission = transaction->admission;
+    transaction->admission = NULL;
+    vkrt_mutex_unlock(&admission->lock);
+}
 VkResult vkrt_query_submit_qualify(struct vkrt_device_data *dev, struct vkrt_query_submission *transaction, VkQueue queue,
                                    bool unsafe_wait, uint32_t count, const VkCommandBuffer *commands) {
     if (!dev->queries) return VK_SUCCESS;
     vkrt_mutex_lock(&dev->queries->lock);
-    struct query_queue *state = dev->queries->queues;
-    while (state && state->queue != queue) state = state->next;
-    VkResult result = VK_SUCCESS;
-    if (!state) {
-        state = calloc(1, sizeof(*state));
-        if (!state)
-            result = VK_ERROR_OUT_OF_HOST_MEMORY;
-        else {
-            state->queue = queue;
-            state->next = dev->queries->queues;
-            dev->queries->queues = state;
-        }
-    }
+    struct query_queue *state = query_queue_get(dev->queries, queue);
+    VkResult result = state ? VK_SUCCESS : VK_ERROR_OUT_OF_HOST_MEMORY;
     if (state && (state->unsafe_waits || transaction->unsafe_waits || unsafe_wait))
         for (uint32_t i = 0; i < count; ++i)
             if (command_has_copy(commands[i])) {
@@ -698,11 +731,19 @@ VkResult vkrt_query_submit_qualify(struct vkrt_device_data *dev, struct vkrt_que
     vkrt_mutex_unlock(&dev->queries->lock);
     return result;
 }
-void vkrt_query_queue_idle(struct vkrt_device_data *dev, VkQueue queue) {
+uint64_t vkrt_query_queue_checkpoint(struct vkrt_device_data *dev) {
+    if (!dev->queries) return 0;
+    vkrt_mutex_lock(&dev->queries->lock);
+    uint64_t epoch = dev->queries->unsafe_epoch;
+    vkrt_mutex_unlock(&dev->queries->lock);
+    return epoch;
+}
+void vkrt_query_queue_idle(struct vkrt_device_data *dev, VkQueue queue, uint64_t checkpoint) {
     if (!dev->queries) return;
     vkrt_mutex_lock(&dev->queries->lock);
     for (struct query_queue *state = dev->queries->queues; state; state = state->next)
-        if (!queue || state->queue == queue) state->unsafe_waits = false;
+        if ((!queue || state->queue == queue) && !state->unsafe_unbounded && state->unsafe_epoch <= checkpoint)
+            state->unsafe_waits = false;
     vkrt_mutex_unlock(&dev->queries->lock);
 }
 static VkResult prepare_command(struct vkrt_device_data *dev, VkCommandBuffer command,
@@ -737,9 +778,16 @@ void vkrt_query_submit_result(struct vkrt_device_data *dev, const struct vkrt_qu
     if (!dev->queries || !transaction) return;
     vkrt_mutex_lock(&dev->queries->lock);
     if (result == VK_ERROR_DEVICE_LOST) dev->queries->error = result;
-    if (result == VK_SUCCESS && transaction->unsafe_waits)
+    if (result == VK_SUCCESS && transaction->unsafe_waits) {
+        const bool bounded = dev->queries->unsafe_epoch < UINT64_MAX;
+        if (bounded) ++dev->queries->unsafe_epoch;
         for (struct query_queue *queue = dev->queries->queues; queue; queue = queue->next)
-            if (queue->queue == transaction->queue) queue->unsafe_waits = true;
+            if (queue->queue == transaction->queue) {
+                queue->unsafe_waits = true;
+                queue->unsafe_epoch = dev->queries->unsafe_epoch;
+                queue->unsafe_unbounded |= !bounded;
+            }
+    }
     for (struct vkrt_query_command *cb = dev->queries->commands; cb; cb = cb->next)
         for (struct query_operation *op = cb->head; op; op = op->next)
             if (op->prepared == transaction) {
@@ -759,7 +807,7 @@ void vkrt_query_device_finish(struct vkrt_device_data *dev) {
     }
     while (q->queues) {
         struct query_queue *next = q->queues->next;
-        free(q->queues);
+        query_queue_destroy(q->queues);
         q->queues = next;
     }
     if (q->property) dev->vtable.DestroyPipeline(dev->device, q->property, NULL);
@@ -799,16 +847,36 @@ void vkrt_query_forget_command_pool(struct vkrt_device_data *dev, VkCommandPool 
     }
     vkrt_mutex_unlock(&dev->queries->lock);
 }
+bool vkrt_query_command_pool_info(struct vkrt_device_data *dev, VkCommandPool pool, uint32_t *family,
+                                  VkCommandPoolCreateFlags *flags) {
+    if (!dev || !dev->queries || !family || !flags) return false;
+    bool found = false;
+    vkrt_mutex_lock(&dev->queries->lock);
+    for (const struct query_command_pool *p = dev->queries->command_pools; p; p = p->next)
+        if (p->pool == pool) {
+            *family = p->family;
+            *flags = p->flags;
+            found = true;
+            break;
+        }
+    vkrt_mutex_unlock(&dev->queries->lock);
+    return found;
+}
 static VKAPI_ATTR void VKAPI_CALL CmdExecuteCommands(VkCommandBuffer command, uint32_t count, const VkCommandBuffer *children) {
     struct vkrt_cmd_buffer_data *cb = VKRT_FIND(struct vkrt_cmd_buffer_data, command);
     if (cb->device_data->queries) {
         for (uint32_t i = 0; i < count; ++i) {
             struct vkrt_cmd_buffer_data *child = VKRT_FIND(struct vkrt_cmd_buffer_data, children[i]);
-            if (!child || !child->queries) continue;
-            if ((cb->usage_flags & VK_COMMAND_BUFFER_USAGE_SIMULTANEOUS_USE_BIT) || cb->native_active_queries) {
+            if (!child || (!child->queries && !child->has_virtual_queries)) continue;
+            const bool execution_owned = cb->replaying || (cb->replay.journal && cb->device_data->executions);
+            if ((!execution_owned && (cb->usage_flags & VK_COMMAND_BUFFER_USAGE_SIMULTANEOUS_USE_BIT)) ||
+                cb->native_active_queries) {
                 cb->record_result = VK_ERROR_FEATURE_NOT_PRESENT;
                 return;
             }
+            cb->has_virtual_queries = true;
+            cb->has_virtual_query_copy |= child->has_virtual_query_copy;
+            if (!cb->replaying && cb->replay.journal && cb->device_data->executions) continue;
             struct vkrt_query_command *state = command_state(cb);
             if (!state) return;
             struct query_child *record = malloc(sizeof(*record));

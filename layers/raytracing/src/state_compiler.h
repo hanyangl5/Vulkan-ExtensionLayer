@@ -149,11 +149,15 @@ struct TypedContinuationProgram {
 // parallel, and no opaque logical pointer bit pattern is stored in a frame.
 // Actual memory operations dispatch within the selected static root/path;
 // native pointer Phi/Select is not required by the transformed program.
-// Function/Private pointer variables, arrays and legal aggregate loads/stores
-// use the same typed identity records. OpPtrAccessChain preserves ArrayStride
-// and folds signed Element advances into finite per-type route segments.
-// Same-pointee ArrayStride-changing views require byte-offset normalization
-// and are explicitly rejected before route analysis, including zero advances.
+// Function/Private pointer variables, arrays, legal aggregate loads/stores and
+// unmasked OpCopyMemory use the same typed identity records. OpPtrAccessChain
+// preserves ArrayStride and folds signed Element advances into finite typed
+// route segments. Ordinary zero-index chains can omit and restore the actual
+// array stride, including through Phi/Select and pointer-valued memory. A
+// restored nonzero stride must agree with the route's original array layout;
+// the views do not create a different array or relax its innermost bounds.
+// Conflicting nonzero stride views and arithmetic without a consistent array
+// origin are rejected, including source-validator layout-check omissions.
 // Only stable descriptor identities are reconstructed; image reads and atomic
 // effects retain their original source positions, scopes and memory semantics.
 // Opaque Phi/Select and nontraditional descriptor handles remain unsupported.

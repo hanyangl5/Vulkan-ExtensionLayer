@@ -58,6 +58,8 @@ static void reset_state(struct vkrt_cmd_buffer_data *cb)
    cb->record_result = query_result;
    cb->native_active_queries = 0;
    cb->usage_flags = 0;
+   cb->has_virtual_queries = false;
+   cb->has_virtual_query_copy = false;
 }
 
 /* Caller holds the per-device list lock. */
@@ -191,6 +193,8 @@ static VKAPI_ATTR VkResult VKAPI_CALL EndCommandBuffer(VkCommandBuffer cmd)
    struct vkrt_cmd_buffer_data *cb = VKRT_FIND(struct vkrt_cmd_buffer_data, cmd);
    if (!cb) return VK_ERROR_INITIALIZATION_FAILED;
    VkResult r = cb->device_data->vtable.EndCommandBuffer(cmd);
+   if (cb->has_virtual_queries && cb->replay.journal && cb->record_result == VK_SUCCESS)
+       cb->record_result = vkrt_replay_journal_status(cb->replay.journal);
    return cb->record_result != VK_SUCCESS ? cb->record_result : r;
 }
 

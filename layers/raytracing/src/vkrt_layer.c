@@ -17,6 +17,7 @@
  */
 
 #include "vkrt_layer.h"
+#include "vkrt_execution_replay.h"
 #include "vkrt_query_pool.h"
 #include "vkrt_shader_objects.h"
 #include "vkrt_shader_interface.h"
@@ -188,6 +189,13 @@ vkrt_CreateDevice(VkPhysicalDevice physicalDevice,
    if (!fpGetInstanceProcAddr || !fpGetDeviceProcAddr)
       return VK_ERROR_INITIALIZATION_FAILED;
 
+   PFN_vkSetDeviceLoaderData set_loader_data = NULL;
+   for (const VkBaseInStructure *p = pCreateInfo->pNext; p; p = p->pNext) {
+       if (p->sType != VK_STRUCTURE_TYPE_LOADER_DEVICE_CREATE_INFO) continue;
+       const VkLayerDeviceCreateInfo *loader = (const void *)p;
+       if (loader->function == VK_LOADER_DATA_CALLBACK) set_loader_data = loader->u.pfnSetDeviceLoaderData;
+   }
+
    PFN_vkCreateDevice fpCreateDevice =
       (PFN_vkCreateDevice)fpGetInstanceProcAddr(NULL, "vkCreateDevice");
    if (!fpCreateDevice) {
@@ -220,6 +228,7 @@ vkrt_CreateDevice(VkPhysicalDevice physicalDevice,
    data->device           = *pDevice;
    data->physical_device  = physicalDevice;
    data->instance_data    = inst_data;
+   data->set_loader_data = set_loader_data;
    data->virtual_rt = vkrt_device_uses_virtual_rt(pCreateInfo);
    data->app_requested_shader_objects = vkrt_device_requests_shader_objects(pCreateInfo);
    data->shader_object_backend = data->app_requested_shader_objects && vkrt_native_backend_eligible(inst_data, physicalDevice);
@@ -260,6 +269,7 @@ vkrt_CreateDevice(VkPhysicalDevice physicalDevice,
                    ((const VkDeviceGroupDeviceCreateInfo *)p)->physicalDeviceCount > 1)
                    data->query_backend_enabled = false;
            result = vkrt_query_device_init(data);
+           if (result == VK_SUCCESS && data->queries) result = vkrt_execution_device_init(data, pAllocator);
        }
    }
    if (result == VK_SUCCESS) result = vkrt_shader_interface_init(data, pCreateInfo);
@@ -267,6 +277,7 @@ vkrt_CreateDevice(VkPhysicalDevice physicalDevice,
    if (result != VK_SUCCESS) {
       VKRT_LOG_ERR("GPU BVH pipeline initialization failed: %d", result);
       vkrt_build_finish(data);
+      vkrt_execution_device_finish(data);
       vkrt_as_copy_finish(data);
       vkrt_as_serialization_finish(data);
       vkrt_rtp_finish(data);
@@ -308,6 +319,7 @@ vkrt_DestroyDevice(VkDevice device, const VkAllocationCallbacks *pAllocator)
    if (!data)
       return;
 
+   vkrt_execution_device_finish(data);
    vkrt_commands_finish(data);
    vkrt_query_device_finish(data);
    vkrt_rtp_finish(data);

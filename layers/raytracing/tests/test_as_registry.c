@@ -19,6 +19,7 @@ static bool coherent_available = true;
 static unsigned native_allocations, native_frees, native_budget = 128;
 static uint64_t native_address_override;
 static bool undersized_requirements;
+static VkDeviceSize storage_alignment = 64;
 static unsigned tested_fault_positions, budget_allocations;
 static _Atomic unsigned concurrent_slice_allocations;
 struct resource {
@@ -55,7 +56,8 @@ static void check_allocator(const VkAllocationCallbacks *a) {
 static VKAPI_ATTR VkResult VKAPI_CALL create_buffer(VkDevice d, const VkBufferCreateInfo *info, const VkAllocationCallbacks *a,
                                                     VkBuffer *out) {
     check_allocator(a);
-    CHECK(d == device && info->usage == (VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT));
+    CHECK(d == device && info->usage == (VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT |
+                                         VK_BUFFER_USAGE_TRANSFER_SRC_BIT));
     CHECK(info->size >= 65536 && !(info->size & 7));
     *out = H(VkBuffer, 0xbad);
     if (fault()) return VK_ERROR_OUT_OF_DEVICE_MEMORY;
@@ -88,7 +90,7 @@ static VKAPI_ATTR void VKAPI_CALL properties(VkPhysicalDevice physical, VkPhysic
 }
 static VKAPI_ATTR void VKAPI_CALL device_properties(VkPhysicalDevice physical, VkPhysicalDeviceProperties *out) {
     memset(out, 0, sizeof(*out));
-    out->limits.minStorageBufferOffsetAlignment = 64;
+    out->limits.minStorageBufferOffsetAlignment = storage_alignment;
     out->limits.maxMemoryAllocationCount = 4096;
 }
 static VKAPI_ATTR VkResult VKAPI_CALL allocate_memory(VkDevice d, const VkMemoryAllocateInfo *info, const VkAllocationCallbacks *a,
@@ -208,6 +210,7 @@ static void clean(void) {
     native_allocations = native_frees = 0;
     native_budget = 128;
     native_address_override = 0;
+    storage_alignment = 64;
     undersized_requirements = false;
 }
 static void begin(void) {
@@ -426,6 +429,53 @@ static void allocation_boundaries(void) {
     CHECK(!first.buffer && !first.allocation && !first.mapping && !live_buffers() && !native_allocations);
     clean();
 }
+static void query_storage_and_copy_alignment(void) {
+    /* The ICD BDA and mapped pointer deliberately have different alignment.
+     * These constants are an independent offset oracle for a 48-byte payload
+     * followed by 64 bytes of copy scratch in a new arena with BDA == base+3. */
+    const VkDeviceSize limits[] = {1, 4, 64, 256};
+    const VkDeviceSize expected_scratch_offsets[] = {56, 56, 64, 256};
+    const uint64_t values[] = {UINT64_C(0xfedcba9876543210), 1, UINT64_C(0x0123456789abcdef), 0, UINT64_C(0x8877665544332211), 1};
+    for (unsigned variant = 0; variant < 4; ++variant) {
+        clean();
+        storage_alignment = limits[variant];
+        native_budget = 1;
+        CHECK(vkrt_private_pool_init(&dev, &allocator) == VK_SUCCESS);
+        struct vkrt_private_slice payload, scratch;
+        CHECK(vkrt_private_pool_allocate(&dev, sizeof(values), false, &payload) == VK_SUCCESS);
+        CHECK(vkrt_private_pool_allocate(&dev, 64, true, &scratch) == VK_SUCCESS);
+        CHECK(payload.buffer == scratch.buffer && native_allocations == 1);
+        const struct resource *resource = &resources[(uintptr_t)payload.buffer - 1];
+        CHECK(resource->address == UINT64_C(0x100000003));
+        CHECK(payload.offset == 5 && payload.address == UINT64_C(0x100000008) && !(payload.address & 7));
+        CHECK(((uintptr_t)payload.mapping & 7) == 5); /* memcpy is required on the CPU. */
+        CHECK(scratch.offset == expected_scratch_offsets[variant] && !(scratch.offset & 3));
+        CHECK(!(scratch.offset % (limits[variant] < 8 ? 8 : limits[variant])));
+        CHECK(scratch.address == resource->address + expected_scratch_offsets[variant] && (scratch.address & 7) == 3);
+        CHECK(payload.mapping == resource->bytes + 5 && scratch.mapping == resource->bytes + expected_scratch_offsets[variant]);
+        memcpy(payload.mapping, values, sizeof(values));
+        CHECK(!memcmp(gpu_bytes(payload.address, sizeof(values)), values, sizeof(values)));
+        /* Emulate the native transfer's source BUFFER OFFSET, independent of
+         * the intentionally unaligned physical address used by the formatter. */
+        uint8_t copied[80], expected[80];
+        memset(copied, 0xa5, sizeof(copied));
+        memset(expected, 0xa5, sizeof(expected));
+        for (unsigned i = 0; i < 64; ++i) {
+            ((uint8_t *)scratch.mapping)[i] = (uint8_t)(i ^ 0x5a);
+            expected[8 + i] = (uint8_t)(i ^ 0x5a);
+        }
+        memcpy(copied + 8, resource->bytes + scratch.offset, 64);
+        CHECK(!memcmp(copied, expected, sizeof(copied)));
+        for (unsigned i = 0; i < 5; ++i) CHECK(resource->bytes[i] == 0xcd);
+        for (VkDeviceSize i = 5 + sizeof(values); i < scratch.offset; ++i) CHECK(resource->bytes[i] == 0xcd);
+        CHECK(resource->bytes[scratch.offset + 64] == 0xcd);
+        vkrt_private_pool_release(&dev, &payload);
+        CHECK(live_buffers() == 1 && !native_frees);
+        vkrt_private_pool_release(&dev, &scratch);
+        CHECK(!live_buffers() && native_allocations == native_frees);
+    }
+    clean();
+}
 struct slice_worker {
     unsigned id;
     bool valid;
@@ -547,6 +597,7 @@ int main(void) {
     allocation_budget();
     owner_precedence();
     allocation_boundaries();
+    query_storage_and_copy_alignment();
     concurrent_slices();
     concurrent_aliases();
     fault_paths();

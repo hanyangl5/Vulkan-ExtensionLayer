@@ -23,9 +23,12 @@ struct vkrt_private_slice {
  * Finish after registry/AS users, before the native device and allocator owner. */
 VkResult vkrt_private_pool_init(struct vkrt_device_data *dev, const VkAllocationCallbacks *allocator);
 void vkrt_private_pool_finish(struct vkrt_device_data *dev);
-/* descriptor=true aligns the buffer offset to minStorageBufferOffsetAlignment;
- * otherwise the physical address is eight-byte aligned. Allocation never
- * assumes that the native buffer BDA itself is eight-byte aligned. */
+/* descriptor=true aligns the buffer offset to max(minStorageBufferOffsetAlignment,
+ * 8), also satisfying native transfer-copy source offset alignment. Its physical
+ * BDA may have any alignment; byte-addressed shader output is required there.
+ * Otherwise the physical BDA is eight-byte aligned, while the buffer offset and
+ * CPU mapping may be unaligned. Access mapped values with memcpy. Pool buffers
+ * support STORAGE_BUFFER, SHADER_DEVICE_ADDRESS, and TRANSFER_SRC usage. */
 VkResult vkrt_private_pool_allocate(struct vkrt_device_data *dev, VkDeviceSize size, bool descriptor,
                                     struct vkrt_private_slice *slice);
 void vkrt_private_pool_release(struct vkrt_device_data *dev, struct vkrt_private_slice *slice);

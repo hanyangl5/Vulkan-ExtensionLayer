@@ -109,7 +109,8 @@ static VKAPI_ATTR VkResult VKAPI_CALL create_buffer(VkDevice d, const VkBufferCr
     check_allocator(allocator); /* Native chunks never borrow the AS object's callbacks. */
     CHECK(d == device && info->sType == VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO && !info->pNext);
     CHECK(info->size >= 65536 && !(info->size & 7));
-    CHECK(info->usage == (VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT));
+    CHECK(info->usage ==
+          (VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT));
     if (expected_family_count > 1) {
         CHECK(info->sharingMode == VK_SHARING_MODE_CONCURRENT && info->queueFamilyIndexCount == expected_family_count);
         CHECK(info->pQueueFamilyIndices == expected_family_pointer);
@@ -411,7 +412,7 @@ static void failure_paths(void) {
 static void independent_objects(void) {
     reset();
     expected_allocator = NULL;
-    VkAccelerationStructureKHR a, b;
+    VkAccelerationStructureKHR a = VK_NULL_HANDLE, b = VK_NULL_HANDLE;
     CHECK(create_as(0x600, &a) == VK_SUCCESS && create_as(0x1000, &b) == VK_SUCCESS);
     struct vkrt_virtual_as *first = VKRT_FIND(struct vkrt_virtual_as, a);
     struct vkrt_virtual_as *second = VKRT_FIND(struct vkrt_virtual_as, b);
@@ -557,7 +558,7 @@ static void queue_family_sharing(void) {
     struct vkrt_private_slice grown;
     CHECK(vkrt_private_pool_allocate(&device_data, 131072, false, &grown) == VK_SUCCESS);
     vkrt_private_pool_release(&device_data, &grown); /* Inspect actual concurrent-sharing chunk creation. */
-    VkAccelerationStructureKHR first, second;
+    VkAccelerationStructureKHR first = VK_NULL_HANDLE, second = VK_NULL_HANDLE;
     CHECK(create_as(0, &first) == VK_SUCCESS && create_as(256, &second) == VK_SUCCESS);
     CHECK(family_allocations == 1 && device_data.queue_families == expected_family_pointer);
     vkrt_destroy_virtual_as(&device_data, first);

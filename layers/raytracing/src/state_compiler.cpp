@@ -356,7 +356,7 @@ class Compiler {
     struct PointerPlan {
         std::set<uint32_t> routes;
         uint32_t offset = 0, words = 1;
-        bool non_uniform = false;
+        bool non_uniform = false, conservative = false;
     };
     TypedContinuationProgram output;
     Parsed parsed;
@@ -881,11 +881,43 @@ class Compiler {
         if (words > UINT32_MAX / 4) Unsupported("logical pointer selector snapshot exceeds frame indexing");
         return static_cast<uint32_t>(words);
     }
+    uint32_t RouteArrayStride(const PointerRoute &route) const {
+        if (!route.first) return 0;
+        auto type = Def(Def(route.first).type).words.at(3);
+        uint32_t stride = 0;
+        for (const auto &index : route.second) {
+            // Arithmetic stays in the same innermost array. A subsequent
+            // ordinary index enters a new subobject and establishes its own
+            // array origin, if any.
+            if (index.pointer_type) continue;
+            const auto &d = Def(type);
+            stride = 0;
+            if (d.op == spv::OpTypeStruct) {
+                if (!index.constant || Def(index.constant).op != spv::OpConstant)
+                    Unsupported("logical pointer structure member is not constant");
+                type = d.words.at(Def(index.constant).words.at(3) + 2);
+            } else if (d.op == spv::OpTypeArray || d.op == spv::OpTypeRuntimeArray) {
+                stride = PointerStride(type);
+                type = d.words.at(2);
+            } else if (d.op == spv::OpTypeVector || d.op == spv::OpTypeMatrix)
+                type = d.words.at(2);
+            else
+                Unsupported("logical pointer route indexes a scalar");
+        }
+        return stride;
+    }
+    bool RouteArrayStrideMismatch(const PointerRoute &route, uint32_t pointer_type) const {
+        const auto stride = PointerStride(pointer_type), origin = RouteArrayStride(route);
+        return stride && origin && stride != origin;
+    }
     PointerRoute ExtendPointerRoute(uint32_t base, const Instruction &access) const {
         auto route = pointer_routes.at(base);
+        if (!route.first || RouteArrayStrideMismatch(route, Def(access.words.at(3)).type)) return {0, {}};
         const bool arithmetic = access.op == spv::OpPtrAccessChain || access.op == spv::OpInBoundsPtrAccessChain;
         if (arithmetic) {
             const auto pointer_type = CanonicalPointerType(Def(access.words.at(3)).type);
+            if (!route.second.empty() && route.second.back().pointer_type && route.second.back().pointer_type != pointer_type)
+                Unsupported("logical pointer arithmetic changes stride without a proven matching array origin");
             if (route.second.empty() || route.second.back().pointer_type != pointer_type)
                 route.second.push_back({0, pointer_arithmetic_type, pointer_type});
         }
@@ -894,6 +926,7 @@ class Compiler {
             const auto &d = Def(index);
             route.second.push_back(d.in_function ? PointerIndex{0, d.type, 0} : PointerIndex{index, 0, 0});
         }
+        if (RouteArrayStrideMismatch(route, access.type)) return {0, {}};
         return route;
     }
     uint32_t PointerStride(uint32_t type) const {
@@ -922,8 +955,15 @@ class Compiler {
                                 i.op == spv::OpInBoundsPtrAccessChain;
             if (!access) continue;
             const auto base_type = Def(i.words.at(3)).type;
-            if (Def(base_type).words.at(3) == Def(i.type).words.at(3) && PointerStride(base_type) != PointerStride(i.type))
-                Unsupported("same-pointee ArrayStride changes require byte-offset pointer normalization");
+            // A pointer's ArrayStride is optional on an ordinary access
+            // chain. Dropping it and subsequently restoring the real array
+            // stride does not change the address or the arithmetic route.
+            // Two different nonzero strides cannot both describe that same
+            // array element (OpAccessChain and ArrayStride definitions), even
+            // when a source validator fails to diagnose the mismatch.
+            if (Def(base_type).words.at(3) == Def(i.type).words.at(3) && PointerStride(base_type) && PointerStride(i.type) &&
+                PointerStride(base_type) != PointerStride(i.type))
+                Unsupported("same-pointee ArrayStride changes require a matching array origin");
         }
         // Zero is the null identity even inside a null-initialized aggregate.
         PointerRouteID({0, {}});
@@ -960,8 +1000,10 @@ class Compiler {
                 // instruction. Memory/aggregate dataflow adds other identities
                 // at the fixed point below; zero also represents poison paths.
                 plan.routes.insert(0);
+                plan.conservative = true;
             }
         }
+        std::set<uint32_t> invalid_stride_results;
         bool changed = true;
         while (changed) {
             changed = false;
@@ -975,12 +1017,25 @@ class Compiler {
                         result->second.non_uniform = true;
                         changed = true;
                     }
+                    if (found->second.conservative && !result->second.conservative) {
+                        result->second.conservative = true;
+                        changed = true;
+                    }
                     // A zero-index chain may refer back through Phi. Copy the
                     // set before insertion, so the fixed point never mutates
                     // the container currently being traversed.
                     const auto parents = found->second.routes;
                     for (auto route : parents) {
-                        const auto target = extend ? PointerRouteID(ExtendPointerRoute(route, i)) : route;
+                        const auto extended = extend ? ExtendPointerRoute(route, i) : PointerRoute{};
+                        if (extend && pointer_routes.at(route).first && !extended.first) {
+                            // Pointer-valued loads conservatively join every
+                            // same-typed stored identity. A restored stride
+                            // rules out roots belonging to another array
+                            // layout; those are not executable defined paths.
+                            invalid_stride_results.insert(i.result);
+                            continue;
+                        }
+                        const auto target = extend ? PointerRouteID(extended) : route;
                         changed |= result->second.routes.insert(target).second;
                     }
                 };
@@ -1007,7 +1062,10 @@ class Compiler {
             }
         }
         for (auto &[id, plan] : pointer_plans) {
-            (void)id;
+            const bool nonnull = std::any_of(plan.routes.begin(), plan.routes.end(),
+                                             [&](uint32_t route) { return pointer_routes.at(route).first != 0; });
+            if (invalid_stride_results.count(id) && !nonnull && !plan.conservative)
+                Unsupported("logical pointer ArrayStride disagrees with its originating array layout");
             if (plan.routes.empty()) Unsupported("logical pointer Phi has no reachable descriptor root");
             for (auto route : plan.routes) plan.words = std::max(plan.words, RouteWords(route));
             pointer_words = std::max(pointer_words, plan.words);
@@ -1122,7 +1180,15 @@ class Compiler {
         }
         for (const auto &[route, label] : labels) {
             if (labels.size() > 1) functions << label << " = OpLabel\n";
-            std::vector<std::string> result{Constant(pointer_route_ids.at(ExtendPointerRoute(route, i)))};
+            const auto extended = ExtendPointerRoute(route, i);
+            if (!extended.first) {
+                // An impossible conservative candidate, or undefined source
+                // arithmetic on null, needs no native address reconstruction.
+                WritePointerSnapshot(i.result, {Constant(0)});
+                if (labels.size() > 1) functions << "OpBranch " << merge << "\n";
+                continue;
+            }
+            std::vector<std::string> result{Constant(pointer_route_ids.at(extended))};
             result.insert(result.end(), parent.begin() + 1, parent.begin() + RouteWords(route));
             if (arithmetic) {
                 const auto &path = pointer_routes.at(route).second;
@@ -1728,6 +1794,21 @@ class Compiler {
         }
         functions << merge << " = OpLabel\nOpBranch %sc_dispatch_merge\n";
     }
+    bool CopyPersistentMemory(const Instruction &i) {
+        if (i.op != spv::OpCopyMemory) return false;
+        const auto target = i.words.at(1), source = i.words.at(2);
+        if (!IsPersistentStorage(Storage(target)) || !IsPersistentStorage(Storage(source))) return false;
+        // Copy the logical value, including any numeric pointer identities,
+        // rather than copying the implementation's native pointer bytes. A
+        // complete source value is read before the target is written, so
+        // aliases and whole aggregates retain ordinary CopyMemory semantics.
+        if (i.words.size() != 3) Unsupported("persistent CopyMemory memory operands require explicit frame-codec support");
+        const auto type = Def(Def(target).type).words.at(3);
+        const auto source_address = Offset(source), target_address = Offset(target);
+        const auto value = Op("OpFunctionCall " + ValueType(type) + " " + codecs.at(type).load + " %sc_base " + source_address);
+        Op("OpFunctionCall " + code.void_type + " " + codecs.at(type).store + " %sc_base " + target_address + " " + value);
+        return true;
+    }
     void Body(const State &state) {
         ephemeral_values.clear();
         ephemeral_pointers.clear();
@@ -1790,7 +1871,7 @@ class Compiler {
                 Suspend(i, state.number + 1);
                 return;
             }
-            if (RoutedPointerOperation(i)) continue;
+            if (CopyPersistentMemory(i) || RoutedPointerOperation(i)) continue;
             if (i.op == spv::OpLoad && (IsPersistentStorage(Storage(i.words.at(3))) || SystemPointer(i.words.at(3)))) {
                 if (i.words.size() != 4) Unsupported("persistent local load memory operands");
                 auto address = Offset(i.words.at(3));

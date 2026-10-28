@@ -2,9 +2,53 @@
 #include "vkrt_layer.h"
 #include "vkrt_as_registry.h"
 #include "vkrt_query_pool.h"
+#include "vkrt_execution_replay.h"
 
 /* Mock only the downstream dispatch; exercise the actual layer entry points. */
 struct vkrt_global vkrt_global = VKRT_GLOBAL_INITIALIZER;
+VkResult vkrt_execution_collect(struct vkrt_device_data *dev, size_t *retired) {
+    (void)dev;
+    if (retired) *retired = 0;
+    return VK_SUCCESS;
+}
+bool vkrt_query_command_requires_replay(const struct vkrt_cmd_buffer_data *cb) {
+    (void)cb;
+    return false;
+}
+VkResult vkrt_execution_batch_create(struct vkrt_device_data *dev, VkQueue queue, struct vkrt_execution_batch **batch) {
+    (void)dev;
+    (void)queue;
+    *batch = NULL;
+    return VK_ERROR_FEATURE_NOT_PRESENT;
+}
+VkResult vkrt_execution_batch_clone(struct vkrt_execution_batch *batch, VkCommandBuffer source, VkCommandBuffer *target) {
+    (void)batch;
+    (void)source;
+    (void)target;
+    return VK_ERROR_FEATURE_NOT_PRESENT;
+}
+VkResult vkrt_execution_batch_submitted(struct vkrt_execution_batch *batch) {
+    (void)batch;
+    abort();
+}
+void vkrt_execution_batch_quarantine(struct vkrt_execution_batch *batch) {
+    (void)batch;
+    abort();
+}
+uint64_t vkrt_execution_checkpoint(struct vkrt_device_data *dev) {
+    (void)dev;
+    return 0;
+}
+void vkrt_execution_queue_completed(struct vkrt_device_data *dev, VkQueue queue, uint64_t checkpoint) {
+    (void)dev;
+    (void)queue;
+    (void)checkpoint;
+}
+VkResult vkrt_execution_batch_discard(struct vkrt_execution_batch *batch) {
+    (void)batch;
+    abort();
+    return VK_ERROR_UNKNOWN;
+}
 VkResult vkrt_query_submit_qualify(struct vkrt_device_data *dev, struct vkrt_query_submission *transaction, VkQueue queue,
                                    bool unsafe_wait, uint32_t count, const VkCommandBuffer *commands) {
     (void)dev;
@@ -15,9 +59,24 @@ VkResult vkrt_query_submit_qualify(struct vkrt_device_data *dev, struct vkrt_que
     (void)commands;
     return VK_SUCCESS;
 }
-void vkrt_query_queue_idle(struct vkrt_device_data *dev, VkQueue queue) {
+uint64_t vkrt_query_queue_checkpoint(struct vkrt_device_data *dev) {
+    (void)dev;
+    return 0;
+}
+void vkrt_query_queue_idle(struct vkrt_device_data *dev, VkQueue queue, uint64_t checkpoint) {
     (void)dev;
     (void)queue;
+    (void)checkpoint;
+}
+VkResult vkrt_query_submit_begin(struct vkrt_device_data *dev, struct vkrt_query_submission *transaction, VkQueue queue) {
+    (void)dev;
+    (void)transaction;
+    (void)queue;
+    return VK_SUCCESS;
+}
+void vkrt_query_submit_end(struct vkrt_device_data *dev, struct vkrt_query_submission *transaction) {
+    (void)dev;
+    (void)transaction;
 }
 VkResult vkrt_query_submit_prepare(struct vkrt_device_data *dev, const struct vkrt_query_submission *transaction, uint32_t count,
                                    const VkCommandBuffer *commands) {

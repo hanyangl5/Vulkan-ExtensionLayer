@@ -19,12 +19,18 @@ static VkResult component_create_device(VkPhysicalDevice physical, const VkDevic
 static VkResult component_create_device(VkPhysicalDevice physical, const VkDeviceCreateInfo *info,
                                         const VkAllocationCallbacks *allocator, VkDevice *device) {
     /* These component shaders are application-visible native compute modules,
-     * so their Int64 requirement must be visible to validation ABOVE the
+     * so their integer/storage requirements must be visible to validation ABOVE the
      * emulation layer as well as privately enabled in the GPU backend. */
     VkDeviceCreateInfo local = *info;
     VkPhysicalDeviceFeatures features = info->pEnabledFeatures ? *info->pEnabledFeatures : (VkPhysicalDeviceFeatures){0};
     features.shaderInt64 = VK_TRUE;
     local.pEnabledFeatures = &features;
+    VkPhysicalDeviceShaderFloat16Int8Features arithmetic = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_FLOAT16_INT8_FEATURES,
+                                                            .pNext = (void *)info->pNext,
+                                                            .shaderInt8 = VK_TRUE};
+    VkPhysicalDevice8BitStorageFeatures storage = {
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_8BIT_STORAGE_FEATURES, .pNext = &arithmetic, .storageBuffer8BitAccess = VK_TRUE};
+    local.pNext = &storage;
     return vkCreateDevice(physical, &local, allocator, device);
 }
 
@@ -39,7 +45,7 @@ _Static_assert(sizeof(struct vkrt_query_format_args) == 56, "GPU formatter push 
             ++g_fail;                                               \
         }                                                           \
     } while (0)
-enum { SLOT_COUNT = 12, FORMAT_COUNT = 12, FORMAT_BYTES = 1024 };
+enum { SLOT_COUNT = 12, FORMAT_COUNT = 13, FORMAT_BYTES = 1024 };
 static const uint64_t high_value = UINT64_C(0xfedcba9876543210);
 static PFN_vkCmdBuildAccelerationStructuresKHR build;
 
@@ -187,7 +193,11 @@ static struct vkrt_query_format_args format_args(unsigned variant, const struct 
             args.count = 2;
             break;
         case 9:
-            args.output += 4;
+            /* Descriptor/copy offset alignment does not align its physical BDA.
+             * Exercise all result bytes, high bits, availability, and gaps. */
+            args.output += 3;
+            args.output_capacity -= 3;
+            args.count = 9;
             break;
         case 10:
             args.stride = 8;
@@ -195,6 +205,13 @@ static struct vkrt_query_format_args format_args(unsigned variant, const struct 
             break;
         case 11:
             args.count = 0;
+            break;
+        case 12:
+            args.output += 3;
+            args.output_capacity -= 3;
+            args.flags = VK_QUERY_RESULT_WITH_AVAILABILITY_BIT | VK_QUERY_RESULT_PARTIAL_BIT;
+            args.count = 9;
+            args.stride = 16;
             break;
     }
     return args;
@@ -267,16 +284,18 @@ static void verify(const struct built *blas, const struct built *tlas, const VkA
         uint8_t expected[FORMAT_BYTES];
         memset(expected, 0xa5, sizeof(expected));
         struct vkrt_query_format_args args = format_args(variant, slots, formatted);
-        if (variant < 6) {
+        if (variant < 6 || variant == 9 || variant == 12) {
+            unsigned destination_offset = variant == 9 || variant == 12 ? 3 : 0;
             unsigned width = args.flags & VK_QUERY_RESULT_64_BIT ? 8 : 4;
             for (uint32_t q = 0; q < args.count; ++q) {
                 uint32_t index = args.first_query + q;
                 bool available = index != 7;
                 uint64_t value = available ? values[index] : 0;
-                if (available || (args.flags & VK_QUERY_RESULT_PARTIAL_BIT)) memcpy(expected + q * args.stride, &value, width);
+                if (available || (args.flags & VK_QUERY_RESULT_PARTIAL_BIT))
+                    memcpy(expected + destination_offset + q * args.stride, &value, width);
                 if (args.flags & VK_QUERY_RESULT_WITH_AVAILABILITY_BIT) {
                     uint64_t availability = available;
-                    memcpy(expected + q * args.stride + width, &availability, width);
+                    memcpy(expected + destination_offset + q * args.stride + width, &availability, width);
                 }
             }
         }
@@ -293,7 +312,7 @@ static void verify(const struct built *blas, const struct built *tlas, const VkA
         REQUIRE(((const uint8_t *)blas->output.mapped)[256 + blas->capacity + n] == 0xa5);
         REQUIRE(((const uint8_t *)tlas->output.mapped)[256 + tlas->capacity + n] == 0xa5);
     }
-    printf("GPU-built BVH4 property values +12 formatter layouts +native transfer copy, resubmit%u: %s\n", execution,
+    printf("GPU-built BVH4 property values +13 formatter layouts +native transfer copy, resubmit%u: %s\n", execution,
            g_fail ? "FAIL" : "PASS");
 }
 

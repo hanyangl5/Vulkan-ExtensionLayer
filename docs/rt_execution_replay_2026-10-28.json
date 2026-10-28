@@ -1,0 +1,1006 @@
+{
+  "schema_version": 1,
+  "checkpoint": "2026-10-28 execution-owned AS query replay",
+  "source_base": "f963e7cd3eb400d846a94c554a2dcaf35866394b",
+  "branch": "codex/ray-tracing-fallback",
+  "goal_status": "active",
+  "milestones_closed": [],
+  "scope_notes": [
+    "The 50-case and final 13-case software runs use distinct DLLs; no aggregate final-DLL 50-case claim.",
+    "Execution-only guard retains native discovery; no physical no-RT, POSIX or complete fallback qualification.",
+    "New pointer-memory GPU forms use SSBO frames; BDA/PrivateArray forms remain compile-only.",
+    "Scoped-signal early readiness is diagnostic, not a portable progress deadline.",
+    "Earlier helper PASS raw paths were overwritten by actual later PASS runs; the note records that limitation."
+  ],
+  "checks": {
+    "offline_final": {
+      "passed": 37,
+      "total": 37,
+      "log": "build-query-execution-2026-10-28/teardown-offline.log"
+    },
+    "sync_host_cases": 50,
+    "typed_gpu": {
+      "passed": 6,
+      "total": 6,
+      "log": "build-query-execution-2026-10-28/fence-typed-gpu.log",
+      "unchanged_executable_hashes": {
+        "build-raytracing-unified\\vel_rt_frame_emitter_tests.exe": true,
+        "build-raytracing-unified\\vel_rt_state_compiler_tests.exe": true,
+        "build-raytracing-unified\\vel_rt_rt_request_tests.exe": true,
+        "build-raytracing-unified\\vel_rt_typed_pipeline_tests.exe": true,
+        "build-raytracing-unified\\vel_rt_typed_bda_tests.exe": true,
+        "build-raytracing-unified\\vel_rt_typed_runtime_tests.exe": true
+      }
+    },
+    "pointer_gpu_forms": 6,
+    "formatter_layouts_per_update": 13,
+    "formatter_input_updates": 3,
+    "public_query_replay_vvl_orders": [
+      "above",
+      "below"
+    ],
+    "sync_validation_environment": {
+      "VK_LAYER_ENABLES": "VK_VALIDATION_FEATURE_ENABLE_SYNCHRONIZATION_VALIDATION_EXT"
+    },
+    "main_build": "pass",
+    "parent_rt_target": "pass",
+    "parent_default_all_target": "not claimed",
+    "pinned_reference_count": 188
+  },
+  "external_cts": {
+    "software_50": {
+      "summary": {
+        "path": "build-rt-cts-evidence/query-execution-guarded-2026-10-28/summary.json",
+        "sha256": "4c4a9ad83fc88bdb6107a783f7291971a17f22be79641d059440f33c6b495742",
+        "bytes": 197211
+      },
+      "mode": "software-rt",
+      "counts": {
+        "pass": 50,
+        "fail": 0,
+        "notSupported": 0,
+        "crash": 0,
+        "timeout": 0,
+        "noresult": 0
+      },
+      "cts_sha256": "8cf824c598181ef43ccd74d67acce89c9cc6fc47029a164440f0b0ea74af0380",
+      "cts_revision_declared": "d18e4c68543103371715845cd914c71e5859963e",
+      "layer": {
+        "name": "VK_LAYER_VKRT_SOFTWARE_RAY_QUERY",
+        "source_manifest": "D:\\Codes\\Vulkan-ExtensionLayer\\build-raytracing-unified\\layers\\VkLayer_VKRT_SOFTWARE_RAY_QUERY.json",
+        "source_manifest_sha256": "256efbc35db5f4d5fcf5fe2c606d9b676bb36e2ecb92513b31d49a8443fef02b",
+        "source_library": "D:\\Codes\\Vulkan-ExtensionLayer\\build-raytracing-unified\\VkLayer_VKRT_SOFTWARE_RAY_QUERY.dll",
+        "snapshot_manifest": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\query-execution-guarded-2026-10-28\\layer_snapshot\\VkLayer_VKRT_SOFTWARE_RAY_QUERY.json",
+        "snapshot_manifest_sha256": "ca8d470e196bcfe4dcdc12d1fa38fae3ce502a9da58b48a95b6bd3aed726e74c",
+        "snapshot_library": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\query-execution-guarded-2026-10-28\\layer_snapshot\\VkLayer_VKRT_SOFTWARE_RAY_QUERY.dll",
+        "library_sha256": "085fc7f8fe221cca467a1bd1beb15434b0ff13d89138890dd73e804b83cc674f",
+        "snapshot_scope": "manifest_and_layer_library"
+      },
+      "guarded_cases": 50,
+      "guard_rejections": 0,
+      "validation_matches": [],
+      "cases": [
+        {
+          "case": "dEQP-VK.ray_tracing_pipeline.pipeline_library.configurations.singlethreaded_compilation.s0_l1",
+          "status": "pass",
+          "reason": "Pass",
+          "elapsed_seconds": 9.735
+        },
+        {
+          "case": "dEQP-VK.ray_tracing_pipeline.pipeline_library.configurations.singlethreaded_compilation.s0_l1_aabbs",
+          "status": "pass",
+          "reason": "Pass",
+          "elapsed_seconds": 11.797
+        },
+        {
+          "case": "dEQP-VK.ray_tracing_pipeline.pipeline_library.configurations.singlethreaded_compilation.s3_l11",
+          "status": "pass",
+          "reason": "Pass",
+          "elapsed_seconds": 11.719
+        },
+        {
+          "case": "dEQP-VK.ray_tracing_pipeline.pipeline_library.configurations.singlethreaded_compilation.s3_l11_aabbs",
+          "status": "pass",
+          "reason": "Pass",
+          "elapsed_seconds": 14.593
+        },
+        {
+          "case": "dEQP-VK.ray_tracing_pipeline.pipeline_library.configurations.singlethreaded_compilation.s0_l23",
+          "status": "pass",
+          "reason": "Pass",
+          "elapsed_seconds": 10.375
+        },
+        {
+          "case": "dEQP-VK.ray_tracing_pipeline.pipeline_library.configurations.singlethreaded_compilation.s0_l23_aabbs",
+          "status": "pass",
+          "reason": "Pass",
+          "elapsed_seconds": 13.031
+        },
+        {
+          "case": "dEQP-VK.ray_tracing_pipeline.pipeline_library.configurations.singlethreaded_compilation.s0_l1_l1",
+          "status": "pass",
+          "reason": "Pass",
+          "elapsed_seconds": 13.484
+        },
+        {
+          "case": "dEQP-VK.ray_tracing_pipeline.pipeline_library.configurations.singlethreaded_compilation.s0_l1_l1_aabbs",
+          "status": "pass",
+          "reason": "Pass",
+          "elapsed_seconds": 12.984
+        },
+        {
+          "case": "dEQP-VK.ray_tracing_pipeline.pipeline_library.configurations.singlethreaded_compilation.s3_l22_l22",
+          "status": "pass",
+          "reason": "Pass",
+          "elapsed_seconds": 13.203
+        },
+        {
+          "case": "dEQP-VK.ray_tracing_pipeline.pipeline_library.configurations.singlethreaded_compilation.s3_l22_l22_aabbs",
+          "status": "pass",
+          "reason": "Pass",
+          "elapsed_seconds": 13.516
+        },
+        {
+          "case": "dEQP-VK.ray_tracing_pipeline.pipeline_library.configurations.multithreaded_compilation.s3_l232",
+          "status": "pass",
+          "reason": "Pass",
+          "elapsed_seconds": 11.609
+        },
+        {
+          "case": "dEQP-VK.ray_tracing_pipeline.pipeline_library.configurations.multithreaded_compilation.s3_l232_aabbs",
+          "status": "pass",
+          "reason": "Pass",
+          "elapsed_seconds": 17.046
+        },
+        {
+          "case": "dEQP-VK.ray_tracing_pipeline.pipeline_library.configurations.multithreaded_compilation_dho.s3_l2_l3",
+          "status": "pass",
+          "reason": "Pass",
+          "elapsed_seconds": 15.218
+        },
+        {
+          "case": "dEQP-VK.ray_tracing_pipeline.pipeline_library.configurations.multithreaded_compilation_dho.s3_l2_l3_aabbs",
+          "status": "pass",
+          "reason": "Pass",
+          "elapsed_seconds": 16.25
+        },
+        {
+          "case": "dEQP-VK.ray_tracing_pipeline.pipeline_library.configurations.rgen_miss_in_library.s0_l1",
+          "status": "pass",
+          "reason": "Pass",
+          "elapsed_seconds": 13.61
+        },
+        {
+          "case": "dEQP-VK.ray_tracing_pipeline.pipeline_library.configurations.rgen_miss_in_library.s0_l1_aabbs",
+          "status": "pass",
+          "reason": "Pass",
+          "elapsed_seconds": 12.562
+        },
+        {
+          "case": "dEQP-VK.ray_tracing_pipeline.pipeline_library.configurations.rgen_miss_in_library.s0_l2_l3",
+          "status": "pass",
+          "reason": "Pass",
+          "elapsed_seconds": 12.484
+        },
+        {
+          "case": "dEQP-VK.ray_tracing_pipeline.pipeline_library.configurations.rgen_miss_in_library.s0_l2_l3_aabbs",
+          "status": "pass",
+          "reason": "Pass",
+          "elapsed_seconds": 14.313
+        },
+        {
+          "case": "dEQP-VK.ray_tracing_pipeline.pipeline_library.configurations.misc.use_link_time_optimizations",
+          "status": "pass",
+          "reason": "Pass",
+          "elapsed_seconds": 12.297
+        },
+        {
+          "case": "dEQP-VK.ray_tracing_pipeline.pipeline_library.configurations.misc.retain_link_time_optimizations",
+          "status": "pass",
+          "reason": "Pass",
+          "elapsed_seconds": 11.671
+        },
+        {
+          "case": "dEQP-VK.ray_tracing_pipeline.acceleration_structures.update.traditional_structures.gpu.normal.vertices",
+          "status": "pass",
+          "reason": "Pass",
+          "elapsed_seconds": 10.812
+        },
+        {
+          "case": "dEQP-VK.ray_tracing_pipeline.acceleration_structures.update.traditional_structures.gpu.normal.indices",
+          "status": "pass",
+          "reason": "Pass",
+          "elapsed_seconds": 11.032
+        },
+        {
+          "case": "dEQP-VK.ray_tracing_pipeline.acceleration_structures.update.traditional_structures.gpu.normal.transform",
+          "status": "pass",
+          "reason": "Pass",
+          "elapsed_seconds": 11.078
+        },
+        {
+          "case": "dEQP-VK.ray_tracing_pipeline.acceleration_structures.update.traditional_structures.gpu.normal.geometry_transform",
+          "status": "pass",
+          "reason": "Pass",
+          "elapsed_seconds": 9.953
+        },
+        {
+          "case": "dEQP-VK.ray_tracing_pipeline.acceleration_structures.update.traditional_structures.gpu.normal.degenerate",
+          "status": "pass",
+          "reason": "Pass",
+          "elapsed_seconds": 11.593
+        },
+        {
+          "case": "dEQP-VK.ray_tracing_pipeline.acceleration_structures.update.traditional_structures.gpu.compact.vertices",
+          "status": "pass",
+          "reason": "Pass",
+          "elapsed_seconds": 13.813
+        },
+        {
+          "case": "dEQP-VK.ray_tracing_pipeline.acceleration_structures.update.traditional_structures.gpu.compact.indices",
+          "status": "pass",
+          "reason": "Pass",
+          "elapsed_seconds": 12.828
+        },
+        {
+          "case": "dEQP-VK.ray_tracing_pipeline.acceleration_structures.update.traditional_structures.gpu.compact.transform",
+          "status": "pass",
+          "reason": "Pass",
+          "elapsed_seconds": 11.218
+        },
+        {
+          "case": "dEQP-VK.ray_tracing_pipeline.acceleration_structures.update.traditional_structures.gpu.compact.geometry_transform",
+          "status": "pass",
+          "reason": "Pass",
+          "elapsed_seconds": 11.421
+        },
+        {
+          "case": "dEQP-VK.ray_tracing_pipeline.acceleration_structures.update.traditional_structures.gpu.compact.degenerate",
+          "status": "pass",
+          "reason": "Pass",
+          "elapsed_seconds": 12.609
+        },
+        {
+          "case": "dEQP-VK.ray_query.acceleration_structures.instance_update.traditional_structures.gpu_built.update",
+          "status": "pass",
+          "reason": "Pass",
+          "elapsed_seconds": 3.75
+        },
+        {
+          "case": "dEQP-VK.ray_query.acceleration_structures.instance_update.traditional_structures.gpu_built.update_in_place",
+          "status": "pass",
+          "reason": "Pass",
+          "elapsed_seconds": 4.265
+        },
+        {
+          "case": "dEQP-VK.ray_tracing_pipeline.acceleration_structures.operations.traditional_structures.compaction.gpu_built.bottom_acceleration_structure.aabbs",
+          "status": "pass",
+          "reason": "Pass",
+          "elapsed_seconds": 12.547
+        },
+        {
+          "case": "dEQP-VK.ray_tracing_pipeline.acceleration_structures.operations.traditional_structures.compaction.gpu_built.bottom_acceleration_structure.triangles",
+          "status": "pass",
+          "reason": "Pass",
+          "elapsed_seconds": 11.109
+        },
+        {
+          "case": "dEQP-VK.ray_tracing_pipeline.acceleration_structures.operations.traditional_structures.compaction.gpu_built.top_acceleration_structure.aabbs",
+          "status": "pass",
+          "reason": "Pass",
+          "elapsed_seconds": 12.25
+        },
+        {
+          "case": "dEQP-VK.ray_tracing_pipeline.acceleration_structures.operations.traditional_structures.compaction.gpu_built.top_acceleration_structure.triangles",
+          "status": "pass",
+          "reason": "Pass",
+          "elapsed_seconds": 9.687
+        },
+        {
+          "case": "dEQP-VK.ray_tracing_pipeline.acceleration_structures.operations.traditional_structures.copy.gpu_built.bottom_acceleration_structure.aabbs",
+          "status": "pass",
+          "reason": "Pass",
+          "elapsed_seconds": 12.0
+        },
+        {
+          "case": "dEQP-VK.ray_tracing_pipeline.acceleration_structures.operations.traditional_structures.copy.gpu_built.bottom_acceleration_structure.triangles",
+          "status": "pass",
+          "reason": "Pass",
+          "elapsed_seconds": 10.891
+        },
+        {
+          "case": "dEQP-VK.ray_tracing_pipeline.acceleration_structures.operations.traditional_structures.copy.gpu_built.top_acceleration_structure.aabbs",
+          "status": "pass",
+          "reason": "Pass",
+          "elapsed_seconds": 13.922
+        },
+        {
+          "case": "dEQP-VK.ray_tracing_pipeline.acceleration_structures.operations.traditional_structures.copy.gpu_built.top_acceleration_structure.triangles",
+          "status": "pass",
+          "reason": "Pass",
+          "elapsed_seconds": 13.188
+        },
+        {
+          "case": "dEQP-VK.ray_tracing_pipeline.acceleration_structures.operations.traditional_structures.serialization.gpu_built.bottom_acceleration_structure.aabbs",
+          "status": "pass",
+          "reason": "Pass",
+          "elapsed_seconds": 11.86
+        },
+        {
+          "case": "dEQP-VK.ray_tracing_pipeline.acceleration_structures.operations.traditional_structures.serialization.gpu_built.bottom_acceleration_structure.triangles",
+          "status": "pass",
+          "reason": "Pass",
+          "elapsed_seconds": 10.25
+        },
+        {
+          "case": "dEQP-VK.ray_tracing_pipeline.acceleration_structures.operations.traditional_structures.serialization.gpu_built.top_acceleration_structure.aabbs",
+          "status": "pass",
+          "reason": "Pass",
+          "elapsed_seconds": 11.734
+        },
+        {
+          "case": "dEQP-VK.ray_tracing_pipeline.acceleration_structures.operations.traditional_structures.serialization.gpu_built.top_acceleration_structure.triangles",
+          "status": "pass",
+          "reason": "Pass",
+          "elapsed_seconds": 12.313
+        },
+        {
+          "case": "dEQP-VK.ray_query.acceleration_structures.operations.traditional_structures.compute_shader.compaction.gpu_built.top_acceleration_structure.triangles",
+          "status": "pass",
+          "reason": "Pass",
+          "elapsed_seconds": 3.64
+        },
+        {
+          "case": "dEQP-VK.ray_query.acceleration_structures.operations.traditional_structures.compute_shader.serialization.gpu_built.top_acceleration_structure.triangles",
+          "status": "pass",
+          "reason": "Pass",
+          "elapsed_seconds": 4.062
+        },
+        {
+          "case": "dEQP-VK.ray_tracing_pipeline.data_spill.execute_callable.v3uint64",
+          "status": "pass",
+          "reason": "Pass",
+          "elapsed_seconds": 13.859
+        },
+        {
+          "case": "dEQP-VK.ray_tracing_pipeline.data_spill.report_intersection.a5float64",
+          "status": "pass",
+          "reason": "Pass",
+          "elapsed_seconds": 16.547
+        },
+        {
+          "case": "dEQP-VK.ray_tracing_pipeline.data_spill.trace_ray.v3uint64",
+          "status": "pass",
+          "reason": "Pass",
+          "elapsed_seconds": 15.484
+        },
+        {
+          "case": "dEQP-VK.ray_tracing_pipeline.data_spill.trace_ray.sampler",
+          "status": "pass",
+          "reason": "Pass",
+          "elapsed_seconds": 16.5
+        }
+      ]
+    },
+    "software_final_13": {
+      "summary": {
+        "path": "build-rt-cts-evidence/query-execution-final-drain-2026-10-28/summary.json",
+        "sha256": "25ba1b542bedc95699e470a27981c7bf049f60dc63698c9108cf406923c5dce2",
+        "bytes": 59719
+      },
+      "mode": "software-rt",
+      "counts": {
+        "pass": 13,
+        "fail": 0,
+        "notSupported": 0,
+        "crash": 0,
+        "timeout": 0,
+        "noresult": 0
+      },
+      "cts_sha256": "8cf824c598181ef43ccd74d67acce89c9cc6fc47029a164440f0b0ea74af0380",
+      "cts_revision_declared": "d18e4c68543103371715845cd914c71e5859963e",
+      "layer": {
+        "name": "VK_LAYER_VKRT_SOFTWARE_RAY_QUERY",
+        "source_manifest": "D:\\Codes\\Vulkan-ExtensionLayer\\build-raytracing-unified\\layers\\VkLayer_VKRT_SOFTWARE_RAY_QUERY.json",
+        "source_manifest_sha256": "256efbc35db5f4d5fcf5fe2c606d9b676bb36e2ecb92513b31d49a8443fef02b",
+        "source_library": "D:\\Codes\\Vulkan-ExtensionLayer\\build-raytracing-unified\\VkLayer_VKRT_SOFTWARE_RAY_QUERY.dll",
+        "snapshot_manifest": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\query-execution-final-drain-2026-10-28\\layer_snapshot\\VkLayer_VKRT_SOFTWARE_RAY_QUERY.json",
+        "snapshot_manifest_sha256": "179065164dfc60e5e7ac99718ad441eb03f7850407230083038532e1f494227f",
+        "snapshot_library": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\query-execution-final-drain-2026-10-28\\layer_snapshot\\VkLayer_VKRT_SOFTWARE_RAY_QUERY.dll",
+        "library_sha256": "88af24d458f9812c06afef8fb26332309270984037e4c96b6a9a9bd22b5879dd",
+        "snapshot_scope": "manifest_and_layer_library"
+      },
+      "guarded_cases": 13,
+      "guard_rejections": 0,
+      "validation_matches": [],
+      "cases": [
+        {
+          "case": "dEQP-VK.ray_tracing_pipeline.acceleration_structures.operations.traditional_structures.compaction.gpu_built.bottom_acceleration_structure.aabbs",
+          "status": "pass",
+          "reason": "Pass",
+          "elapsed_seconds": 12.703
+        },
+        {
+          "case": "dEQP-VK.ray_tracing_pipeline.acceleration_structures.operations.traditional_structures.compaction.gpu_built.bottom_acceleration_structure.triangles",
+          "status": "pass",
+          "reason": "Pass",
+          "elapsed_seconds": 12.86
+        },
+        {
+          "case": "dEQP-VK.ray_tracing_pipeline.acceleration_structures.operations.traditional_structures.compaction.gpu_built.top_acceleration_structure.aabbs",
+          "status": "pass",
+          "reason": "Pass",
+          "elapsed_seconds": 13.11
+        },
+        {
+          "case": "dEQP-VK.ray_tracing_pipeline.acceleration_structures.operations.traditional_structures.compaction.gpu_built.top_acceleration_structure.triangles",
+          "status": "pass",
+          "reason": "Pass",
+          "elapsed_seconds": 11.594
+        },
+        {
+          "case": "dEQP-VK.ray_tracing_pipeline.acceleration_structures.operations.traditional_structures.serialization.gpu_built.bottom_acceleration_structure.aabbs",
+          "status": "pass",
+          "reason": "Pass",
+          "elapsed_seconds": 12.032
+        },
+        {
+          "case": "dEQP-VK.ray_tracing_pipeline.acceleration_structures.operations.traditional_structures.serialization.gpu_built.bottom_acceleration_structure.triangles",
+          "status": "pass",
+          "reason": "Pass",
+          "elapsed_seconds": 11.078
+        },
+        {
+          "case": "dEQP-VK.ray_tracing_pipeline.acceleration_structures.operations.traditional_structures.serialization.gpu_built.top_acceleration_structure.aabbs",
+          "status": "pass",
+          "reason": "Pass",
+          "elapsed_seconds": 11.859
+        },
+        {
+          "case": "dEQP-VK.ray_tracing_pipeline.acceleration_structures.operations.traditional_structures.serialization.gpu_built.top_acceleration_structure.triangles",
+          "status": "pass",
+          "reason": "Pass",
+          "elapsed_seconds": 10.031
+        },
+        {
+          "case": "dEQP-VK.ray_query.acceleration_structures.operations.traditional_structures.compute_shader.compaction.gpu_built.top_acceleration_structure.triangles",
+          "status": "pass",
+          "reason": "Pass",
+          "elapsed_seconds": 3.984
+        },
+        {
+          "case": "dEQP-VK.ray_query.acceleration_structures.operations.traditional_structures.compute_shader.serialization.gpu_built.top_acceleration_structure.triangles",
+          "status": "pass",
+          "reason": "Pass",
+          "elapsed_seconds": 3.781
+        },
+        {
+          "case": "dEQP-VK.ray_tracing_pipeline.pipeline_library.configurations.singlethreaded_compilation.s0_l1",
+          "status": "pass",
+          "reason": "Pass",
+          "elapsed_seconds": 11.281
+        },
+        {
+          "case": "dEQP-VK.ray_tracing_pipeline.acceleration_structures.update.traditional_structures.gpu.normal.geometry_transform",
+          "status": "pass",
+          "reason": "Pass",
+          "elapsed_seconds": 13.094
+        },
+        {
+          "case": "dEQP-VK.ray_tracing_pipeline.data_spill.trace_ray.v3uint64",
+          "status": "pass",
+          "reason": "Pass",
+          "elapsed_seconds": 16.313
+        }
+      ]
+    },
+    "native_additional_18": {
+      "summary": {
+        "path": "build-rt-cts-evidence/query-execution-native-2026-10-28/summary.json",
+        "sha256": "b8748f4ad424e5a0725fab98d1c6d84967a586b0dff5db9088106a7ebe461f2c",
+        "bytes": 54088
+      },
+      "mode": "native",
+      "counts": {
+        "pass": 18,
+        "fail": 0,
+        "notSupported": 0,
+        "crash": 0,
+        "timeout": 0,
+        "noresult": 0
+      },
+      "cts_sha256": "8cf824c598181ef43ccd74d67acce89c9cc6fc47029a164440f0b0ea74af0380",
+      "cts_revision_declared": "d18e4c68543103371715845cd914c71e5859963e",
+      "layer": null,
+      "guarded_cases": 0,
+      "guard_rejections": 0,
+      "validation_matches": [],
+      "cases": [
+        {
+          "case": "dEQP-VK.ray_tracing_pipeline.acceleration_structures.operations.traditional_structures.compaction.gpu_built.bottom_acceleration_structure.aabbs",
+          "status": "pass",
+          "reason": "Pass",
+          "elapsed_seconds": 4.093
+        },
+        {
+          "case": "dEQP-VK.ray_tracing_pipeline.acceleration_structures.operations.traditional_structures.compaction.gpu_built.bottom_acceleration_structure.triangles",
+          "status": "pass",
+          "reason": "Pass",
+          "elapsed_seconds": 1.672
+        },
+        {
+          "case": "dEQP-VK.ray_tracing_pipeline.acceleration_structures.operations.traditional_structures.compaction.gpu_built.top_acceleration_structure.aabbs",
+          "status": "pass",
+          "reason": "Pass",
+          "elapsed_seconds": 1.672
+        },
+        {
+          "case": "dEQP-VK.ray_tracing_pipeline.acceleration_structures.operations.traditional_structures.compaction.gpu_built.top_acceleration_structure.triangles",
+          "status": "pass",
+          "reason": "Pass",
+          "elapsed_seconds": 1.718
+        },
+        {
+          "case": "dEQP-VK.ray_tracing_pipeline.acceleration_structures.operations.traditional_structures.copy.gpu_built.bottom_acceleration_structure.aabbs",
+          "status": "pass",
+          "reason": "Pass",
+          "elapsed_seconds": 1.657
+        },
+        {
+          "case": "dEQP-VK.ray_tracing_pipeline.acceleration_structures.operations.traditional_structures.copy.gpu_built.bottom_acceleration_structure.triangles",
+          "status": "pass",
+          "reason": "Pass",
+          "elapsed_seconds": 1.719
+        },
+        {
+          "case": "dEQP-VK.ray_tracing_pipeline.acceleration_structures.operations.traditional_structures.copy.gpu_built.top_acceleration_structure.aabbs",
+          "status": "pass",
+          "reason": "Pass",
+          "elapsed_seconds": 1.656
+        },
+        {
+          "case": "dEQP-VK.ray_tracing_pipeline.acceleration_structures.operations.traditional_structures.copy.gpu_built.top_acceleration_structure.triangles",
+          "status": "pass",
+          "reason": "Pass",
+          "elapsed_seconds": 1.562
+        },
+        {
+          "case": "dEQP-VK.ray_tracing_pipeline.acceleration_structures.operations.traditional_structures.serialization.gpu_built.bottom_acceleration_structure.aabbs",
+          "status": "pass",
+          "reason": "Pass",
+          "elapsed_seconds": 1.75
+        },
+        {
+          "case": "dEQP-VK.ray_tracing_pipeline.acceleration_structures.operations.traditional_structures.serialization.gpu_built.bottom_acceleration_structure.triangles",
+          "status": "pass",
+          "reason": "Pass",
+          "elapsed_seconds": 1.734
+        },
+        {
+          "case": "dEQP-VK.ray_tracing_pipeline.acceleration_structures.operations.traditional_structures.serialization.gpu_built.top_acceleration_structure.aabbs",
+          "status": "pass",
+          "reason": "Pass",
+          "elapsed_seconds": 2.031
+        },
+        {
+          "case": "dEQP-VK.ray_tracing_pipeline.acceleration_structures.operations.traditional_structures.serialization.gpu_built.top_acceleration_structure.triangles",
+          "status": "pass",
+          "reason": "Pass",
+          "elapsed_seconds": 1.625
+        },
+        {
+          "case": "dEQP-VK.ray_query.acceleration_structures.operations.traditional_structures.compute_shader.compaction.gpu_built.top_acceleration_structure.triangles",
+          "status": "pass",
+          "reason": "Pass",
+          "elapsed_seconds": 1.531
+        },
+        {
+          "case": "dEQP-VK.ray_query.acceleration_structures.operations.traditional_structures.compute_shader.serialization.gpu_built.top_acceleration_structure.triangles",
+          "status": "pass",
+          "reason": "Pass",
+          "elapsed_seconds": 1.391
+        },
+        {
+          "case": "dEQP-VK.ray_tracing_pipeline.data_spill.execute_callable.v3uint64",
+          "status": "pass",
+          "reason": "Pass",
+          "elapsed_seconds": 1.485
+        },
+        {
+          "case": "dEQP-VK.ray_tracing_pipeline.data_spill.report_intersection.a5float64",
+          "status": "pass",
+          "reason": "Pass",
+          "elapsed_seconds": 1.5
+        },
+        {
+          "case": "dEQP-VK.ray_tracing_pipeline.data_spill.trace_ray.v3uint64",
+          "status": "pass",
+          "reason": "Pass",
+          "elapsed_seconds": 1.485
+        },
+        {
+          "case": "dEQP-VK.ray_tracing_pipeline.data_spill.trace_ray.sampler",
+          "status": "pass",
+          "reason": "Pass",
+          "elapsed_seconds": 1.531
+        }
+      ]
+    }
+  },
+  "artifacts": [
+    {
+      "path": "build-raytracing-unified/VkLayer_VKRT_SOFTWARE_RAY_QUERY.dll",
+      "sha256": "88af24d458f9812c06afef8fb26332309270984037e4c96b6a9a9bd22b5879dd",
+      "bytes": 7145984
+    },
+    {
+      "path": "build-source-layout/top-level/layers/raytracing/VkLayer_VKRT_SOFTWARE_RAY_QUERY.dll",
+      "sha256": "c37c004aff08764caca8d2be3685308cf352b822c835350ee8790e0f7b4f65a3",
+      "bytes": 7145984
+    },
+    {
+      "path": "build-raytracing-unified/test_execution_replay.exe",
+      "sha256": "2b8352828a50b2223e5fdf77897b26c5ba01a30d96a7e22b74cf8a07e43702ad",
+      "bytes": 466944
+    },
+    {
+      "path": "build-raytracing-unified/test_sync_execution.exe",
+      "sha256": "6c6f6a61dc30f0321680341438a38e774f037beb9d029ccfbe1197bfda4e7677",
+      "bytes": 71168
+    },
+    {
+      "path": "build-raytracing-unified/test_query_pool_publication.exe",
+      "sha256": "1f7d68a9dd49d72d545cfe14a38eed95b9e8a80f267a4bb195dfdc7750be11a1",
+      "bytes": 73728
+    },
+    {
+      "path": "build-raytracing-unified/test_query_replay.exe",
+      "sha256": "cb723238615537ef3fcded11f6b6555ceeea358ef766432b30d4b46dbf518290",
+      "bytes": 31232
+    },
+    {
+      "path": "build-raytracing-unified/test_query_properties.exe",
+      "sha256": "862dbe534c654ab23c65e735f1542264fd2d246f4e8155802068b915b0cc5a77",
+      "bytes": 30208
+    },
+    {
+      "path": "build-raytracing-unified/test_query_signal_order.exe",
+      "sha256": "e16c258fd4a217f15be9e1fc0941d75a62d67c0fead97597acb75cc5fd9c558f",
+      "bytes": 38400
+    }
+  ],
+  "component_observations": {
+    "path": "build-query-execution-2026-10-28/component-observations.json",
+    "sha256": "2ae6448e00b09297a7ca95919793da4e0e254e0da04afb9dff7e2e32f4007b39",
+    "bytes": 1726
+  },
+  "logs": [
+    {
+      "path": "build-query-execution-2026-10-28/baseline-query-replay.log",
+      "sha256": "f98d656630e652e5f843f73b8882970abf9e30cb52e17319583aaccb534a1996",
+      "bytes": 1638
+    },
+    {
+      "path": "build-query-execution-2026-10-28/cts-final-drain.log",
+      "sha256": "ef0c885ca44b44c6fdbe6781c595c3970851f9378caed11cdeb58ba7394598d5",
+      "bytes": 2510
+    },
+    {
+      "path": "build-query-execution-2026-10-28/cts-guarded.log",
+      "sha256": "b979015a10f8fcde2fc2efe2f6ab2ebba72f51e7be1c0f5080e8521f9725397c",
+      "bytes": 7924
+    },
+    {
+      "path": "build-query-execution-2026-10-28/cts-native.log",
+      "sha256": "116fcfabe91c00717a5e6da7704cfbaebca7876569ab24c9d4c1ce6bcc041e20",
+      "bytes": 3165
+    },
+    {
+      "path": "build-query-execution-2026-10-28/fence-full-build.log",
+      "sha256": "6b4fb6cdbfd47cefcd000cb762c1528da226aef666e2c6f30d7eedcbab0bae4e",
+      "bytes": 4308
+    },
+    {
+      "path": "build-query-execution-2026-10-28/fence-integration-build.log",
+      "sha256": "4672a102fe9e73de6a41163de27cbe2286d626e363a01e2278797dd25cb7675c",
+      "bytes": 5388
+    },
+    {
+      "path": "build-query-execution-2026-10-28/fence-offline.log",
+      "sha256": "1b57d76105c20f7faab8e9cf8ec81a9922d4c886969626d33e70e037e0608eec",
+      "bytes": 5043
+    },
+    {
+      "path": "build-query-execution-2026-10-28/fence-query-properties-vvl.log",
+      "sha256": "4b3beef5a19987f81d10166570f0051d5782884989e0c3183caaf160cc25b1af",
+      "bytes": 2939
+    },
+    {
+      "path": "build-query-execution-2026-10-28/fence-query-replay-vvl-above.log",
+      "sha256": "6158860a042b9041fdcde41a997c9fb4e42d978c85e6f8a6fe77ff7c07c9c856",
+      "bytes": 1947
+    },
+    {
+      "path": "build-query-execution-2026-10-28/fence-query-replay-vvl-below.log",
+      "sha256": "3d1ba2847d6cd30a1972dcadb5857a99d477bffa347098b4d90aef81852d5bee",
+      "bytes": 1947
+    },
+    {
+      "path": "build-query-execution-2026-10-28/fence-signal-order-native.log",
+      "sha256": "2b4d088e4235ec831e877cac3901504d6f495a147f623cece5ea560f6062a6e3",
+      "bytes": 976
+    },
+    {
+      "path": "build-query-execution-2026-10-28/fence-signal-order-software.log",
+      "sha256": "0172c6f31e2eabde22e3120aa2ced2f02d57332aefe86af4ade4b84f5e77f7f6",
+      "bytes": 1184
+    },
+    {
+      "path": "build-query-execution-2026-10-28/fence-typed-gpu.log",
+      "sha256": "5c865517e981f5c96b674a558fb1b99d88bda6a756d36622ae27b26f70a2c3a6",
+      "bytes": 1107
+    },
+    {
+      "path": "build-query-execution-2026-10-28/final-build.log",
+      "sha256": "911ceda30fe46fdc88fd0e3be0a8f9f79c0e3c1241871ed4f77cfd564e239a40",
+      "bytes": 2099
+    },
+    {
+      "path": "build-query-execution-2026-10-28/final-offline.log",
+      "sha256": "05e0f96272cac7112529d5e8ddca249baedfe31b8536491b0fb466fc10035c13",
+      "bytes": 5043
+    },
+    {
+      "path": "build-query-execution-2026-10-28/final-parent-rt-build.log",
+      "sha256": "188a1f39d4210d053bf2536cd64381e2024c6c6b72289ac15f08d3773c8e870b",
+      "bytes": 4639
+    },
+    {
+      "path": "build-query-execution-2026-10-28/final-query-properties-vvl.log",
+      "sha256": "ca39b0d0b8bc527ee1b2fd906220b0209ee252c33330c0f8ebd28826cc348b8d",
+      "bytes": 2939
+    },
+    {
+      "path": "build-query-execution-2026-10-28/final-query-replay-vvl-above.log",
+      "sha256": "2f04f57c9297d3a4c40ea71ca4ce65fa7344060f3fc1b03c39f43a2f09f7c2ff",
+      "bytes": 1947
+    },
+    {
+      "path": "build-query-execution-2026-10-28/final-query-replay-vvl-below.log",
+      "sha256": "5e7834bcabbab042fa17c774d8586aaf42ad4f2a6e33054f1b9fe9425ea7607e",
+      "bytes": 1947
+    },
+    {
+      "path": "build-query-execution-2026-10-28/final-teardown-build.log",
+      "sha256": "686e037b097bc2b824a29d1a0e48b02ea8c98b72d2382342e569d6ced10df05d",
+      "bytes": 1863
+    },
+    {
+      "path": "build-query-execution-2026-10-28/pointer-forms-gpu.log",
+      "sha256": "bbe6a2d6c3698cad921f3b36a99b876c2983381e8c664ae674f5576501770394",
+      "bytes": 1774
+    },
+    {
+      "path": "build-query-execution-2026-10-28/pool-sync-build.log",
+      "sha256": "4f8a8a39367ff5e0eb28ddbfa609f79dda0513a97f2158cb8f54cf0a5c6a4d99",
+      "bytes": 2028
+    },
+    {
+      "path": "build-query-execution-2026-10-28/signal-order-build.log",
+      "sha256": "6b28d7281c62ce97c8a85bcd8a78e0b440ce8ecff2a6da62c39bfc6242f24628",
+      "bytes": 656
+    },
+    {
+      "path": "build-query-execution-2026-10-28/signal-order-native.log",
+      "sha256": "1b51c21cb4f6771cee66b471b86c86af9b38898f52211e1ea1ed1eeaf4812beb",
+      "bytes": 1997
+    },
+    {
+      "path": "build-query-execution-2026-10-28/teardown-offline.log",
+      "sha256": "7798259f9e986e2197b7b09aeb3370bca83932a452575621976f9dab76cde76d",
+      "bytes": 5043
+    },
+    {
+      "path": "build-query-execution-2026-10-28/teardown-parent-rt-build.log",
+      "sha256": "c976c4f445483fa19c2c0f7abcbce65fdb8a207318b31ce9ab358fde467d3aad",
+      "bytes": 788
+    },
+    {
+      "path": "build-query-execution-2026-10-28/teardown-query-properties-vvl.log",
+      "sha256": "e342a65f3bf6ac5ccecd8edaad023be808ecc0cd404914e6810425453aaa2358",
+      "bytes": 2939
+    },
+    {
+      "path": "build-query-execution-2026-10-28/teardown-query-replay-syncval-above.log",
+      "sha256": "2439f816336ee98fdae0021c3042f08ebf76640e1c810f198043acf979c59b93",
+      "bytes": 1947
+    },
+    {
+      "path": "build-query-execution-2026-10-28/teardown-query-replay-syncval-below.log",
+      "sha256": "2249ed1e83018de9d7551a4fcd06edd27764bf5a89a5840e064776a9ef160389",
+      "bytes": 1947
+    },
+    {
+      "path": "build-query-execution-2026-10-28/teardown-query-replay-vvl-above.log",
+      "sha256": "98801fccb65e661e272c955617733d488c1d0c40cd0de2ac7eafbd8907532650",
+      "bytes": 1947
+    },
+    {
+      "path": "build-query-execution-2026-10-28/teardown-query-replay-vvl-below.log",
+      "sha256": "147615ed1b0e0913d47af02d552cd88a3f55e125b63fa098ac82431f57e78708",
+      "bytes": 1947
+    },
+    {
+      "path": "build-source-layout/execution-host/execution_replay_teardown_o2.log",
+      "sha256": "b5f126c9f5fec1babdc463cdf4738fe6b7ba38fb8998b4635067230e37906564",
+      "bytes": 652
+    },
+    {
+      "path": "build-source-layout/execution-host/execution_replay_teardown_saturation_o2.log",
+      "sha256": "e34c7579a80d85d873eadb2a42bd2fd487ab028f547e85bc0a0b7bac01c935a3",
+      "bytes": 230
+    },
+    {
+      "path": "build-source-layout/execution-host/test_query_pool_publication_epochs.log",
+      "sha256": "ac7a29ad1c4a80478b1fa968de47ee941f2d825d95097efc007ecf6852088d94",
+      "bytes": 1712
+    },
+    {
+      "path": "build-source-layout/execution-host/execution_replay_teardown_log_note.txt",
+      "sha256": "b2635c96fb9f138dd4d691cd777d709b02ec56460847f18521461ae4dafeb99a",
+      "bytes": 382
+    }
+  ],
+  "source_files": [
+    {
+      "path": "docs/ray_tracing_fallback_status.md",
+      "sha256": "6a94f147b4782c118e54c57865a97434f8fa72fef5bd5dbf4a49bc842d45de7a",
+      "bytes": 49909
+    },
+    {
+      "path": "docs/rt_execution_replay_2026-10-28.md",
+      "sha256": "9e63e1eaf6c76cc77170a511bc1b50a01dd96fb2d680560446cba8ad16082ca6",
+      "bytes": 9392
+    },
+    {
+      "path": "docs/rt_no_rt_qualification_gates_2026-10-28.md",
+      "sha256": "40c95d1e61c25b7ec7ba5268e08a8fcf84bb14c93807f423cad3deb8e9c3c912",
+      "bytes": 19412
+    },
+    {
+      "path": "layers/raytracing/CMakeLists.txt",
+      "sha256": "7e262453aba8e9a45ed1ea4c32f0da63d0018ec8a466b65ba14a5bdfb6b349d6",
+      "bytes": 58598
+    },
+    {
+      "path": "layers/raytracing/cmake/generate_command_replay.py",
+      "sha256": "12913ab1a9ac437015575aad71be0df347fdfb003df6da3d494ca9dcc8baf439",
+      "bytes": 42676
+    },
+    {
+      "path": "layers/raytracing/docs/QUERY_STAGE_SCHEDULING.md",
+      "sha256": "0546379f1f60cad5b26916f987f38d44bfa0267695783ba7c819ab47ad83ae19",
+      "bytes": 14795
+    },
+    {
+      "path": "layers/raytracing/shaders/vkrt_query_format.comp",
+      "sha256": "9501f7061aa5b092dbb224ff5e5568dcc2f72244b52db3a4e1b85b172f6f06bf",
+      "bytes": 3018
+    },
+    {
+      "path": "layers/raytracing/src/state_compiler.cpp",
+      "sha256": "7e1d10abd430e2ba7e9e18a675127d8fec97c1751159badef28399b91046ec20",
+      "bytes": 129011
+    },
+    {
+      "path": "layers/raytracing/src/state_compiler.h",
+      "sha256": "c5521a41cb9f51369d2dc9e85c58957b1eba92260cfe613dbdc135cb0fd0f05a",
+      "bytes": 10191
+    },
+    {
+      "path": "layers/raytracing/src/vkrt_commands.c",
+      "sha256": "1942263a7b11274faebb19b9b9b5656dd10cdb1b8a2bd4007ab13005d6720ab6",
+      "bytes": 16797
+    },
+    {
+      "path": "layers/raytracing/src/vkrt_execution_replay.c",
+      "sha256": "c7796bb3615f0990fd235830dab2197f36c1db9585ab9cbcb0143d398a2ff109",
+      "bytes": 21433
+    },
+    {
+      "path": "layers/raytracing/src/vkrt_execution_replay.h",
+      "sha256": "7cf6fe6f2af5258157139a951c92b4709320a2c998a5642885e8d3d356501ab4",
+      "bytes": 3520
+    },
+    {
+      "path": "layers/raytracing/src/vkrt_layer.c",
+      "sha256": "24a4776c6c52b85939fa48ca363b22118e64c5b8ff80fb4a6cecc1960bb57f2b",
+      "bytes": 37025
+    },
+    {
+      "path": "layers/raytracing/src/vkrt_layer.h",
+      "sha256": "002fbb480a949102719cd5a7832157dc8ad69b0698c3b0284ae8d156a503283a",
+      "bytes": 11271
+    },
+    {
+      "path": "layers/raytracing/src/vkrt_private_pool.c",
+      "sha256": "f94b46e5adc07869a422291b5ea9291f369b35940c6d60f0d4a6701949190b33",
+      "bytes": 12501
+    },
+    {
+      "path": "layers/raytracing/src/vkrt_private_pool.h",
+      "sha256": "e8fc799386f0b591d7fb998193e733ef81f93a0493b492ac4be0c31295247507",
+      "bytes": 1660
+    },
+    {
+      "path": "layers/raytracing/src/vkrt_query_pool.c",
+      "sha256": "467ba6b52bab115096c2c9ac90b02a03d4829111eac253bc0746e22c8e71c68f",
+      "bytes": 46554
+    },
+    {
+      "path": "layers/raytracing/src/vkrt_query_pool.h",
+      "sha256": "346e3b325bcc25946292ddc43e1a209b0b8c674d5a299f8eb04b0fe0095da78b",
+      "bytes": 2598
+    },
+    {
+      "path": "layers/raytracing/src/vkrt_sync.c",
+      "sha256": "0439a3ada02cadf2ad6e103cd8ce021b9f9fc629448df6d792e68a8b4600a364",
+      "bytes": 30340
+    },
+    {
+      "path": "layers/raytracing/tests/command_replay_host.c",
+      "sha256": "ba717fe257477272552e8346ca66d47f61863b375baf10446df2bee087ddebd4",
+      "bytes": 33902
+    },
+    {
+      "path": "layers/raytracing/tests/execution_replay_host.c",
+      "sha256": "5c03b2f116d78e570f0661444321e7f3677f2de3946cb9aba32eb6e75d4a8a06",
+      "bytes": 39067
+    },
+    {
+      "path": "layers/raytracing/tests/state_compiler_tests.cpp",
+      "sha256": "f8850ead2a6550e14450667735ae91e8d093a36b1b4f4e8e63fef357466f6a04",
+      "bytes": 77857
+    },
+    {
+      "path": "layers/raytracing/tests/sync_execution_host.c",
+      "sha256": "ffc3c68ea82f755582bcd34fe9e9b45b0ae4f065ebe673dcb18d6d580108cb90",
+      "bytes": 34280
+    },
+    {
+      "path": "layers/raytracing/tests/test_as_address_cells.c",
+      "sha256": "38bdcfc839e225799a8155266ee491301f40a1f783a9950fa77d0ebc383d1f5e",
+      "bytes": 34868
+    },
+    {
+      "path": "layers/raytracing/tests/test_as_registry.c",
+      "sha256": "513d94a239dbb7d56fe116966c9066542631756d88c4f4d9dfd52500a498794b",
+      "bytes": 31450
+    },
+    {
+      "path": "layers/raytracing/tests/test_host_translation.c",
+      "sha256": "5d0e69f2c55b85caafd7c7c888f8744b560960f935280fa082f7358a8002f050",
+      "bytes": 81239
+    },
+    {
+      "path": "layers/raytracing/tests/test_query_pool_publication.c",
+      "sha256": "14e62e107f0128e163c68cbc90e49ca384ecedc9f6886903321fe7a71b8fa9bf",
+      "bytes": 29214
+    },
+    {
+      "path": "layers/raytracing/tests/test_query_properties.c",
+      "sha256": "87543863a988090275f162a4b3d337aa95802fbb63aa833077941f520a20c2a9",
+      "bytes": 27014
+    },
+    {
+      "path": "layers/raytracing/tests/test_query_replay.c",
+      "sha256": "26aaaa2eed872bab17e798caa631e8c2720dbf852a753b5ded2fa9f7ed85d737",
+      "bytes": 33713
+    },
+    {
+      "path": "layers/raytracing/tests/test_query_signal_order.c",
+      "sha256": "9f0a3bd6764f9e16802520367a42759380ac9642cee147f863d7c1337f8ce8b7",
+      "bytes": 11951
+    }
+  ]
+}

@@ -62,6 +62,7 @@ the final layout, passing build/local checks and the 16-case external CTS rechec
 - [x] Link nested RT pipeline libraries through the shared typed compute runtime.
 - [x] Execute typed Function/Private pointer memory and supported PtrAccessChain loops across suspension.
 - [x] Add SDK-derived owned command capture and independently tested logical-stage planning components.
+- [x] Execute fresh primary/secondary AS-query recordings with independent payloads, overlapping submissions and completion retirement.
 - [ ] M0: complete all capability, no-native-RT, resource ABI, and continuation proofs.
 - [ ] M1: integrate Mesa builders, GPU BVH4 encoding/refit, and shared AS objects.
 - [ ] M2: complete Ray Query lowering and state semantics.
@@ -78,7 +79,7 @@ Component checkmarks do not complete M0/M1/M2 or the full goal.
 | [Portable BVH4 components](../layers/raytracing/docs/BVH4.md) | Checked reference/CPU adapter; generic BDA hierarchy encoder; direct default Mesa GPU IR adaptation/record emission with compact active leaves, full flags and explicit TLAS relocation; actual LBVH build-to-encode and two-to-four-child GPU collapse, followed by topology-preserving UPDATE/refit | Broader builder variants/large construction IDs, numerical qualification and full object/resource qualification |
 | Typed continuation frames | Typed CFG/continuations; BDA and invocation-private library backing; builtin/push/record state; specialization, linked six-stage scheduler/shared traversal; traditional descriptor-backed opaque provenance; logical StorageBuffer pointer snapshots, supported PtrAccessChain loops and typed Function/Private pointer memory | Remaining pointer arithmetic/memory variants, multi-root/NonUniform execution qualification, actual large aggregate values, conflicting per-stage FP modes and complete resource qualification |
 | RQ host translation | Consume AS/RQ device requirements; translate resource/synchronization masks and explicit RT buffer queries; lifetime-owned AS address cells with allocator/flush/failure handling and enabled-queue-family sharing; private SSBO indexing/variable-pointer prerequisites | Complete emulation capability/limit reporting on no-RT ICDs, future unknown buffer chains, full-layout descriptor transport and private allocation budgets |
-| AS operations and host dependency | GPU CLONE/COMPACT, serialization/UUID/BLAS relocation, topology-preserving UPDATE/refit; bounded public property pools with GPU payload/native completion acquisition and reuse/reset/free publication; synchronous deferred operations; owned command-capture and logical-stage planning components | Per-execution native/query replay, native logical-stage executor, complete native-query interaction, true shrinking compaction, refit performance and full resource budgets |
+| AS operations and host dependency | GPU CLONE/COMPACT, serialization/UUID/BLAS relocation, topology-preserving UPDATE/refit; public property pools with per-execution primary/secondary replay, payload/native completion acquisition and reuse/reset/free publication; synchronous deferred operations; owned command-capture and logical-stage planning components | Native logical-stage executor, remaining replay schemas and native-query interaction, true shrinking compaction, refit performance and full resource budgets |
 | RQ compiler compatibility | Actual per-query AS roots from scalar/array descriptors and integer conversions; helper/value/Phi flow; direct/grouped NonUniform propagation; preserve application workgroup/specialization metadata and remove native RT declarations | Full resource-limit transparency, complete opcode/stage coverage and full shared traversal qualification |
 | RTP API compatibility | Canonical shader/pipeline/SBT/stack/Trace path; cached native variants/private context push; public layouts with retained private copies; copied descriptor definitions; nested pipeline libraries; maintenance6 and compute pipeline/shader-object state restoration | Remaining pipeline options and optional library-handle contracts, remaining descriptor disturbance/interoperability paths, complete mandatory API/resource qualification |
 | Base RQ SBT offset | Lower opcode 6021; select candidate/committed instance; return only the low 24 offset bits; shared-BVH4 helper and CTS evidence | Complete required getter/stage and shared-consumer qualification remain open |
@@ -554,20 +555,60 @@ passes 32/32 with zero-rejection guard audits and no validation diagnostics.
 Canonical/parent RT targets pass; the unrelated parent default-build Windows
 macro failures and every intermediate failure are recorded in the checkpoint.
 
+## 2026-10-28 execution-owned query checkpoint
+
+The [execution replay checkpoint](rt_execution_replay_2026-10-28.md) connects
+fresh primary/secondary query recordings, loader dispatch initialization,
+independent payloads/markers, transactional failure handling and private-fence
+retirement. Public GPU tests cover repeated occurrences, overlapping pending
+submissions, GPU-changing inputs, archived results and prefix availability
+before a blocked tail. Both VVL orders also pass with synchronization validation
+explicitly enabled. Teardown alone drains hidden pending observations; normal
+submission and query collection do not use queue/device idle waits.
+
+Per-queue admission and epoch-bounded idle clearing preserve wait history across
+concurrent submission/publication and pipeline-initialization failure. Query
+allocations now use the shared pool with separate physical-address and native
+copy-offset alignment. Thirteen formatter layouts pass over three GPU updates.
+The SDK357 journal has wrappers for all 317 known commands, including checked
+ABI-only unsupported forwarding; inline/template and unknown future schemas
+still need complete qualification.
+
+Typed pointer memory adds no-memory-operands CopyMemory and correct array-stride
+restoration through unadorned views. All six pointer forms execute on GPU with
+independent oracles. Their new BDA/PrivateArray variants and large array codec
+retain compilation/validation-only evidence.
+
+The final build passes 37/37 offline checks and the parent RT target. Six typed
+GPU checks pass on unchanged component executables. A frozen pre-teardown DLL
+passes 50/50 guarded external CTS; the final teardown DLL separately passes
+13/13 relevant CTS. All guard audits finish with zero rejections and no scanned
+validation diagnostics. New native controls pass 18/18; earlier 20-library and
+12-UPDATE native controls remain separate. The final DLL SHA-256 is
+`88af24d458f9812c06afef8fb26332309270984037e4c96b6a9a9bd22b5879dd`.
+
+The historical watchdog target passes both new software snapshots, without
+establishing its original cause. The old 220-pass/2-NotSupported/4-crash matrix
+and first signal-order test failure remain retained. Scoped signal timing is
+now recorded as an observation, not a portable early-progress requirement.
+The native logical-stage executor, complete no-RT profile, production large-AS
+limits and M0-M5 qualification remain open.
+
 ## Next work
 
-The next integrated slice is per-execution query replay. The existing journal
-and logical-stage planner are foundations, not completed submission semantics.
-Work should proceed in the following dependency order, with the compiler and
-no-RT capability audits continuing in parallel. These are planned exit checks;
-none is a claim that the corresponding missing feature is implemented.
+Per-execution query replay now has public repeated/overlapping GPU executions
+and external CTS observations. It does not complete arbitrary command replay or
+logical-stage submission semantics. The next architectural slice is a native
+logical-stage executor; the no-RT profile and large-construction gates must be
+proved in parallel, before enabling complete no-RT discovery. These are planned
+exit checks, not claims that the missing features are implemented.
 
 | Priority | Deliverable | Evidence needed before closing it |
 | --- | --- | --- |
-| 1 | Fresh primary/secondary query execution resources, loader dispatch setup, completion retirement and atomic submission failure handling | Public GPU cases with repeated occurrences, overlapping pending submissions, GPU-changing inputs, independent archived results, prefix availability before a blocked tail, failure injection and external CTS regression |
-| 2 | Native execution of logical-stage dependencies | Actual GPU feedback/progress cases across future submissions; exact wait/signal scopes, state restoration and binary/external acquire behavior; no broad compute wait or queue-idle substitute |
-| 3 | Complete no-RT discovery and resource contract | Masked-discovery boundary, unmodified application device creation, shared AS/RQ/RTP execution without native RT exposure, full application resource layouts and allocation budgets, followed by physical no-RT qualification |
-| Parallel | Remaining typed compiler memory/resource semantics | Source-valid stride-changing pointer views, copy/volatile memory semantics, multi-root/NonUniform cases, large values and execution-mode handling, with independent oracles and actual relevant frame-transport execution |
+| 1 | Native execution of logical-stage dependencies | Single-native-queue timeline readiness followed by real native acquisition and slice replay; source wait/signal scopes and memory visibility; then binary/external acquisition and native multi-stage gates. CPU permitted schedules and bounded early-signal observations are not portable forward-progress guarantees |
+| Parallel M0/M1 | Complete no-RT discovery, resource and construction contract | One shared software feature/property/device-create profile, mandatory query prerequisites, complete resource budgets, removal of the production 4-GiB IR and one-dimensional dispatch ceilings, masked-discovery public execution, then physical no-RT qualification |
+| Parallel compiler | Remaining typed compiler memory/resource semantics | Access operands and source memory-model rules, multiple real descriptor roots and NonUniform arrays, large values and execution modes, with independent GPU oracles in the actual BDA/PrivateArray transport as applicable |
+| Replay integration | Remaining command schemas and native-query interactions | Inline-layout/template retention, complete entrypoint admission, mixed native scopes, state preservation and simultaneous public execution qualification; existing explicit restrictions are not final support |
 | Final qualification | Complete mandatory behavior and platform matrix | Requirement-to-evidence mapping, broader AS/RQ/RTP CTS, targeted original failures, builder/count/numerical cases, cross-vendor physical no-RT and POSIX runs |
 
 The principal architectural uncertainty is logical-stage execution: software
@@ -575,6 +616,11 @@ AS/RTP/native compute operations share a physical stage, but source semaphore
 scopes do not. Query replay alone cannot solve that problem. Likewise, passing
 the execution-only native-RT guard does not close no-RT discovery, because that
 test mode retains native discovery for CTS selection.
+
+The [no-RT qualification audit](rt_no_rt_qualification_gates_2026-10-28.md)
+identifies the current discovery/property gaps, mandatory query prerequisites
+and production construction ceilings. It specifies gates for a complete shared
+software profile; it does not enable no-RT discovery or complete M0/M1.
 
 Detailed remaining work, grouped by subsystem rather than priority:
 
@@ -610,13 +656,15 @@ Detailed remaining work, grouped by subsystem rather than priority:
    environment before claiming general binary compatibility.
 4. Extend the now-shared RQ/RTP builder, BVH4 traversal and AS object model.
    Four-child GPU collapse and topology-preserving refit execute in production.
-   Qualify additional UPDATE/numerical cases and large construction IDs. Wire
+   The production build still rejects Mesa IR at 4 GiB and leaf dispatch beyond
+   `maxComputeWorkGroupCount[0]`; reference planner tests above those sizes do
+   not remove these limits. Implement segmented/chunked construction and qualify
+   additional UPDATE/numerical cases and large construction IDs. Wire
    PLOC/HPLOC only with complete host contracts. M1 remains incomplete.
-5. Complete public AS queries beyond the bounded non-simultaneous route. Its
-   actual GPU properties and native completion acquisition now execute the two
-   former [CTS failures](rt_cts_copy_pipeline_2026-10-26.md). Implement fresh
-   execution operands/replay for overlapping recordings and complete logical
-   stage scheduling, native query interaction and queue/device qualification.
+5. Complete public AS queries beyond the now-tested execution-owned route. Its
+   actual GPU properties, repeated/overlapping replay and native completion
+   acquisition execute selected external CTS. Complete logical-stage scheduling,
+   remaining command schemas, native query interaction and queue/device qualification.
    Preserve source wait scopes rather than imposing whole-submit waits. The
    early startup crash has recurred; investigate it while retaining all original
    failures and recheck evidence. Do not count skips as passes.
