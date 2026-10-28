@@ -120,6 +120,8 @@ struct TypedContinuationProgram {
     bool uses_app_push_constants = false, uses_shader_record = false;
     uint64_t resource_snapshot_bytes = 0;
     uint32_t resource_snapshot_fields = 0;
+    uint64_t pointer_snapshot_bytes = 0;
+    uint32_t pointer_snapshot_values = 0;
     uint32_t frame_stride_words, control_word, state_count, max_invocations;
 };
 // In physical mode all FunctionFrame slot offsets, invocation-variable offsets
@@ -142,6 +144,12 @@ struct TypedContinuationProgram {
 // pointers use traditional descriptor provenance across state boundaries.
 // Dynamic selectors, texel coordinates and sample numbers are captured with
 // typed codecs at their original definitions, independently for each result.
+// StorageBuffer pointer Phi/Select and inlined helper arguments use separate
+// root/path tags with typed selector snapshots. Loop Phi assignments are
+// parallel, and no opaque logical pointer bit pattern is stored in a frame.
+// Actual memory operations dispatch within the selected static root/path;
+// native pointer Phi/Select is not required by the transformed program.
+// Mutable pointer-valued memory and OpPtrAccessChain remain unsupported.
 // Only stable descriptor identities are reconstructed; image reads and atomic
 // effects retain their original source positions, scopes and memory semantics.
 // Opaque Phi/Select and nontraditional descriptor handles remain unsupported.

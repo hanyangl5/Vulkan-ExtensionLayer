@@ -1,0 +1,2317 @@
+{
+  "schema_version": 1,
+  "source_base": "b15b2bb",
+  "goal": "M0-M5 remains incomplete; this is a tested component checkpoint.",
+  "implementation": [
+    "GPU topology-preserving refit",
+    "typed logical StorageBuffer pointer routes and selectors",
+    "nested RTP library linking and maintenance5 flags2",
+    "test-only downstream RT rejection guard"
+  ],
+  "cts_final": {
+    "state": "completed",
+    "mode": "software-rt",
+    "counts": {
+      "pass": 32,
+      "fail": 0,
+      "notSupported": 0,
+      "crash": 0,
+      "timeout": 0,
+      "noresult": 0
+    },
+    "cts_revision_declared": "d18e4c68543103371715845cd914c71e5859963e",
+    "cts_sha256": "8cf824c598181ef43ccd74d67acce89c9cc6fc47029a164440f0b0ea74af0380",
+    "layer_revision_declared": "worktree-after-b15b2bb-refit-route-library-flags2",
+    "timeout_seconds": 120.0,
+    "finished_at_utc": "2026-10-27T21:03:43.316983+00:00",
+    "summary": {
+      "path": "build-rt-cts-evidence/refit-library-guarded-flags2-final/summary.json",
+      "sha256": "a0bc9afbb8d24ab5a9c097742475ccd4db79563264f52aae8d4435bc5767bafc"
+    },
+    "selected_cases": [
+      "dEQP-VK.ray_tracing_pipeline.pipeline_library.configurations.singlethreaded_compilation.s0_l1",
+      "dEQP-VK.ray_tracing_pipeline.pipeline_library.configurations.singlethreaded_compilation.s0_l1_aabbs",
+      "dEQP-VK.ray_tracing_pipeline.pipeline_library.configurations.singlethreaded_compilation.s3_l11",
+      "dEQP-VK.ray_tracing_pipeline.pipeline_library.configurations.singlethreaded_compilation.s3_l11_aabbs",
+      "dEQP-VK.ray_tracing_pipeline.pipeline_library.configurations.singlethreaded_compilation.s0_l23",
+      "dEQP-VK.ray_tracing_pipeline.pipeline_library.configurations.singlethreaded_compilation.s0_l23_aabbs",
+      "dEQP-VK.ray_tracing_pipeline.pipeline_library.configurations.singlethreaded_compilation.s0_l1_l1",
+      "dEQP-VK.ray_tracing_pipeline.pipeline_library.configurations.singlethreaded_compilation.s0_l1_l1_aabbs",
+      "dEQP-VK.ray_tracing_pipeline.pipeline_library.configurations.singlethreaded_compilation.s3_l22_l22",
+      "dEQP-VK.ray_tracing_pipeline.pipeline_library.configurations.singlethreaded_compilation.s3_l22_l22_aabbs",
+      "dEQP-VK.ray_tracing_pipeline.pipeline_library.configurations.multithreaded_compilation.s3_l232",
+      "dEQP-VK.ray_tracing_pipeline.pipeline_library.configurations.multithreaded_compilation.s3_l232_aabbs",
+      "dEQP-VK.ray_tracing_pipeline.pipeline_library.configurations.multithreaded_compilation_dho.s3_l2_l3",
+      "dEQP-VK.ray_tracing_pipeline.pipeline_library.configurations.multithreaded_compilation_dho.s3_l2_l3_aabbs",
+      "dEQP-VK.ray_tracing_pipeline.pipeline_library.configurations.rgen_miss_in_library.s0_l1",
+      "dEQP-VK.ray_tracing_pipeline.pipeline_library.configurations.rgen_miss_in_library.s0_l1_aabbs",
+      "dEQP-VK.ray_tracing_pipeline.pipeline_library.configurations.rgen_miss_in_library.s0_l2_l3",
+      "dEQP-VK.ray_tracing_pipeline.pipeline_library.configurations.rgen_miss_in_library.s0_l2_l3_aabbs",
+      "dEQP-VK.ray_tracing_pipeline.pipeline_library.configurations.misc.use_link_time_optimizations",
+      "dEQP-VK.ray_tracing_pipeline.pipeline_library.configurations.misc.retain_link_time_optimizations",
+      "dEQP-VK.ray_tracing_pipeline.acceleration_structures.update.traditional_structures.gpu.normal.vertices",
+      "dEQP-VK.ray_tracing_pipeline.acceleration_structures.update.traditional_structures.gpu.normal.indices",
+      "dEQP-VK.ray_tracing_pipeline.acceleration_structures.update.traditional_structures.gpu.normal.transform",
+      "dEQP-VK.ray_tracing_pipeline.acceleration_structures.update.traditional_structures.gpu.normal.geometry_transform",
+      "dEQP-VK.ray_tracing_pipeline.acceleration_structures.update.traditional_structures.gpu.normal.degenerate",
+      "dEQP-VK.ray_tracing_pipeline.acceleration_structures.update.traditional_structures.gpu.compact.vertices",
+      "dEQP-VK.ray_tracing_pipeline.acceleration_structures.update.traditional_structures.gpu.compact.indices",
+      "dEQP-VK.ray_tracing_pipeline.acceleration_structures.update.traditional_structures.gpu.compact.transform",
+      "dEQP-VK.ray_tracing_pipeline.acceleration_structures.update.traditional_structures.gpu.compact.geometry_transform",
+      "dEQP-VK.ray_tracing_pipeline.acceleration_structures.update.traditional_structures.gpu.compact.degenerate",
+      "dEQP-VK.ray_query.acceleration_structures.instance_update.traditional_structures.gpu_built.update",
+      "dEQP-VK.ray_query.acceleration_structures.instance_update.traditional_structures.gpu_built.update_in_place"
+    ],
+    "layer": {
+      "name": "VK_LAYER_VKRT_SOFTWARE_RAY_QUERY",
+      "source_manifest": "D:\\Codes\\Vulkan-ExtensionLayer\\build-raytracing-unified\\layers\\VkLayer_VKRT_SOFTWARE_RAY_QUERY.json",
+      "source_manifest_sha256": "256efbc35db5f4d5fcf5fe2c606d9b676bb36e2ecb92513b31d49a8443fef02b",
+      "source_library": "D:\\Codes\\Vulkan-ExtensionLayer\\build-raytracing-unified\\VkLayer_VKRT_SOFTWARE_RAY_QUERY.dll",
+      "snapshot_manifest": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\refit-library-guarded-flags2-final\\layer_snapshot\\VkLayer_VKRT_SOFTWARE_RAY_QUERY.json",
+      "snapshot_manifest_sha256": "60df69bcb8af105043faa71e0b6e07bc4319d61240cfc671a7674e6acb8a8424",
+      "snapshot_library": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\refit-library-guarded-flags2-final\\layer_snapshot\\VkLayer_VKRT_SOFTWARE_RAY_QUERY.dll",
+      "library_sha256": "1dbe2045dc0daecd9526bb8821ef4540ed2458244a365a3ad73d47228b2944ed",
+      "snapshot_scope": "manifest_and_layer_library"
+    },
+    "guard": {
+      "name": "VK_LAYER_VKRT_NO_NATIVE_RT_GUARD",
+      "source_manifest": "D:\\Codes\\Vulkan-ExtensionLayer\\build-raytracing-unified\\no-native-rt-guard\\VkLayer_VKRT_NO_NATIVE_RT_GUARD.json",
+      "source_manifest_sha256": "5c57a12cbb68587cb33ecf46c0cfe05ad4e889223a6689ba4a39359216a57235",
+      "source_library": "D:\\Codes\\Vulkan-ExtensionLayer\\build-raytracing-unified\\vkrt_no_native_rt_guard.dll",
+      "snapshot_manifest": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\refit-library-guarded-flags2-final\\guard_snapshot\\VkLayer_VKRT_NO_NATIVE_RT_GUARD.json",
+      "snapshot_manifest_sha256": "e0e3cd92b175466b3d81da9cdbed35a121ce441a7b585c13bad57e77c15f5366",
+      "snapshot_library": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\refit-library-guarded-flags2-final\\guard_snapshot\\vkrt_no_native_rt_guard.dll",
+      "library_sha256": "e9334c97f171ab4933d80a2f1955e97dbd0573c8a1e4cd14dadd0d8d79fd9fb8",
+      "snapshot_scope": "manifest_and_layer_library",
+      "auditor_snapshot": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\refit-library-guarded-flags2-final\\guard_snapshot\\guard_auditor.py",
+      "auditor_sha256": "d224732f36b7a7d3cdf045d6217ba30c0300ecdeb980c76a1c541d32cd508fcb"
+    },
+    "validation_diagnostic_matches": [],
+    "cases": [
+      {
+        "case": "dEQP-VK.ray_tracing_pipeline.pipeline_library.configurations.singlethreaded_compilation.s0_l1",
+        "status": "pass",
+        "result": "Pass",
+        "exit_code": 0,
+        "elapsed_seconds": 9.891,
+        "stdout": {
+          "path": "build-rt-cts-evidence/refit-library-guarded-flags2-final/0001-s0_l1-7e48286da4.stdout.txt",
+          "sha256": "3221cbc3485047316a2125b8e26f135b079742a4c935db6aa18f5297bc6ec353"
+        },
+        "qpa": {
+          "path": "build-rt-cts-evidence/refit-library-guarded-flags2-final/0001-s0_l1-7e48286da4.qpa",
+          "sha256": "7bc8c9e5f026545d2d2d640e5715f85e32c6a3418f9ef8bce4e9d8ef786ba900"
+        },
+        "guard": {
+          "log": "build-rt-cts-evidence/refit-library-guarded-flags2-final/0001-s0_l1-7e48286da4.guard.jsonl",
+          "verified": true,
+          "sha256": "358d0c48f17f72505337ed32ae18a7817fed5c50e24b406210c4100c4b66666a",
+          "records": 7,
+          "reject_records": 0,
+          "audit": {
+            "mode": "execution-only",
+            "pid": 69588,
+            "loads": 2,
+            "segments": [
+              {
+                "load_id": "qpc-0000004335922644-7fff0d14e0c8",
+                "instances": 1,
+                "checked": 0,
+                "rejected": 0,
+                "devices": 0,
+                "shader_definitions": 0
+              },
+              {
+                "load_id": "qpc-0000004335a7f795-7fff0d14e0c8",
+                "instances": 1,
+                "checked": 2322,
+                "rejected": 0,
+                "devices": 1,
+                "shader_definitions": 16
+              }
+            ],
+            "instances": 2,
+            "checked": 2322,
+            "rejected": 0,
+            "devices": 1,
+            "shader_definitions": 16
+          }
+        }
+      },
+      {
+        "case": "dEQP-VK.ray_tracing_pipeline.pipeline_library.configurations.singlethreaded_compilation.s0_l1_aabbs",
+        "status": "pass",
+        "result": "Pass",
+        "exit_code": 0,
+        "elapsed_seconds": 10.921,
+        "stdout": {
+          "path": "build-rt-cts-evidence/refit-library-guarded-flags2-final/0002-s0_l1_aabbs-f17393d636.stdout.txt",
+          "sha256": "4a235fefcd294ce4d52c4e3df6826f0b1633c68a30fec150dc437f969f21ad66"
+        },
+        "qpa": {
+          "path": "build-rt-cts-evidence/refit-library-guarded-flags2-final/0002-s0_l1_aabbs-f17393d636.qpa",
+          "sha256": "1cad415804663ef644cf843a695d474d79f3fd6c9960f930ac10b64f0c63977d"
+        },
+        "guard": {
+          "log": "build-rt-cts-evidence/refit-library-guarded-flags2-final/0002-s0_l1_aabbs-f17393d636.guard.jsonl",
+          "verified": true,
+          "sha256": "c2b011fde04868ce71d426ec098dfd43b1d35b57dc2e674374f0c7a237450020",
+          "records": 7,
+          "reject_records": 0,
+          "audit": {
+            "mode": "execution-only",
+            "pid": 65068,
+            "loads": 2,
+            "segments": [
+              {
+                "load_id": "qpc-000000433b7bca79-7fff0d14e0c8",
+                "instances": 1,
+                "checked": 0,
+                "rejected": 0,
+                "devices": 0,
+                "shader_definitions": 0
+              },
+              {
+                "load_id": "qpc-000000433b96a694-7fff0d14e0c8",
+                "instances": 1,
+                "checked": 2066,
+                "rejected": 0,
+                "devices": 1,
+                "shader_definitions": 16
+              }
+            ],
+            "instances": 2,
+            "checked": 2066,
+            "rejected": 0,
+            "devices": 1,
+            "shader_definitions": 16
+          }
+        }
+      },
+      {
+        "case": "dEQP-VK.ray_tracing_pipeline.pipeline_library.configurations.singlethreaded_compilation.s3_l11",
+        "status": "pass",
+        "result": "Pass",
+        "exit_code": 0,
+        "elapsed_seconds": 10.313,
+        "stdout": {
+          "path": "build-rt-cts-evidence/refit-library-guarded-flags2-final/0003-s3_l11-c858af8604.stdout.txt",
+          "sha256": "b8613f9f9a8f54e5dcdaba52f983412b6dbe98bc74b96db91f7f46c9e8aa43c5"
+        },
+        "qpa": {
+          "path": "build-rt-cts-evidence/refit-library-guarded-flags2-final/0003-s3_l11-c858af8604.qpa",
+          "sha256": "4474a666114d9d43024860a9212125b75fdaaeb07adb2af7ee25078738da4ad0"
+        },
+        "guard": {
+          "log": "build-rt-cts-evidence/refit-library-guarded-flags2-final/0003-s3_l11-c858af8604.guard.jsonl",
+          "verified": true,
+          "sha256": "f0ddfc1ebb5dadcde32a4f80bbf4cdfca9389a4ef6ac3d38eb24031975ac423b",
+          "records": 7,
+          "reject_records": 0,
+          "audit": {
+            "mode": "execution-only",
+            "pid": 69844,
+            "loads": 2,
+            "segments": [
+              {
+                "load_id": "qpc-0000004341f02ece-7fff0d14e0c8",
+                "instances": 1,
+                "checked": 0,
+                "rejected": 0,
+                "devices": 0,
+                "shader_definitions": 0
+              },
+              {
+                "load_id": "qpc-0000004342069122-7fff0d14e0c8",
+                "instances": 1,
+                "checked": 2322,
+                "rejected": 0,
+                "devices": 1,
+                "shader_definitions": 16
+              }
+            ],
+            "instances": 2,
+            "checked": 2322,
+            "rejected": 0,
+            "devices": 1,
+            "shader_definitions": 16
+          }
+        }
+      },
+      {
+        "case": "dEQP-VK.ray_tracing_pipeline.pipeline_library.configurations.singlethreaded_compilation.s3_l11_aabbs",
+        "status": "pass",
+        "result": "Pass",
+        "exit_code": 0,
+        "elapsed_seconds": 13.406,
+        "stdout": {
+          "path": "build-rt-cts-evidence/refit-library-guarded-flags2-final/0004-s3_l11_aabbs-4a6cf98ec7.stdout.txt",
+          "sha256": "db046b7e38586b3f7816a22688fcf5de0eb890d9b05033dc32ce108da250a50b"
+        },
+        "qpa": {
+          "path": "build-rt-cts-evidence/refit-library-guarded-flags2-final/0004-s3_l11_aabbs-4a6cf98ec7.qpa",
+          "sha256": "d1389369f2cad9d79ab6bf1822800ea20a4272b0034b7cbbcf9483b32b7270e8"
+        },
+        "guard": {
+          "log": "build-rt-cts-evidence/refit-library-guarded-flags2-final/0004-s3_l11_aabbs-4a6cf98ec7.guard.jsonl",
+          "verified": true,
+          "sha256": "ebfe876febb7eece045c8bc5477250628511c7398e3c60c65db5d786bfb0c127",
+          "records": 7,
+          "reject_records": 0,
+          "audit": {
+            "mode": "execution-only",
+            "pid": 68164,
+            "loads": 2,
+            "segments": [
+              {
+                "load_id": "qpc-000000434821b88a-7fff1f9ae0c8",
+                "instances": 1,
+                "checked": 0,
+                "rejected": 0,
+                "devices": 0,
+                "shader_definitions": 0
+              },
+              {
+                "load_id": "qpc-0000004348467b50-7fff1f9ae0c8",
+                "instances": 1,
+                "checked": 2066,
+                "rejected": 0,
+                "devices": 1,
+                "shader_definitions": 16
+              }
+            ],
+            "instances": 2,
+            "checked": 2066,
+            "rejected": 0,
+            "devices": 1,
+            "shader_definitions": 16
+          }
+        }
+      },
+      {
+        "case": "dEQP-VK.ray_tracing_pipeline.pipeline_library.configurations.singlethreaded_compilation.s0_l23",
+        "status": "pass",
+        "result": "Pass",
+        "exit_code": 0,
+        "elapsed_seconds": 12.234,
+        "stdout": {
+          "path": "build-rt-cts-evidence/refit-library-guarded-flags2-final/0005-s0_l23-c48c988be4.stdout.txt",
+          "sha256": "fc48f99515be1f4f6b9d4019b986f79bbfb24c344498a9edbcea3db281a232c2"
+        },
+        "qpa": {
+          "path": "build-rt-cts-evidence/refit-library-guarded-flags2-final/0005-s0_l23-c48c988be4.qpa",
+          "sha256": "e3804a0123b26458d6c5d18efc54a04bb97de0cf9a2e64eb2f6dc7132695181b"
+        },
+        "guard": {
+          "log": "build-rt-cts-evidence/refit-library-guarded-flags2-final/0005-s0_l23-c48c988be4.guard.jsonl",
+          "verified": true,
+          "sha256": "0f6e5b9fe2dd8ddec1900d412164a52bd9badc04eba4c0bb2de79a77f5cf7b5e",
+          "records": 7,
+          "reject_records": 0,
+          "audit": {
+            "mode": "execution-only",
+            "pid": 61940,
+            "loads": 2,
+            "segments": [
+              {
+                "load_id": "qpc-00000043502b313c-7fff4b5ce0c8",
+                "instances": 1,
+                "checked": 0,
+                "rejected": 0,
+                "devices": 0,
+                "shader_definitions": 0
+              },
+              {
+                "load_id": "qpc-00000043504d85e5-7fff4b5ce0c8",
+                "instances": 1,
+                "checked": 2322,
+                "rejected": 0,
+                "devices": 1,
+                "shader_definitions": 16
+              }
+            ],
+            "instances": 2,
+            "checked": 2322,
+            "rejected": 0,
+            "devices": 1,
+            "shader_definitions": 16
+          }
+        }
+      },
+      {
+        "case": "dEQP-VK.ray_tracing_pipeline.pipeline_library.configurations.singlethreaded_compilation.s0_l23_aabbs",
+        "status": "pass",
+        "result": "Pass",
+        "exit_code": 0,
+        "elapsed_seconds": 12.984,
+        "stdout": {
+          "path": "build-rt-cts-evidence/refit-library-guarded-flags2-final/0006-s0_l23_aabbs-5c5395585a.stdout.txt",
+          "sha256": "cbd2338119542512a3672e0209dbea7ae821b307840ad5db84704c0574e8d692"
+        },
+        "qpa": {
+          "path": "build-rt-cts-evidence/refit-library-guarded-flags2-final/0006-s0_l23_aabbs-5c5395585a.qpa",
+          "sha256": "4eb7a926dad1b011f1e1df6ddb9d93452de443c8c848e637dad9a0745598121d"
+        },
+        "guard": {
+          "log": "build-rt-cts-evidence/refit-library-guarded-flags2-final/0006-s0_l23_aabbs-5c5395585a.guard.jsonl",
+          "verified": true,
+          "sha256": "a44e79f1ec5983d3eb1e0b4cd21572d584faf66bd9d76b39a985db0499579cd4",
+          "records": 7,
+          "reject_records": 0,
+          "audit": {
+            "mode": "execution-only",
+            "pid": 84508,
+            "loads": 2,
+            "segments": [
+              {
+                "load_id": "qpc-00000043578b7d9a-7fff4b5ce0c8",
+                "instances": 1,
+                "checked": 0,
+                "rejected": 0,
+                "devices": 0,
+                "shader_definitions": 0
+              },
+              {
+                "load_id": "qpc-0000004357ae63c9-7fff4b5ce0c8",
+                "instances": 1,
+                "checked": 2066,
+                "rejected": 0,
+                "devices": 1,
+                "shader_definitions": 16
+              }
+            ],
+            "instances": 2,
+            "checked": 2066,
+            "rejected": 0,
+            "devices": 1,
+            "shader_definitions": 16
+          }
+        }
+      },
+      {
+        "case": "dEQP-VK.ray_tracing_pipeline.pipeline_library.configurations.singlethreaded_compilation.s0_l1_l1",
+        "status": "pass",
+        "result": "Pass",
+        "exit_code": 0,
+        "elapsed_seconds": 9.594,
+        "stdout": {
+          "path": "build-rt-cts-evidence/refit-library-guarded-flags2-final/0007-s0_l1_l1-75bbf67b14.stdout.txt",
+          "sha256": "627f41b2da83437b5e88fe53c5a6c25077557e4d169dacf43d45c0dba85261cb"
+        },
+        "qpa": {
+          "path": "build-rt-cts-evidence/refit-library-guarded-flags2-final/0007-s0_l1_l1-75bbf67b14.qpa",
+          "sha256": "789331265e2ab19438008356a39c9293ae958605d03806eb80a3e1194e5a4b96"
+        },
+        "guard": {
+          "log": "build-rt-cts-evidence/refit-library-guarded-flags2-final/0007-s0_l1_l1-75bbf67b14.guard.jsonl",
+          "verified": true,
+          "sha256": "678b65a7b9fd5fe6827bef30c4db3913a14386ebdbccad5ad6a809fa06d74b7c",
+          "records": 7,
+          "reject_records": 0,
+          "audit": {
+            "mode": "execution-only",
+            "pid": 84968,
+            "loads": 2,
+            "segments": [
+              {
+                "load_id": "qpc-000000435f203be1-7fff4b5ce0c8",
+                "instances": 1,
+                "checked": 0,
+                "rejected": 0,
+                "devices": 0,
+                "shader_definitions": 0
+              },
+              {
+                "load_id": "qpc-000000435f389038-7fff4b5ce0c8",
+                "instances": 1,
+                "checked": 2322,
+                "rejected": 0,
+                "devices": 1,
+                "shader_definitions": 16
+              }
+            ],
+            "instances": 2,
+            "checked": 2322,
+            "rejected": 0,
+            "devices": 1,
+            "shader_definitions": 16
+          }
+        }
+      },
+      {
+        "case": "dEQP-VK.ray_tracing_pipeline.pipeline_library.configurations.singlethreaded_compilation.s0_l1_l1_aabbs",
+        "status": "pass",
+        "result": "Pass",
+        "exit_code": 0,
+        "elapsed_seconds": 11.735,
+        "stdout": {
+          "path": "build-rt-cts-evidence/refit-library-guarded-flags2-final/0008-s0_l1_l1_aabbs-55613e1587.stdout.txt",
+          "sha256": "1beb22d0bf6e436dbeac9c61d1888a90946b927b2c98545111a8cdbb39421bd3"
+        },
+        "qpa": {
+          "path": "build-rt-cts-evidence/refit-library-guarded-flags2-final/0008-s0_l1_l1_aabbs-55613e1587.qpa",
+          "sha256": "e5a206fcf90e7efa2d0e9167e686c4de05f00415ef446bbf36ff104e7572b2ed"
+        },
+        "guard": {
+          "log": "build-rt-cts-evidence/refit-library-guarded-flags2-final/0008-s0_l1_l1_aabbs-55613e1587.guard.jsonl",
+          "verified": true,
+          "sha256": "fccb2b363dc79033f217a97f1343ea8e0a8368c49d94c2cbe2a997a76943c2d2",
+          "records": 7,
+          "reject_records": 0,
+          "audit": {
+            "mode": "execution-only",
+            "pid": 83908,
+            "loads": 2,
+            "segments": [
+              {
+                "load_id": "qpc-0000004364dda730-7fff4b5ce0c8",
+                "instances": 1,
+                "checked": 0,
+                "rejected": 0,
+                "devices": 0,
+                "shader_definitions": 0
+              },
+              {
+                "load_id": "qpc-0000004364f474bd-7fff4b5ce0c8",
+                "instances": 1,
+                "checked": 2066,
+                "rejected": 0,
+                "devices": 1,
+                "shader_definitions": 16
+              }
+            ],
+            "instances": 2,
+            "checked": 2066,
+            "rejected": 0,
+            "devices": 1,
+            "shader_definitions": 16
+          }
+        }
+      },
+      {
+        "case": "dEQP-VK.ray_tracing_pipeline.pipeline_library.configurations.singlethreaded_compilation.s3_l22_l22",
+        "status": "pass",
+        "result": "Pass",
+        "exit_code": 0,
+        "elapsed_seconds": 11.125,
+        "stdout": {
+          "path": "build-rt-cts-evidence/refit-library-guarded-flags2-final/0009-s3_l22_l22-3492b3c18c.stdout.txt",
+          "sha256": "e4acc9389b3ab4d724460b87abcccab18e8b19d025dac936eebdf40fb48d4920"
+        },
+        "qpa": {
+          "path": "build-rt-cts-evidence/refit-library-guarded-flags2-final/0009-s3_l22_l22-3492b3c18c.qpa",
+          "sha256": "dbc599fe4d6607ef456a74589a6979b5033162cab983b391b7d30703cf8854d6"
+        },
+        "guard": {
+          "log": "build-rt-cts-evidence/refit-library-guarded-flags2-final/0009-s3_l22_l22-3492b3c18c.guard.jsonl",
+          "verified": true,
+          "sha256": "80bca82b4dedb8d64c9b097e5148b9de54661da23eca3dfc33bba4b5b57b915e",
+          "records": 7,
+          "reject_records": 0,
+          "audit": {
+            "mode": "execution-only",
+            "pid": 75172,
+            "loads": 2,
+            "segments": [
+              {
+                "load_id": "qpc-000000436bf51a97-7fff4b5ce0c8",
+                "instances": 1,
+                "checked": 0,
+                "rejected": 0,
+                "devices": 0,
+                "shader_definitions": 0
+              },
+              {
+                "load_id": "qpc-000000436c0d9125-7fff4b5ce0c8",
+                "instances": 1,
+                "checked": 2322,
+                "rejected": 0,
+                "devices": 1,
+                "shader_definitions": 16
+              }
+            ],
+            "instances": 2,
+            "checked": 2322,
+            "rejected": 0,
+            "devices": 1,
+            "shader_definitions": 16
+          }
+        }
+      },
+      {
+        "case": "dEQP-VK.ray_tracing_pipeline.pipeline_library.configurations.singlethreaded_compilation.s3_l22_l22_aabbs",
+        "status": "pass",
+        "result": "Pass",
+        "exit_code": 0,
+        "elapsed_seconds": 16.5,
+        "stdout": {
+          "path": "build-rt-cts-evidence/refit-library-guarded-flags2-final/0010-s3_l22_l22_aabbs-65cf8a63f1.stdout.txt",
+          "sha256": "7586b596bffb4a11a7b209662576e873f176b8f125dd7b9ff9735773f9f4ede8"
+        },
+        "qpa": {
+          "path": "build-rt-cts-evidence/refit-library-guarded-flags2-final/0010-s3_l22_l22_aabbs-65cf8a63f1.qpa",
+          "sha256": "089f0d93def5fbbac4cdac95e7863c1b721548b4d2bb1c3d5b2c2e3e92e09e1a"
+        },
+        "guard": {
+          "log": "build-rt-cts-evidence/refit-library-guarded-flags2-final/0010-s3_l22_l22_aabbs-65cf8a63f1.guard.jsonl",
+          "verified": true,
+          "sha256": "0c6103fc498aad88cecec9258aba58fe1d1d87d7ac1dc0424be0c828e9a2036c",
+          "records": 7,
+          "reject_records": 0,
+          "audit": {
+            "mode": "execution-only",
+            "pid": 68080,
+            "loads": 2,
+            "segments": [
+              {
+                "load_id": "qpc-0000004372a959e3-7fff4b5ce0c8",
+                "instances": 1,
+                "checked": 0,
+                "rejected": 0,
+                "devices": 0,
+                "shader_definitions": 0
+              },
+              {
+                "load_id": "qpc-0000004372c59e54-7fff4b5ce0c8",
+                "instances": 1,
+                "checked": 2066,
+                "rejected": 0,
+                "devices": 1,
+                "shader_definitions": 16
+              }
+            ],
+            "instances": 2,
+            "checked": 2066,
+            "rejected": 0,
+            "devices": 1,
+            "shader_definitions": 16
+          }
+        }
+      },
+      {
+        "case": "dEQP-VK.ray_tracing_pipeline.pipeline_library.configurations.multithreaded_compilation.s3_l232",
+        "status": "pass",
+        "result": "Pass",
+        "exit_code": 0,
+        "elapsed_seconds": 11.157,
+        "stdout": {
+          "path": "build-rt-cts-evidence/refit-library-guarded-flags2-final/0011-s3_l232-cf2b4d6b68.stdout.txt",
+          "sha256": "32d0cdc2b0be5c5474edb62d7a84e6fb1d87a92c478e6304ae9f83195a606131"
+        },
+        "qpa": {
+          "path": "build-rt-cts-evidence/refit-library-guarded-flags2-final/0011-s3_l232-cf2b4d6b68.qpa",
+          "sha256": "0c996b786d9ab8dc22c6979616895276186c1d9e0c04132395d32f4bc1bcb92a"
+        },
+        "guard": {
+          "log": "build-rt-cts-evidence/refit-library-guarded-flags2-final/0011-s3_l232-cf2b4d6b68.guard.jsonl",
+          "verified": true,
+          "sha256": "b87081a59333bdc8200452d140ddf4fccbea8bec16747565425a3d1a90dd9b02",
+          "records": 7,
+          "reject_records": 0,
+          "audit": {
+            "mode": "execution-only",
+            "pid": 49312,
+            "loads": 2,
+            "segments": [
+              {
+                "load_id": "qpc-000000437c6bccab-7fff4b5ce0c8",
+                "instances": 1,
+                "checked": 0,
+                "rejected": 0,
+                "devices": 0,
+                "shader_definitions": 0
+              },
+              {
+                "load_id": "qpc-000000437c925e02-7fff4b5ce0c8",
+                "instances": 1,
+                "checked": 2322,
+                "rejected": 0,
+                "devices": 1,
+                "shader_definitions": 16
+              }
+            ],
+            "instances": 2,
+            "checked": 2322,
+            "rejected": 0,
+            "devices": 1,
+            "shader_definitions": 16
+          }
+        }
+      },
+      {
+        "case": "dEQP-VK.ray_tracing_pipeline.pipeline_library.configurations.multithreaded_compilation.s3_l232_aabbs",
+        "status": "pass",
+        "result": "Pass",
+        "exit_code": 0,
+        "elapsed_seconds": 14.469,
+        "stdout": {
+          "path": "build-rt-cts-evidence/refit-library-guarded-flags2-final/0012-s3_l232_aabbs-f063f3d2b5.stdout.txt",
+          "sha256": "3766c57b42dbbaaa9fabdb091f3a9021f935725047c2091bd9f73c035b7b2767"
+        },
+        "qpa": {
+          "path": "build-rt-cts-evidence/refit-library-guarded-flags2-final/0012-s3_l232_aabbs-f063f3d2b5.qpa",
+          "sha256": "d67f3a69fc22547fd8337d6ef05e6e7564829d61f6b71f1faec5e1e7797eb862"
+        },
+        "guard": {
+          "log": "build-rt-cts-evidence/refit-library-guarded-flags2-final/0012-s3_l232_aabbs-f063f3d2b5.guard.jsonl",
+          "verified": true,
+          "sha256": "1f0cd43032497210bc147427f37684aa65d04ecbfc169d5bb4cadbd5b946dc31",
+          "records": 7,
+          "reject_records": 0,
+          "audit": {
+            "mode": "execution-only",
+            "pid": 72148,
+            "loads": 2,
+            "segments": [
+              {
+                "load_id": "qpc-00000043832ae44f-7fff4b5ce0c8",
+                "instances": 1,
+                "checked": 0,
+                "rejected": 0,
+                "devices": 0,
+                "shader_definitions": 0
+              },
+              {
+                "load_id": "qpc-000000438352064f-7fff4b5ce0c8",
+                "instances": 1,
+                "checked": 2066,
+                "rejected": 0,
+                "devices": 1,
+                "shader_definitions": 16
+              }
+            ],
+            "instances": 2,
+            "checked": 2066,
+            "rejected": 0,
+            "devices": 1,
+            "shader_definitions": 16
+          }
+        }
+      },
+      {
+        "case": "dEQP-VK.ray_tracing_pipeline.pipeline_library.configurations.multithreaded_compilation_dho.s3_l2_l3",
+        "status": "pass",
+        "result": "Pass",
+        "exit_code": 0,
+        "elapsed_seconds": 11.187,
+        "stdout": {
+          "path": "build-rt-cts-evidence/refit-library-guarded-flags2-final/0013-s3_l2_l3-9ad57e1726.stdout.txt",
+          "sha256": "012fa004ef2ab933280d2f62765c30ee61cc1e766214e02bcaa738296a29508e"
+        },
+        "qpa": {
+          "path": "build-rt-cts-evidence/refit-library-guarded-flags2-final/0013-s3_l2_l3-9ad57e1726.qpa",
+          "sha256": "9723591cd12810598453a50b82ede5800b70233b48e18ee1043a0e265782d7ea"
+        },
+        "guard": {
+          "log": "build-rt-cts-evidence/refit-library-guarded-flags2-final/0013-s3_l2_l3-9ad57e1726.guard.jsonl",
+          "verified": true,
+          "sha256": "9c362024441c0ab3e7c96750ee2b749ead4ebb3b7941c7bcea4302d4550c2c12",
+          "records": 7,
+          "reject_records": 0,
+          "audit": {
+            "mode": "execution-only",
+            "pid": 49704,
+            "loads": 2,
+            "segments": [
+              {
+                "load_id": "qpc-000000438bae7b63-7fff4b5ce0c8",
+                "instances": 1,
+                "checked": 0,
+                "rejected": 0,
+                "devices": 0,
+                "shader_definitions": 0
+              },
+              {
+                "load_id": "qpc-000000438bc56d36-7fff4b5ce0c8",
+                "instances": 1,
+                "checked": 2322,
+                "rejected": 0,
+                "devices": 1,
+                "shader_definitions": 16
+              }
+            ],
+            "instances": 2,
+            "checked": 2322,
+            "rejected": 0,
+            "devices": 1,
+            "shader_definitions": 16
+          }
+        }
+      },
+      {
+        "case": "dEQP-VK.ray_tracing_pipeline.pipeline_library.configurations.multithreaded_compilation_dho.s3_l2_l3_aabbs",
+        "status": "pass",
+        "result": "Pass",
+        "exit_code": 0,
+        "elapsed_seconds": 13.859,
+        "stdout": {
+          "path": "build-rt-cts-evidence/refit-library-guarded-flags2-final/0014-s3_l2_l3_aabbs-3e0c4285ec.stdout.txt",
+          "sha256": "7519d5feb13472d20d16299011bd51260ba7a5da18ab918a8d94182548b92a88"
+        },
+        "qpa": {
+          "path": "build-rt-cts-evidence/refit-library-guarded-flags2-final/0014-s3_l2_l3_aabbs-3e0c4285ec.qpa",
+          "sha256": "0f3bf5131011bb768fb87056a56bf72e8f746ea0824a73fd2c4a64903acf3f9f"
+        },
+        "guard": {
+          "log": "build-rt-cts-evidence/refit-library-guarded-flags2-final/0014-s3_l2_l3_aabbs-3e0c4285ec.guard.jsonl",
+          "verified": true,
+          "sha256": "0c80381dd3f134af8d25c81bfe44236e024b12ee36d81862c436a48b754f4aef",
+          "records": 7,
+          "reject_records": 0,
+          "audit": {
+            "mode": "execution-only",
+            "pid": 66756,
+            "loads": 2,
+            "segments": [
+              {
+                "load_id": "qpc-000000439256b66c-7fff4b5ce0c8",
+                "instances": 1,
+                "checked": 0,
+                "rejected": 0,
+                "devices": 0,
+                "shader_definitions": 0
+              },
+              {
+                "load_id": "qpc-00000043926d795a-7fff4b5ce0c8",
+                "instances": 1,
+                "checked": 2066,
+                "rejected": 0,
+                "devices": 1,
+                "shader_definitions": 16
+              }
+            ],
+            "instances": 2,
+            "checked": 2066,
+            "rejected": 0,
+            "devices": 1,
+            "shader_definitions": 16
+          }
+        }
+      },
+      {
+        "case": "dEQP-VK.ray_tracing_pipeline.pipeline_library.configurations.rgen_miss_in_library.s0_l1",
+        "status": "pass",
+        "result": "Pass",
+        "exit_code": 0,
+        "elapsed_seconds": 10.609,
+        "stdout": {
+          "path": "build-rt-cts-evidence/refit-library-guarded-flags2-final/0015-s0_l1-adacb8915a.stdout.txt",
+          "sha256": "d4bc12b61ef671f955a504c59cde3ecc51895537c21bfeb78ed9e79385a6ae46"
+        },
+        "qpa": {
+          "path": "build-rt-cts-evidence/refit-library-guarded-flags2-final/0015-s0_l1-adacb8915a.qpa",
+          "sha256": "fa920324c3aad8b8de46956e02425be3408451d9b216d0a4e20b8d6c2b88a64e"
+        },
+        "guard": {
+          "log": "build-rt-cts-evidence/refit-library-guarded-flags2-final/0015-s0_l1-adacb8915a.guard.jsonl",
+          "verified": true,
+          "sha256": "b4f0c1e4b2b903c88b79b9692bf1ffc6c129d813e2b913d4873201aabb41411d",
+          "records": 7,
+          "reject_records": 0,
+          "audit": {
+            "mode": "execution-only",
+            "pid": 68740,
+            "loads": 2,
+            "segments": [
+              {
+                "load_id": "qpc-000000439a9caf14-7fff4b5ce0c8",
+                "instances": 1,
+                "checked": 0,
+                "rejected": 0,
+                "devices": 0,
+                "shader_definitions": 0
+              },
+              {
+                "load_id": "qpc-000000439ab48acc-7fff4b5ce0c8",
+                "instances": 1,
+                "checked": 2322,
+                "rejected": 0,
+                "devices": 1,
+                "shader_definitions": 16
+              }
+            ],
+            "instances": 2,
+            "checked": 2322,
+            "rejected": 0,
+            "devices": 1,
+            "shader_definitions": 16
+          }
+        }
+      },
+      {
+        "case": "dEQP-VK.ray_tracing_pipeline.pipeline_library.configurations.rgen_miss_in_library.s0_l1_aabbs",
+        "status": "pass",
+        "result": "Pass",
+        "exit_code": 0,
+        "elapsed_seconds": 12.562,
+        "stdout": {
+          "path": "build-rt-cts-evidence/refit-library-guarded-flags2-final/0016-s0_l1_aabbs-e6051e43d9.stdout.txt",
+          "sha256": "5d09dea9f5ed86db681f6a3a63c7c6923e4c127196721fb04df13fda54a9b451"
+        },
+        "qpa": {
+          "path": "build-rt-cts-evidence/refit-library-guarded-flags2-final/0016-s0_l1_aabbs-e6051e43d9.qpa",
+          "sha256": "16e54bc09239222a15ac1355a5b2f45cfc854866dbcdb1f12c196a4aac4853cc"
+        },
+        "guard": {
+          "log": "build-rt-cts-evidence/refit-library-guarded-flags2-final/0016-s0_l1_aabbs-e6051e43d9.guard.jsonl",
+          "verified": true,
+          "sha256": "6829ac0ac089744397b89e915eec71dc2a19e61b0d628a70a87535a0bebecd20",
+          "records": 7,
+          "reject_records": 0,
+          "audit": {
+            "mode": "execution-only",
+            "pid": 69044,
+            "loads": 2,
+            "segments": [
+              {
+                "load_id": "qpc-00000043a0f7d41b-7fff4b5ce0c8",
+                "instances": 1,
+                "checked": 0,
+                "rejected": 0,
+                "devices": 0,
+                "shader_definitions": 0
+              },
+              {
+                "load_id": "qpc-00000043a11221fd-7fff4b5ce0c8",
+                "instances": 1,
+                "checked": 2066,
+                "rejected": 0,
+                "devices": 1,
+                "shader_definitions": 16
+              }
+            ],
+            "instances": 2,
+            "checked": 2066,
+            "rejected": 0,
+            "devices": 1,
+            "shader_definitions": 16
+          }
+        }
+      },
+      {
+        "case": "dEQP-VK.ray_tracing_pipeline.pipeline_library.configurations.rgen_miss_in_library.s0_l2_l3",
+        "status": "pass",
+        "result": "Pass",
+        "exit_code": 0,
+        "elapsed_seconds": 11.313,
+        "stdout": {
+          "path": "build-rt-cts-evidence/refit-library-guarded-flags2-final/0017-s0_l2_l3-900854fde7.stdout.txt",
+          "sha256": "5789b4f2e58e16e588fb4df32b850c3f36b0eb8e3e5d46001762a3c0febb53b1"
+        },
+        "qpa": {
+          "path": "build-rt-cts-evidence/refit-library-guarded-flags2-final/0017-s0_l2_l3-900854fde7.qpa",
+          "sha256": "49dbf5909c68dd16d3dcb8f083e558b7a1a3f0697f404b30f2d722f88ffcde86"
+        },
+        "guard": {
+          "log": "build-rt-cts-evidence/refit-library-guarded-flags2-final/0017-s0_l2_l3-900854fde7.guard.jsonl",
+          "verified": true,
+          "sha256": "4739e0a378b5f50bbe26d11a824bb2fa38689cd42516d9944ab7c034f16d7810",
+          "records": 7,
+          "reject_records": 0,
+          "audit": {
+            "mode": "execution-only",
+            "pid": 79752,
+            "loads": 2,
+            "segments": [
+              {
+                "load_id": "qpc-00000043a875d55d-7fff4b5ce0c8",
+                "instances": 1,
+                "checked": 0,
+                "rejected": 0,
+                "devices": 0,
+                "shader_definitions": 0
+              },
+              {
+                "load_id": "qpc-00000043a88f5607-7fff4b5ce0c8",
+                "instances": 1,
+                "checked": 2322,
+                "rejected": 0,
+                "devices": 1,
+                "shader_definitions": 16
+              }
+            ],
+            "instances": 2,
+            "checked": 2322,
+            "rejected": 0,
+            "devices": 1,
+            "shader_definitions": 16
+          }
+        }
+      },
+      {
+        "case": "dEQP-VK.ray_tracing_pipeline.pipeline_library.configurations.rgen_miss_in_library.s0_l2_l3_aabbs",
+        "status": "pass",
+        "result": "Pass",
+        "exit_code": 0,
+        "elapsed_seconds": 12.86,
+        "stdout": {
+          "path": "build-rt-cts-evidence/refit-library-guarded-flags2-final/0018-s0_l2_l3_aabbs-af533ccd25.stdout.txt",
+          "sha256": "6506ef40f48a044bb6df06ea2f16fd22839f58af8fa2a2f6c17fd1cda15f8777"
+        },
+        "qpa": {
+          "path": "build-rt-cts-evidence/refit-library-guarded-flags2-final/0018-s0_l2_l3_aabbs-af533ccd25.qpa",
+          "sha256": "2da2801793dd6fa537e526c4b15eabcda27b0729ee302bcd54613aa65ec95704"
+        },
+        "guard": {
+          "log": "build-rt-cts-evidence/refit-library-guarded-flags2-final/0018-s0_l2_l3_aabbs-af533ccd25.guard.jsonl",
+          "verified": true,
+          "sha256": "60e51264cc175f8fd09871b4290eec657a3800a6c05f6a8ad13fb3554b584a3e",
+          "records": 7,
+          "reject_records": 0,
+          "audit": {
+            "mode": "execution-only",
+            "pid": 87416,
+            "loads": 2,
+            "segments": [
+              {
+                "load_id": "qpc-00000043af41ee3e-7fff4b5ce0c8",
+                "instances": 1,
+                "checked": 0,
+                "rejected": 0,
+                "devices": 0,
+                "shader_definitions": 0
+              },
+              {
+                "load_id": "qpc-00000043af56a409-7fff4b5ce0c8",
+                "instances": 1,
+                "checked": 2066,
+                "rejected": 0,
+                "devices": 1,
+                "shader_definitions": 16
+              }
+            ],
+            "instances": 2,
+            "checked": 2066,
+            "rejected": 0,
+            "devices": 1,
+            "shader_definitions": 16
+          }
+        }
+      },
+      {
+        "case": "dEQP-VK.ray_tracing_pipeline.pipeline_library.configurations.misc.use_link_time_optimizations",
+        "status": "pass",
+        "result": "Pass",
+        "exit_code": 0,
+        "elapsed_seconds": 12.782,
+        "stdout": {
+          "path": "build-rt-cts-evidence/refit-library-guarded-flags2-final/0019-use_link_time_optimizations-05cf8cc1dd.stdout.txt",
+          "sha256": "53c7e9d50ed26f35e1581a06521447fb6b60fa937a7c72bea943b0fa2c22e77c"
+        },
+        "qpa": {
+          "path": "build-rt-cts-evidence/refit-library-guarded-flags2-final/0019-use_link_time_optimizations-05cf8cc1dd.qpa",
+          "sha256": "8a882f62bddfeaa38a63755f20ff8cc20952b47a9079007c7ad21aa790862712"
+        },
+        "guard": {
+          "log": "build-rt-cts-evidence/refit-library-guarded-flags2-final/0019-use_link_time_optimizations-05cf8cc1dd.guard.jsonl",
+          "verified": true,
+          "sha256": "5dcd2753db9534ff4d3601d90244343b198c3ea7bd83b44bbb82e14a005ac6e9",
+          "records": 7,
+          "reject_records": 0,
+          "audit": {
+            "mode": "execution-only",
+            "pid": 72220,
+            "loads": 2,
+            "segments": [
+              {
+                "load_id": "qpc-00000043b6e5996b-7fff4b5ce0c8",
+                "instances": 1,
+                "checked": 0,
+                "rejected": 0,
+                "devices": 0,
+                "shader_definitions": 0
+              },
+              {
+                "load_id": "qpc-00000043b7007cdc-7fff4b5ce0c8",
+                "instances": 1,
+                "checked": 2066,
+                "rejected": 0,
+                "devices": 1,
+                "shader_definitions": 16
+              }
+            ],
+            "instances": 2,
+            "checked": 2066,
+            "rejected": 0,
+            "devices": 1,
+            "shader_definitions": 16
+          }
+        }
+      },
+      {
+        "case": "dEQP-VK.ray_tracing_pipeline.pipeline_library.configurations.misc.retain_link_time_optimizations",
+        "status": "pass",
+        "result": "Pass",
+        "exit_code": 0,
+        "elapsed_seconds": 12.718,
+        "stdout": {
+          "path": "build-rt-cts-evidence/refit-library-guarded-flags2-final/0020-retain_link_time_optimizations-46f256b7fc.stdout.txt",
+          "sha256": "a7ecfb869229185a6616a8d941bfa248bcde3e8bd19a0a1fe4f330b048a4f455"
+        },
+        "qpa": {
+          "path": "build-rt-cts-evidence/refit-library-guarded-flags2-final/0020-retain_link_time_optimizations-46f256b7fc.qpa",
+          "sha256": "312107694db2841bb91b83ca6bbaeff7b27549cad734db4e69f227a222940a01"
+        },
+        "guard": {
+          "log": "build-rt-cts-evidence/refit-library-guarded-flags2-final/0020-retain_link_time_optimizations-46f256b7fc.guard.jsonl",
+          "verified": true,
+          "sha256": "0eeedbc9728f546175b71ffe84a3032f762880d6ec5eea0e7323b5a054398787",
+          "records": 7,
+          "reject_records": 0,
+          "audit": {
+            "mode": "execution-only",
+            "pid": 74020,
+            "loads": 2,
+            "segments": [
+              {
+                "load_id": "qpc-00000043be85f1f8-7fff4b5ce0c8",
+                "instances": 1,
+                "checked": 0,
+                "rejected": 0,
+                "devices": 0,
+                "shader_definitions": 0
+              },
+              {
+                "load_id": "qpc-00000043bea023c4-7fff4b5ce0c8",
+                "instances": 1,
+                "checked": 2066,
+                "rejected": 0,
+                "devices": 1,
+                "shader_definitions": 16
+              }
+            ],
+            "instances": 2,
+            "checked": 2066,
+            "rejected": 0,
+            "devices": 1,
+            "shader_definitions": 16
+          }
+        }
+      },
+      {
+        "case": "dEQP-VK.ray_tracing_pipeline.acceleration_structures.update.traditional_structures.gpu.normal.vertices",
+        "status": "pass",
+        "result": "Pass",
+        "exit_code": 0,
+        "elapsed_seconds": 11.672,
+        "stdout": {
+          "path": "build-rt-cts-evidence/refit-library-guarded-flags2-final/0021-vertices-b835de18b5.stdout.txt",
+          "sha256": "9574feb799e63e965e942087deeb76147cbe8241d1bfd03108aa4106e9790ea0"
+        },
+        "qpa": {
+          "path": "build-rt-cts-evidence/refit-library-guarded-flags2-final/0021-vertices-b835de18b5.qpa",
+          "sha256": "a8e565ab691435d92576aede400f44dfe867759a1a72ad1d120450416fa6c589"
+        },
+        "guard": {
+          "log": "build-rt-cts-evidence/refit-library-guarded-flags2-final/0021-vertices-b835de18b5.guard.jsonl",
+          "verified": true,
+          "sha256": "49c83d0ddbaf058f9026420e941d6c5825c316afdc6ac537cd2e78467277cb84",
+          "records": 7,
+          "reject_records": 0,
+          "audit": {
+            "mode": "execution-only",
+            "pid": 86792,
+            "loads": 2,
+            "segments": [
+              {
+                "load_id": "qpc-00000043c6210710-7fff4b5ce0c8",
+                "instances": 1,
+                "checked": 0,
+                "rejected": 0,
+                "devices": 0,
+                "shader_definitions": 0
+              },
+              {
+                "load_id": "qpc-00000043c644692c-7fff4b5ce0c8",
+                "instances": 1,
+                "checked": 378,
+                "rejected": 0,
+                "devices": 1,
+                "shader_definitions": 16
+              }
+            ],
+            "instances": 2,
+            "checked": 378,
+            "rejected": 0,
+            "devices": 1,
+            "shader_definitions": 16
+          }
+        }
+      },
+      {
+        "case": "dEQP-VK.ray_tracing_pipeline.acceleration_structures.update.traditional_structures.gpu.normal.indices",
+        "status": "pass",
+        "result": "Pass",
+        "exit_code": 0,
+        "elapsed_seconds": 10.921,
+        "stdout": {
+          "path": "build-rt-cts-evidence/refit-library-guarded-flags2-final/0022-indices-155be45232.stdout.txt",
+          "sha256": "03cad18f024b81496df8acb4d76fdc803ffd51fed8169f6d8ee8bf2f121f23aa"
+        },
+        "qpa": {
+          "path": "build-rt-cts-evidence/refit-library-guarded-flags2-final/0022-indices-155be45232.qpa",
+          "sha256": "bbdd4ee25b8bc2aaf95054c55559f3802a615108822fe8220580c936cc2c78bd"
+        },
+        "guard": {
+          "log": "build-rt-cts-evidence/refit-library-guarded-flags2-final/0022-indices-155be45232.guard.jsonl",
+          "verified": true,
+          "sha256": "488951030c1bc8645ebe40d552dac02858da21c5ad1b1febff60f4585a22bfd7",
+          "records": 7,
+          "reject_records": 0,
+          "audit": {
+            "mode": "execution-only",
+            "pid": 86956,
+            "loads": 2,
+            "segments": [
+              {
+                "load_id": "qpc-00000043cd25fb97-7fff4b5ce0c8",
+                "instances": 1,
+                "checked": 0,
+                "rejected": 0,
+                "devices": 0,
+                "shader_definitions": 0
+              },
+              {
+                "load_id": "qpc-00000043cd402033-7fff4b5ce0c8",
+                "instances": 1,
+                "checked": 378,
+                "rejected": 0,
+                "devices": 1,
+                "shader_definitions": 16
+              }
+            ],
+            "instances": 2,
+            "checked": 378,
+            "rejected": 0,
+            "devices": 1,
+            "shader_definitions": 16
+          }
+        }
+      },
+      {
+        "case": "dEQP-VK.ray_tracing_pipeline.acceleration_structures.update.traditional_structures.gpu.normal.transform",
+        "status": "pass",
+        "result": "Pass",
+        "exit_code": 0,
+        "elapsed_seconds": 10.844,
+        "stdout": {
+          "path": "build-rt-cts-evidence/refit-library-guarded-flags2-final/0023-transform-1fcaf5d297.stdout.txt",
+          "sha256": "71cbb66fd458bf78588f68920d416a728816fdb01f3b77004e4da1684a28ad07"
+        },
+        "qpa": {
+          "path": "build-rt-cts-evidence/refit-library-guarded-flags2-final/0023-transform-1fcaf5d297.qpa",
+          "sha256": "75d16e40cd6edc6dd797f3b851b750e222a5eb756d2be1d9af139b4850e6c8be"
+        },
+        "guard": {
+          "log": "build-rt-cts-evidence/refit-library-guarded-flags2-final/0023-transform-1fcaf5d297.guard.jsonl",
+          "verified": true,
+          "sha256": "3ac09fc98819f80cb27f17696faf9c7f18784cc1b7f94384e69883ac6c8ad212",
+          "records": 7,
+          "reject_records": 0,
+          "audit": {
+            "mode": "execution-only",
+            "pid": 66584,
+            "loads": 2,
+            "segments": [
+              {
+                "load_id": "qpc-00000043d38f0729-7fff4b5ce0c8",
+                "instances": 1,
+                "checked": 0,
+                "rejected": 0,
+                "devices": 0,
+                "shader_definitions": 0
+              },
+              {
+                "load_id": "qpc-00000043d3aa9286-7fff4b5ce0c8",
+                "instances": 1,
+                "checked": 378,
+                "rejected": 0,
+                "devices": 1,
+                "shader_definitions": 16
+              }
+            ],
+            "instances": 2,
+            "checked": 378,
+            "rejected": 0,
+            "devices": 1,
+            "shader_definitions": 16
+          }
+        }
+      },
+      {
+        "case": "dEQP-VK.ray_tracing_pipeline.acceleration_structures.update.traditional_structures.gpu.normal.geometry_transform",
+        "status": "pass",
+        "result": "Pass",
+        "exit_code": 0,
+        "elapsed_seconds": 10.203,
+        "stdout": {
+          "path": "build-rt-cts-evidence/refit-library-guarded-flags2-final/0024-geometry_transform-b16d215aca.stdout.txt",
+          "sha256": "edce02c124df3be665e8d582cf48ac1be79cbc37b1ae79443ec4c051e049aa85"
+        },
+        "qpa": {
+          "path": "build-rt-cts-evidence/refit-library-guarded-flags2-final/0024-geometry_transform-b16d215aca.qpa",
+          "sha256": "ce5271ed00b027a4d0928a7ecb4e11b61838efdc1b40a69542111bc798bbb4b8"
+        },
+        "guard": {
+          "log": "build-rt-cts-evidence/refit-library-guarded-flags2-final/0024-geometry_transform-b16d215aca.guard.jsonl",
+          "verified": true,
+          "sha256": "1cbc8fdd34b23a100c9b9771d24aed1e6bf502c1ab335141486af3165dd8f227",
+          "records": 7,
+          "reject_records": 0,
+          "audit": {
+            "mode": "execution-only",
+            "pid": 80144,
+            "loads": 2,
+            "segments": [
+              {
+                "load_id": "qpc-00000043da23152c-7fff4b5ce0c8",
+                "instances": 1,
+                "checked": 0,
+                "rejected": 0,
+                "devices": 0,
+                "shader_definitions": 0
+              },
+              {
+                "load_id": "qpc-00000043da3eb4cd-7fff4b5ce0c8",
+                "instances": 1,
+                "checked": 379,
+                "rejected": 0,
+                "devices": 1,
+                "shader_definitions": 16
+              }
+            ],
+            "instances": 2,
+            "checked": 379,
+            "rejected": 0,
+            "devices": 1,
+            "shader_definitions": 16
+          }
+        }
+      },
+      {
+        "case": "dEQP-VK.ray_tracing_pipeline.acceleration_structures.update.traditional_structures.gpu.normal.degenerate",
+        "status": "pass",
+        "result": "Pass",
+        "exit_code": 0,
+        "elapsed_seconds": 9.922,
+        "stdout": {
+          "path": "build-rt-cts-evidence/refit-library-guarded-flags2-final/0025-degenerate-d689de7de3.stdout.txt",
+          "sha256": "52f98ae7d9427a71b6c8d1b0b2b927ed8d3b375e0fbf47f0dd9e00886ad9d6ef"
+        },
+        "qpa": {
+          "path": "build-rt-cts-evidence/refit-library-guarded-flags2-final/0025-degenerate-d689de7de3.qpa",
+          "sha256": "9d2af92620042898d62ba44bf284dc28e0687ed6f134c95d4f2e4886d09d9e65"
+        },
+        "guard": {
+          "log": "build-rt-cts-evidence/refit-library-guarded-flags2-final/0025-degenerate-d689de7de3.guard.jsonl",
+          "verified": true,
+          "sha256": "afaf1c69ca6d733698368171c6ea6d5d9c52d04ea82b5d87925513417a8ca078",
+          "records": 7,
+          "reject_records": 0,
+          "audit": {
+            "mode": "execution-only",
+            "pid": 65800,
+            "loads": 2,
+            "segments": [
+              {
+                "load_id": "qpc-00000043e0356c16-7fff4b5ce0c8",
+                "instances": 1,
+                "checked": 0,
+                "rejected": 0,
+                "devices": 0,
+                "shader_definitions": 0
+              },
+              {
+                "load_id": "qpc-00000043e0511f5b-7fff4b5ce0c8",
+                "instances": 1,
+                "checked": 378,
+                "rejected": 0,
+                "devices": 1,
+                "shader_definitions": 16
+              }
+            ],
+            "instances": 2,
+            "checked": 378,
+            "rejected": 0,
+            "devices": 1,
+            "shader_definitions": 16
+          }
+        }
+      },
+      {
+        "case": "dEQP-VK.ray_tracing_pipeline.acceleration_structures.update.traditional_structures.gpu.compact.vertices",
+        "status": "pass",
+        "result": "Pass",
+        "exit_code": 0,
+        "elapsed_seconds": 9.812,
+        "stdout": {
+          "path": "build-rt-cts-evidence/refit-library-guarded-flags2-final/0026-vertices-0c4202325b.stdout.txt",
+          "sha256": "b404b2445257b1e5272cd5d3cabf8baa28c532b71ff62f40db67819aad48c30f"
+        },
+        "qpa": {
+          "path": "build-rt-cts-evidence/refit-library-guarded-flags2-final/0026-vertices-0c4202325b.qpa",
+          "sha256": "769ac60ca99d264fbc4b529fc487757f006d16635b56f042dfd6513e954aed95"
+        },
+        "guard": {
+          "log": "build-rt-cts-evidence/refit-library-guarded-flags2-final/0026-vertices-0c4202325b.guard.jsonl",
+          "verified": true,
+          "sha256": "1048a48a3355391e0eb7cdd081842e8e89f4bdd8fdcbabb5c8f8f0ae5e7ab76d",
+          "records": 7,
+          "reject_records": 0,
+          "audit": {
+            "mode": "execution-only",
+            "pid": 81552,
+            "loads": 2,
+            "segments": [
+              {
+                "load_id": "qpc-00000043e6129bf6-7fff4b5ce0c8",
+                "instances": 1,
+                "checked": 0,
+                "rejected": 0,
+                "devices": 0,
+                "shader_definitions": 0
+              },
+              {
+                "load_id": "qpc-00000043e62b6a51-7fff4b5ce0c8",
+                "instances": 1,
+                "checked": 378,
+                "rejected": 0,
+                "devices": 1,
+                "shader_definitions": 16
+              }
+            ],
+            "instances": 2,
+            "checked": 378,
+            "rejected": 0,
+            "devices": 1,
+            "shader_definitions": 16
+          }
+        }
+      },
+      {
+        "case": "dEQP-VK.ray_tracing_pipeline.acceleration_structures.update.traditional_structures.gpu.compact.indices",
+        "status": "pass",
+        "result": "Pass",
+        "exit_code": 0,
+        "elapsed_seconds": 9.766,
+        "stdout": {
+          "path": "build-rt-cts-evidence/refit-library-guarded-flags2-final/0027-indices-9bde46ac2b.stdout.txt",
+          "sha256": "7500536ac4f8aee70d37acd804cdc66f9a1731cd1a5bf5e961124e4d8b326811"
+        },
+        "qpa": {
+          "path": "build-rt-cts-evidence/refit-library-guarded-flags2-final/0027-indices-9bde46ac2b.qpa",
+          "sha256": "bfbe42a758e28a9e07649e1741e762a2c55dc220f6a252d3b06ccb6a1dad18fb"
+        },
+        "guard": {
+          "log": "build-rt-cts-evidence/refit-library-guarded-flags2-final/0027-indices-9bde46ac2b.guard.jsonl",
+          "verified": true,
+          "sha256": "64b7312562d0730906b30432ed5f99b13e3e966666927511654e9ab831112297",
+          "records": 7,
+          "reject_records": 0,
+          "audit": {
+            "mode": "execution-only",
+            "pid": 82428,
+            "loads": 2,
+            "segments": [
+              {
+                "load_id": "qpc-00000043ebe3ea41-7fff4b5ce0c8",
+                "instances": 1,
+                "checked": 0,
+                "rejected": 0,
+                "devices": 0,
+                "shader_definitions": 0
+              },
+              {
+                "load_id": "qpc-00000043ebfb8a4d-7fff4b5ce0c8",
+                "instances": 1,
+                "checked": 378,
+                "rejected": 0,
+                "devices": 1,
+                "shader_definitions": 16
+              }
+            ],
+            "instances": 2,
+            "checked": 378,
+            "rejected": 0,
+            "devices": 1,
+            "shader_definitions": 16
+          }
+        }
+      },
+      {
+        "case": "dEQP-VK.ray_tracing_pipeline.acceleration_structures.update.traditional_structures.gpu.compact.transform",
+        "status": "pass",
+        "result": "Pass",
+        "exit_code": 0,
+        "elapsed_seconds": 9.39,
+        "stdout": {
+          "path": "build-rt-cts-evidence/refit-library-guarded-flags2-final/0028-transform-1097ce9084.stdout.txt",
+          "sha256": "411a32e4569a9e831a73bde7cecf0cd7bebd26e8e2843f7891821e925110987c"
+        },
+        "qpa": {
+          "path": "build-rt-cts-evidence/refit-library-guarded-flags2-final/0028-transform-1097ce9084.qpa",
+          "sha256": "972e5361a4e12995ab6483fce88cd8e542a604939ca52f77879279eb578ca610"
+        },
+        "guard": {
+          "log": "build-rt-cts-evidence/refit-library-guarded-flags2-final/0028-transform-1097ce9084.guard.jsonl",
+          "verified": true,
+          "sha256": "6cd175af144c1d93cfc0bea295e49dbc2672a3b91f8c94f4bb35823f2e810b4b",
+          "records": 7,
+          "reject_records": 0,
+          "audit": {
+            "mode": "execution-only",
+            "pid": 72064,
+            "loads": 2,
+            "segments": [
+              {
+                "load_id": "qpc-00000043f1b55b19-7fff4b5ce0c8",
+                "instances": 1,
+                "checked": 0,
+                "rejected": 0,
+                "devices": 0,
+                "shader_definitions": 0
+              },
+              {
+                "load_id": "qpc-00000043f1cbf469-7fff4b5ce0c8",
+                "instances": 1,
+                "checked": 378,
+                "rejected": 0,
+                "devices": 1,
+                "shader_definitions": 16
+              }
+            ],
+            "instances": 2,
+            "checked": 378,
+            "rejected": 0,
+            "devices": 1,
+            "shader_definitions": 16
+          }
+        }
+      },
+      {
+        "case": "dEQP-VK.ray_tracing_pipeline.acceleration_structures.update.traditional_structures.gpu.compact.geometry_transform",
+        "status": "pass",
+        "result": "Pass",
+        "exit_code": 0,
+        "elapsed_seconds": 9.469,
+        "stdout": {
+          "path": "build-rt-cts-evidence/refit-library-guarded-flags2-final/0029-geometry_transform-7dbdac196e.stdout.txt",
+          "sha256": "f360f0ba6453aca4ba4a555e150ee36a4dc95c70b0380e5f84d5c39b0048bbbd"
+        },
+        "qpa": {
+          "path": "build-rt-cts-evidence/refit-library-guarded-flags2-final/0029-geometry_transform-7dbdac196e.qpa",
+          "sha256": "c3e7a37387432050833f75f2c0b59c99ce7d63c3415c802d7a2b1ad220a8ce5b"
+        },
+        "guard": {
+          "log": "build-rt-cts-evidence/refit-library-guarded-flags2-final/0029-geometry_transform-7dbdac196e.guard.jsonl",
+          "verified": true,
+          "sha256": "b8bf7408d954f9a8658da2bb0baf4b437babf04cc5a73c5a60de671f3b45b389",
+          "records": 7,
+          "reject_records": 0,
+          "audit": {
+            "mode": "execution-only",
+            "pid": 82492,
+            "loads": 2,
+            "segments": [
+              {
+                "load_id": "qpc-00000043f74f5edb-7fff4b5ce0c8",
+                "instances": 1,
+                "checked": 0,
+                "rejected": 0,
+                "devices": 0,
+                "shader_definitions": 0
+              },
+              {
+                "load_id": "qpc-00000043f765b1a3-7fff4b5ce0c8",
+                "instances": 1,
+                "checked": 379,
+                "rejected": 0,
+                "devices": 1,
+                "shader_definitions": 16
+              }
+            ],
+            "instances": 2,
+            "checked": 379,
+            "rejected": 0,
+            "devices": 1,
+            "shader_definitions": 16
+          }
+        }
+      },
+      {
+        "case": "dEQP-VK.ray_tracing_pipeline.acceleration_structures.update.traditional_structures.gpu.compact.degenerate",
+        "status": "pass",
+        "result": "Pass",
+        "exit_code": 0,
+        "elapsed_seconds": 9.437,
+        "stdout": {
+          "path": "build-rt-cts-evidence/refit-library-guarded-flags2-final/0030-degenerate-e7552e93c0.stdout.txt",
+          "sha256": "2059009151ed058eab7465a252e8a828b9ffa48bfb61db47e5248de3960cd33c"
+        },
+        "qpa": {
+          "path": "build-rt-cts-evidence/refit-library-guarded-flags2-final/0030-degenerate-e7552e93c0.qpa",
+          "sha256": "c355babc403dd4a2fba167fca0c18b2cfdf69c70a647399d3498fbe8166f322a"
+        },
+        "guard": {
+          "log": "build-rt-cts-evidence/refit-library-guarded-flags2-final/0030-degenerate-e7552e93c0.guard.jsonl",
+          "verified": true,
+          "sha256": "47daedb18afbe853ce6707a51d5067c9d6a5ec930aaa09c07ac8edb87e4e97fd",
+          "records": 7,
+          "reject_records": 0,
+          "audit": {
+            "mode": "execution-only",
+            "pid": 88520,
+            "loads": 2,
+            "segments": [
+              {
+                "load_id": "qpc-00000043fcf467c0-7fff4b5ce0c8",
+                "instances": 1,
+                "checked": 0,
+                "rejected": 0,
+                "devices": 0,
+                "shader_definitions": 0
+              },
+              {
+                "load_id": "qpc-00000043fd0be5f0-7fff4b5ce0c8",
+                "instances": 1,
+                "checked": 378,
+                "rejected": 0,
+                "devices": 1,
+                "shader_definitions": 16
+              }
+            ],
+            "instances": 2,
+            "checked": 378,
+            "rejected": 0,
+            "devices": 1,
+            "shader_definitions": 16
+          }
+        }
+      },
+      {
+        "case": "dEQP-VK.ray_query.acceleration_structures.instance_update.traditional_structures.gpu_built.update",
+        "status": "pass",
+        "result": "Pass",
+        "exit_code": 0,
+        "elapsed_seconds": 3.015,
+        "stdout": {
+          "path": "build-rt-cts-evidence/refit-library-guarded-flags2-final/0031-update-dae2c02081.stdout.txt",
+          "sha256": "baae09addd5b27f76cca6d62e3d47bd1d3b74a9b054c3e6d4e52ae88502dcfd3"
+        },
+        "qpa": {
+          "path": "build-rt-cts-evidence/refit-library-guarded-flags2-final/0031-update-dae2c02081.qpa",
+          "sha256": "a8bdbef83880546b0f93375c045d59b6736a1a3458f0d92f71b4dcb2231bd173"
+        },
+        "guard": {
+          "log": "build-rt-cts-evidence/refit-library-guarded-flags2-final/0031-update-dae2c02081.guard.jsonl",
+          "verified": true,
+          "sha256": "51f22d32210696136addcd8fcbd7214dbe7c15e7ab6ab9de7ff94366eeaa18b7",
+          "records": 7,
+          "reject_records": 0,
+          "audit": {
+            "mode": "execution-only",
+            "pid": 81228,
+            "loads": 2,
+            "segments": [
+              {
+                "load_id": "qpc-00000044028edfc5-7fff4b5ce0c8",
+                "instances": 1,
+                "checked": 0,
+                "rejected": 0,
+                "devices": 0,
+                "shader_definitions": 0
+              },
+              {
+                "load_id": "qpc-0000004402a608ad-7fff4b5ce0c8",
+                "instances": 1,
+                "checked": 2319,
+                "rejected": 0,
+                "devices": 1,
+                "shader_definitions": 16
+              }
+            ],
+            "instances": 2,
+            "checked": 2319,
+            "rejected": 0,
+            "devices": 1,
+            "shader_definitions": 16
+          }
+        }
+      },
+      {
+        "case": "dEQP-VK.ray_query.acceleration_structures.instance_update.traditional_structures.gpu_built.update_in_place",
+        "status": "pass",
+        "result": "Pass",
+        "exit_code": 0,
+        "elapsed_seconds": 3.344,
+        "stdout": {
+          "path": "build-rt-cts-evidence/refit-library-guarded-flags2-final/0032-update_in_place-23e834f508.stdout.txt",
+          "sha256": "aa3acbfd07c6ece9bf9a9b6420dc8011c0a9237a8ad8de95601065cfddaf13d0"
+        },
+        "qpa": {
+          "path": "build-rt-cts-evidence/refit-library-guarded-flags2-final/0032-update_in_place-23e834f508.qpa",
+          "sha256": "d6fec4afcc28829e7e37aae5ed2171a00a43a974dccb80475633b6b7e2580629"
+        },
+        "guard": {
+          "log": "build-rt-cts-evidence/refit-library-guarded-flags2-final/0032-update_in_place-23e834f508.guard.jsonl",
+          "verified": true,
+          "sha256": "e96687c623d7ded23ba0fe86427585a86305378b2da76608a227696e64b448ed",
+          "records": 7,
+          "reject_records": 0,
+          "audit": {
+            "mode": "execution-only",
+            "pid": 71424,
+            "loads": 2,
+            "segments": [
+              {
+                "load_id": "qpc-0000004404771247-7fff4b5ce0c8",
+                "instances": 1,
+                "checked": 0,
+                "rejected": 0,
+                "devices": 0,
+                "shader_definitions": 0
+              },
+              {
+                "load_id": "qpc-00000044048dcb00-7fff4b5ce0c8",
+                "instances": 1,
+                "checked": 2319,
+                "rejected": 0,
+                "devices": 1,
+                "shader_definitions": 16
+              }
+            ],
+            "instances": 2,
+            "checked": 2319,
+            "rejected": 0,
+            "devices": 1,
+            "shader_definitions": 16
+          }
+        }
+      }
+    ]
+  },
+  "native_controls": {
+    "libraries": {
+      "state": "completed",
+      "mode": "native",
+      "counts": {
+        "pass": 20,
+        "fail": 0,
+        "notSupported": 0,
+        "crash": 0,
+        "timeout": 0,
+        "noresult": 0
+      },
+      "cts_revision_declared": "d18e4c68543103371715845cd914c71e5859963e",
+      "cts_sha256": "8cf824c598181ef43ccd74d67acce89c9cc6fc47029a164440f0b0ea74af0380",
+      "layer_revision_declared": null,
+      "timeout_seconds": 120.0,
+      "finished_at_utc": "2026-10-27T20:15:30.395400+00:00",
+      "summary": {
+        "path": "build-rt-cts-evidence/pipeline-library-native/summary.json",
+        "sha256": "7f50dd5736708e30fc532336864384dc3b48a503858da8a4f305cdc03f7a410a"
+      },
+      "selected_cases": [
+        "dEQP-VK.ray_tracing_pipeline.pipeline_library.configurations.singlethreaded_compilation.s0_l1",
+        "dEQP-VK.ray_tracing_pipeline.pipeline_library.configurations.singlethreaded_compilation.s0_l1_aabbs",
+        "dEQP-VK.ray_tracing_pipeline.pipeline_library.configurations.singlethreaded_compilation.s3_l11",
+        "dEQP-VK.ray_tracing_pipeline.pipeline_library.configurations.singlethreaded_compilation.s3_l11_aabbs",
+        "dEQP-VK.ray_tracing_pipeline.pipeline_library.configurations.singlethreaded_compilation.s0_l23",
+        "dEQP-VK.ray_tracing_pipeline.pipeline_library.configurations.singlethreaded_compilation.s0_l23_aabbs",
+        "dEQP-VK.ray_tracing_pipeline.pipeline_library.configurations.singlethreaded_compilation.s0_l1_l1",
+        "dEQP-VK.ray_tracing_pipeline.pipeline_library.configurations.singlethreaded_compilation.s0_l1_l1_aabbs",
+        "dEQP-VK.ray_tracing_pipeline.pipeline_library.configurations.singlethreaded_compilation.s3_l22_l22",
+        "dEQP-VK.ray_tracing_pipeline.pipeline_library.configurations.singlethreaded_compilation.s3_l22_l22_aabbs",
+        "dEQP-VK.ray_tracing_pipeline.pipeline_library.configurations.multithreaded_compilation.s3_l232",
+        "dEQP-VK.ray_tracing_pipeline.pipeline_library.configurations.multithreaded_compilation.s3_l232_aabbs",
+        "dEQP-VK.ray_tracing_pipeline.pipeline_library.configurations.multithreaded_compilation_dho.s3_l2_l3",
+        "dEQP-VK.ray_tracing_pipeline.pipeline_library.configurations.multithreaded_compilation_dho.s3_l2_l3_aabbs",
+        "dEQP-VK.ray_tracing_pipeline.pipeline_library.configurations.rgen_miss_in_library.s0_l1",
+        "dEQP-VK.ray_tracing_pipeline.pipeline_library.configurations.rgen_miss_in_library.s0_l1_aabbs",
+        "dEQP-VK.ray_tracing_pipeline.pipeline_library.configurations.rgen_miss_in_library.s0_l2_l3",
+        "dEQP-VK.ray_tracing_pipeline.pipeline_library.configurations.rgen_miss_in_library.s0_l2_l3_aabbs",
+        "dEQP-VK.ray_tracing_pipeline.pipeline_library.configurations.misc.use_link_time_optimizations",
+        "dEQP-VK.ray_tracing_pipeline.pipeline_library.configurations.misc.retain_link_time_optimizations"
+      ],
+      "layer": null,
+      "guard": null
+    },
+    "refit": {
+      "state": "completed",
+      "mode": "native",
+      "counts": {
+        "pass": 12,
+        "fail": 0,
+        "notSupported": 0,
+        "crash": 0,
+        "timeout": 0,
+        "noresult": 0
+      },
+      "cts_revision_declared": "d18e4c68543103371715845cd914c71e5859963e",
+      "cts_sha256": "8cf824c598181ef43ccd74d67acce89c9cc6fc47029a164440f0b0ea74af0380",
+      "layer_revision_declared": null,
+      "timeout_seconds": 120.0,
+      "finished_at_utc": "2026-10-27T21:04:04.638147+00:00",
+      "summary": {
+        "path": "build-rt-cts-evidence/refit-native-control/summary.json",
+        "sha256": "225bf51ddb215dceb60516b7df1ec6a0e55e4bfdd8b9dd14dea771e946cab1f1"
+      },
+      "selected_cases": [
+        "dEQP-VK.ray_tracing_pipeline.acceleration_structures.update.traditional_structures.gpu.normal.vertices",
+        "dEQP-VK.ray_tracing_pipeline.acceleration_structures.update.traditional_structures.gpu.normal.indices",
+        "dEQP-VK.ray_tracing_pipeline.acceleration_structures.update.traditional_structures.gpu.normal.transform",
+        "dEQP-VK.ray_tracing_pipeline.acceleration_structures.update.traditional_structures.gpu.normal.geometry_transform",
+        "dEQP-VK.ray_tracing_pipeline.acceleration_structures.update.traditional_structures.gpu.normal.degenerate",
+        "dEQP-VK.ray_tracing_pipeline.acceleration_structures.update.traditional_structures.gpu.compact.vertices",
+        "dEQP-VK.ray_tracing_pipeline.acceleration_structures.update.traditional_structures.gpu.compact.indices",
+        "dEQP-VK.ray_tracing_pipeline.acceleration_structures.update.traditional_structures.gpu.compact.transform",
+        "dEQP-VK.ray_tracing_pipeline.acceleration_structures.update.traditional_structures.gpu.compact.geometry_transform",
+        "dEQP-VK.ray_tracing_pipeline.acceleration_structures.update.traditional_structures.gpu.compact.degenerate",
+        "dEQP-VK.ray_query.acceleration_structures.instance_update.traditional_structures.gpu_built.update",
+        "dEQP-VK.ray_query.acceleration_structures.instance_update.traditional_structures.gpu_built.update_in_place"
+      ],
+      "layer": null,
+      "guard": null
+    }
+  },
+  "local_tests": {
+    "offline": {
+      "passed": 30,
+      "total": 30,
+      "log": {
+        "path": "build-source-layout/rt-integration-2026-10-28-offline-flags2.log",
+        "sha256": "a2ba767eb22875acb2677342786d81825decb9d27c9d30499ae844a31b73bc8e"
+      }
+    },
+    "components_fresh": {
+      "passed": 5,
+      "total": 5,
+      "log": {
+        "path": "build-source-layout/rt-integration-2026-10-28-components-tests.log",
+        "sha256": "39baf255645d04db381745a795af47e728d88457cbfdaf6f10d041808d6331fa"
+      }
+    },
+    "public_gpu_and_components": {
+      "passed": 11,
+      "total": 11,
+      "log": {
+        "path": "build-source-layout/rt-integration-2026-10-28-gpu-flags2.log",
+        "sha256": "cbc429a7e4009d946c6de4b1e52b4859e95c4aca387de0435f2e50c1d4892c36"
+      }
+    },
+    "earlier_public_gpu_including_full_build": {
+      "passed": 8,
+      "total": 8,
+      "log": {
+        "path": "build-source-layout/rt-integration-2026-10-28-gpu-final.log",
+        "sha256": "73e719ab54624eda948d34056cc2f0cf29a63dae7a0d8e75125e0b3fccf84f8e"
+      }
+    }
+  },
+  "artifacts_sha256": {
+    "build-raytracing-unified/VkLayer_VKRT_SOFTWARE_RAY_QUERY.dll": "1dbe2045dc0daecd9526bb8821ef4540ed2458244a365a3ad73d47228b2944ed",
+    "build-raytracing-unified/vkrt_no_native_rt_guard.dll": "e9334c97f171ab4933d80a2f1955e97dbd0573c8a1e4cd14dadd0d8d79fd9fb8",
+    "build-raytracing-unified/vel_rt_state_compiler_tests.exe": "1bf9d409ce00cb07d8b859848b32e16102b44176dbfda62deac98986683dd2d2",
+    "build-raytracing-unified/test_rtp_api.exe": "c286282b1063225daca624b75fcd4547912520ec0547a3746b657fd062e2647e",
+    "build-raytracing-unified/test_as_update.exe": "e89a293a74ac9dc6ee800abdd3584cb9b019426a16cde5dc68d68e6aaddef581",
+    "build-raytracing-unified/test_gpu_build.exe": "b9e4c98a9abba319c04b7a7f018b9d51cc588d260fa772f2bf0e625a72e46a60"
+  },
+  "earlier_public_gpu_artifacts_sha256": {
+    "build-raytracing-unified/VkLayer_VKRT_SOFTWARE_RAY_QUERY.dll": "45dc307247cd198a00e66860f0f3483f60cfde4251ecba304956c45bfbf0b2e8",
+    "build-raytracing-unified/vkrt_no_native_rt_guard.dll": "e9334c97f171ab4933d80a2f1955e97dbd0573c8a1e4cd14dadd0d8d79fd9fb8",
+    "build-raytracing-unified/vel_rt_state_compiler_tests.exe": "1bf9d409ce00cb07d8b859848b32e16102b44176dbfda62deac98986683dd2d2",
+    "build-raytracing-unified/test_rtp_api.exe": "90bf732080bf5fc059fe1f5e57212b771fbf38aa6f0dfa9f9da1f296fffcb133",
+    "build-raytracing-unified/test_as_update.exe": "11915674738756d8abde9749bb5f83128f1c6cf6187c254fdf4947d88c51a21c",
+    "build-raytracing-unified/test_gpu_build.exe": "773bd8b8feec59e91119a2e306e64b79cf0c7f3aa975a0da2cea76a6b6a3726c"
+  },
+  "earlier_public_gpu_artifact_note": "The 8/8 run includes the full default BUILD fixture. Fixture executables were later rebuilt for Win32 macro-safe local names; retain the earlier observed hashes separately. The final 11/11 recheck uses the final layer and current fixtures, including aligned values instead of repeating the full default BUILD scene set.",
+  "build_logs": [
+    {
+      "path": "build-source-layout/rt-integration-2026-10-28-flags2-build.log",
+      "sha256": "e46811c41010fa1dcdc458b4b987d58b22b85ad4bc091f4412dab9676ff47772"
+    },
+    {
+      "path": "build-source-layout/rt-integration-2026-10-28-parent-flags2-build.log",
+      "sha256": "ebd45cf8cba1fce1e719522e663d9628fa308bd3c0860bc3dcd84b7d05da89ac"
+    },
+    {
+      "path": "build-source-layout/rt-integration-2026-10-28-components-configure.log",
+      "sha256": "7ea5045c6462bd53d826c9d60861b726db0786c1a1d5805be0208c434817775f"
+    },
+    {
+      "path": "build-source-layout/rt-integration-2026-10-28-components-build.log",
+      "sha256": "520eb9ec3b173cf18d2291cfedb088cb1bd37296377366a2ad908e365715723b"
+    }
+  ],
+  "pointer_gpu_log": {
+    "path": "build-source-layout/rt-integration-2026-10-28-pointer-route-gpu.log",
+    "sha256": "a9d92e982b2dc169d662b2ea75cf766144d3dd810f49ecedef8056de7ce2eb3f"
+  },
+  "pointer_original_exception": {
+    "scope": "Original typed logical-pointer SSA GPU failure captured before routed-operation replacement",
+    "original_shader": {
+      "path": "build-source-layout/typed-pointer-before.spv",
+      "size": 8260,
+      "sha256": "c7271c970373f0e897307ceb2759a6b79eb548bc91baf5203f6a6fff4b1baa95",
+      "validator": "C:/VulkanSDK/1.4.357.0/Bin/spirv-val.exe --target-env vulkan1.3 --scalar-block-layout",
+      "validator_exit_code": 0
+    },
+    "executable": {
+      "path": "build-raytracing-unified/vel_rt_state_compiler_tests.exe",
+      "original_size_observed": 3410944,
+      "original_last_write_time_local_observed": "2026-10-28 04:22:20",
+      "note": "Original executable was subsequently overwritten by the routed-operation rebuild. No hash is inferred for the original executable; the shader and CDB evidence were captured before that rebuild."
+    },
+    "driver_library": "C:/WINDOWS/System32/DriverStore/FileRepository/nv_dispi.inf_amd64_b7cca8360c0d57e9/nvoglv64.dll",
+    "exception": {
+      "chance": "second",
+      "code": "0xc0000005",
+      "driver_offset": "0xea4b7",
+      "access": "read",
+      "address": "0x8",
+      "observed_api": "vkCreateComputePipelines"
+    },
+    "configuration": {
+      "implicit_layers": "disabled",
+      "explicit_layer": "VK_LAYER_KHRONOS_validation",
+      "core_features": "all false",
+      "vulkan12_features": "all false (source initialized; captured prefix zero)",
+      "variablePointersStorageBuffer": true,
+      "variablePointers": false,
+      "enabled_device_extensions": [],
+      "compute_pipeline_flags": 0,
+      "compute_stage": "main"
+    },
+    "logs": [
+      {
+        "path": "build-source-layout/typed-pointer-crash-cdb.log",
+        "sha256": "d1a25a009733efec6a4e99528fb807c39266ad622eb3f0dbaef5b6ebd6cc86a1"
+      },
+      {
+        "path": "build-source-layout/typed-pointer-crash-vvl-second-cdb.log",
+        "sha256": "5fc550f35bb7d2ec013180414f67ddb4ef932c2859c567ed5d81dd81de7f3e09"
+      },
+      {
+        "path": "build-source-layout/typed-pointer-captured-cdb.log",
+        "sha256": "d9f3f69fb9b3ab4f353e37ade23017e7a836ff002828bc02f368249579ab083e"
+      }
+    ],
+    "observation": "The generated shader validates and has native StorageBuffer pointer Phi nodes including a null route. The driver access violation is observed; attributing the exact compiler defect requires reduced-driver investigation. The replacement retains the same source/fixture semantics and dispatches actual operations within the selected static route."
+  },
+  "retained_intermediate_cts": {
+    "pipeline-library-before": {
+      "state": "completed",
+      "mode": "software-rt",
+      "counts": {
+        "pass": 0,
+        "fail": 0,
+        "notSupported": 0,
+        "crash": 0,
+        "timeout": 0,
+        "noresult": 2
+      },
+      "cts_revision_declared": "d18e4c68543103371715845cd914c71e5859963e",
+      "cts_sha256": "8cf824c598181ef43ccd74d67acce89c9cc6fc47029a164440f0b0ea74af0380",
+      "layer_revision_declared": "b15b2bb",
+      "timeout_seconds": 120.0,
+      "finished_at_utc": "2026-10-27T20:10:12.141289+00:00",
+      "summary": {
+        "path": "build-rt-cts-evidence/pipeline-library-before/summary.json",
+        "sha256": "88b50650e536ce5ca41e1bee6bca1098b82439a1b8fcfa65d84937ea00c59800"
+      },
+      "selected_cases": [
+        "dEQP-VK.ray_tracing_pipeline.pipeline_library.singlethreaded_compilation.s0_l1",
+        "dEQP-VK.ray_tracing_pipeline.pipeline_library.singlethreaded_compilation.s0_l1_aabbs"
+      ],
+      "layer": {
+        "name": "VK_LAYER_VKRT_SOFTWARE_RAY_QUERY",
+        "source_manifest": "D:\\Codes\\Vulkan-ExtensionLayer\\build-raytracing-unified\\layers\\VkLayer_VKRT_SOFTWARE_RAY_QUERY.json",
+        "source_manifest_sha256": "256efbc35db5f4d5fcf5fe2c606d9b676bb36e2ecb92513b31d49a8443fef02b",
+        "source_library": "D:\\Codes\\Vulkan-ExtensionLayer\\build-raytracing-unified\\VkLayer_VKRT_SOFTWARE_RAY_QUERY.dll",
+        "snapshot_manifest": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\pipeline-library-before\\layer_snapshot\\VkLayer_VKRT_SOFTWARE_RAY_QUERY.json",
+        "snapshot_manifest_sha256": "c214f8989b0ee207b51d9ae8692ed716fefbcee39f3e83fc9bc5d9682595aa9b",
+        "snapshot_library": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\pipeline-library-before\\layer_snapshot\\VkLayer_VKRT_SOFTWARE_RAY_QUERY.dll",
+        "library_sha256": "ed5589534291e35465c44bc4c2fb96342ba1d6b72e5a2b9476700d0358664cb5",
+        "snapshot_scope": "manifest_and_layer_library"
+      },
+      "guard": null
+    },
+    "pipeline-library-before-corrected": {
+      "state": "completed",
+      "mode": "software-rt",
+      "counts": {
+        "pass": 0,
+        "fail": 2,
+        "notSupported": 0,
+        "crash": 0,
+        "timeout": 0,
+        "noresult": 0
+      },
+      "cts_revision_declared": "d18e4c68543103371715845cd914c71e5859963e",
+      "cts_sha256": "8cf824c598181ef43ccd74d67acce89c9cc6fc47029a164440f0b0ea74af0380",
+      "layer_revision_declared": "b15b2bb",
+      "timeout_seconds": 120.0,
+      "finished_at_utc": "2026-10-27T20:10:34.490244+00:00",
+      "summary": {
+        "path": "build-rt-cts-evidence/pipeline-library-before-corrected/summary.json",
+        "sha256": "b0e5a7b11c743a5ae5b6cb1ed8fc05741890af149788595dc2e13f81e0e712e6"
+      },
+      "selected_cases": [
+        "dEQP-VK.ray_tracing_pipeline.pipeline_library.configurations.singlethreaded_compilation.s0_l1",
+        "dEQP-VK.ray_tracing_pipeline.pipeline_library.configurations.singlethreaded_compilation.s0_l1_aabbs"
+      ],
+      "layer": {
+        "name": "VK_LAYER_VKRT_SOFTWARE_RAY_QUERY",
+        "source_manifest": "D:\\Codes\\Vulkan-ExtensionLayer\\build-raytracing-unified\\layers\\VkLayer_VKRT_SOFTWARE_RAY_QUERY.json",
+        "source_manifest_sha256": "256efbc35db5f4d5fcf5fe2c606d9b676bb36e2ecb92513b31d49a8443fef02b",
+        "source_library": "D:\\Codes\\Vulkan-ExtensionLayer\\build-raytracing-unified\\VkLayer_VKRT_SOFTWARE_RAY_QUERY.dll",
+        "snapshot_manifest": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\pipeline-library-before-corrected\\layer_snapshot\\VkLayer_VKRT_SOFTWARE_RAY_QUERY.json",
+        "snapshot_manifest_sha256": "eb4c7e68d370ff82825bc37521a4a32ba3e5ee2961d5833a6d3f1eca1b467717",
+        "snapshot_library": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\pipeline-library-before-corrected\\layer_snapshot\\VkLayer_VKRT_SOFTWARE_RAY_QUERY.dll",
+        "library_sha256": "ed5589534291e35465c44bc4c2fb96342ba1d6b72e5a2b9476700d0358664cb5",
+        "snapshot_scope": "manifest_and_layer_library"
+      },
+      "guard": null
+    },
+    "pipeline-library-first": {
+      "state": "completed",
+      "mode": "software-rt",
+      "counts": {
+        "pass": 2,
+        "fail": 0,
+        "notSupported": 0,
+        "crash": 0,
+        "timeout": 0,
+        "noresult": 0
+      },
+      "cts_revision_declared": "d18e4c68543103371715845cd914c71e5859963e",
+      "cts_sha256": "8cf824c598181ef43ccd74d67acce89c9cc6fc47029a164440f0b0ea74af0380",
+      "layer_revision_declared": "worktree-after-b15b2bb-pipeline-library-first",
+      "timeout_seconds": 120.0,
+      "finished_at_utc": "2026-10-27T20:12:16.665088+00:00",
+      "summary": {
+        "path": "build-rt-cts-evidence/pipeline-library-first/summary.json",
+        "sha256": "1b4cdd0f407f0f5ea2cebc78c770159526f78d16138f3f9e1b6c7db8dd68fba1"
+      },
+      "selected_cases": [
+        "dEQP-VK.ray_tracing_pipeline.pipeline_library.configurations.singlethreaded_compilation.s0_l1",
+        "dEQP-VK.ray_tracing_pipeline.pipeline_library.configurations.singlethreaded_compilation.s0_l1_aabbs"
+      ],
+      "layer": {
+        "name": "VK_LAYER_VKRT_SOFTWARE_RAY_QUERY",
+        "source_manifest": "D:\\Codes\\Vulkan-ExtensionLayer\\build-raytracing-unified\\layers\\VkLayer_VKRT_SOFTWARE_RAY_QUERY.json",
+        "source_manifest_sha256": "256efbc35db5f4d5fcf5fe2c606d9b676bb36e2ecb92513b31d49a8443fef02b",
+        "source_library": "D:\\Codes\\Vulkan-ExtensionLayer\\build-raytracing-unified\\VkLayer_VKRT_SOFTWARE_RAY_QUERY.dll",
+        "snapshot_manifest": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\pipeline-library-first\\layer_snapshot\\VkLayer_VKRT_SOFTWARE_RAY_QUERY.json",
+        "snapshot_manifest_sha256": "d92f4fd8616349ed494c342c6b9d9ba8ca1e80325e1ef2c6c87aa35d082ce348",
+        "snapshot_library": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\pipeline-library-first\\layer_snapshot\\VkLayer_VKRT_SOFTWARE_RAY_QUERY.dll",
+        "library_sha256": "bd901d8a333c8821abee48a104101a1786884e474f189cc37538ccf2f66b76f0",
+        "snapshot_scope": "manifest_and_layer_library"
+      },
+      "guard": null
+    },
+    "no-native-rt-guard-first": {
+      "state": "completed",
+      "mode": "software-rt",
+      "counts": {
+        "pass": 0,
+        "fail": 2,
+        "notSupported": 0,
+        "crash": 0,
+        "timeout": 0,
+        "noresult": 0
+      },
+      "cts_revision_declared": "d18e4c68543103371715845cd914c71e5859963e",
+      "cts_sha256": "8cf824c598181ef43ccd74d67acce89c9cc6fc47029a164440f0b0ea74af0380",
+      "layer_revision_declared": "worktree-after-b15b2bb-refit-pointer-libraries",
+      "timeout_seconds": 120.0,
+      "finished_at_utc": "2026-10-27T20:23:47.498792+00:00",
+      "summary": {
+        "path": "build-rt-cts-evidence/no-native-rt-guard-first/summary.json",
+        "sha256": "aa077c72c2ad1d966370de440a97075c705acf3ea79189a26592fc39075d17fd"
+      },
+      "selected_cases": [
+        "dEQP-VK.ray_query.builtin.flow.comp.triangles",
+        "dEQP-VK.ray_tracing_pipeline.builtin.launchidext.rgen_1_1_1"
+      ],
+      "layer": {
+        "name": "VK_LAYER_VKRT_SOFTWARE_RAY_QUERY",
+        "source_manifest": "D:\\Codes\\Vulkan-ExtensionLayer\\build-raytracing-unified\\layers\\VkLayer_VKRT_SOFTWARE_RAY_QUERY.json",
+        "source_manifest_sha256": "256efbc35db5f4d5fcf5fe2c606d9b676bb36e2ecb92513b31d49a8443fef02b",
+        "source_library": "D:\\Codes\\Vulkan-ExtensionLayer\\build-raytracing-unified\\VkLayer_VKRT_SOFTWARE_RAY_QUERY.dll",
+        "snapshot_manifest": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\no-native-rt-guard-first\\layer_snapshot\\VkLayer_VKRT_SOFTWARE_RAY_QUERY.json",
+        "snapshot_manifest_sha256": "e2fc404926c13a2d5cae4aeae293b741146d13414fffea78e94c7e8d51fe92c0",
+        "snapshot_library": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\no-native-rt-guard-first\\layer_snapshot\\VkLayer_VKRT_SOFTWARE_RAY_QUERY.dll",
+        "library_sha256": "b6f6ee903c39acf0475799d8d57d8b69635e7e69ff0a361e7714589e00096b1d",
+        "snapshot_scope": "manifest_and_layer_library"
+      },
+      "guard": {
+        "name": "VK_LAYER_VKRT_NO_NATIVE_RT_GUARD",
+        "source_manifest": "D:\\Codes\\Vulkan-ExtensionLayer\\build-raytracing-unified\\no-native-rt-guard\\VkLayer_VKRT_NO_NATIVE_RT_GUARD.json",
+        "source_manifest_sha256": "5c57a12cbb68587cb33ecf46c0cfe05ad4e889223a6689ba4a39359216a57235",
+        "source_library": "D:\\Codes\\Vulkan-ExtensionLayer\\build-raytracing-unified\\vkrt_no_native_rt_guard.dll",
+        "snapshot_manifest": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\no-native-rt-guard-first\\guard_snapshot\\VkLayer_VKRT_NO_NATIVE_RT_GUARD.json",
+        "snapshot_manifest_sha256": "1e11d483adceeb4430bf2abff337dd280fc8003f7bdd97f5c4ee99b59256ed0d",
+        "snapshot_library": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\no-native-rt-guard-first\\guard_snapshot\\vkrt_no_native_rt_guard.dll",
+        "library_sha256": "a213f3bbfab57e7ec9748d1f840f5a6289c43b910414dbae9385395c454f7e7f",
+        "snapshot_scope": "manifest_and_layer_library"
+      }
+    },
+    "no-native-rt-guard-v2-smoke": {
+      "state": "completed",
+      "mode": "software-rt",
+      "counts": {
+        "pass": 2,
+        "fail": 0,
+        "notSupported": 0,
+        "crash": 0,
+        "timeout": 0,
+        "noresult": 0
+      },
+      "cts_revision_declared": "d18e4c68543103371715845cd914c71e5859963e",
+      "cts_sha256": "8cf824c598181ef43ccd74d67acce89c9cc6fc47029a164440f0b0ea74af0380",
+      "layer_revision_declared": "worktree-after-b15b2bb-refit-pointer-libraries",
+      "timeout_seconds": 120.0,
+      "finished_at_utc": "2026-10-27T20:39:12.998156+00:00",
+      "summary": {
+        "path": "build-rt-cts-evidence/no-native-rt-guard-v2-smoke/summary.json",
+        "sha256": "66b3d09b9869b251f99afdf6b73a81556cb198bc838165e2f9e6be607c30037d"
+      },
+      "selected_cases": [
+        "dEQP-VK.ray_query.builtin.flow.comp.triangles",
+        "dEQP-VK.ray_tracing_pipeline.builtin.launchidext.rgen_1_1_1"
+      ],
+      "layer": {
+        "name": "VK_LAYER_VKRT_SOFTWARE_RAY_QUERY",
+        "source_manifest": "D:\\Codes\\Vulkan-ExtensionLayer\\build-raytracing-unified\\layers\\VkLayer_VKRT_SOFTWARE_RAY_QUERY.json",
+        "source_manifest_sha256": "256efbc35db5f4d5fcf5fe2c606d9b676bb36e2ecb92513b31d49a8443fef02b",
+        "source_library": "D:\\Codes\\Vulkan-ExtensionLayer\\build-raytracing-unified\\VkLayer_VKRT_SOFTWARE_RAY_QUERY.dll",
+        "snapshot_manifest": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\no-native-rt-guard-v2-smoke\\layer_snapshot\\VkLayer_VKRT_SOFTWARE_RAY_QUERY.json",
+        "snapshot_manifest_sha256": "3bbe633ddbd998a5d528800afe56a557d50393ae82f051fb607348928ccff308",
+        "snapshot_library": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\no-native-rt-guard-v2-smoke\\layer_snapshot\\VkLayer_VKRT_SOFTWARE_RAY_QUERY.dll",
+        "library_sha256": "b6f6ee903c39acf0475799d8d57d8b69635e7e69ff0a361e7714589e00096b1d",
+        "snapshot_scope": "manifest_and_layer_library"
+      },
+      "guard": {
+        "name": "VK_LAYER_VKRT_NO_NATIVE_RT_GUARD",
+        "source_manifest": "D:\\Codes\\Vulkan-ExtensionLayer\\build-raytracing-unified\\no-native-rt-guard\\VkLayer_VKRT_NO_NATIVE_RT_GUARD.json",
+        "source_manifest_sha256": "5c57a12cbb68587cb33ecf46c0cfe05ad4e889223a6689ba4a39359216a57235",
+        "source_library": "D:\\Codes\\Vulkan-ExtensionLayer\\build-raytracing-unified\\vkrt_no_native_rt_guard.dll",
+        "snapshot_manifest": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\no-native-rt-guard-v2-smoke\\guard_snapshot\\VkLayer_VKRT_NO_NATIVE_RT_GUARD.json",
+        "snapshot_manifest_sha256": "942b4c8bd3fc6d9a98bad6b5d170dbfcf60acd1fdcfdae0877b564b81aeaa571",
+        "snapshot_library": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\no-native-rt-guard-v2-smoke\\guard_snapshot\\vkrt_no_native_rt_guard.dll",
+        "library_sha256": "e9334c97f171ab4933d80a2f1955e97dbd0573c8a1e4cd14dadd0d8d79fd9fb8",
+        "snapshot_scope": "manifest_and_layer_library",
+        "auditor_snapshot": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\no-native-rt-guard-v2-smoke\\guard_snapshot\\guard_auditor.py",
+        "auditor_sha256": "d224732f36b7a7d3cdf045d6217ba30c0300ecdeb980c76a1c541d32cd508fcb"
+      }
+    },
+    "refit-guarded-first": {
+      "state": "completed",
+      "mode": "software-rt",
+      "counts": {
+        "pass": 12,
+        "fail": 0,
+        "notSupported": 0,
+        "crash": 0,
+        "timeout": 0,
+        "noresult": 0
+      },
+      "cts_revision_declared": "d18e4c68543103371715845cd914c71e5859963e",
+      "cts_sha256": "8cf824c598181ef43ccd74d67acce89c9cc6fc47029a164440f0b0ea74af0380",
+      "layer_revision_declared": "worktree-after-b15b2bb-refit-first",
+      "timeout_seconds": 120.0,
+      "finished_at_utc": "2026-10-27T20:41:47.496789+00:00",
+      "summary": {
+        "path": "build-rt-cts-evidence/refit-guarded-first/summary.json",
+        "sha256": "043bafc561f7fb75bf1d1bac44749aa9efdeef75b02cafb5f9e16b2c2ee356d7"
+      },
+      "selected_cases": [
+        "dEQP-VK.ray_tracing_pipeline.acceleration_structures.update.traditional_structures.gpu.normal.vertices",
+        "dEQP-VK.ray_tracing_pipeline.acceleration_structures.update.traditional_structures.gpu.normal.indices",
+        "dEQP-VK.ray_tracing_pipeline.acceleration_structures.update.traditional_structures.gpu.normal.transform",
+        "dEQP-VK.ray_tracing_pipeline.acceleration_structures.update.traditional_structures.gpu.normal.geometry_transform",
+        "dEQP-VK.ray_tracing_pipeline.acceleration_structures.update.traditional_structures.gpu.normal.degenerate",
+        "dEQP-VK.ray_tracing_pipeline.acceleration_structures.update.traditional_structures.gpu.compact.vertices",
+        "dEQP-VK.ray_tracing_pipeline.acceleration_structures.update.traditional_structures.gpu.compact.indices",
+        "dEQP-VK.ray_tracing_pipeline.acceleration_structures.update.traditional_structures.gpu.compact.transform",
+        "dEQP-VK.ray_tracing_pipeline.acceleration_structures.update.traditional_structures.gpu.compact.geometry_transform",
+        "dEQP-VK.ray_tracing_pipeline.acceleration_structures.update.traditional_structures.gpu.compact.degenerate",
+        "dEQP-VK.ray_query.acceleration_structures.instance_update.traditional_structures.gpu_built.update",
+        "dEQP-VK.ray_query.acceleration_structures.instance_update.traditional_structures.gpu_built.update_in_place"
+      ],
+      "layer": {
+        "name": "VK_LAYER_VKRT_SOFTWARE_RAY_QUERY",
+        "source_manifest": "D:\\Codes\\Vulkan-ExtensionLayer\\build-raytracing-unified\\layers\\VkLayer_VKRT_SOFTWARE_RAY_QUERY.json",
+        "source_manifest_sha256": "256efbc35db5f4d5fcf5fe2c606d9b676bb36e2ecb92513b31d49a8443fef02b",
+        "source_library": "D:\\Codes\\Vulkan-ExtensionLayer\\build-raytracing-unified\\VkLayer_VKRT_SOFTWARE_RAY_QUERY.dll",
+        "snapshot_manifest": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\refit-guarded-first\\layer_snapshot\\VkLayer_VKRT_SOFTWARE_RAY_QUERY.json",
+        "snapshot_manifest_sha256": "1fde2a8d58c4491102861e17b092bca13c65830e7ac3f6d6786cee3903cb43c2",
+        "snapshot_library": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\refit-guarded-first\\layer_snapshot\\VkLayer_VKRT_SOFTWARE_RAY_QUERY.dll",
+        "library_sha256": "b6f6ee903c39acf0475799d8d57d8b69635e7e69ff0a361e7714589e00096b1d",
+        "snapshot_scope": "manifest_and_layer_library"
+      },
+      "guard": {
+        "name": "VK_LAYER_VKRT_NO_NATIVE_RT_GUARD",
+        "source_manifest": "D:\\Codes\\Vulkan-ExtensionLayer\\build-raytracing-unified\\no-native-rt-guard\\VkLayer_VKRT_NO_NATIVE_RT_GUARD.json",
+        "source_manifest_sha256": "5c57a12cbb68587cb33ecf46c0cfe05ad4e889223a6689ba4a39359216a57235",
+        "source_library": "D:\\Codes\\Vulkan-ExtensionLayer\\build-raytracing-unified\\vkrt_no_native_rt_guard.dll",
+        "snapshot_manifest": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\refit-guarded-first\\guard_snapshot\\VkLayer_VKRT_NO_NATIVE_RT_GUARD.json",
+        "snapshot_manifest_sha256": "ff63aa7736eb07653844dcc18bc87db17a2558b2eb13c1e3887810877788919a",
+        "snapshot_library": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\refit-guarded-first\\guard_snapshot\\vkrt_no_native_rt_guard.dll",
+        "library_sha256": "e9334c97f171ab4933d80a2f1955e97dbd0573c8a1e4cd14dadd0d8d79fd9fb8",
+        "snapshot_scope": "manifest_and_layer_library",
+        "auditor_snapshot": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\refit-guarded-first\\guard_snapshot\\guard_auditor.py",
+        "auditor_sha256": "d224732f36b7a7d3cdf045d6217ba30c0300ecdeb980c76a1c541d32cd508fcb"
+      }
+    },
+    "refit-library-guarded-final": {
+      "state": "completed",
+      "mode": "software-rt",
+      "counts": {
+        "pass": 30,
+        "fail": 2,
+        "notSupported": 0,
+        "crash": 0,
+        "timeout": 0,
+        "noresult": 0
+      },
+      "cts_revision_declared": "d18e4c68543103371715845cd914c71e5859963e",
+      "cts_sha256": "8cf824c598181ef43ccd74d67acce89c9cc6fc47029a164440f0b0ea74af0380",
+      "layer_revision_declared": "worktree-after-b15b2bb-refit-route-dispatch-libraries",
+      "timeout_seconds": 120.0,
+      "finished_at_utc": "2026-10-27T20:55:12.304444+00:00",
+      "summary": {
+        "path": "build-rt-cts-evidence/refit-library-guarded-final/summary.json",
+        "sha256": "60037d9d238d50d76f00cfc9aa69448ce212d05300c1c51a9416d73c5e591fc0"
+      },
+      "selected_cases": [
+        "dEQP-VK.ray_tracing_pipeline.pipeline_library.configurations.singlethreaded_compilation.s0_l1",
+        "dEQP-VK.ray_tracing_pipeline.pipeline_library.configurations.singlethreaded_compilation.s0_l1_aabbs",
+        "dEQP-VK.ray_tracing_pipeline.pipeline_library.configurations.singlethreaded_compilation.s3_l11",
+        "dEQP-VK.ray_tracing_pipeline.pipeline_library.configurations.singlethreaded_compilation.s3_l11_aabbs",
+        "dEQP-VK.ray_tracing_pipeline.pipeline_library.configurations.singlethreaded_compilation.s0_l23",
+        "dEQP-VK.ray_tracing_pipeline.pipeline_library.configurations.singlethreaded_compilation.s0_l23_aabbs",
+        "dEQP-VK.ray_tracing_pipeline.pipeline_library.configurations.singlethreaded_compilation.s0_l1_l1",
+        "dEQP-VK.ray_tracing_pipeline.pipeline_library.configurations.singlethreaded_compilation.s0_l1_l1_aabbs",
+        "dEQP-VK.ray_tracing_pipeline.pipeline_library.configurations.singlethreaded_compilation.s3_l22_l22",
+        "dEQP-VK.ray_tracing_pipeline.pipeline_library.configurations.singlethreaded_compilation.s3_l22_l22_aabbs",
+        "dEQP-VK.ray_tracing_pipeline.pipeline_library.configurations.multithreaded_compilation.s3_l232",
+        "dEQP-VK.ray_tracing_pipeline.pipeline_library.configurations.multithreaded_compilation.s3_l232_aabbs",
+        "dEQP-VK.ray_tracing_pipeline.pipeline_library.configurations.multithreaded_compilation_dho.s3_l2_l3",
+        "dEQP-VK.ray_tracing_pipeline.pipeline_library.configurations.multithreaded_compilation_dho.s3_l2_l3_aabbs",
+        "dEQP-VK.ray_tracing_pipeline.pipeline_library.configurations.rgen_miss_in_library.s0_l1",
+        "dEQP-VK.ray_tracing_pipeline.pipeline_library.configurations.rgen_miss_in_library.s0_l1_aabbs",
+        "dEQP-VK.ray_tracing_pipeline.pipeline_library.configurations.rgen_miss_in_library.s0_l2_l3",
+        "dEQP-VK.ray_tracing_pipeline.pipeline_library.configurations.rgen_miss_in_library.s0_l2_l3_aabbs",
+        "dEQP-VK.ray_tracing_pipeline.pipeline_library.configurations.misc.use_link_time_optimizations",
+        "dEQP-VK.ray_tracing_pipeline.pipeline_library.configurations.misc.retain_link_time_optimizations",
+        "dEQP-VK.ray_tracing_pipeline.acceleration_structures.update.traditional_structures.gpu.normal.vertices",
+        "dEQP-VK.ray_tracing_pipeline.acceleration_structures.update.traditional_structures.gpu.normal.indices",
+        "dEQP-VK.ray_tracing_pipeline.acceleration_structures.update.traditional_structures.gpu.normal.transform",
+        "dEQP-VK.ray_tracing_pipeline.acceleration_structures.update.traditional_structures.gpu.normal.geometry_transform",
+        "dEQP-VK.ray_tracing_pipeline.acceleration_structures.update.traditional_structures.gpu.normal.degenerate",
+        "dEQP-VK.ray_tracing_pipeline.acceleration_structures.update.traditional_structures.gpu.compact.vertices",
+        "dEQP-VK.ray_tracing_pipeline.acceleration_structures.update.traditional_structures.gpu.compact.indices",
+        "dEQP-VK.ray_tracing_pipeline.acceleration_structures.update.traditional_structures.gpu.compact.transform",
+        "dEQP-VK.ray_tracing_pipeline.acceleration_structures.update.traditional_structures.gpu.compact.geometry_transform",
+        "dEQP-VK.ray_tracing_pipeline.acceleration_structures.update.traditional_structures.gpu.compact.degenerate",
+        "dEQP-VK.ray_query.acceleration_structures.instance_update.traditional_structures.gpu_built.update",
+        "dEQP-VK.ray_query.acceleration_structures.instance_update.traditional_structures.gpu_built.update_in_place"
+      ],
+      "layer": {
+        "name": "VK_LAYER_VKRT_SOFTWARE_RAY_QUERY",
+        "source_manifest": "D:\\Codes\\Vulkan-ExtensionLayer\\build-raytracing-unified\\layers\\VkLayer_VKRT_SOFTWARE_RAY_QUERY.json",
+        "source_manifest_sha256": "256efbc35db5f4d5fcf5fe2c606d9b676bb36e2ecb92513b31d49a8443fef02b",
+        "source_library": "D:\\Codes\\Vulkan-ExtensionLayer\\build-raytracing-unified\\VkLayer_VKRT_SOFTWARE_RAY_QUERY.dll",
+        "snapshot_manifest": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\refit-library-guarded-final\\layer_snapshot\\VkLayer_VKRT_SOFTWARE_RAY_QUERY.json",
+        "snapshot_manifest_sha256": "ad2c1e3e2df58e120b67b54b010fec00ccaf69b5d5dcc47a266bfdc13e6cb0cd",
+        "snapshot_library": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\refit-library-guarded-final\\layer_snapshot\\VkLayer_VKRT_SOFTWARE_RAY_QUERY.dll",
+        "library_sha256": "45dc307247cd198a00e66860f0f3483f60cfde4251ecba304956c45bfbf0b2e8",
+        "snapshot_scope": "manifest_and_layer_library"
+      },
+      "guard": {
+        "name": "VK_LAYER_VKRT_NO_NATIVE_RT_GUARD",
+        "source_manifest": "D:\\Codes\\Vulkan-ExtensionLayer\\build-raytracing-unified\\no-native-rt-guard\\VkLayer_VKRT_NO_NATIVE_RT_GUARD.json",
+        "source_manifest_sha256": "5c57a12cbb68587cb33ecf46c0cfe05ad4e889223a6689ba4a39359216a57235",
+        "source_library": "D:\\Codes\\Vulkan-ExtensionLayer\\build-raytracing-unified\\vkrt_no_native_rt_guard.dll",
+        "snapshot_manifest": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\refit-library-guarded-final\\guard_snapshot\\VkLayer_VKRT_NO_NATIVE_RT_GUARD.json",
+        "snapshot_manifest_sha256": "cbfffb61434048a6dc8f021289ffeab2186300dc0384c67dc6a497a65de882a9",
+        "snapshot_library": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\refit-library-guarded-final\\guard_snapshot\\vkrt_no_native_rt_guard.dll",
+        "library_sha256": "e9334c97f171ab4933d80a2f1955e97dbd0573c8a1e4cd14dadd0d8d79fd9fb8",
+        "snapshot_scope": "manifest_and_layer_library",
+        "auditor_snapshot": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\refit-library-guarded-final\\guard_snapshot\\guard_auditor.py",
+        "auditor_sha256": "d224732f36b7a7d3cdf045d6217ba30c0300ecdeb980c76a1c541d32cd508fcb"
+      }
+    },
+    "pipeline-library-flags2-recheck": {
+      "state": "completed",
+      "mode": "software-rt",
+      "counts": {
+        "pass": 2,
+        "fail": 0,
+        "notSupported": 0,
+        "crash": 0,
+        "timeout": 0,
+        "noresult": 0
+      },
+      "cts_revision_declared": "d18e4c68543103371715845cd914c71e5859963e",
+      "cts_sha256": "8cf824c598181ef43ccd74d67acce89c9cc6fc47029a164440f0b0ea74af0380",
+      "layer_revision_declared": "worktree-after-b15b2bb-flags2",
+      "timeout_seconds": 120.0,
+      "finished_at_utc": "2026-10-27T20:57:08.684533+00:00",
+      "summary": {
+        "path": "build-rt-cts-evidence/pipeline-library-flags2-recheck/summary.json",
+        "sha256": "f97e4fc52050509ff86c70d3922973d7216256d8e7c8b02a3402d5f150cd072b"
+      },
+      "selected_cases": [
+        "dEQP-VK.ray_tracing_pipeline.pipeline_library.configurations.misc.use_link_time_optimizations",
+        "dEQP-VK.ray_tracing_pipeline.pipeline_library.configurations.misc.retain_link_time_optimizations"
+      ],
+      "layer": {
+        "name": "VK_LAYER_VKRT_SOFTWARE_RAY_QUERY",
+        "source_manifest": "D:\\Codes\\Vulkan-ExtensionLayer\\build-raytracing-unified\\layers\\VkLayer_VKRT_SOFTWARE_RAY_QUERY.json",
+        "source_manifest_sha256": "256efbc35db5f4d5fcf5fe2c606d9b676bb36e2ecb92513b31d49a8443fef02b",
+        "source_library": "D:\\Codes\\Vulkan-ExtensionLayer\\build-raytracing-unified\\VkLayer_VKRT_SOFTWARE_RAY_QUERY.dll",
+        "snapshot_manifest": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\pipeline-library-flags2-recheck\\layer_snapshot\\VkLayer_VKRT_SOFTWARE_RAY_QUERY.json",
+        "snapshot_manifest_sha256": "ead6828e28a5dde753df7b0ef6b1b70417d54bdb2d7fc57801f94fae2075b08c",
+        "snapshot_library": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\pipeline-library-flags2-recheck\\layer_snapshot\\VkLayer_VKRT_SOFTWARE_RAY_QUERY.dll",
+        "library_sha256": "1dbe2045dc0daecd9526bb8821ef4540ed2458244a365a3ad73d47228b2944ed",
+        "snapshot_scope": "manifest_and_layer_library"
+      },
+      "guard": {
+        "name": "VK_LAYER_VKRT_NO_NATIVE_RT_GUARD",
+        "source_manifest": "D:\\Codes\\Vulkan-ExtensionLayer\\build-raytracing-unified\\no-native-rt-guard\\VkLayer_VKRT_NO_NATIVE_RT_GUARD.json",
+        "source_manifest_sha256": "5c57a12cbb68587cb33ecf46c0cfe05ad4e889223a6689ba4a39359216a57235",
+        "source_library": "D:\\Codes\\Vulkan-ExtensionLayer\\build-raytracing-unified\\vkrt_no_native_rt_guard.dll",
+        "snapshot_manifest": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\pipeline-library-flags2-recheck\\guard_snapshot\\VkLayer_VKRT_NO_NATIVE_RT_GUARD.json",
+        "snapshot_manifest_sha256": "3991dc03ec99d4334c8890d599a92911beba7ae4a83df19cfb53af0aa0e6a177",
+        "snapshot_library": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\pipeline-library-flags2-recheck\\guard_snapshot\\vkrt_no_native_rt_guard.dll",
+        "library_sha256": "e9334c97f171ab4933d80a2f1955e97dbd0573c8a1e4cd14dadd0d8d79fd9fb8",
+        "snapshot_scope": "manifest_and_layer_library",
+        "auditor_snapshot": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\pipeline-library-flags2-recheck\\guard_snapshot\\guard_auditor.py",
+        "auditor_sha256": "d224732f36b7a7d3cdf045d6217ba30c0300ecdeb980c76a1c541d32cd508fcb"
+      }
+    }
+  },
+  "retained_initial_gpu_failure_log": {
+    "path": "build-source-layout/rt-integration-2026-10-28-gpu-first.log",
+    "sha256": "ea4168bf1ed05d7de8c106db9c7c2e052b1e171ad6a553ab6cc5c3b4e0f461e9"
+  },
+  "retained_initial_gpu_failure_note": "7/10 passes, with native early-library-retirement crash, stale BUILD degenerate-leaf oracle, and native-pointer-Phi GPU pipeline crash. All original observations are retained; corrected runs do not rewrite them.",
+  "prior_226_case_counts": {
+    "pass": 220,
+    "notSupported": 2,
+    "crash": 4,
+    "note": "Original early exits/watchdog remain unresolved; no root cause is established by the new runs."
+  },
+  "remaining": [
+    "physical no-RT discovery/advertisement and qualification",
+    "complete private resource budgets",
+    "OpPtrAccessChain and mutable pointer memory",
+    "multi-root and descriptor-array NonUniform execution qualification",
+    "query simultaneous execution replay and logical-stage scheduling",
+    "additional builders/large IDs/numerical qualification",
+    "complete mandatory API/shader/extension exit criteria"
+  ]
+}

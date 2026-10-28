@@ -473,6 +473,28 @@ add_dependencies(test_spirv_lower vkrt_traversal_spv vkrt_test_rq_spv vkrt_test_
 
 include(CTest)
 if(BUILD_TESTING)
+   # Explicitly enabled test boundary, staged separately from application layers.
+   add_library(vkrt_no_native_rt_guard SHARED tests/no_native_rt_guard_layer.c)
+   target_include_directories(vkrt_no_native_rt_guard PRIVATE ${Vulkan_INCLUDE_DIRS})
+   target_link_libraries(vkrt_no_native_rt_guard PRIVATE Threads::Threads)
+   set_target_properties(vkrt_no_native_rt_guard PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED ON)
+   if(WIN32)
+      target_sources(vkrt_no_native_rt_guard PRIVATE tests/no_native_rt_guard.def)
+   endif()
+   set(VKRT_NO_RT_GUARD_LIBRARY "$<TARGET_FILE:vkrt_no_native_rt_guard>")
+   file(READ "${CMAKE_CURRENT_SOURCE_DIR}/tests/no_native_rt_guard.json.in" _vkrt_guard_manifest)
+   string(CONFIGURE "${_vkrt_guard_manifest}" _vkrt_guard_manifest @ONLY)
+   file(GENERATE OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/no-native-rt-guard/VkLayer_VKRT_NO_NATIVE_RT_GUARD.json"
+      CONTENT "${_vkrt_guard_manifest}")
+   add_executable(test_no_native_rt_guard tests/test_no_native_rt_guard.c)
+   target_include_directories(test_no_native_rt_guard PRIVATE ${Vulkan_INCLUDE_DIRS})
+   target_link_libraries(test_no_native_rt_guard PRIVATE Threads::Threads)
+   set_target_properties(test_no_native_rt_guard PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED ON)
+   add_test(NAME vkrt.no_native_rt_guard COMMAND test_no_native_rt_guard "${CMAKE_CURRENT_BINARY_DIR}/no-native-rt-guard/host-control.jsonl")
+   add_test(NAME vkrt.no_native_rt_guard.controls COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/no_native_rt_guard_checks.py"
+      --executable "$<TARGET_FILE:test_no_native_rt_guard>" --output "${CMAKE_CURRENT_BINARY_DIR}/no-native-rt-guard/controls")
+   add_test(NAME vkrt.cts_guard_evidence COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/../../scripts/test_rt_cts_guard_evidence.py")
+   set_tests_properties(vkrt.no_native_rt_guard vkrt.no_native_rt_guard.controls vkrt.cts_guard_evidence PROPERTIES LABELS "offline;no_native_rt")
    set(VKRT_RTP_API_SPV)
    foreach(stage rgen rmiss rchit comp)
       set(output ${CMAKE_CURRENT_BINARY_DIR}/rtp_api.${stage}.spv)
@@ -701,6 +723,15 @@ if(BUILD_TESTING)
    add_test(NAME vkrt.rtp_api.derivatives.native COMMAND test_rtp_api ${VKRT_RTP_API_SPV} --derivatives)
    set_tests_properties(vkrt.rtp_api.derivatives.native PROPERTIES
       ENVIRONMENT "VK_INSTANCE_LAYERS=" LABELS "gpu;typed_rtp;native_rt" SKIP_RETURN_CODE 77 TIMEOUT 600)
+   foreach(mode libraries library-stages)
+      add_test(NAME vkrt.rtp_api.${mode}.software COMMAND test_rtp_api ${VKRT_RTP_API_SPV} --${mode})
+      set_tests_properties(vkrt.rtp_api.${mode}.software PROPERTIES
+         ENVIRONMENT "VK_LAYER_PATH=${CMAKE_BINARY_DIR}/layers;VK_INSTANCE_LAYERS=VK_LAYER_VKRT_SOFTWARE_RAY_QUERY"
+         LABELS "gpu;typed_rtp" SKIP_RETURN_CODE 77 TIMEOUT 600)
+      add_test(NAME vkrt.rtp_api.${mode}.native COMMAND test_rtp_api ${VKRT_RTP_API_SPV} --${mode})
+      set_tests_properties(vkrt.rtp_api.${mode}.native PROPERTIES
+         ENVIRONMENT "VK_INSTANCE_LAYERS=" LABELS "gpu;typed_rtp;native_rt" SKIP_RETURN_CODE 77 TIMEOUT 600)
+   endforeach()
    add_executable(test_device_features tests/test_device_features.c src/vkrt_features.c src/vkrt_resource_profile.c)
    target_include_directories(test_device_features PRIVATE src ${CMAKE_CURRENT_BINARY_DIR} ${Vulkan_INCLUDE_DIRS})
    set_target_properties(test_device_features PROPERTIES C_STANDARD 11)
@@ -800,6 +831,8 @@ if(BUILD_TESTING)
    set_tests_properties(vkrt.gpu_build.pool_pressure.native PROPERTIES ENVIRONMENT "VK_INSTANCE_LAYERS=" LABELS "gpu;native_rt" TIMEOUT 120)
    add_test(NAME vkrt.as_copy.software COMMAND test_as_copy)
    add_test(NAME vkrt.as_update.software COMMAND test_as_update)
+   add_test(NAME vkrt.as_update.native COMMAND test_as_update)
+   set_tests_properties(vkrt.as_update.native PROPERTIES ENVIRONMENT "VK_INSTANCE_LAYERS=" LABELS "gpu;native_rt" TIMEOUT 600)
    add_test(NAME vkrt.as_serialization.software COMMAND test_as_serialization)
    add_test(NAME vkrt.query_properties.software COMMAND test_query_properties
       ${CMAKE_CURRENT_BINARY_DIR}/bvh/vkrt_as_query.spv ${CMAKE_CURRENT_BINARY_DIR}/bvh/vkrt_query_format.spv)

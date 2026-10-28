@@ -260,6 +260,13 @@ class FramePlanner {
                     suspension.saved_values.push_back(value);
                 } else if (i.op == spv::OpVariable) {
                     // The persistent backing slot already provides this root.
+                } else if (options.logical_pointer_snapshots && type.op == spv::OpTypePointer &&
+                           type.words.at(2) == spv::StorageClassStorageBuffer) {
+                    // The executable backend has captured this abstract
+                    // pointer's root/path/selectors at its SSA definition.
+                    // Replaying dependencies would both change old identities
+                    // in loops and recurse indefinitely through pointer Phi.
+                    suspension.rematerializations.push_back({value, i.type, i.offset, {}});
                 } else {
                     bool supported = i.op == spv::OpCopyObject;
                     if (type.op == spv::OpTypePointer) {

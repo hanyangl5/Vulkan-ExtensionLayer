@@ -40,23 +40,25 @@ static void record(VkCommandBuffer cmd, const struct built_as *as, VkAcceleratio
     pBuild(cmd, 1, &info, &range);
     dependency(cmd);
 }
-static void prepare(struct built_as *as, VkAccelerationStructureTypeKHR type, const VkAccelerationStructureGeometryKHR *geometry) {
+static void prepare_full(struct built_as *as, VkAccelerationStructureTypeKHR type,
+                         const VkAccelerationStructureGeometryKHR *geometry, uint32_t geometry_count, const uint32_t *counts) {
     memset(as, 0, sizeof(*as));
     as->info =
         (VkAccelerationStructureBuildGeometryInfoKHR){.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_GEOMETRY_INFO_KHR,
                                                       .type = type,
                                                       .flags = VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_UPDATE_BIT_KHR,
                                                       .mode = VK_BUILD_ACCELERATION_STRUCTURE_MODE_BUILD_KHR,
-                                                      .geometryCount = 1,
+                                                      .geometryCount = geometry_count,
                                                       .pGeometries = geometry};
-    as->ranges[0].primitiveCount = 1;
-    uint32_t count = 1;
+    for (uint32_t i = 0; i < geometry_count; ++i) as->ranges[i].primitiveCount = counts[i];
     VkAccelerationStructureBuildSizesInfoKHR size = {.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_SIZES_INFO_KHR};
     PFN_vkGetAccelerationStructureBuildSizesKHR sizes =
         (void *)vkGetDeviceProcAddr(g_dev, "vkGetAccelerationStructureBuildSizesKHR");
-    sizes(g_dev, VK_ACCELERATION_STRUCTURE_BUILD_TYPE_DEVICE_KHR, &as->info, &count, &size);
-    if (!size.updateScratchSize || (g_software && size.updateScratchSize != size.buildScratchSize)) {
-        fprintf(stderr, "FAIL missing/full-rebuild UPDATE scratch contract\n");
+    sizes(g_dev, VK_ACCELERATION_STRUCTURE_BUILD_TYPE_DEVICE_KHR, &as->info, counts, &size);
+    bool has_primitives = false;
+    for (uint32_t i = 0; i < geometry_count; ++i) has_primitives |= counts[i] != 0;
+    if ((has_primitives && !size.updateScratchSize) || (g_software && size.updateScratchSize != size.buildScratchSize)) {
+        fprintf(stderr, "FAIL missing/shared BUILD/UPDATE scratch contract\n");
         ++g_fail;
     }
     as->size = size.accelerationStructureSize;
@@ -84,6 +86,10 @@ static void prepare(struct built_as *as, VkAccelerationStructureTypeKHR type, co
     expect_u("unmapped output", as->output.mapped != NULL, 0);
     expect_u("unmapped scratch", as->scratch.mapped != NULL, 0);
 }
+static void prepare(struct built_as *as, VkAccelerationStructureTypeKHR type, const VkAccelerationStructureGeometryKHR *geometry) {
+    const uint32_t count = 1;
+    prepare_full(as, type, geometry, 1, &count);
+}
 static void snapshot(VkCommandBuffer cmd, const struct built_as *as, const struct gpu_buf *readback, VkDeviceSize offset) {
     VkBufferCopy copy = {256, offset, as->size};
     vkCmdCopyBuffer(cmd, as->output.buf, readback->buf, 1, &copy);
@@ -100,6 +106,94 @@ static void expect(const struct built_as *tlas, float x, bool hit) {
         expect_u("updated getter semantics", out.getter_errors, 0);
         expect_f("updated distance", out.t, 2, 1e-5f);
     }
+}
+static void expect_topology(const void *before, const void *after) {
+    if (!g_software) return;
+    VelRtBvh4Header a, b;
+    memcpy(&a, before, sizeof(a));
+    memcpy(&b, after, sizeof(b));
+    expect_u("refit header topology/layout preserved", memcmp(before, after, 96) == 0, 1);
+    expect_u("valid refit header", b.magic == VEL_RT_BVH4_MAGIC && !(b.flags & VEL_RT_BVH4_FLAG_INVALID), 1);
+    for (uint32_t i = 0; i < a.node_count; ++i) {
+        const uint8_t *old_node = (const uint8_t *)before + a.node_offset + (VkDeviceSize)i * sizeof(VelRtBvh4Node);
+        const uint8_t *new_node = (const uint8_t *)after + b.node_offset + (VkDeviceSize)i * sizeof(VelRtBvh4Node);
+        expect_u("refit internal children/arity/parent preserved", memcmp(old_node + 96, new_node + 96, 32) == 0, 1);
+    }
+    const uint32_t leaves = a.triangle_count + a.aabb_count + a.instance_count;
+    expect_u("refit leaf parents preserved",
+             memcmp((const uint8_t *)before + a.leaf_parent_offset, (const uint8_t *)after + b.leaf_parent_offset,
+                    (size_t)leaves * 4) == 0,
+             1);
+}
+static void degenerate_instances(const struct built_as *blas, const VkAccelerationStructureGeometryKHR *triangle) {
+    struct built_as empty, tlas, destination;
+    const uint32_t zero = 0, four = 4;
+    prepare_full(&empty, VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR, triangle, 1, &zero);
+    struct gpu_buf instances, readback;
+    buf_create(4 * sizeof(VkAccelerationStructureInstanceKHR),
+               VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
+               VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, &instances);
+    VkAccelerationStructureInstanceKHR *input = instances.mapped;
+    for (uint32_t i = 0; i < 4; ++i) {
+        input[i] = (VkAccelerationStructureInstanceKHR){.transform.matrix = {{1, 0, 0, (float)i * 10}, {0, 1, 0, 0}, {0, 0, 1, 0}},
+                                                        .instanceCustomIndex = 77,
+                                                        .mask = i == 1 ? 0 : 255,
+                                                        .accelerationStructureReference = i == 2 ? empty.address : blas->address};
+    }
+    input[3].accelerationStructureReference = 0;
+    VkAccelerationStructureGeometryKHR geometry = {
+        .sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR,
+        .geometryType = VK_GEOMETRY_TYPE_INSTANCES_KHR,
+        .geometry.instances = {.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_INSTANCES_DATA_KHR,
+                               .data.deviceAddress = instances.addr}};
+    prepare_full(&tlas, VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR, &geometry, 1, &four);
+    prepare_full(&destination, VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR, &geometry, 1, &four);
+    buf_create(4 * tlas.size, VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+               VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, &readback);
+    VkCommandBuffer cmd = begin();
+    record(cmd, &empty, VK_NULL_HANDLE);
+    record(cmd, &tlas, VK_NULL_HANDLE);
+    snapshot(cmd, &tlas, &readback, 0);
+    submit(cmd);
+    expect(&tlas, 8, true);
+    expect(&tlas, 18, false);
+    expect(&tlas, 28, false);
+    if (g_software) {
+        VelRtBvh4Header header;
+        memcpy(&header, readback.mapped, sizeof(header));
+        expect_u("mask-zero/empty BLAS retained, null reference inactive", header.instance_count, 3);
+    }
+    input[0].mask = 0;
+    input[1].mask = 255;
+    input[2].accelerationStructureReference = blas->address;
+    cmd = begin();
+    record(cmd, &destination, tlas.handle);
+    snapshot(cmd, &tlas, &readback, tlas.size);
+    snapshot(cmd, &destination, &readback, 2 * tlas.size);
+    submit(cmd);
+    expect_u("out-of-place degenerate refit preserves source bytes",
+             memcmp(readback.mapped, (uint8_t *)readback.mapped + tlas.size, (size_t)tlas.size) == 0, 1);
+    expect_topology(readback.mapped, (uint8_t *)readback.mapped + 2 * tlas.size);
+    expect(&destination, 8, false);
+    expect(&destination, 18, true);
+    expect(&destination, 28, true);
+    expect(&tlas, 8, true);
+    input[0].mask = 255;
+    input[1].mask = 0;
+    input[2].accelerationStructureReference = empty.address;
+    cmd = begin();
+    record(cmd, &destination, destination.handle);
+    snapshot(cmd, &destination, &readback, 3 * tlas.size);
+    submit(cmd);
+    expect_topology(readback.mapped, (uint8_t *)readback.mapped + 3 * tlas.size);
+    expect(&destination, 8, true);
+    expect(&destination, 18, false);
+    expect(&destination, 28, false);
+    destroy_as(&destination);
+    destroy_as(&tlas);
+    destroy_as(&empty);
+    buf_destroy(&readback);
+    buf_destroy(&instances);
 }
 int main(void) {
     init_vulkan();
@@ -196,6 +290,7 @@ int main(void) {
     expect(&source_tlas, 8, true);
     expect(&translated_tlas, 11, true);
     expect(&translated_tlas, 8, false);
+    degenerate_instances(&source, &geometry[0]);
     destroy_as(&translated_tlas);
     destroy_as(&destination_tlas);
     destroy_as(&source_tlas);

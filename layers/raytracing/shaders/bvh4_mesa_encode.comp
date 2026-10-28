@@ -4,12 +4,14 @@
 #extension GL_EXT_buffer_reference : require
 #extension GL_EXT_scalar_block_layout : require
 #extension GL_EXT_shader_explicit_arithmetic_types_int64 : require
+#extension GL_KHR_memory_scope_semantics : require
+#pragma use_vulkan_memory_model
 #include "as_address.glsl"
 
 layout(local_size_x = 64) in;
 layout(constant_id = 0) const uint phase = 0;
 layout(constant_id = 6) const uint64_t vkrt_as_registry_context = 0ul;
-layout(buffer_reference, scalar, buffer_reference_align = 4) buffer Word { uint value; };
+layout(buffer_reference, scalar, buffer_reference_align = 4) coherent buffer Word { uint value; };
 layout(push_constant, scalar) uniform Args {
     uint64_t source, source_size, output_as, mapping;
     uint64_t geometry_flags, runtime_blas, status, first;
@@ -28,14 +30,16 @@ void fail(uint bits) {
     atomicOr(Word(args.status).value, bits);
     atomicOr(Word(args.output_as + 12).value, 0x80000000u);
 }
-uint source32(uint offset) { return read32(args.source + uint64_t(offset)); }
+bool refitting() { return (args.options & 0x100u) != 0; }
+uint64_t source_ir() { return refitting() ? args.source_size : args.source; }
+uint source32(uint offset) { return read32(source_ir() + uint64_t(offset)); }
 uint active_count() { return source32(24); }
 uint internal_count() { return source32(32); }
 uint stride() { return args.geometry_type == 0 ? 68 : args.geometry_type == 1 ? 32 : 96; }
 uint leaf_kind() { return args.geometry_type == 0 ? 1 : args.geometry_type == 1 ? 2 : 3; }
 uint source_leaf_kind() { return args.geometry_type == 0 ? 0 : args.geometry_type == 1 ? 3 : 2; }
 uint64_t box_base() { return uint64_t(args.capacity) * uint64_t(stride()); }
-uint64_t source_node(uint id) { return args.source + 128 + uint64_t(id & OFFSET_MASK); }
+uint64_t source_node(uint id) { return source_ir() + 128 + uint64_t(id & OFFSET_MASK); }
 uint64_t box_address(uint index) { return args.source + 128 + box_base() + uint64_t(index) * uint64_t(40); }
 uint64_t map_address(uint index) { return args.mapping + uint64_t(index) * uint64_t(4); }
 uint64_t work_map_address(uint array, uint index) {
@@ -77,12 +81,9 @@ uint output_id(uint source_id) {
     uint source_slot = (source_id & OFFSET_MASK) / stride();
     return (leaf_kind() << 30) | read32(map_address(source_slot));
 }
-void emit_leaf(uint source_id, uint parent) {
-    uint source_slot = (source_id & OFFSET_MASK) / stride();
-    uint index = read32(map_address(source_slot));
-    uint64_t src = source_node(source_id), dst = output_leaf(index);
+void emit_leaf_record(uint source_slot, uint index) {
+    uint64_t src = source_ir() + 128 + uint64_t(source_slot) * uint64_t(stride()), dst = output_leaf(index);
     if (!valid_box(src)) { fail(8); return; }
-    write32(output_region(80) + uint64_t(index) * uint64_t(4), parent);
     if (args.geometry_type < 2) {
         uint packed = read32(src + (args.geometry_type == 0 ? 64 : 28));
         uint geometry = packed & 0x7fffffffu;
@@ -108,7 +109,7 @@ void emit_leaf(uint source_id, uint parent) {
         return;
     }
     bool identity_blas = (args.options & 1u) != 0;
-    if ((!identity_blas && args.runtime_blas == uint64_t(0)) || read64(src + 24) == uint64_t(0) || (read32(src + 32) >> 24) == 0) {
+    if ((!identity_blas && args.runtime_blas == uint64_t(0)) || read64(src + 24) == uint64_t(0)) {
         fail(32); return;
     }
     uint64_t blas = identity_blas ? read64(src + 24) : read64(args.runtime_blas + uint64_t(source_slot) * uint64_t(8));
@@ -144,10 +145,97 @@ void emit_leaf(uint source_id, uint parent) {
     write32(dst + 116, 0);
     write64(dst + 120, public_value);
 }
+void emit_leaf(uint source_id, uint parent) {
+    uint source_slot = (source_id & OFFSET_MASK) / stride();
+    uint index = read32(map_address(source_slot));
+    write32(output_region(80) + uint64_t(index) * uint64_t(4), parent);
+    emit_leaf_record(source_slot, index);
+}
+
+/* The refit view of the same 80-byte push ABI is VelRtBvh4RefitArgs:
+ * source=source_as, source_size=source_ir, mapping=geometry_prefix,
+ * runtime_blas=ready_counts. No construction topology is consumed. */
+void refit(uint index) {
+    if (phase == 0) {
+        uint nodes = read32(args.source + 20);
+        if (index < min(nodes, args.capacity)) write32(args.runtime_blas + uint64_t(index) * 4ul, 0);
+        if (args.source != args.output_as) {
+            uint64_t size = read64(args.source + 88);
+            for (uint64_t offset = uint64_t(index) * 4ul; offset < size; offset += uint64_t(max(args.capacity, 1)) * 4ul)
+                write32(args.output_as + offset, read32(args.source + offset));
+        }
+        if (index != 0) return;
+        write32(args.status, 0);
+        uint leaves = read32(args.source + 24 + args.geometry_type * 4);
+        if ((args.options & ~0x103u) != 0 || (args.options & 1u) == 0 || args.geometry_type > 2 ||
+            read32(args.source) != 0x344c4556u || read32(args.source + 4) != 2 ||
+            (read32(args.source + 12) & 0x80000000u) != 0 || nodes > (args.capacity > 1 ? args.capacity - 1 : 0) ||
+            source32(108) != 0x58424856u || source32(112) != 2 || source32(116) != args.capacity ||
+            source32(120) != args.geometry_type || leaves != active_count() || leaves > args.capacity)
+            atomicOr(Word(args.status).value, 1);
+        return;
+    }
+    if (phase != 1) return;
+    if (atomicAdd(Word(args.status).value, 0) != 0) { fail(0); return; }
+    uint leaves = read32(args.output_as + 24 + args.geometry_type * 4);
+    if (index >= leaves) return;
+    uint64_t record = output_leaf(index);
+    uint primitive = read32(record + (args.geometry_type == 0 ? 36 : args.geometry_type == 1 ? 24 : 112));
+    uint source_slot = primitive;
+    if (args.geometry_type != 2) {
+        uint geometry = read32(record + (args.geometry_type == 0 ? 40 : 28));
+        if (geometry >= args.geometry_count) { fail(16); return; }
+        source_slot += read32(args.mapping + uint64_t(geometry) * 4ul);
+    }
+    if (source_slot >= args.capacity) { fail(2); return; }
+    uint64_t src = source_ir() + 128ul + uint64_t(source_slot) * uint64_t(stride());
+    if (!valid_box(src)) { fail(8); return; }
+    emit_leaf_record(source_slot, index);
+    vec3 lo = read_vec(src), hi = read_vec(src + 12);
+    uint child_id = (leaf_kind() << 30) | index;
+    uint parent = read32(output_region(80) + uint64_t(index) * 4ul);
+    uint ancestors = 0;
+    for (;;) {
+        if (parent == INVALID) {
+            for (uint axis = 0; axis < 3; ++axis) {
+                write32(args.output_as + 96ul + axis * 4ul, floatBitsToUint(lo[axis]));
+                write32(args.output_as + 108ul + axis * 4ul, floatBitsToUint(hi[axis]));
+            }
+            return;
+        }
+        if (parent >= read32(args.output_as + 20) || ++ancestors > args.capacity) { fail(2); return; }
+        uint64_t node = output_node(parent);
+        uint children = read32(node + 112);
+        if (children < 2 || children > 4) { fail(2); return; }
+        uint slot = 0;
+        while (slot < children && read32(node + 96 + slot * 4) != child_id) ++slot;
+        if (slot == children) { fail(2); return; }
+        for (uint axis = 0; axis < 3; ++axis) {
+            write32(node + slot * 12 + axis * 4, floatBitsToUint(lo[axis]));
+            write32(node + 48 + slot * 12 + axis * 4, floatBitsToUint(hi[axis]));
+        }
+        /* Publish this child's record and bounds. Only the final child walks
+         * upward, after acquiring every preceding child's release sequence.
+         * No invocation waits or polls for an unscheduled workgroup. */
+        uint previous = atomicAdd(Word(args.runtime_blas + uint64_t(parent) * 4ul).value, 1, gl_ScopeDevice,
+                                  gl_StorageSemanticsBuffer,
+                                  gl_SemanticsAcquireRelease | gl_SemanticsMakeAvailable | gl_SemanticsMakeVisible);
+        if (previous != children - 1) return;
+        lo = vec3(uintBitsToFloat(0x7f800000u));
+        hi = vec3(uintBitsToFloat(0xff800000u));
+        for (uint child = 0; child < children; ++child) {
+            lo = min(lo, read_vec(node + child * 12));
+            hi = max(hi, read_vec(node + 48 + child * 12));
+        }
+        child_id = parent;
+        parent = read32(node + 116);
+    }
+}
 void main() {
     uint64_t index64 = args.first + uint64_t(gl_GlobalInvocationID.x);
     if (index64 >= uint64_t(max(args.capacity, 1))) return;
     uint index = uint(index64);
+    if (refitting()) { refit(index); return; }
     uint maximum_internals = max(args.capacity, 2) - 1;
     if (phase == 0) {
         if (index < args.capacity) {

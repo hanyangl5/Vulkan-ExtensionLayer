@@ -10,6 +10,7 @@
 #endif
 #include <stdbool.h>
 static bool capability_harness, advertised, maintenance6_mode, dynamic_layout, graphics_queue, shader_object_mode, derivatives_mode;
+static unsigned library_mode;
 #include <vulkan/vulkan.h>
 static VkQueue second_queue;
 static PFN_vkCmdBindDescriptorSets2 bind2[2];
@@ -95,13 +96,14 @@ static VkResult create_device(VkPhysicalDevice physical, const VkDeviceCreateInf
         .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_FEATURES_KHR,
         .pNext = &maintenance,
         .rayTracingPipeline = VK_TRUE};
-    const char **extensions = malloc((info->enabledExtensionCount + 5) * sizeof(*extensions));
+    const char **extensions = malloc((info->enabledExtensionCount + 6) * sizeof(*extensions));
     if (!extensions) return VK_ERROR_OUT_OF_HOST_MEMORY;
     memcpy(extensions, info->ppEnabledExtensionNames, info->enabledExtensionCount * sizeof(*extensions));
     extensions[local.enabledExtensionCount++] = VK_KHR_MAINTENANCE_4_EXTENSION_NAME;
     if (maintenance6_mode) extensions[local.enabledExtensionCount++] = VK_KHR_MAINTENANCE_6_EXTENSION_NAME;
     if (dynamic_layout) extensions[local.enabledExtensionCount++] = VK_NV_PER_STAGE_DESCRIPTOR_SET_EXTENSION_NAME;
     if (shader_object_mode) extensions[local.enabledExtensionCount++] = VK_EXT_SHADER_OBJECT_EXTENSION_NAME;
+    if (library_mode) extensions[local.enabledExtensionCount++] = VK_KHR_PIPELINE_LIBRARY_EXTENSION_NAME;
     local.ppEnabledExtensionNames = extensions;
     if (advertised) {
         extensions[local.enabledExtensionCount++] = VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME;
@@ -243,10 +245,11 @@ int main(int argc, char **argv) {
     maintenance6_mode = argc == 6 && !strcmp(argv[5], "--maintenance6");
     shader_object_mode = argc == 6 && !strcmp(argv[5], "--shader-object");
     derivatives_mode = argc == 6 && !strcmp(argv[5], "--derivatives");
-    if (argc != 5 && !capability_harness && !maintenance6_mode && !shader_object_mode && !derivatives_mode) {
+    library_mode = argc == 6 && !strcmp(argv[5], "--libraries") ? 1 : argc == 6 && !strcmp(argv[5], "--library-stages") ? 2 : 0;
+    if (argc != 5 && !capability_harness && !maintenance6_mode && !shader_object_mode && !derivatives_mode && !library_mode) {
         fprintf(stderr,
                 "usage: %s rgen.spv miss.spv chit.spv compute.spv "
-                "[--capability-harness|--maintenance6|--shader-object|--derivatives]\n",
+                "[--capability-harness|--maintenance6|--shader-object|--derivatives|--libraries|--library-stages]\n",
                 argv[0]);
         return 1;
     }
@@ -413,7 +416,56 @@ int main(int argc, char **argv) {
                                               .layout = layout};
     VkPipeline rt;
     VkPipeline derivative_indexed = VK_NULL_HANDLE, derivative_handle = VK_NULL_HANDLE;
-    if (derivatives_mode) {
+    VkPipeline retained_libraries[3] = {VK_NULL_HANDLE, VK_NULL_HANDLE, VK_NULL_HANDLE};
+    if (library_mode) {
+        VkRayTracingPipelineInterfaceCreateInfoKHR library_interface = {
+            .sType = VK_STRUCTURE_TYPE_RAY_TRACING_PIPELINE_INTERFACE_CREATE_INFO_KHR,
+            .maxPipelineRayPayloadSize = 16,
+            .maxPipelineRayHitAttributeSize = 8};
+        VkRayTracingPipelineCreateInfoKHR lib = rtci;
+        lib.flags = VK_PIPELINE_CREATE_LIBRARY_BIT_KHR;
+        lib.pLibraryInterface = &library_interface;
+        lib.pDynamicState = NULL;
+        VkPipeline *libraries = retained_libraries;
+        VkPipelineLibraryCreateInfoKHR links = {
+            .sType = VK_STRUCTURE_TYPE_PIPELINE_LIBRARY_CREATE_INFO_KHR, .libraryCount = 1, .pLibraries = &libraries[0]};
+        if (library_mode == 2) {
+            // Groups in the final pipeline may reference stages supplied only
+            // by a library that has no groups of its own.
+            lib.groupCount = 0;
+            lib.pGroups = NULL;
+            CHECK(create(g_dev, VK_NULL_HANDLE, VK_NULL_HANDLE, 1, &lib, NULL, &libraries[0]));
+            rtci.stageCount = 0;
+            rtci.pStages = NULL;
+        } else {
+            VkRayTracingShaderGroupCreateInfoKHR hit = groups[2];
+            hit.closestHitShader = 0;
+            lib.stageCount = lib.groupCount = 1;
+            lib.pStages = &stages[2];
+            lib.pGroups = &hit;
+            CHECK(create(g_dev, VK_NULL_HANDLE, VK_NULL_HANDLE, 1, &lib, NULL, &libraries[0]));
+            // Empty intermediate libraries preserve the complete nested lists.
+            lib.stageCount = lib.groupCount = 0;
+            lib.pStages = NULL;
+            lib.pGroups = NULL;
+            lib.pLibraryInfo = &links;
+            CHECK(create(g_dev, VK_NULL_HANDLE, VK_NULL_HANDLE, 1, &lib, NULL, &libraries[1]));
+            links.pLibraries = &libraries[1];
+            lib.stageCount = lib.groupCount = 2;
+            lib.pStages = stages;
+            lib.pGroups = groups;
+            CHECK(create(g_dev, VK_NULL_HANDLE, VK_NULL_HANDLE, 1, &lib, NULL, &libraries[2]));
+            links.pLibraries = &libraries[2];
+            rtci.stageCount = rtci.groupCount = 0;
+            rtci.pStages = NULL;
+            rtci.pGroups = NULL;
+        }
+        rtci.pLibraryInfo = &links;
+        rtci.pLibraryInterface = &library_interface;
+        CHECK(create(g_dev, VK_NULL_HANDLE, VK_NULL_HANDLE, 1, &rtci, NULL, &rt));
+        // Library lifetimes follow all linked pipelines, including later
+        // dispatches; retain the complete chain through execution.
+    } else if (derivatives_mode) {
         VkRayTracingPipelineCreateInfoKHR batch[2] = {rtci, rtci};
         batch[0].flags = VK_PIPELINE_CREATE_ALLOW_DERIVATIVES_BIT | VK_PIPELINE_CREATE_DISABLE_OPTIMIZATION_BIT;
         batch[0].basePipelineIndex = -1;
@@ -639,6 +691,8 @@ int main(int argc, char **argv) {
         vkDestroyPipelineLayout(g_dev, layout, NULL);
     }
     vkDestroyPipeline(g_dev, rt, NULL);
+    for (unsigned i = 3; i-- > 0;)
+        if (retained_libraries[i]) vkDestroyPipeline(g_dev, retained_libraries[i], NULL);
     if (derivative_indexed) vkDestroyPipeline(g_dev, derivative_indexed, NULL);
     vkDestroyPipeline(g_dev, compute, NULL);
     if (compute_shader) destroy_shader(g_dev, compute_shader, NULL);
@@ -667,6 +721,9 @@ int main(int argc, char **argv) {
     if (shader_object_mode) printf("Compute shader object/RTP/pipeline state restoration: %s\n", g_fail ? "FAIL" : "PASS");
     if (derivatives_mode)
         printf("RTP base/index/handle derivatives, optimization flags and destroyed base before trace: %s\n",
+               g_fail ? "FAIL" : "PASS");
+    if (library_mode)
+        printf("RTP linked library mode=%u, nested definitions and later stack variants: %s\n", library_mode,
                g_fail ? "FAIL" : "PASS");
     printf("RTP API test mode=%s %s\n", advertised ? "advertised" : "explicit capability harness", g_fail ? "FAIL" : "PASS");
     return g_fail ? 1 : 0;

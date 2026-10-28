@@ -3,7 +3,7 @@
 
 # Software RT Fallback: Implementation Status
 
-Checkpoint: 2026-10-27 (Asia/Hong_Kong). The [implementation goal](ray_tracing_fallback_goal.md)
+Checkpoint: 2026-10-28 (Asia/Hong_Kong). The [implementation goal](ray_tracing_fallback_goal.md)
 is in progress. **The complete AS/RQ/RTP fallback is not implemented.**
 The [review](ray_tracing_fallback_review.md) records the pre-change `f18c40d3`
 baseline; goal alignment was committed as `82251ec3`.
@@ -57,6 +57,9 @@ the final layout, passing build/local checks and the 16-case external CTS rechec
 - [x] Back numeric module-Private state per logical RT invocation and execute the additional control-flow CTS slice.
 - [x] Preserve shader-object binary interfaces, linked peers, successful batch prefixes and legal SPIR-V 1.6 RQ inputs, with expanded external CTS.
 - [x] Pool sparse AS pages and shared descriptor values, apply the descriptor budget to discovery/device creation, and emit real four-child GPU BVH4 nodes.
+- [x] Refit shared BVH4 topology on GPU UPDATE, retaining recoverable degenerate instances.
+- [x] Preserve logical StorageBuffer pointer Phi/Select/helper values across suspension with typed route/selector snapshots.
+- [x] Link nested RT pipeline libraries through the shared typed compute runtime.
 - [ ] M0: complete all capability, no-native-RT, resource ABI, and continuation proofs.
 - [ ] M1: integrate Mesa builders, GPU BVH4 encoding/refit, and shared AS objects.
 - [ ] M2: complete Ray Query lowering and state semantics.
@@ -70,12 +73,12 @@ Component checkmarks do not complete M0/M1/M2 or the full goal.
 
 | Component | Implemented and tested | Remaining boundary |
 | --- | --- | --- |
-| [Portable BVH4 components](../layers/raytracing/docs/BVH4.md) | Checked reference/CPU adapter; generic BDA hierarchy encoder; direct default Mesa GPU IR adaptation/record emission with compact active leaves, full flags and explicit TLAS relocation; actual LBVH build-to-encode and two-to-four-child GPU collapse in one command buffer | Broader builder variants/large construction IDs, numerical qualification, full object/resource qualification, refit |
-| Typed continuation frames | Typed CFG/continuations; BDA and invocation-private library backing; builtin/push/record state; specialization, linked six-stage scheduler/shared traversal; traditional descriptor-backed opaque provenance snapshots | Complete pointer Phi/parameter provenance, actual large aggregate values, conflicting per-stage FP modes and complete resource qualification |
+| [Portable BVH4 components](../layers/raytracing/docs/BVH4.md) | Checked reference/CPU adapter; generic BDA hierarchy encoder; direct default Mesa GPU IR adaptation/record emission with compact active leaves, full flags and explicit TLAS relocation; actual LBVH build-to-encode and two-to-four-child GPU collapse, followed by topology-preserving UPDATE/refit | Broader builder variants/large construction IDs, numerical qualification and full object/resource qualification |
+| Typed continuation frames | Typed CFG/continuations; BDA and invocation-private library backing; builtin/push/record state; specialization, linked six-stage scheduler/shared traversal; traditional descriptor-backed opaque provenance and logical StorageBuffer pointer Phi/Select/helper snapshots | OpPtrAccessChain, mutable pointer memory, multi-root/NonUniform execution qualification, actual large aggregate values, conflicting per-stage FP modes and complete resource qualification |
 | RQ host translation | Consume AS/RQ device requirements; translate resource/synchronization masks and explicit RT buffer queries; lifetime-owned AS address cells with allocator/flush/failure handling and enabled-queue-family sharing; private SSBO indexing/variable-pointer prerequisites | Complete emulation capability/limit reporting on no-RT ICDs, future unknown buffer chains, full-layout descriptor transport and private allocation budgets |
-| AS operations and host dependency | GPU CLONE/COMPACT, serialization/UUID/BLAS relocation, semantic UPDATE; bounded public property pools with GPU payload/native completion acquisition and reuse/reset/free publication; synchronous deferred operations | Simultaneous query replay, complete logical-stage/native-query interaction, true shrinking compaction, refit performance and full resource budgets |
+| AS operations and host dependency | GPU CLONE/COMPACT, serialization/UUID/BLAS relocation, topology-preserving UPDATE/refit; bounded public property pools with GPU payload/native completion acquisition and reuse/reset/free publication; synchronous deferred operations | Simultaneous query replay, complete logical-stage/native-query interaction, true shrinking compaction, refit performance and full resource budgets |
 | RQ compiler compatibility | Actual per-query AS roots from scalar/array descriptors and integer conversions; helper/value/Phi flow; direct/grouped NonUniform propagation; preserve application workgroup/specialization metadata and remove native RT declarations | Full resource-limit transparency, complete opcode/stage coverage and full shared traversal qualification |
-| RTP API compatibility | Canonical shader/pipeline/SBT/stack/Trace path; cached native variants/private context push; public layouts with retained private copies; copied descriptor definitions; maintenance6 and compute pipeline/shader-object state restoration | Full pipeline options, remaining descriptor disturbance/interoperability paths, complete mandatory API/resource qualification |
+| RTP API compatibility | Canonical shader/pipeline/SBT/stack/Trace path; cached native variants/private context push; public layouts with retained private copies; copied descriptor definitions; nested pipeline libraries; maintenance6 and compute pipeline/shader-object state restoration | Remaining pipeline options and optional library-handle contracts, remaining descriptor disturbance/interoperability paths, complete mandatory API/resource qualification |
 | Base RQ SBT offset | Lower opcode 6021; select candidate/committed instance; return only the low 24 offset bits; shared-BVH4 helper and CTS evidence | Complete required getter/stage and shared-consumer qualification remain open |
 | AABB opacity | Apply the existing ray-over-instance-over-geometry precedence before opacity culling and expose the correct candidate opacity | Does not complete all RQ traversal or no-native-RT layer behavior |
 
@@ -481,6 +484,42 @@ termination reports `0xffffffff`. These are separate observations, not one prove
 cause. The older startup investigation remains open. All raw failures remain
 retained; this is not a clean 226-case run.
 
+## 2026-10-28 refit, pointer and pipeline-library checkpoint
+
+The [integrated checkpoint](rt_refit_pointer_libraries_2026-10-28.md) adds
+production topology-preserving GPU refit and preserves zero-mask/empty-BLAS
+instances so legal updates can make them visible again. Original geometry and
+primitive IDs map refreshed source leaves to the retained runtime hierarchy;
+Device-scope acquire/release publication joins child bounds without polling.
+
+Logical StorageBuffer pointer Phi/Select and inlined helper values now cross
+suspension through route tags and typed selectors, including parallel loop Phi
+assignment. Generated memory operations execute inside the selected route's
+branch. The prior valid native-pointer-Phi sample's NVIDIA compute-pipeline
+exception and its raw shader/debugger evidence remain retained. OpPtrAccessChain,
+mutable pointer memory, multiple descriptor-root execution and real descriptor
+array NonUniform qualification remain open.
+
+Nested RT pipeline libraries, including empty intermediate libraries, now
+retain typed definitions and link through the shared compute backend. Shader
+and group lists preserve implicit append order and repeated references.
+Maintenance5 flags2 is consumed at full width and replaces the legacy flags.
+The first merged CTS attempt records 30 pass/2 fail for the missing flags2 path;
+its focused recheck passes 2/2 and the complete rebuilt selection passes 32/32.
+
+All 32 external cases also pass the test-only downstream native-RT rejection
+boundary, with completed zero-rejection audits and no validation diagnostics.
+Matching native controls pass 20/20 pipeline-library and 12/12 UPDATE cases.
+The boundary retains driver discovery for CTS selection; masked discovery still
+exposes the unfinished no-RT advertisement path. It is not physical no-RT or
+cross-vendor qualification. The prior 226-case crashes remain unresolved.
+
+Main/parent builds, 30 offline and five fresh component checks pass. These
+results close tested construction/compiler/API components, not any entire M0-M5
+milestone. Query execution replay, logical-stage scheduling, full resource and
+capability contracts, additional builder variants/large IDs, and physical no-RT
+qualification remain required.
+
 ## Next work
 
 Run M0 proof work in parallel with shared-backend construction:
@@ -502,10 +541,12 @@ Run M0 proof work in parallel with shared-backend construction:
    application/private allocation budgets still require proof.
 3. Expand external CTS beyond the passing typed RTP selection. Image atomics,
    BDA root classification and resource/value aggregate types are now fixed;
-   traditional descriptor-backed opaque values now cross suspension. Complete
-   pointer parameters/Phi provenance, mutable opaque encodings and the full
-   argument/return ABI. Complete descriptor disturbance, push-descriptor and
-   descriptor-buffer interoperability, and pipeline option/API coverage before
+   traditional descriptor-backed opaque values now cross suspension. Qualify the
+   new logical StorageBuffer pointer Phi/Select/helper route with
+   multiple descriptor roots and real descriptor-array NonUniform execution;
+   implement OpPtrAccessChain, mutable pointer memory, mutable opaque encodings
+   and the full argument/return ABI. Complete descriptor disturbance, push-descriptor
+   and descriptor-buffer interoperability, and pipeline option/API coverage before
    claiming the full typed-continuation M0 proof. Cached native pipelines now
    use a separate internal context-push layout with public state replay.
    Shader-object binary imports now preserve original descriptor/sampler/push
@@ -514,9 +555,9 @@ Run M0 proof work in parallel with shared-backend construction:
    destination; qualify unknown extension chains and the complete compiler
    environment before claiming general binary compatibility.
 4. Extend the now-shared RQ/RTP builder, BVH4 traversal and AS object model.
-   Four-child GPU collapse now executes in production. Implement refit and
-   qualify numerical cases and large construction IDs. Wire PLOC/HPLOC only
-   with complete host contracts. M1 remains incomplete.
+   Four-child GPU collapse and topology-preserving refit execute in production.
+   Qualify additional UPDATE/numerical cases and large construction IDs. Wire
+   PLOC/HPLOC only with complete host contracts. M1 remains incomplete.
 5. Complete public AS queries beyond the bounded non-simultaneous route. Its
    actual GPU properties and native completion acquisition now execute the two
    former [CTS failures](rt_cts_copy_pipeline_2026-10-26.md). Implement fresh

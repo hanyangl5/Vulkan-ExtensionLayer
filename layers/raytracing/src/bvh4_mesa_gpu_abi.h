@@ -10,6 +10,8 @@
 /* Requires IDENTITY_BLAS; source values are public AS handles resolved through
  * specialization constant 6, then retained at instance byte 120. */
 #define VEL_RT_MESA_GPU_PUBLIC_BLAS UINT32_C(2)
+/* Reuse the encoder pipelines for topology-preserving runtime refit. */
+#define VEL_RT_MESA_GPU_REFIT UINT32_C(0x100)
 #define VEL_RT_MESA_GPU_ENCODE_PHASE_COUNT 7u
 
 /* Leaf remap followed by input parents, two pointer-jump banks, and dense
@@ -39,4 +41,16 @@ typedef struct VelRtMesaGpuEncodeArgs {
     uint64_t geometry_flags, runtime_blas, status, first;
     uint32_t capacity, geometry_type, geometry_count, options;
 } VelRtMesaGpuEncodeArgs;
+
+/* Phase 0 copies source_as to output_as when distinct and initializes one
+ * ready counter per retained internal. Phase 1 updates original leaves from
+ * source_ir and propagates bounds with release/acquire child completion.
+ * geometry_prefix contains geometry_count original primitive prefix offsets;
+ * no dense-leaf-order assumption is made. Both phases use the encoder's
+ * existing dispatch/chunk ABI and require a barrier between them. */
+typedef struct VelRtBvh4RefitArgs {
+    uint64_t source_as, source_ir, output_as, geometry_prefix;
+    uint64_t geometry_flags, ready_counts, status, first;
+    uint32_t capacity, geometry_type, geometry_count, options;
+} VelRtBvh4RefitArgs;
 #endif

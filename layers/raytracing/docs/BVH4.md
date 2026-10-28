@@ -44,8 +44,11 @@ RQ production traversal now uses these parent links for constant-space
 resumable walks without fixed-stack truncation. It tests all four child slots,
 including a depth140/fourth-child regression. Production CLONE/COMPACT and GPU
 serialization now use this representation. Complete property-query publication,
-query replay/synchronization, refit and full API/resource qualification remain
-open; canonical typed RTP already uses the shared backend.
+query replay/synchronization and full API/resource qualification remain open.
+Topology-preserving GPU UPDATE now refreshes original-ID leaves and propagates
+bounds through retained parents; the [refit checkpoint](../../../docs/rt_refit_pointer_libraries_2026-10-28.md)
+records recoverable degenerate instances, memory publication and remaining
+qualification. Canonical typed RTP uses the same backend.
 
 ## Mesa construction IR adapter
 

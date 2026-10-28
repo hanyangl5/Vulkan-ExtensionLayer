@@ -100,12 +100,14 @@ static void dispatch(struct vkrt_device_data *dev, VkCommandBuffer cmd,
 struct vkrt_build_emit_context {
    struct vkrt_device_data *dev;
    VkCommandBuffer cmd;
+   bool leaf_only;
 };
 
 static void vkrt_build_emit(void *user, uint32_t pass, const void *args,
                             uint32_t size, uint32_t groups)
 {
    struct vkrt_build_emit_context *ctx = user;
+   if (ctx->leaf_only && pass > BVH_IR_STAGE_LEAF) return;
    dispatch(ctx->dev, ctx->cmd, pass, args, size, groups);
 }
 
@@ -171,24 +173,59 @@ void vkrt_cmd_build_as(struct vkrt_device_data *dev, VkCommandBuffer cmd, uint32
                                                0,
                                                0,
                                                0};
-      dispatch(dev, cmd, PREPARE, &prepare, sizeof(prepare), 1);
+      if (!update) dispatch(dev, cmd, PREPARE, &prepare, sizeof(prepare), 1);
       prepare.mode = 1;
+      uint32_t geometry_prefix = 0;
       for (uint32_t g = 0; g < info->geometryCount; ++g) {
           const VkAccelerationStructureGeometryKHR *geometry = info->pGeometries ? &info->pGeometries[g] : info->ppGeometries[g];
           prepare.geometry = g;
           prepare.flags = geometry->flags;
           dispatch(dev, cmd, PREPARE, &prepare, sizeof(prepare), 1);
+          if (update) {
+              prepare.geometry_flags = scratch + l.geometry_prefix;
+              prepare.flags = geometry_prefix;
+              dispatch(dev, cmd, PREPARE, &prepare, sizeof(prepare), 1);
+              prepare.geometry_flags = scratch + l.geometry_flags;
+              geometry_prefix += ranges[i][g].primitiveCount;
+          }
       }
-      struct vkrt_build_emit_context context = {dev, cmd};
-      /* UPDATE supplies the complete geometry description. Rebuild the shared
-       * representation on the GPU at the destination's unchanged physical
-       * header base. No source AS bytes are written for an out-of-place update,
-       * and existing TLAS references remain valid for an in-place BLAS update.
-       * Topology need not be preserved by Vulkan. This is not a refit path. */
+      struct vkrt_build_emit_context context = {dev, cmd, update};
+      /* UPDATE only refreshes source leaf records. Sorting, construction and
+       * IR parent/bounds passes are omitted; the retained runtime topology
+       * and original application IDs drive the separate refit below. */
       VkAccelerationStructureBuildGeometryInfoKHR build = *info;
       build.mode = VK_BUILD_ACCELERATION_STRUCTURE_MODE_BUILD_KHR;
       VkResult result = bvh_ir_record_build(&build, ranges[i], scratch + l.source, scratch, 0, vkrt_build_emit, &context);
       if (result != VK_SUCCESS) { cb->record_result = result; break; }
+      if (update) {
+          VkDeviceAddress source_address = vkrt_as_backing_address(dev, info->srcAccelerationStructure);
+          if (!source_address || source_address > UINT64_MAX - l.as_size) {
+              cb->record_result = VK_ERROR_INITIALIZATION_FAILED;
+              break;
+          }
+          VelRtBvh4RefitArgs refit = {source_address,
+                                      scratch + l.source,
+                                      address,
+                                      scratch + l.geometry_prefix,
+                                      scratch + l.geometry_flags,
+                                      scratch + l.mapping,
+                                      scratch + l.status,
+                                      0,
+                                      (uint32_t)l.leaf_count,
+                                      geometry_type,
+                                      info->geometryCount,
+                                      VEL_RT_MESA_GPU_REFIT | VEL_RT_MESA_GPU_IDENTITY_BLAS | VEL_RT_MESA_GPU_PUBLIC_BLAS};
+          for (uint32_t phase = 0; phase < 2; ++phase) {
+              uint64_t invocations = l.leaf_count ? l.leaf_count : 1;
+              uint64_t chunk = (uint64_t)dev->max_build_dispatch_x * 64;
+              for (refit.first = 0; refit.first < invocations; refit.first += chunk) {
+                  uint64_t remaining = invocations - refit.first;
+                  uint32_t groups = (uint32_t)((remaining < chunk ? remaining : chunk) + 63) / 64;
+                  dispatch(dev, cmd, ENCODE_0 + phase, &refit, sizeof(refit), groups);
+              }
+          }
+          continue;
+      }
       VelRtMesaGpuEncodeArgs encode = {scratch + l.source,
                                        l.ir.as_size,
                                        address,

@@ -10,7 +10,7 @@
 struct vkrt_build_layout {
     struct bvh_ir_build_layout ir;
     VkDeviceSize nodes, triangles, aabbs, instances, parents, as_size;
-    VkDeviceSize source, mapping, geometry_flags, status, scratch_size, leaf_count;
+    VkDeviceSize source, mapping, geometry_flags, geometry_prefix, status, scratch_size, leaf_count;
     bool valid;
 };
 static inline bool vkrt_layout_region(VkDeviceSize *cursor, VkDeviceSize count, VkDeviceSize stride, VkDeviceSize alignment,
@@ -48,6 +48,7 @@ static inline struct vkrt_build_layout vkrt_build_layout(const VkAccelerationStr
     if (!vkrt_layout_region(&cursor, l.ir.as_size, 1, 256, &l.source) ||
         !vkrt_layout_region(&cursor, map_words, 4, 256, &l.mapping) ||
         !vkrt_layout_region(&cursor, info->geometryCount, 4, 16, &l.geometry_flags) ||
+        !vkrt_layout_region(&cursor, info->geometryCount, 4, 16, &l.geometry_prefix) ||
         !vkrt_layout_region(&cursor, 1, 4, 16, &l.status) || !vkrt_layout_region(&cursor, 0, 1, 256, &unused))
         goto invalid;
     l.scratch_size = cursor;
@@ -65,8 +66,10 @@ struct vkrt_bvh4_prepare_args {
 #ifdef __cplusplus
 static_assert(sizeof(struct vkrt_bvh4_prepare_args) == 88, "BVH4 prepare push ABI");
 static_assert(sizeof(VelRtMesaGpuEncodeArgs) == 80, "BVH4 encoder push ABI");
+static_assert(sizeof(VelRtBvh4RefitArgs) == 80, "BVH4 refit push ABI");
 #else
 _Static_assert(sizeof(struct vkrt_bvh4_prepare_args) == 88, "BVH4 prepare push ABI");
 _Static_assert(sizeof(VelRtMesaGpuEncodeArgs) == 80, "BVH4 encoder push ABI");
+_Static_assert(sizeof(VelRtBvh4RefitArgs) == 80, "BVH4 refit push ABI");
 #endif
 #endif

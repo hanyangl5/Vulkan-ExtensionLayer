@@ -101,10 +101,11 @@ different purposes; neither completes the full goal by itself.
 ## Current implementation and evidence
 
 The GPU path builds triangle/AABB BLAS and instance TLAS through Mesa construction
-IR and encodes the shared BVH4 runtime. It supports semantic UPDATE through
-reconstruction, GPU CLONE/COMPACT, serialization and relocation, and bounded
-public AS property-query publication. COMPACT retains the same representation and
-size; UPDATE is not a refit optimization. The
+IR and encodes the shared BVH4 runtime. UPDATE refreshes leaf records and refits
+bounds while retaining the runtime topology. It also supports GPU CLONE/COMPACT,
+serialization and relocation, and bounded public AS property-query publication.
+COMPACT retains the same representation and
+size. Non-null zero-mask and empty-BLAS instances retain recoverable leaves. The
 [AS address contract](docs/AS_ADDRESS_ABI.md) distinguishes public values,
 physical roots, and publication lifetime.
 
@@ -132,8 +133,12 @@ scope:
 - [Resource profile and boundary checks](../../docs/rt_resource_profile_2026-10-26.md).
 - [Shader-object source and binary interoperability](../../docs/rt_shader_objects_2026-10-26.md).
 
-Full pointer provenance, complete shader/API/resource and synchronization
-coverage, advertised-limit qualification, larger builder variants, and physical
+Logical StorageBuffer pointer Phi/Select and inlined helper values use typed
+route/selector snapshots across suspension. RT pipeline libraries retain typed
+definitions and link through the same compute-backed runtime. The
+[refit/compiler/library checkpoint](../../docs/rt_refit_pointer_libraries_2026-10-28.md)
+records their scope and validation. Full pointer provenance, complete shader/API/
+resource and synchronization coverage, advertised-limit qualification, larger builder variants, and physical
 no-RT qualification remain work under the active goal. Unsupported optional
 features retain explicit boundaries. Evidence records distinguish failures,
 unsupported cases, and startup crashes from passes; an isolated successful

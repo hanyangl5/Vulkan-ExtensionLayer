@@ -168,6 +168,9 @@ struct Pipeline {
     std::vector<std::string> entries;
     std::vector<VkRayTracingShaderGroupCreateInfoKHR> groups;
     uint32_t depth = 0;
+    bool has_interface = false;
+    uint32_t max_payload = 0, max_attribute = 0;
+    std::vector<uint64_t> library_stack_bytes;
     VkPipelineCreateFlags flags = 0;
     uint64_t identity = 0;
     bool dynamic_stack = false;
@@ -562,11 +565,30 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateRayTracingPipelinesKHR(VkDevice device, VkD
         VkResult overall = VK_SUCCESS;
         for (uint32_t n = 0; n < count; ++n) {
             VkResult one = Guard([&] {
-                const auto &ci = infos[n];
+                auto ci = infos[n];
                 constexpr VkPipelineCreateFlags supported = VK_PIPELINE_CREATE_DISABLE_OPTIMIZATION_BIT |
                                                             VK_PIPELINE_CREATE_ALLOW_DERIVATIVES_BIT |
-                                                            VK_PIPELINE_CREATE_DERIVATIVE_BIT;
-                Need(!ci.pNext && !(ci.flags & ~supported) && !ci.pLibraryInfo && !ci.pLibraryInterface);
+                                                            VK_PIPELINE_CREATE_DERIVATIVE_BIT | VK_PIPELINE_CREATE_LIBRARY_BIT_KHR |
+                                                            VK_PIPELINE_CREATE_RAY_TRACING_NO_NULL_ANY_HIT_SHADERS_BIT_KHR |
+                                                            VK_PIPELINE_CREATE_RAY_TRACING_NO_NULL_CLOSEST_HIT_SHADERS_BIT_KHR |
+                                                            VK_PIPELINE_CREATE_RAY_TRACING_NO_NULL_INTERSECTION_SHADERS_BIT_KHR |
+                                                            VK_PIPELINE_CREATE_RAY_TRACING_NO_NULL_MISS_SHADERS_BIT_KHR |
+                                                            VK_PIPELINE_CREATE_LINK_TIME_OPTIMIZATION_BIT_EXT |
+                                                            VK_PIPELINE_CREATE_RETAIN_LINK_TIME_OPTIMIZATION_INFO_BIT_EXT;
+                // Maintenance5 flags2 replaces, rather than augments, flags.
+                // Inspect the full-width value before narrowing known bits.
+                VkPipelineCreateFlags2KHR flags = ci.flags;
+                bool has_flags2 = false;
+                for (auto next = static_cast<const VkBaseInStructure *>(ci.pNext); next; next = next->pNext) {
+                    Need(next->sType == VK_STRUCTURE_TYPE_PIPELINE_CREATE_FLAGS_2_CREATE_INFO_KHR && !has_flags2);
+                    flags = reinterpret_cast<const VkPipelineCreateFlags2CreateInfoKHR *>(next)->flags;
+                    has_flags2 = true;
+                }
+                Need(!(flags & ~VkPipelineCreateFlags2KHR(supported)));
+                ci.flags = VkPipelineCreateFlags(flags);
+                ci.pNext = nullptr;
+                Need(!ci.pLibraryInfo || !ci.pLibraryInfo->pNext);
+                Need(!ci.pLibraryInterface || !ci.pLibraryInterface->pNext);
                 if (ci.flags & VK_PIPELINE_CREATE_DERIVATIVE_BIT) {
                     std::shared_ptr<Pipeline> base;
                     if (ci.basePipelineHandle) {
@@ -587,6 +609,12 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateRayTracingPipelinesKHR(VkDevice device, VkD
                 p->layout = FindLayout(d, ci.layout);
                 Need(p->layout != nullptr);
                 p->depth = ci.maxPipelineRayRecursionDepth;
+                p->has_interface = ci.pLibraryInterface != nullptr;
+                if (ci.pLibraryInterface) {
+                    p->max_payload = ci.pLibraryInterface->maxPipelineRayPayloadSize;
+                    p->max_attribute = ci.pLibraryInterface->maxPipelineRayHitAttributeSize;
+                }
+                Need(!(ci.flags & VK_PIPELINE_CREATE_LIBRARY_BIT_KHR) || p->has_interface);
                 p->identity = d->rtp->next_identity.fetch_add(1);
                 Need(p->identity != 0);
                 if (ci.pDynamicState) {
@@ -596,7 +624,7 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateRayTracingPipelinesKHR(VkDevice device, VkD
                         p->dynamic_stack = true;
                     }
                 }
-                p->groups.assign(ci.pGroups, ci.pGroups + ci.groupCount);
+                if (ci.groupCount) p->groups.assign(ci.pGroups, ci.pGroups + ci.groupCount);
                 for (auto g : p->groups) Need(!g.pNext && !g.pShaderGroupCaptureReplayHandle);
                 for (uint32_t s = 0; s < ci.stageCount; ++s) {
                     const auto &stage = ci.pStages[s];
@@ -607,10 +635,49 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateRayTracingPipelinesKHR(VkDevice device, VkD
                     p->metadata.push_back(CompileTypedPipelineStage(source, stage.pName, stage.stage, stage.pSpecializationInfo,
                                                                     "vel_rt_stage_" + std::to_string(s)));
                 }
-                uint64_t bytes = PlanTypedRuntimeArenaBytes(p->metadata, p->groups, p->depth);
+                // Vulkan implicitly appends each library's complete stage and
+                // group lists in pLibraries order. A library already owns its
+                // flattened dependencies; repeated references deliberately
+                // produce repeated lists, rather than a deduplicated DAG.
+                if (ci.pLibraryInfo) {
+                    for (uint32_t i = 0; i < ci.pLibraryInfo->libraryCount; ++i) {
+                        auto library = FindPipeline(d, ci.pLibraryInfo->pLibraries[i]);
+                        Need(library && (library->flags & VK_PIPELINE_CREATE_LIBRARY_BIT_KHR) && p->has_interface &&
+                             library->depth == p->depth && library->max_payload == p->max_payload &&
+                             library->max_attribute == p->max_attribute);
+                        constexpr VkPipelineCreateFlags no_null =
+                            VK_PIPELINE_CREATE_RAY_TRACING_NO_NULL_ANY_HIT_SHADERS_BIT_KHR |
+                            VK_PIPELINE_CREATE_RAY_TRACING_NO_NULL_CLOSEST_HIT_SHADERS_BIT_KHR |
+                            VK_PIPELINE_CREATE_RAY_TRACING_NO_NULL_INTERSECTION_SHADERS_BIT_KHR |
+                            VK_PIPELINE_CREATE_RAY_TRACING_NO_NULL_MISS_SHADERS_BIT_KHR;
+                        Need((library->flags & (ci.flags & no_null)) == (ci.flags & no_null));
+                        Need(library->metadata.size() <= UINT32_MAX - p->metadata.size() &&
+                             library->groups.size() <= UINT32_MAX - p->groups.size());
+                        const uint32_t base = uint32_t(p->metadata.size());
+                        p->metadata.insert(p->metadata.end(), library->metadata.begin(), library->metadata.end());
+                        p->kinds.insert(p->kinds.end(), library->kinds.begin(), library->kinds.end());
+                        p->entries.insert(p->entries.end(), library->entries.begin(), library->entries.end());
+                        for (auto group : library->groups) {
+                            for (uint32_t *stage :
+                                 {&group.generalShader, &group.closestHitShader, &group.anyHitShader, &group.intersectionShader})
+                                if (*stage != VK_SHADER_UNUSED_KHR) {
+                                    Need(*stage < library->metadata.size());
+                                    *stage += base;
+                                }
+                            p->groups.push_back(group);
+                        }
+                    }
+                }
+                const auto arena = PlanTypedRuntimeArena(p->metadata, p->groups, p->depth);
                 // Application cache access is confined to this creation call.
                 // Later stack variants use no cache and retain no cache handle.
-                p->initial = Build(*p, bytes, cache);
+                // Libraries may omit raygen, all groups, or their own stages.
+                // They retain typed source/interface definitions, never native
+                // RT pipelines or caller-owned shader/cache/library handles.
+                if (ci.flags & VK_PIPELINE_CREATE_LIBRARY_BIT_KHR)
+                    p->library_stack_bytes = arena.stage_stack_bytes;
+                else
+                    p->initial = Build(*p, arena.default_arena_bytes, cache);
                 auto token = Token<PipelineToken>(a, p);
                 try {
                     std::lock_guard<std::mutex> lock(d->rtp->lock);
@@ -651,7 +718,7 @@ VKAPI_ATTR VkResult VKAPI_CALL GetRayTracingShaderGroupHandlesKHR(VkDevice devic
                                                                   size_t bytes, void *data) {
     return Guard([&] {
         auto p = FindPipeline(Device(device), h);
-        Need(p != nullptr);
+        Need(p != nullptr && p->initial != nullptr);
         auto v = p->initial;
         Need(uint64_t(first) + count <= v->program.group_handles.size() && uint64_t(count) * 32 <= bytes);
         for (uint32_t i = 0; i < count; ++i) std::memcpy((uint8_t *)data + i * 32, v->program.group_handles[first + i].data(), 32);
@@ -675,7 +742,7 @@ VKAPI_ATTR VkDeviceSize VKAPI_CALL GetRayTracingShaderGroupStackSizeKHR(VkDevice
         else if (shader == VK_SHADER_GROUP_SHADER_INTERSECTION_KHR)
             s = g.intersectionShader;
         if (s != VK_SHADER_UNUSED_KHR) {
-            auto &sizes = p->initial->program.stage_stack_bytes;
+            const auto &sizes = p->initial ? p->initial->program.stage_stack_bytes : p->library_stack_bytes;
             Need(s < sizes.size());
             bytes = sizes[s];
         }
@@ -1057,7 +1124,7 @@ extern "C" bool vkrt_rtp_bind_pipeline(vkrt_cmd_buffer_data *cb, VkPipelineBindP
     if (point != VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR) return false;
     VkResult r = Guard([&] {
         State(cb).bound = FindPipeline(cb->device_data, h);
-        Need(State(cb).bound != nullptr);
+        Need(State(cb).bound != nullptr && State(cb).bound->initial != nullptr);
         return VK_SUCCESS;
     });
     if (r != VK_SUCCESS) cb->record_result = r;

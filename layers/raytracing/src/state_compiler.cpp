@@ -155,7 +155,8 @@ class Compiler {
             if (opcode.find("Group") == 0 || opcode.find("Subgroup") == 0 || (i.op >= spv::OpDPdx && i.op <= spv::OpFwidthCoarse))
                 Unsupported("subgroup/derivative execution semantics require scheduler support");
             if (i.type && Def(i.type).op == spv::OpTypePointer && i.op != spv::OpVariable && i.op != spv::OpAccessChain &&
-                i.op != spv::OpInBoundsAccessChain && i.op != spv::OpCopyObject && i.op != spv::OpImageTexelPointer)
+                i.op != spv::OpInBoundsAccessChain && i.op != spv::OpCopyObject && i.op != spv::OpImageTexelPointer &&
+                !((i.op == spv::OpPhi || i.op == spv::OpSelect) && Def(i.type).words.at(2) == spv::StorageClassStorageBuffer))
                 Unsupported("unsupported pointer provenance Op" + std::string(spvOpcodeString(i.op)) + " for ID " +
                             std::to_string(i.result));
             NeedValueType(i.type);
@@ -184,9 +185,11 @@ class Compiler {
             if (!BDA() && source_binding != resource_bindings.end() && resource_set == set && source_binding->second == binding)
                 Unsupported("frame descriptor binding collides with a live source resource");
         }
+        PlanPointerRoutes();
         std::vector<uint32_t> types(value_types.begin(), value_types.end());
         ContinuationFrameOptions options{true, true};
         options.persistent_private_storage = true;
+        options.logical_pointer_snapshots = !pointer_plans.empty();
         options.physical_frame_addresses = BDA();
         options.private_frame_words = config.private_frame_words;
         if (config.transport == TypedFrameTransport::PrivateArray) {
@@ -242,6 +245,7 @@ class Compiler {
             }
         }
         PlanResourceRecipes(persistent_size, preview.types);
+        PlanPointerSnapshots(persistent_size);
         const auto bounds = PlanTypedContinuationFrameBounds(persistent_size);
         output.frame_stride_words = bounds.stride_words;
         output.max_invocations = bounds.max_invocations;
@@ -334,6 +338,16 @@ class Compiler {
         std::shared_ptr<RecipeNode> root;
         std::vector<RecipeCapture> captures;
     };
+    // A route is a descriptor root plus an exact typed access path. Constant
+    // selectors keep their module ID; dynamic selectors keep only their type.
+    // Equal routes share a tag, while each SSA result owns its own selector
+    // snapshots. Pointer Phi cycles therefore have a finite path fixed point.
+    using PointerRoute = std::pair<uint32_t, std::vector<std::pair<uint32_t, uint32_t>>>;
+    struct PointerPlan {
+        std::set<uint32_t> routes;
+        uint32_t offset = 0, words = 1;
+        bool non_uniform = false;
+    };
     TypedContinuationProgram output;
     Parsed parsed;
     std::string entry;
@@ -361,6 +375,11 @@ class Compiler {
     std::map<uint32_t, std::string> ephemeral_values;
     std::map<uint32_t, std::string> ephemeral_pointers;
     std::map<uint32_t, ResourceRecipe> resource_recipes;
+    std::map<PointerRoute, uint32_t> pointer_route_ids;
+    std::vector<PointerRoute> pointer_routes;
+    std::map<uint32_t, PointerPlan> pointer_plans;
+    std::map<std::string, std::string> null_pointers;
+    std::map<uint32_t, uint32_t> active_pointer_routes;
     std::set<uint64_t> wide_constants;
     std::vector<std::string> interfaces;
     std::ostringstream source_caps, imports, extensions, execution_modes, annotations, declarations, functions;
@@ -816,6 +835,303 @@ class Compiler {
         return p.words.at(2) == spv::StorageClassImage ||
                (p.words.at(2) == spv::StorageClassUniformConstant && ContainsNativeOpaque(p.words.at(3)));
     }
+    uint32_t PointerRouteID(const PointerRoute &route) {
+        auto found = pointer_route_ids.find(route);
+        if (found != pointer_route_ids.end()) return found->second;
+        if (pointer_routes.size() >= UINT32_MAX) Unsupported("logical pointer route tags exceed uint32");
+        auto id = static_cast<uint32_t>(pointer_routes.size());
+        pointer_routes.push_back(route);
+        pointer_route_ids.emplace(route, id);
+        return id;
+    }
+    uint32_t SelectorWords(uint32_t type) const {
+        const auto &t = Def(type);
+        if (t.op != spv::OpTypeInt || !t.words.at(2) || t.words.at(2) > 64)
+            Unsupported("logical pointer selector is not an integer of at most 64 bits");
+        return (t.words.at(2) + 31) / 32;
+    }
+    uint32_t RouteWords(uint32_t route) const {
+        uint64_t words = 1;
+        for (const auto &[constant, type] : pointer_routes.at(route).second)
+            if (!constant) words += SelectorWords(type);
+        if (words > UINT32_MAX / 4) Unsupported("logical pointer selector snapshot exceeds frame indexing");
+        return static_cast<uint32_t>(words);
+    }
+    PointerRoute ExtendPointerRoute(uint32_t base, const Instruction &access) const {
+        auto route = pointer_routes.at(base);
+        for (size_t n = 4; n < access.words.size(); ++n) {
+            const auto index = access.words[n];
+            const auto &d = Def(index);
+            route.second.push_back(d.in_function ? std::make_pair(0u, d.type) : std::make_pair(index, 0u));
+        }
+        return route;
+    }
+    void PlanPointerRoutes() {
+        bool needed = false;
+        for (const auto &i : parsed.instructions)
+            needed |= i.type && IsPointer(i.type) && Def(i.type).words.at(2) == spv::StorageClassStorageBuffer &&
+                      (i.op == spv::OpPhi || i.op == spv::OpSelect);
+        if (!needed) return;
+        std::set<uint32_t> non_uniform;
+        for (const auto &i : parsed.instructions)
+            if (i.op == spv::OpDecorate && i.words.at(2) == spv::DecorationNonUniform) non_uniform.insert(i.words.at(1));
+        for (const auto &i : parsed.instructions) {
+            if (!i.result || !IsPointer(i.type) || Def(i.type).words.at(2) != spv::StorageClassStorageBuffer) continue;
+            auto &plan = pointer_plans[i.result];
+            plan.non_uniform = non_uniform.count(i.result) != 0;
+            if (i.op == spv::OpAccessChain || i.op == spv::OpInBoundsAccessChain)
+                for (size_t n = 4; n < i.words.size(); ++n) plan.non_uniform |= non_uniform.count(i.words[n]) != 0;
+            if (!i.in_function) {
+                if (i.op != spv::OpVariable && i.op != spv::OpConstantNull)
+                    Unsupported("logical pointer root is not a descriptor or null");
+                plan.routes.insert(PointerRouteID({i.op == spv::OpConstantNull ? 0u : i.result, {}}));
+            }
+        }
+        bool changed = true;
+        while (changed) {
+            changed = false;
+            for (const auto &i : parsed.instructions) {
+                auto result = pointer_plans.find(i.result);
+                if (result == pointer_plans.end() || !i.in_function) continue;
+                auto inherit = [&](uint32_t source, bool extend) {
+                    const auto found = pointer_plans.find(source);
+                    if (found == pointer_plans.end()) Unsupported("logical pointer has no typed source route");
+                    if (found->second.non_uniform && !result->second.non_uniform) {
+                        result->second.non_uniform = true;
+                        changed = true;
+                    }
+                    // A zero-index chain may refer back through Phi. Copy the
+                    // set before insertion, so the fixed point never mutates
+                    // the container currently being traversed.
+                    const auto parents = found->second.routes;
+                    for (auto route : parents) {
+                        const auto target = extend ? PointerRouteID(ExtendPointerRoute(route, i)) : route;
+                        changed |= result->second.routes.insert(target).second;
+                    }
+                };
+                if (i.op == spv::OpAccessChain || i.op == spv::OpInBoundsAccessChain)
+                    inherit(i.words.at(3), true);
+                else if (i.op == spv::OpCopyObject)
+                    inherit(i.words.at(3), false);
+                else if (i.op == spv::OpSelect) {
+                    inherit(i.words.at(4), false);
+                    inherit(i.words.at(5), false);
+                } else if (i.op == spv::OpPhi) {
+                    for (size_t n = 3; n < i.words.size(); n += 2) inherit(i.words[n], false);
+                } else
+                    Unsupported("logical pointer SSA operation requires an explicit identity encoding");
+            }
+        }
+        for (auto &[id, plan] : pointer_plans) {
+            (void)id;
+            if (plan.routes.empty()) Unsupported("logical pointer Phi has no reachable descriptor root");
+            for (auto route : plan.routes) plan.words = std::max(plan.words, RouteWords(route));
+        }
+    }
+    void PlanPointerSnapshots(uint64_t &size) {
+        const auto begin = size;
+        for (auto &[id, plan] : pointer_plans) {
+            if (!Def(id).in_function) continue;
+            size = (size + 3) & ~uint64_t(3);
+            const uint64_t bytes = uint64_t(plan.words) * 4;
+            if (size > UINT32_MAX || bytes > UINT32_MAX - size)
+                Unsupported("logical pointer snapshots exceed 32-bit frame indexing");
+            plan.offset = static_cast<uint32_t>(size);
+            size += bytes;
+            ++output.pointer_snapshot_values;
+        }
+        output.pointer_snapshot_bytes = size - begin;
+    }
+    std::vector<std::string> ReadPointerSnapshot(uint32_t id) {
+        const auto &plan = pointer_plans.at(id);
+        std::vector<std::string> result;
+        if (!Def(id).in_function) {
+            result.push_back(Constant(*plan.routes.begin()));
+            return result;
+        }
+        for (uint32_t n = 0; n < plan.words; ++n)
+            result.push_back(
+                Op("OpFunctionCall " + code.word_type + " " + word_codec->load + " %sc_base " + Constant(plan.offset + n * 4)));
+        return result;
+    }
+    void WritePointerSnapshot(uint32_t id, const std::vector<std::string> &words) {
+        const auto &plan = pointer_plans.at(id);
+        for (uint32_t n = 0; n < plan.words; ++n)
+            Op("OpFunctionCall " + code.void_type + " " + word_codec->store + " %sc_base " + Constant(plan.offset + n * 4) + " " +
+               (n < words.size() ? words[n] : Constant(0)));
+    }
+    std::vector<std::string> EncodeSelector(uint32_t id) {
+        auto value = Value(id);
+        const auto type = Def(id).type;
+        const auto width = Def(type).words.at(2);
+        if (width == 64) {
+            auto pair = Op("OpBitcast " + code.word_pair_type + " " + value);
+            return {Op("OpCompositeExtract " + code.word_type + " " + pair + " 0"),
+                    Op("OpCompositeExtract " + code.word_type + " " + pair + " 1")};
+        }
+        if (Type(type) != code.word_type)
+            value = Op(std::string(width == 32 ? "OpBitcast " : "OpUConvert ") + code.word_type + " " + value);
+        return {value};
+    }
+    std::string DecodeSelector(uint32_t type, const std::vector<std::string> &words, size_t &offset) {
+        const auto width = Def(type).words.at(2);
+        auto value = words.at(offset++);
+        if (width == 64) {
+            auto pair = Op("OpCompositeConstruct " + code.word_pair_type + " " + value + " " + words.at(offset++));
+            return Op("OpBitcast " + Type(type) + " " + pair);
+        }
+        if (Type(type) != code.word_type)
+            value = Op(std::string(width == 32 ? "OpBitcast " : "OpUConvert ") + Type(type) + " " + value);
+        return value;
+    }
+    void CapturePointerSnapshot(const Instruction &i) {
+        if (!pointer_plans.count(i.result)) return;
+        if (i.op == spv::OpCopyObject) {
+            WritePointerSnapshot(i.result, ReadPointerSnapshot(i.words.at(3)));
+            return;
+        }
+        if (i.op == spv::OpSelect) {
+            const auto condition = Value(i.words.at(3));
+            const auto yes = ReadPointerSnapshot(i.words.at(4)), no = ReadPointerSnapshot(i.words.at(5));
+            std::vector<std::string> result;
+            for (uint32_t n = 0; n < pointer_plans.at(i.result).words; ++n)
+                result.push_back(Op("OpSelect " + code.word_type + " " + condition + " " + (n < yes.size() ? yes[n] : Constant(0)) +
+                                    " " + (n < no.size() ? no[n] : Constant(0))));
+            WritePointerSnapshot(i.result, result);
+            return;
+        }
+        const auto base = i.words.at(3);
+        const auto parent = ReadPointerSnapshot(base);
+        std::vector<std::string> appended;
+        for (size_t n = 4; n < i.words.size(); ++n)
+            if (Def(i.words[n]).in_function) {
+                const auto encoded = EncodeSelector(i.words[n]);
+                appended.insert(appended.end(), encoded.begin(), encoded.end());
+            }
+        const auto &routes = pointer_plans.at(base).routes;
+        const auto merge = Fresh();
+        std::vector<std::pair<uint32_t, std::string>> labels;
+        for (auto route : routes) labels.push_back({route, Fresh()});
+        if (labels.size() > 1) {
+            functions << "OpSelectionMerge " << merge << " None\nOpSwitch " << parent[0] << " " << labels[0].second;
+            for (const auto &[route, label] : labels) functions << " " << route << " " << label;
+            functions << "\n";
+        }
+        for (const auto &[route, label] : labels) {
+            if (labels.size() > 1) functions << label << " = OpLabel\n";
+            std::vector<std::string> result{Constant(pointer_route_ids.at(ExtendPointerRoute(route, i)))};
+            result.insert(result.end(), parent.begin() + 1, parent.begin() + RouteWords(route));
+            result.insert(result.end(), appended.begin(), appended.end());
+            WritePointerSnapshot(i.result, result);
+            if (labels.size() > 1) functions << "OpBranch " << merge << "\n";
+        }
+        if (labels.size() > 1) functions << merge << " = OpLabel\n";
+    }
+    std::string RebuildPointerSnapshot(uint32_t id) {
+        const auto &routes = pointer_plans.at(id).routes;
+        const auto active = active_pointer_routes.find(id);
+        if (active == active_pointer_routes.end() && routes.size() != 1)
+            Unsupported("variable logical pointer must be consumed inside its selected route");
+        const auto &route = pointer_routes.at(active == active_pointer_routes.end() ? *routes.begin() : active->second);
+        if (!route.first) {
+            const auto type = Type(Def(id).type);
+            auto found = null_pointers.find(type);
+            if (found == null_pointers.end()) {
+                const auto value = Fresh();
+                declarations << value << " = OpConstantNull " << type << "\n";
+                found = null_pointers.emplace(type, value).first;
+            }
+            return found->second;
+        }
+        if (route.second.empty()) return Global(route.first);
+        const auto words = ReadPointerSnapshot(id);
+        std::string operands = Global(route.first);
+        size_t offset = 1;
+        for (const auto &[constant, type] : route.second)
+            operands += " " + (constant ? Global(constant) : DecodeSelector(type, words, offset));
+        auto result = Op("OpAccessChain " + Type(Def(id).type) + " " + operands);
+        DecoratePointerSnapshot(id, result);
+        return result;
+    }
+    bool RoutedPointerOperation(const Instruction &i) {
+        std::vector<uint32_t> pointers;
+        bool needed = false;
+        for (auto id : i.uses) {
+            const auto found = pointer_plans.find(id);
+            if (found == pointer_plans.end() || std::find(pointers.begin(), pointers.end(), id) != pointers.end()) continue;
+            pointers.push_back(id);
+            needed |= found->second.routes.size() != 1 || !pointer_routes.at(*found->second.routes.begin()).first;
+        }
+        if (!needed) return false;
+        // Keep native pointers within a statically rooted case. Only the
+        // selected operation executes, including volatile/atomic accesses.
+        // The normal numeric Function registers merge results after the
+        // switch; no native logical pointer Phi/Select is required downstream.
+        std::function<void(size_t)> emit = [&](size_t index) {
+            if (index == pointers.size()) {
+                const auto opcode = std::string(spvOpcodeString(i.op));
+                const bool memory = i.op == spv::OpLoad || i.op == spv::OpStore || opcode.find("Atomic") == 0;
+                bool null = false;
+                for (const auto &[id, route] : active_pointer_routes) {
+                    (void)id;
+                    null |= !pointer_routes.at(route).first;
+                }
+                if (memory && null) {
+                    // Dereferencing a logical null pointer is undefined. Do
+                    // not issue an invalid native memory access on that path;
+                    // all defined, selected non-null paths remain unchanged.
+                    if (i.result) {
+                        const auto value = Fresh();
+                        declarations << value << " = OpUndef " << Type(i.type) << "\n";
+                        Save(i.result, value);
+                    }
+                } else if (i.op == spv::OpStore) {
+                    const auto value_id = i.words.at(2);
+                    const auto type = Def(value_id).type;
+                    auto value = Value(value_id);
+                    if (ResourceType(type) != Type(type)) value = Op("OpCopyLogical " + ResourceType(type) + " " + value);
+                    functions << Rewrite(i.text, [&](uint32_t id) { return id == value_id ? value : Value(id); }) << "\n";
+                } else if (i.op == spv::OpAtomicStore || i.op == spv::OpAtomicFlagClear)
+                    functions << Rewrite(i.text, [&](uint32_t id) { return Value(id); }) << "\n";
+                else
+                    Generic(i);
+                return;
+            }
+            const auto id = pointers[index];
+            const auto &routes = pointer_plans.at(id).routes;
+            if (routes.size() == 1) {
+                active_pointer_routes[id] = *routes.begin();
+                emit(index + 1);
+                active_pointer_routes.erase(id);
+                return;
+            }
+            const auto words = ReadPointerSnapshot(id);
+            const auto merge = Fresh();
+            std::vector<std::pair<uint32_t, std::string>> labels;
+            for (auto route : routes) labels.push_back({route, Fresh()});
+            functions << "OpSelectionMerge " << merge << " None\nOpSwitch " << words[0] << " " << labels[0].second;
+            for (const auto &[route, label] : labels) functions << " " << route << " " << label;
+            functions << "\n";
+            for (const auto &[route, label] : labels) {
+                functions << label << " = OpLabel\n";
+                active_pointer_routes[id] = route;
+                emit(index + 1);
+                functions << "OpBranch " << merge << "\n";
+            }
+            active_pointer_routes.erase(id);
+            functions << merge << " = OpLabel\n";
+        };
+        emit(0);
+        return true;
+    }
+    void DecoratePointerSnapshot(uint32_t id, const std::string &result) {
+        DecorateResult(id, result, true);
+        if (!pointer_plans.at(id).non_uniform) return;
+        bool direct = false;
+        for (const auto &i : parsed.instructions)
+            direct |= i.op == spv::OpDecorate && i.words.at(1) == id && i.words.at(2) == spv::DecorationNonUniform;
+        if (!direct) annotations << "OpDecorate " << result << " NonUniform\n";
+    }
     void PlanResourceRecipes(uint64_t &size, const std::vector<ContinuationTypeLayout> &layouts) {
         const auto begin = size;
         auto allocate = [&](uint32_t type) {
@@ -984,6 +1300,7 @@ class Compiler {
     std::string RealPointer(uint32_t id) {
         const auto &d = Def(id);
         if (IsPersistentStorage(Storage(id)) || SystemPointer(id)) Unsupported("persistent pointer used outside typed load/store");
+        if (pointer_plans.count(id)) return RebuildPointerSnapshot(id);
         if (resource_recipes.count(id)) {
             auto found = ephemeral_pointers.find(id);
             if (found != ephemeral_pointers.end()) return found->second;
@@ -1039,12 +1356,16 @@ class Compiler {
         auto found = std::find_if(blocks.begin(), blocks.end(), [&](const Block &b) { return b.label == target; });
         if (found == blocks.end()) Unsupported("missing branch target");
         std::vector<std::pair<uint32_t, std::string>> copies;
+        std::vector<std::pair<uint32_t, std::vector<std::string>>> pointer_copies;
         for (auto i : found->body) {
             if (i->op != spv::OpPhi) continue;
             bool matched = false;
             for (size_t n = 3; n < i->words.size(); n += 2) {
                 if (i->words.at(n + 1) == predecessor) {
-                    copies.push_back({i->result, Value(i->words[n])});
+                    if (pointer_plans.count(i->result))
+                        pointer_copies.push_back({i->result, ReadPointerSnapshot(i->words[n])});
+                    else
+                        copies.push_back({i->result, Value(i->words[n])});
                     matched = true;
                     break;
                 }
@@ -1054,6 +1375,7 @@ class Compiler {
         // Read every incoming operand before writing any destination. This is
         // required for loop-carried swaps and mutually dependent Phi nodes.
         for (const auto &[destination, value] : copies) Save(destination, value);
+        for (const auto &[destination, value] : pointer_copies) WritePointerSnapshot(destination, value);
     }
     void Resume(const Instruction &i) {
         const auto &site = *sites.at(i.offset);
@@ -1281,7 +1603,12 @@ class Compiler {
             }
             if (i.op == spv::OpAccessChain || i.op == spv::OpInBoundsAccessChain ||
                 (i.op == spv::OpCopyObject && IsPointer(i.type) && Def(i.type).words.at(2) != spv::StorageClassImage)) {
+                CapturePointerSnapshot(i);
                 CaptureRecipe(i.result);
+                continue;
+            }
+            if (i.op == spv::OpSelect && pointer_plans.count(i.result)) {
+                CapturePointerSnapshot(i);
                 continue;
             }
             if (i.op == spv::OpImageTexelPointer || (i.op == spv::OpCopyObject && IsPointer(i.type))) {
@@ -1307,6 +1634,7 @@ class Compiler {
                 Suspend(i, state.number + 1);
                 return;
             }
+            if (RoutedPointerOperation(i)) continue;
             if (i.op == spv::OpLoad && (IsPersistentStorage(Storage(i.words.at(3))) || SystemPointer(i.words.at(3)))) {
                 if (i.words.size() != 4) Unsupported("persistent local load memory operands");
                 auto address = Offset(i.words.at(3));

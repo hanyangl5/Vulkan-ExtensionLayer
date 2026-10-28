@@ -26,6 +26,7 @@ import math
 import os
 from pathlib import Path
 import re
+import runpy
 import shutil
 import signal
 import subprocess
@@ -92,8 +93,8 @@ def load_cases(path):
     return cases
 
 
-def snapshot_layer(source_dir, output_dir, mode):
-    expected = LAYERS[mode]
+def snapshot_layer(source_dir, output_dir, mode, expected=None, directory="layer_snapshot"):
+    expected = expected or LAYERS[mode]
     matches = []
     for path in sorted(source_dir.glob("*.json")):
         try:
@@ -112,7 +113,7 @@ def snapshot_layer(source_dir, output_dir, mode):
     if not library.is_absolute():
         library = source_manifest.parent / library
     library = library.resolve(strict=True)
-    snapshot = output_dir / "layer_snapshot"
+    snapshot = output_dir / directory
     snapshot.mkdir()
     target = snapshot / library.name
     for _ in range(3):
@@ -144,17 +145,21 @@ def snapshot_layer(source_dir, output_dir, mode):
     }
 
 
-def run_environment(mode, snapshot, validation_dir=None):
+def run_environment(mode, snapshot, validation_dir=None, guard_dir=None):
     env = os.environ.copy()
     removed = {key: env.pop(key) for key in LAYER_ENV if key in env}
     overrides = {"VK_LOADER_LAYERS_DISABLE": "~implicit~"}
     if mode != "native":
         overrides.update(VK_INSTANCE_LAYERS=LAYERS[mode], VK_LAYER_PATH=str(snapshot))
+        if guard_dir:
+            overrides["VK_INSTANCE_LAYERS"] += os.pathsep + "VK_LAYER_VKRT_NO_NATIVE_RT_GUARD"
         if mode in ("ray-query", "software-rt"):
             overrides["ENABLE_VKRT_SOFTWARE_RAY_QUERY"] = "1"
-    if validation_dir:
+    if validation_dir or guard_dir:
         overrides["VK_LAYER_PATH"] = os.pathsep.join(
-            [str(path) for path in (snapshot, validation_dir) if path is not None])
+            [str(path) for path in (snapshot, guard_dir, validation_dir) if path is not None])
+    env.pop("VKRT_NO_RT_GUARD_LOG", None)
+    env.pop("VKRT_NO_RT_GUARD_MASK_DISCOVERY", None)
     env.update(overrides)
     # Keep reproducibility-relevant driver/loader inputs without dumping API
     # keys, credentials or unrelated inherited process environment variables.
@@ -215,6 +220,23 @@ def write_summary(path, summary):
     temporary.replace(path)
 
 
+def guard_evidence(path, auditor=None):
+    evidence = {"log": str(path), "verified": False}
+    if not path.is_file():
+        return evidence, "guard log missing; downstream boundary was not proved active"
+    evidence["sha256"] = sha256(path)
+    try:
+        records = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
+        evidence["records"] = len(records)
+        evidence["reject_records"] = sum(r["event"] == "reject" for r in records)
+        auditor = auditor or Path(__file__).resolve().parents[1] / "layers/raytracing/tests/no_native_rt_guard_audit.py"
+        evidence["audit"] = runpy.run_path(str(auditor))["audit_records"](records)
+        evidence["verified"] = True
+        return evidence, None
+    except (OSError, ValueError, KeyError, TypeError) as error:
+        return evidence, f"invalid guard evidence: {error}"
+
+
 def execute(args):
     cts = args.cts.resolve(strict=True)
     archive = args.archive_dir.resolve(strict=True)
@@ -228,6 +250,15 @@ def execute(args):
     snapshot, layer = (None, None)
     if args.mode != "native":
         snapshot, layer = snapshot_layer(args.layer_dir.resolve(strict=True), output, args.mode)
+    guard_dir, guard_layer = None, None
+    guard_auditor = None
+    if args.no_native_rt_guard_dir:
+        guard_dir, guard_layer = snapshot_layer(args.no_native_rt_guard_dir.resolve(strict=True), output, args.mode,
+                                               "VK_LAYER_VKRT_NO_NATIVE_RT_GUARD", "guard_snapshot")
+        guard_auditor = guard_dir / "guard_auditor.py"
+        shutil.copy2(Path(__file__).resolve().parents[1] / "layers/raytracing/tests/no_native_rt_guard_audit.py", guard_auditor)
+        guard_layer["auditor_snapshot"] = str(guard_auditor)
+        guard_layer["auditor_sha256"] = sha256(guard_auditor)
     validation = None
     validation_dir = args.validation_layer_dir.resolve(strict=True) if args.validation_layer_dir else None
     if validation_dir:
@@ -241,7 +272,7 @@ def execute(args):
         validation = {"manifest": str(manifest_path), "manifest_sha256": sha256(manifest_path),
                       "library": str(library.resolve(strict=True)), "library_sha256": sha256(library),
                       "scope": "original SDK installation, hashed but not copied"}
-    env, env_record = run_environment(args.mode, snapshot, validation_dir)
+    env, env_record = run_environment(args.mode, snapshot, validation_dir, guard_dir)
     device_info = None
     if args.device_info_file:
         device_source = args.device_info_file.resolve(strict=True)
@@ -252,6 +283,7 @@ def execute(args):
     binary_stat = (cts.stat().st_size, cts.stat().st_mtime_ns)
     summary = {
         "schema_version": 1,
+        "runner_sha256": sha256(Path(__file__)),
         "started_at_utc": utc_now(),
         "state": "running",
         "mode": args.mode,
@@ -265,6 +297,7 @@ def execute(args):
         "selected_cases": cases,
         "layer": layer,
         "validation": validation,
+        "no_native_rt_guard": guard_layer,
         "layer_revision_declared": args.layer_revision,
         "device_info": device_info,
         "environment": env_record,
@@ -279,6 +312,9 @@ def execute(args):
         stem = f"{ordinal:04d}-{case.split('.')[-1][:40]}-{hashlib.sha256(case.encode()).hexdigest()[:10]}"
         qpa = output / (stem + ".qpa")
         stdout = output / (stem + ".stdout.txt")
+        guard_log = output / (stem + ".guard.jsonl")
+        if guard_dir:
+            env["VKRT_NO_RT_GUARD_LOG"] = str(guard_log)
         watchdog = max(1, math.ceil(args.timeout))
         command = [str(cts), f"--deqp-case={case}", "--deqp-visibility=hidden", f"--deqp-archive-dir={archive}",
                    "--deqp-shadercache=disable", "--deqp-watchdog=enable", "--deqp-crashhandler=enable",
@@ -314,6 +350,11 @@ def execute(args):
         entry = {"case": case, "status": status, "result": result, "reason": reason, "exit_code": exit_code,
                  "elapsed_seconds": round(time.monotonic() - start, 6), "command": command, "cwd": str(output),
                  "stdout": str(stdout), "qpa": str(qpa), "session_info": session}
+        if guard_dir:
+            entry["no_native_rt_guard"], guard_error = guard_evidence(guard_log, guard_auditor)
+            if guard_error and status == "pass":
+                status = entry["status"] = "fail"
+                reason = entry["reason"] = f"CTS passed, but downstream proof failed: {guard_error}"
         summary["cases"].append(entry)
         write_summary(summary_path, summary)
         print(f"  {status} ({entry['elapsed_seconds']:.2f}s): {reason}", flush=True)
@@ -339,6 +380,8 @@ def main():
     parser.add_argument("--device-info-file", type=Path, help="snapshot a user-supplied device report beside the logs")
     parser.add_argument("--validation-layer-dir", type=Path,
                         help="enable CTS Vulkan validation using this SDK Khronos validation manifest directory")
+    parser.add_argument("--no-native-rt-guard-dir", type=Path,
+                        help="place the test-only RT rejection layer below the fallback; require its completed zero-rejection log")
     args = parser.parse_args()
     if not math.isfinite(args.timeout) or args.timeout <= 0:
         parser.error("--timeout must be positive and finite")
@@ -346,6 +389,8 @@ def main():
         parser.error("fallback modes require --layer-dir")
     if args.mode == "native" and args.layer_dir is not None:
         parser.error("native control cannot use --layer-dir")
+    if args.mode == "native" and args.no_native_rt_guard_dir is not None:
+        parser.error("native control cannot use the downstream RT rejection guard")
     try:
         return execute(args)
     except (OSError, ValueError, KeyError) as error:

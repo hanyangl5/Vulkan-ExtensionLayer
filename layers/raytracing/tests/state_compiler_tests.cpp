@@ -659,13 +659,210 @@ void BoundariesAndSourcePreservation() {
     Replace(pointer, "OpCapability RayTracingKHR", "OpCapability RayTracingKHR\nOpCapability VariablePointersStorageBuffer");
     Replace(pointer, "%seed_ptr = OpAccessChain %out_word %output %c0 %id",
             "%seed_base = OpAccessChain %out_word %output %c0 %id\n%seed_ptr = OpSelect %out_word %true %seed_base %seed_base");
-    reject(pointer, "pointer provenance");
+    auto pointer_program = CompileTypedContinuationSteps(Source(pointer), "main", spv::ExecutionModelIntersectionKHR);
+    Require(pointer_program.pointer_snapshot_values && pointer_program.pointer_snapshot_bytes,
+            "StorageBuffer pointer selection has no owned identity snapshots");
     std::string memory_model(kSource);
     Replace(memory_model, "OpCapability RayTracingKHR", "OpCapability RayTracingKHR\nOpCapability VulkanMemoryModel");
     Replace(memory_model, "OpExtension \"SPV_KHR_ray_tracing\"",
             "OpExtension \"SPV_KHR_ray_tracing\"\nOpExtension \"SPV_KHR_vulkan_memory_model\"");
     Replace(memory_model, "OpMemoryModel Logical GLSL450", "OpMemoryModel Logical Vulkan");
     reject(memory_model, "source memory model requires explicit frame/scheduler support");
+}
+const char *kPointerSource = R"spv(
+OpCapability Shader
+OpCapability RayTracingKHR
+OpCapability VariablePointersStorageBuffer
+OpExtension "SPV_KHR_ray_tracing"
+OpMemoryModel Logical GLSL450
+OpEntryPoint IntersectionKHR %main "main" %launch %output
+OpDecorate %launch BuiltIn LaunchIdKHR
+OpDecorate %array ArrayStride 4
+OpDecorate %block Block
+OpMemberDecorate %block 0 Offset 0
+OpMemberDecorate %block 1 Offset 128
+OpDecorate %output DescriptorSet 0
+OpDecorate %output Binding 1
+%void = OpTypeVoid
+%bool = OpTypeBool
+%uint = OpTypeInt 32 0
+%float = OpTypeFloat 32
+%v3u = OpTypeVector %uint 3
+%zero = OpConstant %uint 0
+%one = OpConstant %uint 1
+%two = OpConstant %uint 2
+%three = OpConstant %uint 3
+%seven = OpConstant %uint 7
+%eleven = OpConstant %uint 11
+%count = OpConstant %uint 32
+%half = OpConstant %float 0.5
+%array = OpTypeArray %uint %count
+%block = OpTypeStruct %array %array
+%block_ptr = OpTypePointer StorageBuffer %block
+%word_ptr = OpTypePointer StorageBuffer %uint
+%input_ptr = OpTypePointer Input %v3u
+%output = OpVariable %block_ptr StorageBuffer
+%launch = OpVariable %input_ptr Input
+%null = OpConstantNull %word_ptr
+%true = OpConstantTrue %bool
+%entry_type = OpTypeFunction %void
+%helper_type = OpTypeFunction %void %word_ptr %uint %float %uint
+%main = OpFunction %void None %entry_type
+%entry = OpLabel
+%launch_value = OpLoad %v3u %launch
+%id = OpCompositeExtract %uint %launch_value 0
+%a = OpAccessChain %word_ptr %output %zero %id
+%b = OpAccessChain %word_ptr %output %one %id
+%nonnull = OpSelect %word_ptr %true %a %null
+%parity = OpBitwiseAnd %uint %id %one
+%even = OpIEqual %bool %parity %zero
+OpBranch %loop
+%loop = OpLabel
+%round = OpPhi %uint %zero %entry %next %continue
+%pa = OpPhi %word_ptr %nonnull %entry %pb %continue
+%pb = OpPhi %word_ptr %b %entry %pa %continue
+%keep_going = OpULessThan %bool %round %three
+OpLoopMerge %done %continue None
+OpBranchConditional %keep_going %body %done
+%body = OpLabel
+%selected = OpSelect %word_ptr %even %pa %pb
+%round_float = OpConvertUToF %float %round
+%distance = OpFAdd %float %round_float %half
+%kind = OpIAdd %uint %id %round
+%delta = OpIAdd %uint %round %one
+%called = OpFunctionCall %void %helper %selected %delta %distance %kind
+OpBranch %continue
+%continue = OpLabel
+%next = OpIAdd %uint %round %one
+OpBranch %loop
+%done = OpLabel
+OpReturn
+OpFunctionEnd
+%helper = OpFunction %void None %helper_type
+%target = OpFunctionParameter %word_ptr
+%increment = OpFunctionParameter %uint
+%t = OpFunctionParameter %float
+%hit_kind = OpFunctionParameter %uint
+%helper_entry = OpLabel
+%old = OpLoad %uint %target
+%accepted = OpReportIntersectionKHR %bool %t %hit_kind
+%bonus = OpSelect %uint %accepted %seven %eleven
+%sum = OpIAdd %uint %old %increment
+%value = OpIAdd %uint %sum %bonus
+OpStore %target %value
+OpReturn
+OpFunctionEnd
+)spv";
+bool LogicalPointerSnapshots(bool execute, bool array_pointers = false) {
+    std::string source_text(kPointerSource);
+    if (array_pointers) {
+        Replace(source_text, "%word_ptr = OpTypePointer",
+                "%array_ptr = OpTypePointer StorageBuffer %array\n%word_ptr = OpTypePointer");
+        Replace(source_text, "%a = OpAccessChain %word_ptr %output %zero %id", "%a = OpAccessChain %array_ptr %output %zero");
+        Replace(source_text, "%b = OpAccessChain %word_ptr %output %one %id", "%b = OpAccessChain %array_ptr %output %one");
+        Replace(source_text, "%null = OpConstantNull %word_ptr", "%null = OpConstantNull %array_ptr");
+        Replace(source_text, "%nonnull = OpSelect %word_ptr", "%nonnull = OpSelect %array_ptr");
+        Replace(source_text, "%pa = OpPhi %word_ptr", "%pa = OpPhi %array_ptr");
+        Replace(source_text, "%pb = OpPhi %word_ptr", "%pb = OpPhi %array_ptr");
+        Replace(source_text, "%selected = OpSelect %word_ptr", "%selected = OpSelect %array_ptr");
+        Replace(source_text, "%called = OpFunctionCall",
+                "%element = OpAccessChain %word_ptr %selected %id\n%called = OpFunctionCall");
+        Replace(source_text, "%helper %selected %delta", "%helper %element %delta");
+    }
+    const auto source = Source(source_text);
+    auto program = CompileTypedContinuationSteps(source, "main", spv::ExecutionModelIntersectionKHR);
+    Require(program.pointer_snapshot_values >= 5 && program.pointer_snapshot_bytes >= uint64_t(program.pointer_snapshot_values) * 4,
+            "Pointer Phi/Select/helper arguments lack persistent typed identity snapshots");
+    auto physical = CompileTypedPipelineStage(source, "main", VK_SHADER_STAGE_INTERSECTION_BIT_KHR, nullptr, "logical_pointer_bda");
+    TypedContinuationCompileOptions options;
+    options.transport = TypedFrameTransport::PrivateArray;
+    options.private_frame_words = physical.frame_stride_words;
+    auto private_array = CompileTypedPipelineStage(source, "main", VK_SHADER_STAGE_INTERSECTION_BIT_KHR, nullptr,
+                                                   "logical_pointer_private", options);
+    Require(physical.pointer_snapshot_values == program.pointer_snapshot_values &&
+                physical.pointer_snapshot_bytes == program.pointer_snapshot_bytes &&
+                private_array.pointer_snapshot_bytes == physical.pointer_snapshot_bytes &&
+                private_array.frame_stride_bytes == physical.frame_stride_bytes,
+            "Logical pointer identity ABI differs across frame transports");
+    std::string wide_source(kPointerSource);
+    Replace(wide_source, "OpCapability Shader", "OpCapability Shader\nOpCapability Int64");
+    Replace(wide_source, "%float = OpTypeFloat 32", "%wide = OpTypeInt 64 1\n%float = OpTypeFloat 32");
+    Replace(wide_source, "%a = OpAccessChain", "%wide_id = OpSConvert %wide %id\n%a = OpAccessChain");
+    Replace(wide_source, "%output %zero %id", "%output %zero %wide_id");
+    Replace(wide_source, "%output %one %id", "%output %one %wide_id");
+    const auto wide = CompileTypedContinuationSteps(Source(wide_source), "main", spv::ExecutionModelIntersectionKHR);
+    if (!array_pointers)
+        Require(wide.pointer_snapshot_bytes > program.pointer_snapshot_bytes,
+                "64-bit pointer selectors were truncated instead of retaining both words");
+    std::string nonuniform_source(source_text);
+    Replace(nonuniform_source, "OpCapability Shader", "OpCapability Shader\nOpCapability ShaderNonUniform");
+    Replace(nonuniform_source, "OpDecorate %launch BuiltIn", "OpDecorate %a NonUniform\nOpDecorate %launch BuiltIn");
+    const auto nonuniform = CompileTypedContinuationSteps(Source(nonuniform_source), "main", spv::ExecutionModelIntersectionKHR);
+    std::set<uint32_t> decorated, pointer_types;
+    for (size_t p = 5; p < nonuniform.spirv.size(); p += nonuniform.spirv[p] >> 16) {
+        const auto op = nonuniform.spirv[p] & 0xffff;
+        if (op == spv::OpTypePointer) pointer_types.insert(nonuniform.spirv[p + 1]);
+        if (op == spv::OpDecorate && nonuniform.spirv[p + 2] == spv::DecorationNonUniform)
+            decorated.insert(nonuniform.spirv[p + 1]);
+    }
+    bool pointer_phi = false, access_nonuniform = false;
+    for (size_t p = 5; p < nonuniform.spirv.size(); p += nonuniform.spirv[p] >> 16) {
+        const auto op = nonuniform.spirv[p] & 0xffff;
+        if (op == spv::OpPhi && pointer_types.count(nonuniform.spirv[p + 1])) pointer_phi = true;
+        if (op == spv::OpAccessChain && pointer_types.count(nonuniform.spirv[p + 1]) && decorated.count(nonuniform.spirv[p + 2]))
+            access_nonuniform = true;
+    }
+    Require(!pointer_phi && access_nonuniform, "Routed access lost NonUniform or still merges opaque native pointers");
+    if (!execute) return true;
+    constexpr uint32_t count = 32;
+    const auto frame_bytes = program.frame_stride_words * count * 4;
+    const auto output_offset = (frame_bytes + 255u) & ~255u;
+    GPU gpu;
+    std::cout << "Creating logical " << (array_pointers ? "array" : "element") << " pointer GPU pipeline: " << program.spirv.size()
+              << " words, frame " << program.frame_stride_bytes << " bytes\n"
+              << std::flush;
+    if (!gpu.Init(program.spirv, output_offset + count * 8, output_offset, false, frame_bytes, VK_WHOLE_SIZE, true)) {
+        std::cout << "Logical-pointer GPU fixture skipped: no suitable Vulkan device with VariablePointersStorageBuffer\n";
+        return false;
+    }
+    for (uint32_t activation = 0; activation < 2; ++activation) {
+        for (uint32_t id = 0; id < count; ++id) {
+            std::fill_n(gpu.mapped + id * program.frame_stride_words + program.control_word, 7, 0);
+            gpu.mapped[output_offset / 4 + id] = 100 + id;
+            gpu.mapped[output_offset / 4 + count + id] = 200 + id;
+        }
+        std::vector<uint32_t> reports(count);
+        for (uint32_t round = 0; round < 4; ++round) {
+            gpu.Dispatch(0, 0, count);
+            for (uint32_t id = 0; id < count; ++id) {
+                auto *control = gpu.mapped + id * program.frame_stride_words + program.control_word;
+                if (round == 3) {
+                    Require(control[0] == UINT32_MAX && reports[id] == 3, "Pointer loop did not terminate after three reports");
+                    continue;
+                }
+                float distance;
+                std::memcpy(&distance, control + 4, 4);
+                Require(control[1] == 2 && control[2] == 0 && distance == float(round) + 0.5f && control[5] == id + round,
+                        "Pointer helper lost source request order/arguments");
+                control[3] = (id + round) % 3 != 0;
+                control[2] = 1;
+                ++reports[id];
+            }
+        }
+        for (uint32_t id = 0; id < count; ++id) {
+            uint32_t expected[2] = {100 + id, 200 + id};
+            for (uint32_t round = 0; round < 3; ++round) {
+                const auto which = (id & 1) ^ (round & 1);
+                expected[which] += round + 1 + ((id + round) % 3 != 0 ? 7 : 11);
+            }
+            Require(gpu.mapped[output_offset / 4 + id] == expected[0] && gpu.mapped[output_offset / 4 + count + id] == expected[1],
+                    "Pointer Phi swaps/selection/helper alias changed source writes across suspension");
+        }
+    }
+    std::cout << "Logical StorageBuffer " << (array_pointers ? "array" : "element")
+              << " pointers executed: 32 invocations, parallel loop Phi swaps, Select/null, "
+                 "inlined pointer helper, independent root/index snapshots and repeated suspend/resume\n";
+    return true;
 }
 struct Event {
     float distance;
@@ -701,14 +898,28 @@ void VerifyPayload(const uint32_t *value, const uint32_t *array, uint32_t result
 }
 }  // namespace
 
-int main() {
+int main(int argc, char **argv) {
     try {
+        const bool compile_only = argc == 2 && std::string(argv[1]) == "--compile-only";
+        const bool pointer_only = argc == 2 && std::string(argv[1]) == "--pointer-only";
+        Require(argc == 1 || compile_only || pointer_only, "Usage: vel_rt_state_compiler_tests [--compile-only|--pointer-only]");
+        if (pointer_only) {
+            for (bool array_pointers : {false, true})
+                if (!LogicalPointerSnapshots(true, array_pointers)) return 77;
+            return 0;
+        }
         BoundariesAndSourcePreservation();
         LargeDescriptorResourceTypes();
         ResourceValueTypes();
         PrivateFrameBounds();
         OpaqueResourceBoundaries();
         ExactCtsImageAtomicStage();
+        for (bool array_pointers : {false, true})
+            if (!LogicalPointerSnapshots(!compile_only, array_pointers)) return 77;
+        if (compile_only) {
+            std::cout << "Typed source and logical pointer compile/validation checks passed; GPU execution not requested\n";
+            return 0;
+        }
         for (bool module_private : {false, true}) {
             std::string source = kSource;
             if (module_private) {

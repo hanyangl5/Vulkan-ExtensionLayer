@@ -319,6 +319,54 @@ OpFunctionEnd
     CHECK(create(device, VK_NULL_HANDLE, VK_NULL_HANDLE, 1, &ci, nullptr, &rejected_base) == VK_ERROR_FEATURE_NOT_PRESENT &&
           !rejected_base && native_creates == calls);
     destroy(device, ordinary, nullptr);
+    // Libraries own typed definitions and do not allocate an executable. A
+    // nested/repeated dependency remains linkable after its source is retired.
+    VkRayTracingPipelineInterfaceCreateInfoKHR library_interface{VK_STRUCTURE_TYPE_RAY_TRACING_PIPELINE_INTERFACE_CREATE_INFO_KHR};
+    library_interface.maxPipelineRayPayloadSize = 16;
+    library_interface.maxPipelineRayHitAttributeSize = 8;
+    VkRayTracingPipelineCreateInfoKHR lib = ci;
+    lib.flags = VK_PIPELINE_CREATE_LIBRARY_BIT_KHR;
+    lib.pLibraryInterface = &library_interface;
+    VkPipeline library_source{}, wrapper{}, linked{};
+    const unsigned before_libraries = native_creates;
+    VkPipelineCreateFlags2CreateInfoKHR flags2{VK_STRUCTURE_TYPE_PIPELINE_CREATE_FLAGS_2_CREATE_INFO_KHR};
+    flags2.flags = VK_PIPELINE_CREATE_2_LIBRARY_BIT_KHR | VK_PIPELINE_CREATE_2_RETAIN_LINK_TIME_OPTIMIZATION_INFO_BIT_EXT;
+    lib.pNext = &flags2;
+    // The legacy field is ignored in its entirety when flags2 is present.
+    lib.flags = VK_PIPELINE_CREATE_FAIL_ON_PIPELINE_COMPILE_REQUIRED_BIT;
+    const auto saved_library = Snapshot(lib);
+    const auto saved_flags2 = Snapshot(flags2);
+    CHECK(create(device, VK_NULL_HANDLE, VK_NULL_HANDLE, 1, &lib, nullptr, &library_source) == VK_SUCCESS && library_source);
+    CHECK(!std::memcmp(&lib, saved_library.data(), sizeof(lib)) && !std::memcmp(&flags2, saved_flags2.data(), sizeof(flags2)));
+    CHECK(native_creates == before_libraries);
+    VkPipeline unsupported_flags{};
+    flags2.flags |= UINT64_C(1) << 63;
+    CHECK(create(device, VK_NULL_HANDLE, VK_NULL_HANDLE, 1, &lib, nullptr, &unsupported_flags) == VK_ERROR_FEATURE_NOT_PRESENT &&
+          !unsupported_flags && native_creates == before_libraries);
+    lib.pNext = nullptr;
+    lib.flags = VK_PIPELINE_CREATE_LIBRARY_BIT_KHR;
+    VkPipeline repeated[] = {library_source, library_source};
+    VkPipelineLibraryCreateInfoKHR links{VK_STRUCTURE_TYPE_PIPELINE_LIBRARY_CREATE_INFO_KHR};
+    links.libraryCount = 2;
+    links.pLibraries = repeated;
+    lib.stageCount = lib.groupCount = 0;
+    lib.pStages = nullptr;
+    lib.pGroups = nullptr;
+    lib.pLibraryInfo = &links;
+    CHECK(create(device, VK_NULL_HANDLE, VK_NULL_HANDLE, 1, &lib, nullptr, &wrapper) == VK_SUCCESS && wrapper);
+    CHECK(native_creates == before_libraries);
+    destroy(device, library_source, nullptr);
+    lib.flags = 0;
+    links.libraryCount = 1;
+    links.pLibraries = &wrapper;
+    CHECK(create(device, VK_NULL_HANDLE, cache, 1, &lib, nullptr, &linked) == VK_SUCCESS && linked);
+    CHECK(native_creates == before_libraries + 1 && native_caches.back() == cache);
+    destroy(device, wrapper, nullptr);
+    std::array<uint8_t, 64> linked_handles{};
+    CHECK(handles(device, linked, 0, 2, linked_handles.size(), linked_handles.data()) == VK_SUCCESS);
+    CHECK(std::memcmp(linked_handles.data(), linked_handles.data() + 32, 32) != 0);
+    destroy(device, linked, nullptr);
+    CHECK(native_pipelines.empty() && native_shaders.empty());
     // Invalid provenance is rejected before native compilation. These are host
     // contract tests; native validation never receives malformed create infos.
     unsigned before = native_creates;

@@ -111,7 +111,8 @@ struct Context {
             VkPhysicalDeviceProperties properties;
             vkGetPhysicalDeviceProperties(candidate, &properties);
             if (properties.apiVersion < VK_API_VERSION_1_2 || !f12.bufferDeviceAddress || !f12.scalarBlockLayout ||
-                !features.features.shaderInt64 || properties.limits.maxPushConstantsSize < sizeof(MesaGpuEncodeArgs))
+                !f12.vulkanMemoryModel || !f12.vulkanMemoryModelDeviceScope || !features.features.shaderInt64 ||
+                properties.limits.maxPushConstantsSize < sizeof(MesaGpuEncodeArgs))
                 continue;
             if (builder && (!features.features.shaderInt16 || !f11.storageBuffer16BitAccess || !f12.storageBuffer8BitAccess ||
                             !f12.shaderInt8 || !f12.vulkanMemoryModel || !f12.vulkanMemoryModelDeviceScope ||
@@ -152,6 +153,7 @@ struct Context {
         VkPhysicalDeviceVulkan12Features f12{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES};
         f12.bufferDeviceAddress = VK_TRUE;
         f12.scalarBlockLayout = VK_TRUE;
+        f12.vulkanMemoryModel = f12.vulkanMemoryModelDeviceScope = VK_TRUE;
         VkPhysicalDeviceVulkan11Features f11{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_FEATURES};
         if (builder) {
             f11.storageBuffer16BitAccess = VK_TRUE;
@@ -377,9 +379,10 @@ struct Context {
         VkCommandBufferBeginInfo begin{VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
         VkCheck(vkBeginCommandBuffer(cmd, &begin));
         if (producer) producer(cmd);
-        uint32_t passes = vel_rt_mesa_encode_passes(args.capacity);
+        const bool refit = (args.options & VEL_RT_MESA_GPU_REFIT) != 0;
+        uint32_t passes = refit ? 2u : vel_rt_mesa_encode_passes(args.capacity);
         for (uint32_t pass = 0; pass < passes; ++pass) {
-            uint32_t phase = vel_rt_mesa_encode_phase(args.capacity, pass);
+            uint32_t phase = refit ? pass : vel_rt_mesa_encode_phase(args.capacity, pass);
             vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, mesa_pipeline[phase]);
             for (uint64_t first = 0; first < std::max(args.capacity, 1u); first += 128) {
                 args.first = first;
@@ -869,6 +872,195 @@ static void MesaCases(Context& ctx) {
     RunMesa(ctx, instances, {}, blas, MesaGpuTransform);
 }
 
+static void RefitCases(Context& ctx) {
+    for (uint32_t type = 0; type < 3; ++type) {
+        for (uint32_t count : {0u, 1u, 4u, 33u, 1025u}) {
+            const uint32_t capacity = count * 2;
+            mesa_test::Fixture original(capacity, count, type);
+            const float identity[] = {1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0};
+            std::vector<uint32_t> flags = {3, 2}, prefix = {0, capacity / 2};
+            for (uint32_t i = 0; i < count; ++i) {
+                const uint32_t slot = i * 2, geometry = slot >= prefix[1] ? 1 : 0;
+                const uint32_t primitive = slot - prefix[geometry];
+                const uint32_t packed = geometry | (geometry == 0 ? 0x80000000u : 0);
+                if (type == 0) original.Triangle(slot, float(i), primitive, packed);
+                if (type == 1) original.Aabb(slot, {{float(i), 0, 0}, {float(i + 1), 1, 1}}, primitive, packed);
+                if (type == 2) original.Instance(slot, UINT64_C(0x123400000000) + uint64_t(i) * 256, slot, identity);
+            }
+            const Bounds original_bounds = type == 2 ? Bounds{{-8, -8, -8}, {8, 8, 8}} : Bounds{{0, 0, 0}, {float(count), 1, 1}};
+            if (count == 0) original.Empty();
+            if (count == 1) original.InternalBox(0, original.LeafId(0), VEL_RT_BVH4_INVALID_ID, original_bounds);
+            for (uint32_t i = 1; i < count; ++i)
+                original.InternalBox(i - 1, i == 1 ? original.LeafId(0) : original.InternalId(i - 2), original.LeafId(i * 2),
+                                     original_bounds);
+            auto updated = original;
+            for (uint32_t i = 0; i < count; ++i) {
+                const uint32_t slot = i * 2, geometry = slot >= prefix[1] ? 1 : 0;
+                const uint32_t primitive = slot - prefix[geometry];
+                const uint32_t packed = geometry | (geometry == 0 ? 0x80000000u : 0);
+                const float x = -3.0f * float(count - i);
+                if (type == 0) updated.Triangle(slot, x, primitive, packed);
+                if (type == 1) updated.Aabb(slot, {{x, -1, -2}, {x + 2, 3, 4}}, primitive, packed);
+                if (type == 2) {
+                    float transform[] = {1, 0, 0, x, 0, 1, 0, -2, 0, 0, 1, 3};
+                    updated.Instance(slot, UINT64_C(0x987600000000) + uint64_t(i) * 256, slot, transform);
+                    mesa_test::U32(updated.bytes, updated.Leaf(slot) + 32, i & 1 ? 0x00123456u : 0xff654321u);
+                    mesa_test::U32(updated.bytes, updated.Leaf(slot) + 36, 0x04001234u + i);
+                    mesa_test::Box(updated.bytes, updated.Leaf(slot),
+                                   i & 1 ? Bounds{{x, -2, 3}, {x, -2, 3}} : Bounds{{x - 8, -10, -5}, {x + 8, 6, 11}});
+                }
+            }
+            const auto plan = PlanMesaGpuLayout(capacity, type);
+            const uint64_t map_bytes = MesaGpuMappingWords(capacity) * 4;
+            auto source = ctx.Allocate(original.bytes.size());
+            auto changed = ctx.Allocate(updated.bytes.size());
+            auto mapping = ctx.Allocate(map_bytes + 256);
+            auto output = ctx.Allocate(plan.size + 256);
+            auto destination = ctx.Allocate(plan.size + 256);
+            auto tables = ctx.Allocate(16);
+            auto status = ctx.Allocate(260);
+            std::memcpy(source.mapped, original.bytes.data(), original.bytes.size());
+            std::memcpy(changed.mapped, updated.bytes.data(), updated.bytes.size());
+            std::memcpy(tables.mapped, flags.data(), 8);
+            std::memcpy(tables.mapped + 8, prefix.data(), 8);
+            std::memset(status.mapped + 128, 0, 4);
+            VelRtBvh4Header header{};
+            header.magic = VEL_RT_BVH4_MAGIC;
+            header.version = VEL_RT_BVH4_ABI_VERSION;
+            header.type = type == 2 ? 0 : 1;
+            header.node_offset = plan.nodes;
+            header.triangle_offset = plan.triangles;
+            header.aabb_offset = plan.aabbs;
+            header.instance_offset = plan.instances;
+            header.leaf_parent_offset = plan.leaf_parents;
+            header.total_size = plan.size;
+            std::memcpy(output.mapped + 128, &header, sizeof(header));
+            MesaGpuEncodeArgs build{source.address,
+                                    original.bytes.size(),
+                                    output.address + 128,
+                                    mapping.address + 128,
+                                    tables.address,
+                                    0,
+                                    status.address + 128,
+                                    0,
+                                    capacity,
+                                    type,
+                                    2,
+                                    VEL_RT_MESA_GPU_IDENTITY_BLAS};
+            ctx.EncodeMesa(build);
+            uint32_t error;
+            std::memcpy(&error, status.mapped + 128, 4);
+            Check(error == 0, "initial refit fixture encoding");
+            std::vector<uint8_t> before(output.mapped + 128, output.mapped + 128 + plan.size);
+            std::memcpy(&header, before.data(), sizeof(header));
+            for (bool in_place : {false, true}) {
+                const auto& result = in_place ? output : destination;
+                VelRtBvh4RefitArgs refit{output.address + 128,
+                                         changed.address,
+                                         result.address + 128,
+                                         tables.address + 8,
+                                         tables.address,
+                                         mapping.address + 128,
+                                         status.address + 128,
+                                         0,
+                                         capacity,
+                                         type,
+                                         2,
+                                         VEL_RT_MESA_GPU_REFIT | VEL_RT_MESA_GPU_IDENTITY_BLAS};
+                MesaGpuEncodeArgs encoded;
+                std::memcpy(&encoded, &refit, sizeof(encoded));
+                ctx.EncodeMesa(encoded);
+                std::memcpy(&error, status.mapped + 128, 4);
+                Check(error == 0, "GPU refit error");
+                const auto* bytes = result.mapped + 128;
+                Check(std::memcmp(before.data(), bytes, 96) == 0, "refit header topology/layout changed");
+                Check(std::memcmp(before.data() + plan.leaf_parents, bytes + plan.leaf_parents, size_t(capacity) * 4) == 0,
+                      "refit leaf parents changed");
+                for (uint32_t node = 0; node < header.node_count; ++node)
+                    Check(std::memcmp(before.data() + plan.nodes + uint64_t(node) * 128 + 96,
+                                      bytes + plan.nodes + uint64_t(node) * 128 + 96, 32) == 0,
+                          "refit internal topology changed");
+                std::unordered_map<uint32_t, Bounds> expected;
+                for (uint32_t leaf = 0; leaf < count; ++leaf) {
+                    const auto offset = type == 0 ? plan.triangles : type == 1 ? plan.aabbs : plan.instances;
+                    const auto* record = bytes + offset + uint64_t(leaf) * (type == 2 ? 128 : 48);
+                    uint32_t primitive, geometry = 0;
+                    std::memcpy(&primitive, record + (type == 0 ? 36 : type == 1 ? 24 : 112), 4);
+                    if (type < 2) std::memcpy(&geometry, record + (type == 0 ? 40 : 28), 4);
+                    Check(type == 2 || geometry < 2, "refit original geometry ID");
+                    const uint32_t slot = primitive + (type == 2 ? 0 : prefix[geometry]);
+                    Check(slot < capacity && slot % 2 == 0, "refit original primitive/instance ID");
+                    const auto* input = updated.bytes.data() + updated.Leaf(slot);
+                    Bounds b;
+                    std::memcpy(b.min.data(), input, 12);
+                    std::memcpy(b.max.data(), input + 12, 12);
+                    expected[(type + 1) << 30 | leaf] = b;
+                    if (type < 2) {
+                        Check(std::memcmp(record, input + (type == 0 ? 24 : 0), type == 0 ? 36 : 24) == 0,
+                              "refit updated vertex/AABB data");
+                        uint32_t actual_flags;
+                        std::memcpy(&actual_flags, record + (type == 0 ? 44 : 32), 4);
+                        Check(actual_flags == flags[geometry], "refit complete geometry flags");
+                    } else {
+                        Check(std::memcmp(record, input + 24, 16) == 0 && std::memcmp(record + 16, input + 40, 48) == 0,
+                              "refit instance relocation/flags/transform");
+                        float inverse[12];
+                        std::memcpy(inverse, record + 64, 48);
+                        Check(inverse[0] == 1 && inverse[5] == 1 && inverse[10] == 1 &&
+                                  inverse[3] == -b.min[0] - ((slot / 2) & 1 ? 0 : 8) && inverse[7] == 2 && inverse[11] == -3,
+                              "refit instance inverse transform");
+                    }
+                }
+                std::vector<std::pair<uint32_t, bool>> pending;
+                if (count) pending.push_back({header.root_id, false});
+                while (!pending.empty()) {
+                    const auto [id, finish] = pending.back();
+                    pending.pop_back();
+                    if (id >> 30) continue;
+                    VelRtBvh4Node node;
+                    std::memcpy(&node, bytes + plan.nodes + uint64_t(id) * 128, sizeof(node));
+                    if (!finish) {
+                        pending.push_back({id, true});
+                        for (uint32_t child = 0; child < node.child_count; ++child)
+                            pending.push_back({node.child_id[child], false});
+                    } else {
+                        auto combined = expected.at(node.child_id[0]);
+                        for (uint32_t child = 0; child < node.child_count; ++child) {
+                            const auto b = expected.at(node.child_id[child]);
+                            Check(std::memcmp(node.bounds_min[child], b.min.data(), 12) == 0 &&
+                                      std::memcmp(node.bounds_max[child], b.max.data(), 12) == 0,
+                                  "refit exact child bounds");
+                            combined = Unite(combined, b);
+                        }
+                        expected[id] = combined;
+                    }
+                }
+                if (count) {
+                    const auto b = expected.at(header.root_id);
+                    Check(std::memcmp(bytes + 96, b.min.data(), 12) == 0 && std::memcmp(bytes + 108, b.max.data(), 12) == 0,
+                          "refit exact root bounds");
+                }
+                if (!in_place)
+                    Check(std::memcmp(output.mapped + 128, before.data(), before.size()) == 0,
+                          "out-of-place refit changed source bytes");
+                for (size_t guard = 0; guard < 128; ++guard) {
+                    Check(result.mapped[guard] == 0xa5 && result.mapped[plan.size + 128 + guard] == 0xa5,
+                          "refit AS guard overwritten");
+                    Check(mapping.mapped[guard] == 0xa5 && mapping.mapped[map_bytes + 128 + guard] == 0xa5,
+                          "refit counter guard overwritten");
+                }
+            }
+            ctx.Free(status);
+            ctx.Free(tables);
+            ctx.Free(destination);
+            ctx.Free(output);
+            ctx.Free(mapping);
+            ctx.Free(changed);
+            ctx.Free(source);
+        }
+    }
+}
+
 static void MesaBuilderCases(Context& ctx) {
     for (uint32_t type = 0; type < 2; ++type)
         for (uint32_t capacity : {0u, 1u, 321u, 1025u}) {
@@ -999,10 +1191,12 @@ int main(int argc, char** argv) {
         const auto adapted = AdaptMesaContainerV2(mesa_fixture.Span(), mesa_test::SparseTriangleFlags());
         Run(ctx, adapted.tree, adapted.root);
         MesaCases(ctx);
+        RefitCases(ctx);
         Check(validation_errors == 0, "Vulkan validation errors");
         std::cout << "BVH4 GPU encode: empty, 28 shuffled trees, deep tree, Mesa adapter input, chunks, bounds, parents and guards "
                      "passed; direct Mesa GPU four-child triangle/AABB/TLAS collapse, sparse/empty/deep graphs and rejection "
-                     "checks passed\n";
+                     "checks passed; topology-preserving refit of sparse/multigeometry triangle/AABB/TLAS trees, "
+                     "empty/singleton/deep roots, changed records and in/out-of-place guards passed\n";
         return 0;
     } catch (const std::exception& error) {
         std::cerr << error.what() << '\n';

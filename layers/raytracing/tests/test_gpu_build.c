@@ -227,7 +227,7 @@ static void rejected_builds(const struct built_as *as)
    VkCommandBufferAllocateInfo alloc = {.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
       .commandPool = g_pool, .level = VK_COMMAND_BUFFER_LEVEL_PRIMARY, .commandBufferCount = 1};
    CHECK(vkAllocateCommandBuffers(g_dev, &alloc, &cmd));
-   VkAccelerationStructureKHR small;
+   VkAccelerationStructureKHR undersized_as;
    /* A singleton's queried output can be exactly 256 bytes. Use the actual
     * successful build's queried size to guarantee this object is too small. */
    VkAccelerationStructureCreateInfoKHR ci = {.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_CREATE_INFO_KHR,
@@ -235,13 +235,16 @@ static void rejected_builds(const struct built_as *as)
                                               .offset = 256,
                                               .size = as->size - 1,
                                               .type = as->info.type};
-   CHECK(pCreateAS(g_dev, &ci, NULL, &small));
+   CHECK(pCreateAS(g_dev, &ci, NULL, &undersized_as));
    for (uint32_t i = 0; i < 2; ++i) {
       VkCommandBufferBeginInfo begin = {.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
       CHECK(vkBeginCommandBuffer(cmd, &begin));
       VkAccelerationStructureBuildGeometryInfoKHR info = as->info;
-      if (i == 0) { info.mode = VK_BUILD_ACCELERATION_STRUCTURE_MODE_UPDATE_KHR; info.srcAccelerationStructure = as->handle; }
-      else info.dstAccelerationStructure = small;
+      if (i == 0) {
+          info.mode = VK_BUILD_ACCELERATION_STRUCTURE_MODE_UPDATE_KHR;
+          info.srcAccelerationStructure = as->handle;
+      } else
+          info.dstAccelerationStructure = undersized_as;
       const VkAccelerationStructureBuildRangeInfoKHR *range = as->ranges;
       pBuild(cmd, 1, &info, &range);
       VkResult result = vkEndCommandBuffer(cmd);
@@ -249,7 +252,7 @@ static void rejected_builds(const struct built_as *as)
       if (result != expected) { fprintf(stderr, "FAIL rejected build: %d expected %d\n", result, expected); ++g_fail; }
       CHECK(vkResetCommandBuffer(cmd, 0));
    }
-   pDestroyAS(g_dev, small, NULL);
+   pDestroyAS(g_dev, undersized_as, NULL);
    vkFreeCommandBuffers(g_dev, g_pool, 1, &cmd);
 }
 
@@ -495,7 +498,8 @@ static void triangles_case(uint32_t n, bool inactive, bool indexed, bool two_geo
    }
    uint32_t active = n - (inactive ? (n + 6) / 7 : 0);
    validate_tree(&blas, active);
-   validate_tree(&tlas, active ? 1 : 0);
+   /* A non-null reference to an empty BLAS is a recoverable degenerate instance. */
+   validate_tree(&tlas, 1);
    if (n == 1 && !g_aligned_values && !g_pool_pressure) rejected_builds(&blas);
    g_before_dispatch = NULL;
    destroy_as(&tlas); destroy_as(&blas);
@@ -560,7 +564,8 @@ static void aabb_instances_case(void)
       }
       g_before_dispatch = NULL;
    }
-   validate_tree(&blas, 2); validate_tree(&tlas, 3);
+   validate_tree(&blas, 2);
+   validate_tree(&tlas, 4);
    destroy_as(&tlas); destroy_as(&blas);
    buf_destroy(&pointers); buf_destroy(&instances); buf_destroy(&boxes);
 }

@@ -21,7 +21,7 @@ struct GPU {
     bool specialized_context = false;
     bool Init(const std::vector<uint32_t> &code, uint32_t bytes, VkDeviceSize second_binding_offset = VK_WHOLE_SIZE,
               bool wide_features = true, VkDeviceSize frame_binding_bytes = VK_WHOLE_SIZE,
-              VkDeviceSize context_offset = VK_WHOLE_SIZE) {
+              VkDeviceSize context_offset = VK_WHOLE_SIZE, bool variable_pointers = false) {
         specialized_context = context_offset != VK_WHOLE_SIZE;
         VkApplicationInfo app{VK_STRUCTURE_TYPE_APPLICATION_INFO};
         app.apiVersion = VK_API_VERSION_1_3;
@@ -37,8 +37,11 @@ struct GPU {
         Check(vkEnumeratePhysicalDevices(instance, &count, devices.data()));
         auto physical = devices[0];
         VkPhysicalDeviceVulkan12Features v12{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES};
+        VkPhysicalDeviceVariablePointersFeatures pointer_features{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VARIABLE_POINTERS_FEATURES};
+        if (variable_pointers) v12.pNext = &pointer_features;
         VkPhysicalDeviceFeatures2 features{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2, &v12};
         vkGetPhysicalDeviceFeatures2(physical, &features);
+        if (variable_pointers && !pointer_features.variablePointersStorageBuffer) return false;
         if (specialized_context && (!v12.bufferDeviceAddress || !features.features.shaderInt64)) return false;
         if (wide_features && !(v12.shaderFloat16 && v12.shaderInt8 && features.features.shaderFloat64 &&
                                features.features.shaderInt64 && features.features.shaderInt16))
@@ -55,6 +58,11 @@ struct GPU {
         qi.queueCount = 1;
         qi.pQueuePriorities = &priority;
         v12 = {VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES};
+        if (variable_pointers) {
+            pointer_features = {VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VARIABLE_POINTERS_FEATURES};
+            pointer_features.variablePointersStorageBuffer = VK_TRUE;
+            v12.pNext = &pointer_features;
+        }
         v12.shaderFloat16 = v12.shaderInt8 = wide_features;
         v12.bufferDeviceAddress = specialized_context;
         VkPhysicalDeviceFeatures enabled{};

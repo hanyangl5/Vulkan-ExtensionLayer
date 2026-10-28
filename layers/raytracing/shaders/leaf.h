@@ -158,11 +158,13 @@ build_instance(inout vk_aabb bounds, VOID_REF src_ptr, VOID_REF dst_ptr, uint32_
 
    AccelerationStructureInstance instance = DEREF(REF(AccelerationStructureInstance)(src_ptr));
 
-   /* An inactive instance is one whose acceleration structure handle is VK_NULL_HANDLE. Since the active terminology is
-    * only relevant for BVH updates, which we do not implement, we can also skip instances with mask == 0.
-    */
-   if (instance.accelerationStructureReference == 0 || instance.custom_instance_and_mask < (1u << 24u))
-      return false;
+   /* Only a null reference is inactive. Runtime BVH4 retains zero-mask and
+    * empty-BLAS instances: those are degenerate, and a legal UPDATE can make
+    * them visible without changing the original leaf/topology mapping. */
+   if (instance.accelerationStructureReference == 0) return false;
+#ifndef VKRT_RUNTIME_BVH4
+   if (instance.custom_instance_and_mask < (1u << 24u)) return false;
+#endif
 
    DEREF(node).base_ptr = instance.accelerationStructureReference;
 
@@ -178,11 +180,16 @@ build_instance(inout vk_aabb bounds, VOID_REF src_ptr, VOID_REF dst_ptr, uint32_
    /* Keep base_ptr as the original public AS value. The final encoder
     * resolves it explicitly and retains both forms for serialization. */
    if (DEREF(REF(uint32_t)(blas)) != VEL_RT_BVH4_MAGIC || DEREF(REF(uint32_t)(blas + 4)) != VEL_RT_BVH4_ABI_VERSION ||
-       (DEREF(REF(uint32_t)(blas + 12)) & 0x80000000u) != 0u || DEREF(REF(uint32_t)(blas + 16)) == 0xffffffffu)
+       (DEREF(REF(uint32_t)(blas + 12)) & 0x80000000u) != 0u)
        return false;
-   for (uint32_t k = 0; k < 3; ++k) {
-       blas_aabb.min[k] = uintBitsToFloat(DEREF(REF(uint32_t)(blas + 96 + k * 4)));
-       blas_aabb.max[k] = uintBitsToFloat(DEREF(REF(uint32_t)(blas + 108 + k * 4)));
+   if (instance.custom_instance_and_mask < (1u << 24u) || DEREF(REF(uint32_t)(blas + 16)) == 0xffffffffu) {
+       /* A degenerate instance is represented at its transformed origin. */
+       blas_aabb.min = blas_aabb.max = vec3(0);
+   } else {
+       for (uint32_t k = 0; k < 3; ++k) {
+           blas_aabb.min[k] = uintBitsToFloat(DEREF(REF(uint32_t)(blas + 96 + k * 4)));
+           blas_aabb.max[k] = uintBitsToFloat(DEREF(REF(uint32_t)(blas + 108 + k * 4)));
+       }
    }
 #else
    uint64_t blas_ir = args.blas_ir_addresses != 0 ?

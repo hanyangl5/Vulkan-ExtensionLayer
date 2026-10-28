@@ -1,0 +1,15 @@
+# Copyright 2026 The Khronos Group Inc.
+# SPDX-License-Identifier: Apache-2.0
+# GPU UPDATE/refit selection, VK-GL-CTS d18e4c68543103371715845cd914c71e5859963e.
+dEQP-VK.ray_tracing_pipeline.acceleration_structures.update.traditional_structures.gpu.normal.vertices
+dEQP-VK.ray_tracing_pipeline.acceleration_structures.update.traditional_structures.gpu.normal.indices
+dEQP-VK.ray_tracing_pipeline.acceleration_structures.update.traditional_structures.gpu.normal.transform
+dEQP-VK.ray_tracing_pipeline.acceleration_structures.update.traditional_structures.gpu.normal.geometry_transform
+dEQP-VK.ray_tracing_pipeline.acceleration_structures.update.traditional_structures.gpu.normal.degenerate
+dEQP-VK.ray_tracing_pipeline.acceleration_structures.update.traditional_structures.gpu.compact.vertices
+dEQP-VK.ray_tracing_pipeline.acceleration_structures.update.traditional_structures.gpu.compact.indices
+dEQP-VK.ray_tracing_pipeline.acceleration_structures.update.traditional_structures.gpu.compact.transform
+dEQP-VK.ray_tracing_pipeline.acceleration_structures.update.traditional_structures.gpu.compact.geometry_transform
+dEQP-VK.ray_tracing_pipeline.acceleration_structures.update.traditional_structures.gpu.compact.degenerate
+dEQP-VK.ray_query.acceleration_structures.instance_update.traditional_structures.gpu_built.update
+dEQP-VK.ray_query.acceleration_structures.instance_update.traditional_structures.gpu_built.update_in_place

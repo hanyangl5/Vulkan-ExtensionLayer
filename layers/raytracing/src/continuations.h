@@ -98,6 +98,10 @@ struct ContinuationFrameOptions {
     // reachable module-Private variables. The planner does not allocate those
     // globals itself; default callers must still reject unbacked mutable state.
     bool persistent_private_storage = false;
+    // The state backend owns typed root/path/selector snapshots for logical
+    // StorageBuffer pointer SSA. These are provenance, never native pointer
+    // bytes. The component planner must not recursively replay Phi cycles.
+    bool logical_pointer_snapshots = false;
 };
 struct ContinuationFrames {
     ContinuationAnalysis analysis;
