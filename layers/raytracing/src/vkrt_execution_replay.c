@@ -33,6 +33,12 @@ struct execution_frame {
     const struct execution_frame *previous;
     VkCommandBuffer source;
 };
+struct command_pool_record {
+    struct command_pool_record *next;
+    VkCommandPool pool;
+    uint32_t family;
+    VkCommandPoolCreateFlags flags;
+};
 struct vkrt_execution_batch {
     struct vkrt_execution_batch *next;
     struct vkrt_execution_device *owner;
@@ -49,6 +55,7 @@ struct vkrt_execution_batch {
 struct vkrt_execution_device {
     struct vkrt_device_data *dev;
     struct vkrt_execution_batch *batches;
+    struct command_pool_record *command_pools;
     uint64_t settled_clock;
     vkrt_mutex_t lock;
     bool has_allocator;
@@ -82,6 +89,57 @@ static void release(struct vkrt_execution_device *state, void *memory) {
         state->allocator.pfnFree(state->allocator.pUserData, memory);
     else
         free(memory);
+}
+bool vkrt_execution_command_requires_replay(const struct vkrt_cmd_buffer_data *cb) {
+    return cb && !cb->replaying && (cb->has_virtual_queries || cb->has_rtp_execution);
+}
+VkResult vkrt_execution_track_command_pool(struct vkrt_device_data *dev, VkCommandPool pool, uint32_t family,
+                                           VkCommandPoolCreateFlags flags) {
+    if (!dev || !pool) return VK_ERROR_INITIALIZATION_FAILED;
+    struct vkrt_execution_device *state = dev->executions;
+    if (!state) return VK_SUCCESS;
+    struct command_pool_record *record = allocate(state, sizeof(*record));
+    if (!record) return VK_ERROR_OUT_OF_HOST_MEMORY;
+    *record = (struct command_pool_record){.pool = pool, .family = family, .flags = flags};
+    vkrt_mutex_lock(&state->lock);
+    for (const struct command_pool_record *p = state->command_pools; p; p = p->next) {
+        if (p->pool != pool) continue;
+        bool same = p->family == family && p->flags == flags;
+        vkrt_mutex_unlock(&state->lock);
+        release(state, record);
+        return same ? VK_SUCCESS : VK_ERROR_INITIALIZATION_FAILED;
+    }
+    record->next = state->command_pools;
+    state->command_pools = record;
+    vkrt_mutex_unlock(&state->lock);
+    return VK_SUCCESS;
+}
+void vkrt_execution_forget_command_pool(struct vkrt_device_data *dev, VkCommandPool pool) {
+    struct vkrt_execution_device *state = dev ? dev->executions : NULL;
+    if (!state) return;
+    vkrt_mutex_lock(&state->lock);
+    struct command_pool_record **link = &state->command_pools;
+    while (*link && (*link)->pool != pool) link = &(*link)->next;
+    struct command_pool_record *record = *link;
+    if (record) *link = record->next;
+    vkrt_mutex_unlock(&state->lock);
+    release(state, record);
+}
+bool vkrt_execution_command_pool_info(struct vkrt_device_data *dev, VkCommandPool pool, uint32_t *family,
+                                      VkCommandPoolCreateFlags *flags) {
+    struct vkrt_execution_device *state = dev ? dev->executions : NULL;
+    if (!state || !family || !flags) return false;
+    bool found = false;
+    vkrt_mutex_lock(&state->lock);
+    for (const struct command_pool_record *p = state->command_pools; p; p = p->next)
+        if (p->pool == pool) {
+            *family = p->family;
+            *flags = p->flags;
+            found = true;
+            break;
+        }
+    vkrt_mutex_unlock(&state->lock);
+    return found;
 }
 static VkResult poison(struct vkrt_execution_batch *batch, VkResult error) {
     if (batch->status == VK_SUCCESS) batch->status = error;
@@ -125,7 +183,7 @@ VkResult vkrt_execution_device_init(struct vkrt_device_data *dev, const VkAlloca
     NATIVE(fence_status, PFN_vkGetFenceStatus, "vkGetFenceStatus");
     NATIVE(device_idle, PFN_vkDeviceWaitIdle, "vkDeviceWaitIdle");
 #undef NATIVE
-    state->create_pool = (PFN_vkCreateCommandPool)vkrt_query_pool_proc("vkCreateCommandPool");
+    state->create_pool = (PFN_vkCreateCommandPool)vkrt_command_proc("vkCreateCommandPool");
     state->destroy_pool = (PFN_vkDestroyCommandPool)vkrt_command_proc("vkDestroyCommandPool");
     state->allocate_commands = (PFN_vkAllocateCommandBuffers)vkrt_command_proc("vkAllocateCommandBuffers");
     state->free_commands = (PFN_vkFreeCommandBuffers)vkrt_command_proc("vkFreeCommandBuffers");
@@ -174,6 +232,11 @@ void vkrt_execution_device_finish(struct vkrt_device_data *dev) {
         state->batches = batch->next;
         destroy_batch(batch);
     }
+    while (state->command_pools) {
+        struct command_pool_record *next = state->command_pools->next;
+        release(state, state->command_pools);
+        state->command_pools = next;
+    }
     dev->executions = NULL;
 #if !defined(_WIN32)
     pthread_mutex_destroy(&state->lock);
@@ -216,7 +279,7 @@ static VkResult find_pool(struct vkrt_execution_batch *batch, const struct vkrt_
     struct vkrt_execution_device *state = batch->owner;
     uint32_t family;
     VkCommandPoolCreateFlags flags;
-    if (!vkrt_query_command_pool_info(state->dev, source->pool, &family, &flags)) return VK_ERROR_FEATURE_NOT_PRESENT;
+    if (!vkrt_execution_command_pool_info(state->dev, source->pool, &family, &flags)) return VK_ERROR_FEATURE_NOT_PRESENT;
     for (struct execution_pool *pool = batch->pools; pool; pool = pool->next) {
         if (pool->family == family && pool->flags == flags) {
             *out = pool;
@@ -244,8 +307,8 @@ static PFN_vkVoidFunction resolve(void *user, const char *name) {
 }
 static VkResult clone_command(struct vkrt_execution_batch *batch, VkCommandBuffer command, VkCommandBuffer *target, bool force);
 static VkResult remap_child(void *user, VkCommandBuffer source, VkCommandBuffer *target) {
-    /* Query-free secondaries can still own mutable RTP frame packets. A replayed
-     * parent is self-contained, with fresh state for every child occurrence. */
+    /* A replayed parent owns fresh state for every secondary occurrence,
+     * including RTP-only and ordinary children. Never deduplicate recordings. */
     return clone_command(user, source, target, true);
 }
 static VkResult clone_command(struct vkrt_execution_batch *batch, VkCommandBuffer command, VkCommandBuffer *target, bool force) {
@@ -257,7 +320,7 @@ static VkResult clone_command(struct vkrt_execution_batch *batch, VkCommandBuffe
     struct vkrt_cmd_buffer_data *source = VKRT_FIND(struct vkrt_cmd_buffer_data, command);
     if (!source || source->device_data != state->dev) return poison(batch, VK_ERROR_INITIALIZATION_FAILED);
     if (force && source->level != VK_COMMAND_BUFFER_LEVEL_SECONDARY) return poison(batch, VK_ERROR_INITIALIZATION_FAILED);
-    if (!force && !vkrt_query_command_requires_replay(source)) {
+    if (!force && !vkrt_execution_command_requires_replay(source)) {
         *target = command;
         return VK_SUCCESS;
     }

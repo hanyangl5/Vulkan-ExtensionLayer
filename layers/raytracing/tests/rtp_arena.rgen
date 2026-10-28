@@ -1,0 +1,29 @@
+// Copyright 2026 The Khronos Group Inc.
+// SPDX-License-Identifier: Apache-2.0
+#version 460
+#extension GL_EXT_ray_tracing : require
+layout(set = 0, binding = 0, std430) coherent buffer Results { uint words[]; } result;
+layout(push_constant) uniform Config { uint seed; } config;
+struct CallData { uint value; uint id; uint depth; };
+layout(location = 0) callableDataEXT CallData call_data;
+
+void main() {
+    uint id = gl_LaunchIDEXT.x + gl_LaunchSizeEXT.x *
+        (gl_LaunchIDEXT.y + gl_LaunchSizeEXT.y * gl_LaunchIDEXT.z);
+    // Every element remains live across two nested callable invocations.
+    // This source array alone exceeds 128 KiB; no reduced-size variant is used.
+    uint table[32769];
+    uint seed = config.seed;
+    for (uint n = 0; n < 32769; ++n)
+        table[n] = (seed * 1664525u + id * 1013904223u) ^ (n * 2246822519u);
+    call_data.value = seed ^ (id * 747796405u);
+    call_data.id = id;
+    call_data.depth = 0;
+    executeCallableEXT(0, 0);
+    uint digest = 2166136261u;
+    for (uint n = 0; n < 32769; ++n) digest = (digest ^ table[n]) * 16777619u;
+    atomicAdd(result.words[id * 4], digest);
+    atomicAdd(result.words[id * 4 + 1], call_data.value);
+    atomicAdd(result.words[id * 4 + 2], 1u);
+    atomicAdd(result.words[id * 4 + 3], seed + id);
+}

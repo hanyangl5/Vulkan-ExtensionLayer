@@ -3,6 +3,7 @@
 #include "vkrt_rtp.h"
 #include "vkrt_rt_capabilities.h"
 #include "vkrt_query_pool.h"
+#include "vkrt_execution_replay.h"
 
 static PFN_vkVoidFunction replay_resolve(void *user, const char *name) {
     struct vkrt_cmd_buffer_data *cb = user;
@@ -59,6 +60,7 @@ static void reset_state(struct vkrt_cmd_buffer_data *cb)
    cb->native_active_queries = 0;
    cb->usage_flags = 0;
    cb->has_virtual_queries = false;
+   cb->has_rtp_execution = false;
 }
 
 /* Caller holds the per-device list lock. */
@@ -95,7 +97,7 @@ static VKAPI_ATTR VkResult VKAPI_CALL AllocateCommandBuffers(VkDevice device,
       if (!cb) break;
       cb->cmd = commands[i]; cb->device_data = dev; cb->pool = info->commandPool;
       cb->level = info->level;
-      if (dev->virtual_rt && dev->query_backend_enabled) {
+      if (dev->executions) {
           const VkAllocationCallbacks *allocator = dev->queue_families_have_allocator ? &dev->queue_families_allocator : NULL;
           if (!allocator && dev->instance_data && dev->instance_data->has_allocator) allocator = &dev->instance_data->allocator;
           cb->replay.journal = vkrt_replay_journal_create(allocator, VK_SYSTEM_ALLOCATION_SCOPE_DEVICE);
@@ -127,20 +129,35 @@ static VKAPI_ATTR void VKAPI_CALL FreeCommandBuffers(VkDevice device, VkCommandP
    dev->vtable.FreeCommandBuffers(device, pool, count, commands);
 }
 
-static VKAPI_ATTR void VKAPI_CALL DestroyCommandPool(VkDevice device, VkCommandPool pool,
-   const VkAllocationCallbacks *allocator)
-{
-   struct vkrt_device_data *dev = VKRT_FIND(struct vkrt_device_data, device);
-   vkrt_mutex_lock(&dev->command_buffers_lock);
-   struct vkrt_cmd_buffer_data *cb = dev->command_buffers;
-   while (cb) {
-      struct vkrt_cmd_buffer_data *next = cb->next;
-      if (cb->pool == pool) remove_cb(dev, cb->cmd);
-      cb = next;
-   }
-   vkrt_mutex_unlock(&dev->command_buffers_lock);
-   dev->vtable.DestroyCommandPool(device, pool, allocator);
-   vkrt_query_forget_command_pool(dev, pool);
+static VKAPI_ATTR VkResult VKAPI_CALL CreateCommandPool(VkDevice device, const VkCommandPoolCreateInfo *info,
+                                                        const VkAllocationCallbacks *allocator, VkCommandPool *pool) {
+    struct vkrt_device_data *dev = VKRT_FIND(struct vkrt_device_data, device);
+    if (!dev) return VK_ERROR_INITIALIZATION_FAILED;
+    VkResult result = dev->vtable.CreateCommandPool(device, info, allocator, pool);
+    if (result != VK_SUCCESS) return result;
+    result = vkrt_execution_track_command_pool(dev, *pool, info->queueFamilyIndex, info->flags);
+    if (result != VK_SUCCESS) {
+        /* No record was acquired. Do not forget a replacement pool whose
+         * native handle is recycled while this rollback destroys the old one. */
+        dev->vtable.DestroyCommandPool(device, *pool, allocator);
+        *pool = VK_NULL_HANDLE;
+    }
+    return result;
+}
+static VKAPI_ATTR void VKAPI_CALL DestroyCommandPool(VkDevice device, VkCommandPool pool, const VkAllocationCallbacks *allocator) {
+    struct vkrt_device_data *dev = VKRT_FIND(struct vkrt_device_data, device);
+    vkrt_mutex_lock(&dev->command_buffers_lock);
+    struct vkrt_cmd_buffer_data *cb = dev->command_buffers;
+    while (cb) {
+        struct vkrt_cmd_buffer_data *next = cb->next;
+        if (cb->pool == pool) remove_cb(dev, cb->cmd);
+        cb = next;
+    }
+    vkrt_mutex_unlock(&dev->command_buffers_lock);
+    /* The native call can release this handle for reuse by another thread.
+     * Remove its old metadata before a new pool can acquire the same value. */
+    vkrt_execution_forget_command_pool(dev, pool);
+    dev->vtable.DestroyCommandPool(device, pool, allocator);
 }
 
 static VKAPI_ATTR VkResult VKAPI_CALL ResetCommandPool(VkDevice device, VkCommandPool pool,
@@ -192,9 +209,22 @@ static VKAPI_ATTR VkResult VKAPI_CALL EndCommandBuffer(VkCommandBuffer cmd)
    struct vkrt_cmd_buffer_data *cb = VKRT_FIND(struct vkrt_cmd_buffer_data, cmd);
    if (!cb) return VK_ERROR_INITIALIZATION_FAILED;
    VkResult r = cb->device_data->vtable.EndCommandBuffer(cmd);
-   if (cb->has_virtual_queries && cb->replay.journal && cb->record_result == VK_SUCCESS)
-       cb->record_result = vkrt_replay_journal_status(cb->replay.journal);
+   if (vkrt_execution_command_requires_replay(cb) && cb->record_result == VK_SUCCESS) {
+       if (cb->replay.journal)
+           cb->record_result = vkrt_replay_journal_status(cb->replay.journal);
+       else if (cb->device_data->executions || cb->has_rtp_execution)
+           cb->record_result = VK_ERROR_FEATURE_NOT_PRESENT;
+   }
    return cb->record_result != VK_SUCCESS ? cb->record_result : r;
+}
+static VKAPI_ATTR void VKAPI_CALL CmdExecuteCommands(VkCommandBuffer command, uint32_t count, const VkCommandBuffer *children) {
+    struct vkrt_cmd_buffer_data *cb = VKRT_FIND(struct vkrt_cmd_buffer_data, command);
+    if (!cb || cb->record_result != VK_SUCCESS) return;
+    for (uint32_t i = 0; i < count; ++i) {
+        struct vkrt_cmd_buffer_data *child = VKRT_FIND(struct vkrt_cmd_buffer_data, children[i]);
+        if (child && child->device_data == cb->device_data) cb->has_rtp_execution |= child->has_rtp_execution;
+    }
+    if (vkrt_query_record_children(cb, count, children)) cb->device_data->vtable.CmdExecuteCommands(command, count, children);
 }
 
 static VKAPI_ATTR void VKAPI_CALL CmdBindPipeline(VkCommandBuffer cmd, VkPipelineBindPoint point, VkPipeline pipeline)
@@ -374,13 +404,19 @@ static VKAPI_ATTR void VKAPI_CALL CmdPushConstants2(VkCommandBuffer cmd, const V
 PFN_vkVoidFunction vkrt_command_proc(const char *name)
 {
 #define ENTRY(fn) if (strcmp(name, "vk" #fn) == 0) return (PFN_vkVoidFunction)fn
-   ENTRY(AllocateCommandBuffers); ENTRY(FreeCommandBuffers); ENTRY(DestroyCommandPool);
-   ENTRY(ResetCommandPool); ENTRY(BeginCommandBuffer); ENTRY(ResetCommandBuffer);
-   ENTRY(EndCommandBuffer);
-   ENTRY(CmdBindPipeline);
-   ENTRY(CmdBindShadersEXT);
-   ENTRY(CmdPushConstants);
-   ENTRY(CmdPushConstants2);
+    ENTRY(AllocateCommandBuffers);
+    ENTRY(FreeCommandBuffers);
+    ENTRY(CreateCommandPool);
+    ENTRY(DestroyCommandPool);
+    ENTRY(ResetCommandPool);
+    ENTRY(BeginCommandBuffer);
+    ENTRY(ResetCommandBuffer);
+    ENTRY(EndCommandBuffer);
+    ENTRY(CmdExecuteCommands);
+    ENTRY(CmdBindPipeline);
+    ENTRY(CmdBindShadersEXT);
+    ENTRY(CmdPushConstants);
+    ENTRY(CmdPushConstants2);
 #undef ENTRY
    if (!strcmp(name, "vkCmdPushConstants2KHR")) return (PFN_vkVoidFunction)CmdPushConstants2;
    return NULL;

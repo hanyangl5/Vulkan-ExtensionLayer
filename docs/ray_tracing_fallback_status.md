@@ -63,6 +63,7 @@ the final layout, passing build/local checks and the 16-case external CTS rechec
 - [x] Execute typed Function/Private pointer memory and supported PtrAccessChain loops across suspension.
 - [x] Add SDK-derived owned command capture and independently tested logical-stage planning components.
 - [x] Execute fresh primary/secondary AS-query recordings with independent payloads, overlapping submissions and completion retirement.
+- [x] Replace production RTP PrivateArray frames with tiled, execution-owned BDA arenas and generic primary/secondary replay.
 - [ ] M0: complete all capability, no-native-RT, resource ABI, and continuation proofs.
 - [ ] M1: integrate Mesa builders, GPU BVH4 encoding/refit, and shared AS objects.
 - [ ] M2: complete Ray Query lowering and state semantics.
@@ -631,9 +632,10 @@ and four enhanced SSBO/BDA GPU observations. The enhanced matrix uses actual
 independent buffers and 16-lane NonUniform descriptor arrays. Large PrivateArray
 execution still returns DEVICE_LOST; all diagnostic variants and a native GLSL
 control fail. Device-fault capture reports invalid writes for both the lowered
-and native controls, without proving the underlying cause. Production RTP
-still uses PrivateArray, so scalable production arena integration is the next
-concrete delivery gate. BDA component passes do not close that requirement.
+and native controls, without proving the underlying cause. At that checkpoint,
+production RTP still used PrivateArray and scalable arena integration remained
+a delivery gate. The following checkpoint supplies a production replacement;
+the historical failures remain failures.
 
 The final integrated build passes 38/38 offline checks and the parent RT target.
 The frozen pre-profile/cleanup DLL passes 50/50 guarded external CTS. The final
@@ -641,35 +643,84 @@ DLL separately passes 13/13 relevant CTS. These snapshots, raw failures and
 qualification boundaries are recorded in the checkpoint and its manifest.
 No complete M0-M5 milestone or full-goal completion is claimed.
 
+## 2026-10-28 execution-owned RTP arena checkpoint
+
+The [production arena checkpoint](rtp_execution_arenas_2026-10-28.md) replaces
+RTP destination PrivateArray storage with device-local-preferred BDA arena
+leases. Native compilation is cached once per pipeline, independently of the
+current dynamic stack budget. A checked tile planner retains the complete
+per-invocation budget, shrinks allocation widths on OOM and preserves original
+three-dimensional launch IDs through a private 16-byte push. The 64-MiB target
+is an allocation strategy, not a public stack cap. Context storage is O(stage
+count); HOST/context visibility and tile reuse cover the real buffer slices.
+
+Generic per-execution replay now includes RTP independently of optional query
+initialization. Source recording does not allocate mutable execution storage.
+Each primary/secondary occurrence owns its leases through completion retirement.
+Pool metadata belongs to generic execution, and forget-before-native-destroy
+prevents a same-handle creation from losing its new metadata. Independent O0/O2
+host checks and a failing old-order mutation cover that race.
+
+A new public fixture keeps a 131,076-byte source array live across two nested
+callables and checks its complete digest, output values, multiplicity and
+padding. Its exact public stack equation is 133,312 bytes on this pipeline.
+The preceding frozen DLL returns DEVICE_LOST at the first caller-fence wait;
+the production BDA replacement passes all seven execution/reuse phases.
+Source Private/Function value and pointer semantics remain supported. Pending
+GPU submissions alone do not prove overlapping execution or exclude a shared
+per-recording arena: distinct-lease host oracles provide separate ownership
+evidence.
+
+The final build and 40/40 offline checks pass. A 24-run GPU matrix passes in both
+VVL orders, with ordinary no-native-RT guards, synchronization validation and
+zero scanned validation diagnostics. It includes public large arrays, API and
+ordinary compute state, shader objects, maintenance6, libraries, resource
+boundaries, query replay/acquisition and typed BDA/pointer components. Forced
+`(2,2,64)` dispatch tests separately pass Submit2 and disabled optimization;
+each observes 182 dispatches with maximum `(2,1,1)`, including the short tail.
+These artificial limits are not an ordinary mandatory-limit proof. After a
+fixture-only SBT-address alignment correction, 4/4 final public GPU runs pass,
+including both VVL orders and both forced-tile variants. The same production DLL
+passes **50/50 external CTS** from `D:/Codes/VK-GL-CTS`, with 125,113 complete
+guard boundary checks, zero rejections and no scanned validation diagnostics.
+The new checkpoint/manifest bind the DLL, CTS revision and complete raw evidence;
+these are separate observations from the preceding checkpoint's snapshots.
+
+The observed large-frame production blocker now has a tested replacement.
+Complete resource qualification remains open: native buffer/allocation size
+preflight and compute push-descriptor/descriptor-buffer state restoration are
+known source gaps without GPU reproducers in this checkpoint. Destination
+PrivateArray diagnostic code is now unused by production and can be retired
+without deleting source Private semantics or historical failure evidence.
+
 ## Next work
 
-Per-execution query replay now has public repeated/overlapping GPU executions
-and external CTS observations. It does not complete arbitrary command replay or
-logical-stage submission semantics. The next production slice is execution-owned
-BDA arenas for RTP, including generic replay, checked tiling and lifetime/error
-proofs. Complete synchronization
-semantics, the no-RT profile and large-construction qualification proceed in
-parallel before enabling complete no-RT discovery. These are planned
-exit checks, not claims that the missing features are implemented.
+Execution-owned BDA RTP arenas and generic replay now have production GPU
+observations, alongside the existing per-execution query implementation. The
+next slice closes native resource-size and compute descriptor-state gaps,
+retires the obsolete destination PrivateArray transport, and expands external
+qualification. This does not complete arbitrary command replay or logical-stage
+submission semantics. Complete synchronization, the no-RT profile and
+large-construction qualification proceed in parallel before enabling complete
+no-RT discovery. These are planned exit checks, not implemented-feature claims.
 
 | Priority | Deliverable | Evidence needed before closing it |
 | --- | --- | --- |
-| 1 | Scalable RTP arenas and generic execution replay | Production BDA frames without a small stack cap; checked tile/tail/3D launches; shared-pool allocation; independent arenas for simultaneous primary/secondary occurrences; native submission failures and fence retirement; operation independent of optional query initialization |
+| 1 | Complete RTP resource/state qualification and retire obsolete destination transport | Native maxBufferSize/allocation preflight; push-descriptor and descriptor-buffer compute state reproducers/restoration; preserve source Private semantics and retained failures while deleting unused destination PrivateArray diagnostics; broader public execution/CTS coverage |
 | Parallel M4 | Complete logical-stage synchronization semantics | Source semaphore/barrier/event/ownership scopes, native-query interactions and qualified queues/groups. Query COPY uses the proved native bridge. CPU schedules and early-signal timing alone establish neither a correctness failure nor a requirement for a general queue worker |
 | Parallel M0/M1 | Complete no-RT discovery, resource and construction contract | One shared software feature/property/device-create profile, mandatory query prerequisites, complete resource budgets, qualification of production indexed construction and XYZ dispatch, masked-discovery public execution, then physical no-RT qualification |
-| Parallel compiler | Remaining typed compiler memory/resource semantics | Access operands and source memory-model rules, multiple real descriptor roots and NonUniform arrays, large values and execution modes, with independent GPU oracles in the actual BDA/PrivateArray transport as applicable |
+| Parallel compiler | Remaining typed compiler memory/resource semantics | Access operands and source memory-model rules, multiple real descriptor roots and NonUniform arrays, large values and execution modes, with independent GPU oracles in the production BDA transport and applicable component transports |
 | Replay integration | Remaining command schemas and native-query interactions | Inline-layout/template retention, complete entrypoint admission, mixed native scopes, state preservation and simultaneous public execution qualification; existing explicit restrictions are not final support |
 | Final qualification | Complete mandatory behavior and platform matrix | Requirement-to-evidence mapping, broader AS/RQ/RTP CTS, targeted original failures, builder/count/numerical cases, cross-vendor physical no-RT and POSIX runs |
 
-The concrete production blocker is large invocation-private RTP storage, for
-which a native GLSL control also faults. Scalable BDA arenas need generic
-per-execution ownership. AS/RTP/native compute share a physical stage while
-source scopes differ; complete mapping still requires proof, but no mandatory
-forward-progress counterexample currently establishes that a queue worker is
-the only solution. The query acquire bridge closes its specific narrow-wait gap.
-Passing
-the execution-only native-RT guard does not close no-RT discovery, because that
-test mode retains native discovery for CTS selection.
+The preceding large-PrivateArray production failure has a BDA replacement;
+its old native GLSL and diagnostic failures remain retained. AS/RTP/native
+compute share a physical stage while source scopes differ. Complete mapping
+still requires proof, but no mandatory forward-progress counterexample currently
+establishes that a queue worker is the only solution. The query acquire bridge
+closes its specific narrow-wait gap. Passing the execution-only native-RT guard
+does not close no-RT discovery, because that mode retains native discovery for
+CTS selection.
 
 The [no-RT qualification audit](rt_no_rt_qualification_gates_2026-10-28.md)
 identifies discovery/property gaps and qualification gates at its audited
@@ -699,8 +750,9 @@ Detailed remaining work, grouped by subsystem rather than priority:
    traditional descriptor-backed opaque values now cross suspension. Qualify the
    new logical StorageBuffer pointer Phi/Select/helper route with
    multiple descriptor roots and real descriptor-array NonUniform execution
-   beyond the new passing SSBO/BDA matrix; resolve PrivateArray device loss and
-   complete remaining pointer arithmetic/memory variants, mutable opaque encodings
+   beyond the passing SSBO/BDA matrix; qualify the production BDA replacement
+   for the historical PrivateArray device loss, retire its unused destination
+   path, and complete remaining pointer arithmetic/memory variants, mutable opaque encodings
    and the full argument/return ABI. Complete descriptor disturbance, push-descriptor
    and descriptor-buffer interoperability, and pipeline option/API coverage before
    claiming the full typed-continuation M0 proof. Cached native pipelines now

@@ -5,6 +5,7 @@
 #define VKRT_EXECUTION_REPLAY_H
 #include <vulkan/vulkan.h>
 #include <stddef.h>
+#include <stdbool.h>
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -12,6 +13,7 @@ extern "C" {
 struct vkrt_device_data;
 struct vkrt_execution_device;
 struct vkrt_execution_batch;
+struct vkrt_cmd_buffer_data;
 
 VkResult vkrt_execution_device_init(struct vkrt_device_data *dev, const VkAllocationCallbacks *allocator);
 /* Exclusive device teardown: no concurrent helper/native submission calls.
@@ -20,9 +22,16 @@ VkResult vkrt_execution_device_init(struct vkrt_device_data *dev, const VkAlloca
  * SUCCESS or DEVICE_LOST; no fixed retry budget permits an unsafe release.
  * Normal submission/collect paths never use this drain or readback mechanism. */
 void vkrt_execution_device_finish(struct vkrt_device_data *dev);
+/* Generic replay infrastructure is independent of optional query capabilities. */
+bool vkrt_execution_command_requires_replay(const struct vkrt_cmd_buffer_data *cb);
+VkResult vkrt_execution_track_command_pool(struct vkrt_device_data *dev, VkCommandPool pool, uint32_t family,
+                                           VkCommandPoolCreateFlags flags);
+void vkrt_execution_forget_command_pool(struct vkrt_device_data *dev, VkCommandPool pool);
+bool vkrt_execution_command_pool_info(struct vkrt_device_data *dev, VkCommandPool pool, uint32_t *family,
+                                      VkCommandPoolCreateFlags *flags);
 
 VkResult vkrt_execution_batch_create(struct vkrt_device_data *dev, VkQueue queue, struct vkrt_execution_batch **batch);
-/* A top-level source with no virtual query dependency is returned unchanged.
+/* A top-level source with no query or RTP execution dependency is unchanged.
  * Every secondary occurrence inside a replayed parent is cloned, including
  * query-free children that may own mutable RTP frame packets.
  * A batch is prepared by one thread; failure poisons it until discarded. */

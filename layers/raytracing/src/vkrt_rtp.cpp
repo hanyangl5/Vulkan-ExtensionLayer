@@ -9,6 +9,7 @@ extern "C" {
 #include "vkrt_rtp.h"
 }
 #include "typed_runtime.h"
+#include "rtp_launch_plan.h"
 #include <spirv/unified1/spirv.hpp>
 #include <algorithm>
 #include <atomic>
@@ -155,7 +156,6 @@ struct Variant {
     TypedRuntimeProgram program;
     VkPipeline native{};
     std::set<uint32_t> used_sets;
-    uint64_t budget = 0;
     ~Variant() {
         if (native) dev->vtable.DestroyPipeline(dev->device, native, nullptr);
     }
@@ -175,7 +175,6 @@ struct Pipeline {
     uint64_t identity = 0;
     bool dynamic_stack = false;
     std::shared_ptr<Variant> initial;
-    std::map<uint64_t, std::shared_ptr<Variant>> variants;
     std::mutex lock;
 };
 struct PipelineToken {
@@ -193,16 +192,14 @@ struct Binding {
 };
 struct Packet {
     vkrt_device_data *dev;
-    VkBuffer buffer{};
-    VkDeviceMemory memory{};
+    vkrt_private_slice context{}, arena{};
     void *mapping = nullptr;
     VkDeviceAddress address = 0;
     std::shared_ptr<Pipeline> pipeline;
     std::shared_ptr<Variant> variant;
     ~Packet() {
-        if (mapping) dev->vtable.UnmapMemory(dev->device, memory);
-        if (buffer) dev->vtable.DestroyBuffer(dev->device, buffer, nullptr);
-        if (memory) dev->vtable.FreeMemory(dev->device, memory, nullptr);
+        vkrt_private_pool_release(dev, &arena);
+        vkrt_private_pool_release(dev, &context);
     }
 };
 }  // namespace
@@ -228,6 +225,7 @@ struct vkrt_rtp_command {
     std::map<uint32_t, std::shared_ptr<Layout>> push_layouts;
     std::vector<std::unique_ptr<Packet>> packets;
     uint64_t stack = 0;
+    bool stack_set = false;
 };
 
 namespace {
@@ -300,23 +298,19 @@ bool PushCompatible(const Layout &a, const Layout &b) {
             return false;
     return true;
 }
-std::shared_ptr<Variant> Build(Pipeline &p, uint64_t budget, VkPipelineCache cache = VK_NULL_HANDLE) {
+std::shared_ptr<Variant> Build(Pipeline &p, VkPipelineCache cache = VK_NULL_HANDLE) {
     std::lock_guard<std::mutex> lock(p.lock);
-    auto i = p.variants.find(budget);
-    if (i != p.variants.end()) return i->second;
-    Need(budget && budget <= uint64_t(UINT32_MAX) * 4 && !(budget & 3));
+    if (p.initial) return p.initial;
     TypedContinuationCompileOptions config;
-    config.transport = TypedFrameTransport::PrivateArray;
-    config.private_frame_words = uint32_t(budget / 4);
+    config.transport = TypedFrameTransport::PhysicalAddress;
     std::vector<TypedContinuationProgram> stages;
     for (size_t n = 0; n < p.metadata.size(); ++n)
         stages.push_back(CompileTypedPipelineStage(p.metadata[n].source, p.entries[n], p.kinds[n], nullptr,
                                                    "vel_rt_stage_" + std::to_string(n), config));
     auto v = std::make_shared<Variant>();
     v->dev = p.dev;
-    v->budget = budget;
     const bool optimize = (p.flags & VK_PIPELINE_CREATE_DISABLE_OPTIMIZATION_BIT) == 0;
-    v->program = BuildTypedRuntimeProgram(stages, p.groups, {p.depth, p.identity, true, optimize});
+    v->program = BuildTypedRuntimeProgram(stages, p.groups, {p.depth, p.identity, true, optimize, true});
     const auto &words = v->program.spirv;
     for (size_t word = 5; word < words.size(); word += words[word] >> 16)
         if ((words[word] & 65535) == spv::OpDecorate && words[word + 2] == spv::DecorationDescriptorSet)
@@ -348,9 +342,8 @@ std::shared_ptr<Variant> Build(Pipeline &p, uint64_t budget, VkPipelineCache cac
     }
     v->native = native;
     Need(v->native != VK_NULL_HANDLE);
-    p.variants.emplace(budget, v);
-    VKRT_LOG_DBG("typed RTP native variant created identity=%llu budget=%llu", (unsigned long long)p.identity,
-                 (unsigned long long)budget);
+    p.initial = v;
+    VKRT_LOG_DBG("typed RTP BDA native variant created identity=%llu", (unsigned long long)p.identity);
     return v;
 }
 void Bind(vkrt_device_data *d, VkCommandBuffer c, const Binding &b, bool rt = false) {
@@ -359,62 +352,26 @@ void Bind(vkrt_device_data *d, VkCommandBuffer c, const Binding &b, bool rt = fa
     d->vtable.CmdBindDescriptorSets(c, VK_PIPELINE_BIND_POINT_COMPUTE, layout, b.first, uint32_t(b.sets.size()), b.sets.data(),
                                     uint32_t(b.offsets.size()), b.offsets.data());
 }
-void Allocate(Packet &p, uint64_t bytes) {
-    auto d = p.dev;
-    Need(bytes <= SIZE_MAX - 7);
-    VkBufferCreateInfo ci{};
-    ci.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-    ci.size = bytes + 7;
-    ci.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
-    ci.sharingMode = d->queue_family_count > 1 ? VK_SHARING_MODE_CONCURRENT : VK_SHARING_MODE_EXCLUSIVE;
-    if (d->queue_family_count > 1) {
-        ci.queueFamilyIndexCount = d->queue_family_count;
-        ci.pQueueFamilyIndices = d->queue_families;
+void Allocate(Packet &p, RtpLaunchPlan &plan) {
+    Check(vkrt_private_pool_allocate_ex(p.dev, plan.context_bytes, VKRT_PRIVATE_HOST_COHERENT, 8, 1, &p.context));
+    Need(p.context.mapping && p.context.size >= plan.context_bytes && p.context.address && !(p.context.address & 7) &&
+         plan.context_bytes <= UINT64_MAX - p.context.address);
+    p.address = p.context.address;
+    p.mapping = p.context.mapping;
+    std::memset(p.mapping, 0, size_t(plan.context_bytes));
+    for (;;) {
+        const auto result =
+            vkrt_private_pool_allocate_ex(p.dev, plan.arena_bytes, VKRT_PRIVATE_DEVICE_LOCAL_PREFERRED, 16, 1, &p.arena);
+        if (result == VK_SUCCESS) break;
+        if ((result != VK_ERROR_OUT_OF_DEVICE_MEMORY && result != VK_ERROR_OUT_OF_HOST_MEMORY) || !ReduceRtpLaunchTile(plan))
+            Check(result);
     }
-    VkBuffer buffer{};
-    Check(d->vtable.CreateBuffer(d->device, &ci, nullptr, &buffer));
-    p.buffer = buffer;
-    VkMemoryRequirements req;
-    d->vtable.GetBufferMemoryRequirements(d->device, p.buffer, &req);
-    VkPhysicalDeviceMemoryProperties props;
-    d->instance_data->vtable.GetPhysicalDeviceMemoryProperties(d->physical_device, &props);
-    uint32_t type = UINT32_MAX;
-    for (uint32_t i = 0; i < props.memoryTypeCount; ++i)
-        if ((req.memoryTypeBits & (1u << i)) &&
-            (props.memoryTypes[i].propertyFlags & (VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT)) ==
-                (VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT)) {
-            type = i;
-            break;
-        }
-    Need(type != UINT32_MAX);
-    VkMemoryAllocateFlagsInfo flags{};
-    flags.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_FLAGS_INFO;
-    flags.flags = VK_MEMORY_ALLOCATE_DEVICE_ADDRESS_BIT;
-    VkMemoryAllocateInfo ai{};
-    ai.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-    ai.pNext = &flags;
-    ai.allocationSize = req.size;
-    ai.memoryTypeIndex = type;
-    VkDeviceMemory memory{};
-    Check(d->vtable.AllocateMemory(d->device, &ai, nullptr, &memory));
-    p.memory = memory;
-    Check(d->vtable.BindBufferMemory(d->device, p.buffer, p.memory, 0));
-    void *mapping = nullptr;
-    Check(d->vtable.MapMemory(d->device, p.memory, 0, bytes + 7, 0, &mapping));
-    p.mapping = mapping;
-    VkBufferDeviceAddressInfo bi{};
-    bi.sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO;
-    bi.buffer = p.buffer;
-    uint64_t raw = d->vtable.GetBufferDeviceAddress(d->device, &bi);
-    Need(raw && raw <= UINT64_MAX - 7);
-    uint64_t padding = (0 - raw) & 7;
-    p.address = raw + padding;
-    p.mapping = static_cast<uint8_t *>(mapping) + padding;
-    Need(p.address <= UINT64_MAX - bytes);
-    std::memset(p.mapping, 0, size_t(bytes));
+    Need(p.arena.address && !(p.arena.address & 15) && p.arena.size >= plan.arena_bytes &&
+         plan.arena_bytes <= UINT64_MAX - p.arena.address);
 }
 template <class T>
 void Write(Packet &p, uint64_t offset, const T &v) {
+    Need(offset <= p.context.size && sizeof(v) <= p.context.size - offset);
     std::memcpy((uint8_t *)p.mapping + offset, &v, sizeof(v));
 }
 
@@ -485,7 +442,7 @@ VKAPI_ATTR VkResult VKAPI_CALL CreatePipelineLayout(VkDevice device, const VkPip
         // This separate layout uses the native compute range for a recorded
         // context pointer, independent of every application push range. Create
         // it now, while the caller's descriptor-set layout handles are valid.
-        VkPushConstantRange context_range{VK_SHADER_STAGE_COMPUTE_BIT, 0, 8};
+        VkPushConstantRange context_range{VK_SHADER_STAGE_COMPUTE_BIT, 0, 16};
         auto rt_layout = *ci;
         rt_layout.pushConstantRangeCount = 1;
         rt_layout.pPushConstantRanges = &context_range;
@@ -694,14 +651,14 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateRayTracingPipelinesKHR(VkDevice device, VkD
                 }
                 const auto arena = PlanTypedRuntimeArena(p->metadata, p->groups, p->depth);
                 // Application cache access is confined to this creation call.
-                // Later stack variants use no cache and retain no cache handle.
+                // Runtime stack budgets do not specialize the native program.
                 // Libraries may omit raygen, all groups, or their own stages.
                 // They retain typed source/interface definitions, never native
                 // RT pipelines or caller-owned shader/cache/library handles.
                 if (ci.flags & VK_PIPELINE_CREATE_LIBRARY_BIT_KHR)
                     p->library_stack_bytes = arena.stage_stack_bytes;
                 else
-                    p->initial = Build(*p, arena.default_arena_bytes, cache);
+                    p->initial = Build(*p, cache);
                 auto token = Token<PipelineToken>(a, p);
                 try {
                     std::lock_guard<std::mutex> lock(d->rtp->lock);
@@ -866,7 +823,8 @@ VKAPI_ATTR void VKAPI_CALL CmdSetRayTracingPipelineStackSizeKHR(VkCommandBuffer 
     auto cb = VKRT_FIND(vkrt_cmd_buffer_data, command);
     if (!cb) return;
     VkResult r = Guard([&] {
-        State(cb).stack = (uint64_t(size) + 3) & ~UINT64_C(3);
+        State(cb).stack = size;
+        State(cb).stack_set = true;
         return VK_SUCCESS;
     });
     if (r != VK_SUCCESS) cb->record_result = r;
@@ -883,78 +841,102 @@ VKAPI_ATTR void VKAPI_CALL CmdTraceRaysKHR(VkCommandBuffer command, const VkStri
         auto p = state.bound;
         Need(p && d->rtp && d->rtp->max_dispatch);
         if (!width || !height || !depth) return VK_SUCCESS;
-        uint64_t total = uint64_t(width) * height;
-        Need(total <= UINT64_MAX / depth);
-        total *= depth;
-        uint64_t default_bytes = PlanTypedRuntimeArenaBytes(p->metadata, p->groups, p->depth);
-        auto v = Build(*p, p->dynamic_stack && state.stack ? state.stack : default_bytes);
-        uint64_t chunks = (total - 1) / d->rtp->max_dispatch + 1;
-        Need(chunks <= SIZE_MAX / VEL_RT_RUNTIME_CONTEXT_BYTES);
-        uint64_t table = chunks * VEL_RT_RUNTIME_CONTEXT_BYTES;
-        uint64_t push_size = (p->layout->push_bytes + 7u) & ~uint64_t(7);
-        Need(p->metadata.size() <= ((UINT64_MAX - table) / (push_size + 8)));
-        uint64_t bytes = table + p->metadata.size() * (push_size + 8);
-        Need(bytes <= SIZE_MAX);
-        auto packet = std::make_unique<Packet>();
-        packet->dev = d;
-        packet->pipeline = p;
-        packet->variant = v;
-        Allocate(*packet, bytes);
-        uint64_t payload = table + p->metadata.size() * 8;
+        const uint64_t default_bytes = PlanTypedRuntimeArenaBytes(p->metadata, p->groups, p->depth);
+        const uint64_t budget = p->dynamic_stack && state.stack_set ? state.stack : default_bytes;
+        Need(budget != 0);
+        RtpLaunchPlan plan;
+        if (!PlanRtpLaunch(width, height, depth, budget, d->rtp->max_dispatch, p->metadata.size(), p->layout->push_bytes,
+                           VEL_RT_RUNTIME_CONTEXT_BYTES, plan))
+            throw Failure{VK_ERROR_OUT_OF_DEVICE_MEMORY};
+        auto v = Build(*p);
+        const VkStridedDeviceAddressRegionKHR *regions[] = {rg, miss, hit, call};
+        for (const auto *region : regions) Need(region != nullptr);
         for (size_t s = 0; s < p->metadata.size(); ++s) {
             if (p->metadata[s].uses_app_push_constants) {
                 auto source = state.push_layouts.find(p->kinds[s]);
                 Need(source != state.push_layouts.end() && PushCompatible(*source->second, *p->layout));
             }
-            Write(*packet, table + s * 8, packet->address + payload + s * push_size);
-            auto i = state.pushes.find(p->kinds[s]);
-            if (i != state.pushes.end())
-                std::memcpy((uint8_t *)packet->mapping + payload + s * push_size, i->second.data(),
-                            std::min(size_t(push_size), i->second.size()));
         }
-        for (uint64_t chunk = 0, base = 0; chunk < chunks; ++chunk) {
-            uint64_t count = std::min(uint64_t(d->rtp->max_dispatch), total - base), offset = chunk * VEL_RT_RUNTIME_CONTEXT_BYTES;
-            Write(*packet, offset + VEL_RT_RUN_MAGIC, uint32_t(VEL_RT_RUNTIME_MAGIC));
-            Write(*packet, offset + VEL_RT_RUN_VERSION, uint32_t(VEL_RT_RUNTIME_VERSION));
-            Write(*packet, offset + VEL_RT_RUN_ARENA_BYTES, v->budget);
-            Write(*packet, offset + VEL_RT_RUN_INVOCATION_COUNT, count);
-            Write(*packet, offset + VEL_RT_RUN_WIDTH, width);
-            Write(*packet, offset + VEL_RT_RUN_HEIGHT, height);
-            Write(*packet, offset + VEL_RT_RUN_DEPTH, depth);
-            Write(*packet, offset + VEL_RT_RUN_LAUNCH_BASE, base);
-            Write(*packet, offset + VEL_RT_RUN_AS_REGISTRY, vkrt_as_registry_address(d));
-            Write(*packet, offset + VEL_RT_RUN_PUSH_TABLE, packet->address + table);
-            Write(*packet, offset + VEL_RT_RUN_PIPELINE_ID, p->identity);
-            const VkStridedDeviceAddressRegionKHR *regions[] = {rg, miss, hit, call};
-            const uint32_t starts[] = {80, 104, 128, 152};
-            for (unsigned i = 0; i < 4; ++i) {
-                Need(regions[i] != nullptr);
-                Write(*packet, offset + starts[i], regions[i]->deviceAddress);
-                Write(*packet, offset + starts[i] + 8, i == 0 ? regions[i]->size : regions[i]->stride);
-                Write(*packet, offset + starts[i] + 16, regions[i]->size);
-            }
-            base += count;
-        }
-        // Preserve packet ownership before recording commands which reference it.
-        Packet *owned = packet.get();
-        state.packets.push_back(std::move(packet));
         for (const auto &b : state.rt_bindings) {
             uint32_t last = UINT32_MAX;
             for (uint32_t s = 0; s < b.live.size(); ++s)
                 if (b.live[s] && v->used_sets.count(b.first + s)) last = s;
-            if (last == UINT32_MAX) continue;
-            if (b.owner) Need(Compatible(*b.owner, *p->layout, b.first + last));
-            Bind(d, command, b, true);
+            if (last != UINT32_MAX && b.owner) Need(Compatible(*b.owner, *p->layout, b.first + last));
         }
-        uint64_t remaining = total;
+        // The journal captures the public trace and preceding binding/push
+        // state. Only per-execution replay creates mutable arena leases.
+        if (!cb->replaying) {
+            cb->has_rtp_execution = true;
+            return VK_SUCCESS;
+        }
+        auto packet = std::make_unique<Packet>();
+        packet->dev = d;
+        packet->pipeline = p;
+        packet->variant = v;
+        Allocate(*packet, plan);
+        for (size_t s = 0; s < p->metadata.size(); ++s) {
+            Write(*packet, plan.push_table + s * 8, packet->address + plan.push_payload + s * plan.push_stride);
+            auto i = state.pushes.find(p->kinds[s]);
+            if (i != state.pushes.end())
+                std::memcpy((uint8_t *)packet->mapping + plan.push_payload + s * plan.push_stride, i->second.data(),
+                            std::min(size_t(plan.push_stride), i->second.size()));
+        }
+        Write(*packet, VEL_RT_RUN_MAGIC, uint32_t(VEL_RT_RUNTIME_MAGIC));
+        Write(*packet, VEL_RT_RUN_VERSION, uint32_t(VEL_RT_RUNTIME_VERSION));
+        Write(*packet, VEL_RT_RUN_POOL_ADDRESS, packet->arena.address);
+        Write(*packet, VEL_RT_RUN_POOL_BYTES, plan.arena_bytes);
+        Write(*packet, VEL_RT_RUN_ARENA_BYTES, plan.arena_stride);
+        Write(*packet, VEL_RT_RUN_INVOCATION_COUNT, uint64_t(plan.tile_invocations));
+        Write(*packet, VEL_RT_RUN_WIDTH, width);
+        Write(*packet, VEL_RT_RUN_HEIGHT, height);
+        Write(*packet, VEL_RT_RUN_DEPTH, depth);
+        Write(*packet, VEL_RT_RUN_LAUNCH_BASE, uint64_t(0));
+        Write(*packet, VEL_RT_RUN_AS_REGISTRY, vkrt_as_registry_address(d));
+        Write(*packet, VEL_RT_RUN_PUSH_TABLE, packet->address + plan.push_table);
+        Write(*packet, VEL_RT_RUN_PIPELINE_ID, p->identity);
+        const uint32_t starts[] = {80, 104, 128, 152};
+        for (unsigned i = 0; i < 4; ++i) {
+            Write(*packet, starts[i], regions[i]->deviceAddress);
+            Write(*packet, starts[i] + 8, i == 0 ? regions[i]->size : regions[i]->stride);
+            Write(*packet, starts[i] + 16, regions[i]->size);
+        }
+        // Preserve ownership before recording native commands referencing it.
+        Packet *owned = packet.get();
+        state.packets.push_back(std::move(packet));
+        for (const auto &b : state.rt_bindings) {
+            bool used = false;
+            for (uint32_t s = 0; s < b.live.size(); ++s) used |= b.live[s] && v->used_sets.count(b.first + s);
+            if (used) Bind(d, command, b, true);
+        }
+        VkBufferMemoryBarrier context_barrier{};
+        context_barrier.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
+        context_barrier.srcAccessMask = VK_ACCESS_HOST_WRITE_BIT;
+        context_barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+        context_barrier.srcQueueFamilyIndex = context_barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        context_barrier.buffer = owned->context.buffer;
+        context_barrier.offset = owned->context.offset;
+        context_barrier.size = plan.context_bytes;
+        d->vtable.CmdPipelineBarrier(command, VK_PIPELINE_STAGE_HOST_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 0, nullptr, 1,
+                                     &context_barrier, 0, nullptr);
         d->vtable.CmdBindPipeline(command, VK_PIPELINE_BIND_POINT_COMPUTE, v->native);
-        for (uint64_t chunk = 0; chunk < chunks; ++chunk) {
-            uint32_t count = uint32_t(std::min(remaining, uint64_t(d->rtp->max_dispatch)));
-            uint64_t root = owned->address + chunk * VEL_RT_RUNTIME_CONTEXT_BYTES;
-            const uint32_t words[] = {uint32_t(root), uint32_t(root >> 32)};
+        for (uint64_t base = 0; base < plan.invocations;) {
+            if (base) {
+                VkBufferMemoryBarrier arena_barrier{};
+                arena_barrier.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
+                arena_barrier.srcAccessMask = arena_barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;
+                arena_barrier.srcQueueFamilyIndex = arena_barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+                arena_barrier.buffer = owned->arena.buffer;
+                arena_barrier.offset = owned->arena.offset;
+                arena_barrier.size = plan.arena_bytes;
+                d->vtable.CmdPipelineBarrier(command, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0,
+                                             0, nullptr, 1, &arena_barrier, 0, nullptr);
+            }
+            const uint32_t count = RtpLaunchTileCount(plan, base);
+            const uint32_t words[] = {uint32_t(owned->address), uint32_t(owned->address >> 32), uint32_t(base),
+                                      uint32_t(base >> 32)};
             d->vtable.CmdPushConstants(command, p->layout->rt_native, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(words), words);
             d->vtable.CmdDispatch(command, count, 1, 1);
-            remaining -= count;
+            base += count;  // count <= invocations - base by the checked planner.
         }
         vkrt_replay_compute_binding(cb);
         for (const auto &b : state.compute_bindings) Bind(d, command, b);

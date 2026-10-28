@@ -30,7 +30,7 @@ static void teardown_cleanup_guard(void) { CHECK(!teardown_tracking || teardown_
 struct command_record {
     struct command_record *next;
     struct vkrt_cmd_buffer_data *owner;
-    bool required, internal, loader, begun, inherited, ended;
+    bool internal, loader, begun, inherited, ended;
     unsigned payload, frame;
     uint32_t child_count;
     VkCommandBuffer children[8];
@@ -75,7 +75,19 @@ static struct pool_record *new_pool(uint32_t family, VkCommandPoolCreateFlags fl
     *p = (struct pool_record){
         .next = pools, .handle = H(VkCommandPool, ++next_handle), .family = family, .flags = flags, .internal = internal};
     pools = p;
+    if (!internal && device.executions) CHECK(vkrt_execution_track_command_pool(&device, p->handle, family, flags) == VK_SUCCESS);
     return p;
+}
+static VkResult init_execution(const VkAllocationCallbacks *allocator) {
+    VkResult result = vkrt_execution_device_init(&device, allocator);
+    if (result == VK_SUCCESS)
+        for (const struct pool_record *p = pools; p; p = p->next)
+            if (!p->internal) {
+                result = vkrt_execution_track_command_pool(&device, p->handle, p->family, p->flags);
+                if (result != VK_SUCCESS) break;
+            }
+    if (result != VK_SUCCESS) vkrt_execution_device_finish(&device);
+    return result;
 }
 static struct command_record *new_command(struct pool_record *p, VkCommandBufferLevel level, bool internal, bool required) {
     struct command_record *record = calloc(1, sizeof(*record));
@@ -87,7 +99,7 @@ static struct command_record *new_command(struct pool_record *p, VkCommandBuffer
     record->owner->replay.journal = vkrt_replay_journal_create(NULL, VK_SYSTEM_ALLOCATION_SCOPE_DEVICE);
     CHECK(record->owner->replay.journal);
     record->internal = internal;
-    record->required = required;
+    record->owner->has_virtual_queries = required;
     record->next = commands;
     commands = record;
     vkrt_map_object(VKRT_HKEY(record->owner->cmd), record->owner);
@@ -104,33 +116,9 @@ static void delete_command(VkCommandBuffer handle) {
     free(record->owner);
     free(record);
 }
-bool vkrt_query_command_pool_info(struct vkrt_device_data *dev, VkCommandPool handle, uint32_t *family,
-                                  VkCommandPoolCreateFlags *flags) {
-    CHECK(dev == &device);
-    struct pool_record *p = pool(handle);
-    if (!p) return false;
-    *family = p->family;
-    *flags = p->flags;
-    return true;
-}
-bool vkrt_query_command_requires_replay(const struct vkrt_cmd_buffer_data *cb) {
-    struct command_record *p = command(cb->cmd);
-    CHECK(p);
-    return p->required;
-}
-static VKAPI_ATTR VkResult VKAPI_CALL make_pool(VkDevice dev, const VkCommandPoolCreateInfo *info,
-                                                const VkAllocationCallbacks *allocator, VkCommandPool *out) {
-    CHECK(dev == device.device && info->sType == VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO);
-    (void)allocator;
-    if (failure == FAIL_POOL) return VK_ERROR_OUT_OF_DEVICE_MEMORY;
-    *out = new_pool(info->queueFamilyIndex, info->flags, true)->handle;
-    ++creates;
-    return VK_SUCCESS;
-}
-static VKAPI_ATTR void VKAPI_CALL destroy_pool(VkDevice dev, VkCommandPool handle, const VkAllocationCallbacks *allocator) {
+static void destroy_native_pool(VkDevice dev, VkCommandPool handle) {
     teardown_cleanup_guard();
     CHECK(dev == device.device);
-    (void)allocator;
     struct pool_record **link = &pools;
     while (*link && (*link)->handle != handle) link = &(*link)->next;
     CHECK(*link && (*link)->internal);
@@ -139,6 +127,34 @@ static VKAPI_ATTR void VKAPI_CALL destroy_pool(VkDevice dev, VkCommandPool handl
     *link = p->next;
     free(p);
     ++destroys;
+}
+static VKAPI_ATTR VkResult VKAPI_CALL make_pool(VkDevice dev, const VkCommandPoolCreateInfo *info,
+                                                const VkAllocationCallbacks *allocator, VkCommandPool *out) {
+    CHECK(dev == device.device && info->sType == VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO);
+    (void)allocator;
+    if (failure == FAIL_POOL) return VK_ERROR_OUT_OF_DEVICE_MEMORY;
+    *out = new_pool(info->queueFamilyIndex, info->flags, true)->handle;
+    ++creates;
+    VkResult result = vkrt_execution_track_command_pool(&device, *out, info->queueFamilyIndex, info->flags);
+    if (result != VK_SUCCESS) {
+        /* Match the production Create hook: no metadata was acquired, so its
+         * rollback calls native Destroy directly instead of forgetting. */
+        destroy_native_pool(dev, *out);
+        *out = VK_NULL_HANDLE;
+    }
+    return result;
+}
+static VKAPI_ATTR void VKAPI_CALL destroy_pool(VkDevice dev, VkCommandPool handle, const VkAllocationCallbacks *allocator) {
+    (void)allocator;
+    uint32_t family;
+    VkCommandPoolCreateFlags flags;
+    CHECK(vkrt_execution_command_pool_info(&device, handle, &family, &flags));
+    CHECK(pool(handle) && family == pool(handle)->family && flags == pool(handle)->flags);
+    /* Every successfully created private replay pool reaches this ordinary
+     * command hook, including discard, completion and device teardown. */
+    vkrt_execution_forget_command_pool(&device, handle);
+    CHECK(!vkrt_execution_command_pool_info(&device, handle, &family, &flags));
+    destroy_native_pool(dev, handle);
 }
 static VKAPI_ATTR VkResult VKAPI_CALL allocate_commands(VkDevice dev, const VkCommandBufferAllocateInfo *info,
                                                         VkCommandBuffer *out) {
@@ -199,6 +215,8 @@ static VKAPI_ATTR void VKAPI_CALL query_reset(VkCommandBuffer handle, VkQueryPoo
     if (p->internal) {
         CHECK(p->begun && p->inherited && !p->payload);
         p->payload = ++payload_identity;
+    } else {
+        p->owner->has_virtual_queries = true;
     }
 }
 static VKAPI_ATTR void VKAPI_CALL trace(VkCommandBuffer handle, const VkStridedDeviceAddressRegionKHR *raygen,
@@ -207,7 +225,10 @@ static VKAPI_ATTR void VKAPI_CALL trace(VkCommandBuffer handle, const VkStridedD
     struct command_record *p = command(handle);
     CHECK(p && raygen->deviceAddress == 0x1000 && !miss->size && !hit->size && !callable->size && x == 1 && y == 1 && z == 1);
     if (p->internal) CHECK(p->begun && p->inherited && !p->frame);
-    p->frame = ++frame_identity;
+    if (p->internal)
+        p->frame = ++frame_identity;
+    else
+        p->owner->has_rtp_execution = true;
 }
 static VKAPI_ATTR void VKAPI_CALL execute_commands(VkCommandBuffer handle, uint32_t count, const VkCommandBuffer *children) {
     struct command_record *p = command(handle);
@@ -220,6 +241,13 @@ static VKAPI_ATTR void VKAPI_CALL execute_commands(VkCommandBuffer handle, uint3
             struct command_record *child = command(children[i]);
             CHECK(child);
             if (child->internal) CHECK(child->ended);
+        }
+    } else {
+        for (uint32_t i = 0; i < count; ++i) {
+            struct command_record *child = command(children[i]);
+            CHECK(child);
+            p->owner->has_virtual_queries |= child->owner->has_virtual_queries;
+            p->owner->has_rtp_execution |= child->owner->has_rtp_execution;
         }
     }
 }
@@ -251,15 +279,13 @@ struct vkrt_replay_context *vkrt_replay_lookup_context(VkCommandBuffer handle) {
     return &p->owner->replay;
 }
 PFN_vkVoidFunction vkrt_command_proc(const char *name) {
+    if (!strcmp(name, "vkCreateCommandPool")) return (PFN_vkVoidFunction)make_pool;
     if (!strcmp(name, "vkAllocateCommandBuffers")) return (PFN_vkVoidFunction)allocate_commands;
     if (!strcmp(name, "vkFreeCommandBuffers")) return (PFN_vkVoidFunction)free_commands;
     if (!strcmp(name, "vkDestroyCommandPool")) return (PFN_vkVoidFunction)destroy_pool;
     if (!strcmp(name, "vkBeginCommandBuffer")) return (PFN_vkVoidFunction)begin_command;
     if (!strcmp(name, "vkEndCommandBuffer")) return (PFN_vkVoidFunction)end_command;
     return NULL;
-}
-PFN_vkVoidFunction vkrt_query_pool_proc(const char *name) {
-    return !strcmp(name, "vkCreateCommandPool") ? (PFN_vkVoidFunction)make_pool : NULL;
 }
 static VkResult observer_error;
 static unsigned observations;
@@ -351,6 +377,8 @@ static VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL get_proc(VkDevice dev, const cha
     return NULL;
 }
 static void begin_source(struct command_record *p) {
+    p->owner->has_virtual_queries = false;
+    p->owner->has_rtp_execution = false;
     VkCommandBufferInheritanceInfo inheritance = {.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_INHERITANCE_INFO,
                                                   .renderPass = H(VkRenderPass, 99)};
     VkCommandBufferBeginInfo info = {.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
@@ -374,6 +402,47 @@ static void record_children(struct command_record *p, uint32_t count, const VkCo
 static void check_balanced(void) {
     CHECK(creates == destroys && allocations == frees && fence_creates == fence_destroys);
     CHECK(!fences);
+}
+static void test_rtp_without_queries(struct pool_record *application_pool) {
+    CHECK(!device.queries && !device.query_backend_enabled);
+    struct command_record *source = new_command(application_pool, VK_COMMAND_BUFFER_LEVEL_PRIMARY, false, false);
+    begin_source(source);
+    record_trace(source);
+    source->owner->native_active_queries = 1; /* RTP alone does not enter query qualification. */
+    CHECK(source->owner->has_rtp_execution && !source->owner->has_virtual_queries && !source->frame);
+    CHECK(vkrt_execution_command_requires_replay(source->owner));
+    struct vkrt_execution_batch *batch;
+    CHECK(vkrt_execution_batch_create(&device, queue_a, &batch) == VK_SUCCESS);
+    VkCommandBuffer first, second;
+    CHECK(vkrt_execution_batch_clone(batch, source->owner->cmd, &first) == VK_SUCCESS && first != source->owner->cmd);
+    CHECK(vkrt_execution_batch_clone(batch, source->owner->cmd, &second) == VK_SUCCESS && first != second);
+    CHECK(command(first)->frame && command(second)->frame && command(first)->frame != command(second)->frame);
+    CHECK(!vkrt_execution_command_requires_replay(command(first)->owner));
+    VkFence completion = vkrt_execution_batch_completion_fence(batch);
+    CHECK(vkrt_execution_batch_submitted(batch) == VK_SUCCESS);
+    size_t retired;
+    CHECK(vkrt_execution_collect(&device, &retired) == VK_SUCCESS && retired == 0 && command(first) && command(second));
+    fence(completion)->complete = true;
+    CHECK(vkrt_execution_collect(&device, &retired) == VK_SUCCESS && retired == 1 && !command(first) && !command(second));
+    source->owner->native_active_queries = 0;
+    delete_command(source->owner->cmd);
+    check_balanced();
+}
+static void test_generic_pool_metadata(struct pool_record *application_pool) {
+    uint32_t family = UINT32_MAX;
+    VkCommandPoolCreateFlags flags = UINT32_MAX;
+    CHECK(!device.queries && vkrt_execution_command_pool_info(&device, application_pool->handle, &family, &flags));
+    CHECK(family == application_pool->family && flags == application_pool->flags);
+    CHECK(vkrt_execution_track_command_pool(&device, application_pool->handle, family, flags) == VK_SUCCESS);
+    CHECK(vkrt_execution_track_command_pool(&device, application_pool->handle, family + 1, flags) ==
+          VK_ERROR_INITIALIZATION_FAILED);
+    CHECK(vkrt_execution_command_pool_info(&device, application_pool->handle, &family, &flags) &&
+          family == application_pool->family);
+    vkrt_execution_forget_command_pool(&device, application_pool->handle);
+    family = UINT32_MAX;
+    CHECK(!vkrt_execution_command_pool_info(&device, application_pool->handle, &family, &flags) && family == UINT32_MAX);
+    CHECK(vkrt_execution_track_command_pool(&device, application_pool->handle, application_pool->family, application_pool->flags) ==
+          VK_SUCCESS);
 }
 static void test_occurrences(struct command_record *primary, struct command_record *secondary, struct command_record *plain) {
     VkCommandBuffer children[] = {secondary->owner->cmd, secondary->owner->cmd, plain->owner->cmd};
@@ -531,14 +600,14 @@ static void teardown_finish(unsigned before, unsigned expected_calls) {
     CHECK(teardown_result_index == teardown_result_count);
     teardown_tracking = false;
     check_balanced();
-    CHECK(vkrt_execution_device_init(&device, NULL) == VK_SUCCESS);
+    CHECK(init_execution(NULL) == VK_SUCCESS);
 }
 static void test_device_teardown(struct command_record *source) {
     CHECK(device_idle_calls == 0); /* Normal collect/observation never drains. */
     unsigned before = device_idle_calls;
     vkrt_execution_device_finish(&device);
     CHECK(device_idle_calls == before && !device.executions);
-    CHECK(vkrt_execution_device_init(&device, NULL) == VK_SUCCESS);
+    CHECK(init_execution(NULL) == VK_SUCCESS);
     struct vkrt_execution_batch *prepared;
     CHECK(vkrt_execution_batch_create(&device, queue_a, &prepared) == VK_SUCCESS);
     VkCommandBuffer target;
@@ -546,7 +615,7 @@ static void test_device_teardown(struct command_record *source) {
     vkrt_execution_device_finish(&device);
     CHECK(device_idle_calls == before && !device.executions);
     check_balanced(); /* Prepared-only objects are not pending. */
-    CHECK(vkrt_execution_device_init(&device, NULL) == VK_SUCCESS);
+    CHECK(init_execution(NULL) == VK_SUCCESS);
     /* Accepted work needs a drain even when observer OOM left an unassociated
      * fence. Every retry checks that no CB/pool/fence cleanup happened early. */
     VkFence completion;
@@ -641,6 +710,7 @@ static void test_pool_identity(struct command_record *source) {
 }
 static void test_admission_and_cycle(struct command_record *plain, struct command_record *primary,
                                      struct command_record *secondary) {
+    plain->owner->has_rtp_execution = false;
     ((PFN_vkCmdPushDescriptorSetWithTemplateKHR)vkrt_replay_proc("vkCmdPushDescriptorSetWithTemplateKHR"))(
         plain->owner->cmd, VK_NULL_HANDLE, VK_NULL_HANDLE, 0, (void *)(uintptr_t)1);
     CHECK(vkrt_replay_journal_status(plain->owner->replay.journal) == VK_ERROR_FEATURE_NOT_PRESENT);
@@ -648,11 +718,12 @@ static void test_admission_and_cycle(struct command_record *plain, struct comman
     CHECK(vkrt_execution_batch_create(&device, queue_a, &batch) == VK_SUCCESS);
     VkCommandBuffer target;
     CHECK(vkrt_execution_batch_clone(batch, plain->owner->cmd, &target) == VK_SUCCESS && target == plain->owner->cmd);
-    plain->required = true;
+    plain->owner->has_virtual_queries = true;
     CHECK(vkrt_execution_batch_clone(batch, plain->owner->cmd, &target) == VK_ERROR_FEATURE_NOT_PRESENT && !target);
     CHECK(vkrt_execution_batch_clone_count(batch) == 0 && vkrt_execution_batch_discard(batch) == VK_SUCCESS);
-    plain->required = false;
+    plain->owner->has_virtual_queries = false;
     begin_source(primary);
+    record_trace(primary);
     VkCommandBuffer unsupported_child[] = {plain->owner->cmd};
     record_children(primary, 1, unsupported_child);
     CHECK(vkrt_execution_batch_create(&device, queue_a, &batch) == VK_SUCCESS);
@@ -660,6 +731,7 @@ static void test_admission_and_cycle(struct command_record *plain, struct comman
     CHECK(vkrt_execution_batch_clone_count(batch) == 1 && vkrt_execution_batch_discard(batch) == VK_SUCCESS);
     begin_source(primary);
     begin_source(secondary);
+    record_query(secondary);
     VkCommandBuffer recursive[] = {secondary->owner->cmd};
     record_children(primary, 1, recursive);
     record_children(secondary, 1, recursive);
@@ -691,10 +763,10 @@ static VKAPI_ATTR void VKAPI_CALL host_free(void *user, void *memory) {
 }
 static void test_host_oom(struct command_record *source) {
     vkrt_execution_device_finish(&device);
-    for (unsigned fail = 0; fail < 12; ++fail) {
+    for (unsigned fail = 0; fail < 24; ++fail) {
         struct allocation_state state = {.fail_after = fail};
         VkAllocationCallbacks allocator = {.pUserData = &state, .pfnAllocation = host_allocate, .pfnFree = host_free};
-        VkResult result = vkrt_execution_device_init(&device, &allocator);
+        VkResult result = init_execution(&allocator);
         if (result == VK_SUCCESS) {
             struct vkrt_execution_batch *batch = NULL;
             result = vkrt_execution_batch_create(&device, queue_a, &batch);
@@ -718,7 +790,7 @@ int main(void) {
     device.vtable.GetDeviceProcAddr = get_proc;
     device.set_loader_data = loader_data;
     vkrt_map_object(VKRT_HKEY(device.device), &device);
-    CHECK(vkrt_execution_device_init(&device, NULL) == VK_SUCCESS);
+    CHECK(init_execution(NULL) == VK_SUCCESS);
     struct pool_record *application_pool = new_pool(3, VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT, false);
     struct command_record *primary = new_command(application_pool, VK_COMMAND_BUFFER_LEVEL_PRIMARY, false, true);
     struct command_record *secondary = new_command(application_pool, VK_COMMAND_BUFFER_LEVEL_SECONDARY, false, true);
@@ -731,6 +803,8 @@ int main(void) {
 #ifdef VKRT_EXECUTION_SETTLED_LIMIT
     test_clock_saturation(secondary);
 #else
+    test_generic_pool_metadata(application_pool);
+    test_rtp_without_queries(application_pool);
     test_occurrences(primary, secondary, plain);
     test_observation_failures(secondary);
     test_idle_checkpoint_and_quarantine(secondary);

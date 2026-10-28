@@ -97,6 +97,7 @@ struct vkrt_cmd_buffer_data {
     VkCommandBufferUsageFlags usage_flags;
     uint32_t native_active_queries;
     bool has_virtual_queries;
+    bool has_rtp_execution;
     struct vkrt_rtp_command *rtp;
     VkCommandBuffer cmd;
     struct vkrt_device_data *device_data;

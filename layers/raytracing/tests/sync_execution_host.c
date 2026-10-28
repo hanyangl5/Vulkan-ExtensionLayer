@@ -47,7 +47,7 @@ static unsigned begins, ends;
 static unsigned fail_clone, fail_prepare;
 static VkResult collect_result, begin_result, create_result, native_result, observer_result, idle_result, last_query_result;
 static VkResult clone_failure_result;
-static bool use_submit2, query_sources, helper_enabled, zero_batches, wait_only, prepared_active, caller_has_fence;
+static bool use_submit2, query_sources, rtp_sources, helper_enabled, zero_batches, wait_only, prepared_active, caller_has_fence;
 static bool admission_active;
 static VkCommandBuffer emitted[MAX_COMMANDS], prepared[MAX_COMMANDS];
 static size_t emitted_count, prepared_count;
@@ -87,13 +87,15 @@ static void note(enum event event) {
     CHECK(event_count < EVENT_CAPACITY);
     events[event_count++] = event;
 }
-static bool needs_query(VkCommandBuffer command) {
+static bool needs_execution(VkCommandBuffer command) {
     for (unsigned i = 0; i < VKRT_ARRAY_SIZE(source); ++i)
-        if (source[i].cmd == command) return query_sources && i < 2;
+        if (source[i].cmd == command) return (query_sources || rtp_sources) && i < 2;
     CHECK(false);
     return false;
 }
-static unsigned expected_clone_calls(void) { return !zero_batches && !wait_only && query_sources && helper_enabled ? 5 : 0; }
+static unsigned expected_clone_calls(void) {
+    return !zero_batches && !wait_only && (query_sources || rtp_sources) && helper_enabled ? 5 : 0;
+}
 static VkPipelineStageFlags2 translated(VkPipelineStageFlags2 mask) {
     /* Independent expected mapping: preserve every unrelated flag. */
     if (mask & VK_PIPELINE_STAGE_2_ACCELERATION_STRUCTURE_BUILD_BIT_KHR)
@@ -105,9 +107,10 @@ static VkPipelineStageFlags2 translated(VkPipelineStageFlags2 mask) {
     return mask;
 }
 
-bool vkrt_query_command_requires_replay(const struct vkrt_cmd_buffer_data *cb) {
+bool vkrt_execution_command_requires_replay(const struct vkrt_cmd_buffer_data *cb) {
     CHECK(cb && cb->device_data == &device);
-    return needs_query(cb->cmd);
+    if (rtp_sources) CHECK(cb->has_rtp_execution == needs_execution(cb->cmd) && !cb->has_virtual_queries);
+    return needs_execution(cb->cmd);
 }
 VkResult vkrt_execution_collect(struct vkrt_device_data *dev, size_t *retired_count) {
     CHECK(dev == &device && !retired_count);
@@ -118,7 +121,7 @@ VkResult vkrt_execution_collect(struct vkrt_device_data *dev, size_t *retired_co
 }
 VkResult vkrt_execution_batch_create(struct vkrt_device_data *dev, VkQueue q, struct vkrt_execution_batch **out) {
     CHECK(dev == &device && q == queue && out && !*out && helper_enabled && !batch.created);
-    CHECK(begins == 1 && !ends && admission_active && !prepares && !natives);
+    CHECK(begins == 1 && !ends && admission_active == (device.queries != NULL) && !prepares && !natives);
     ++creates;
     note(CREATE);
     if (create_result != VK_SUCCESS) return create_result;
@@ -131,7 +134,7 @@ VkResult vkrt_execution_batch_clone(struct vkrt_execution_batch *b, VkCommandBuf
     ++clones;
     note(CLONE);
     if (clones == fail_clone) return clone_failure_result;
-    *target = needs_query(original) ? H(VkCommandBuffer, 100 + ++fresh) : original;
+    *target = needs_execution(original) ? H(VkCommandBuffer, 100 + ++fresh) : original;
     CHECK(emitted_count < MAX_COMMANDS);
     emitted[emitted_count++] = *target;
     return VK_SUCCESS;
@@ -342,7 +345,11 @@ static void reset(bool sync2) {
     last_query_result = VK_ERROR_UNKNOWN;
     use_submit2 = sync2;
     query_sources = helper_enabled = caller_has_fence = true;
-    zero_batches = wait_only = prepared_active = idle_probe = admission_active = false;
+    zero_batches = wait_only = prepared_active = idle_probe = admission_active = rtp_sources = false;
+    for (unsigned i = 0; i < VKRT_ARRAY_SIZE(source); ++i) {
+        source[i].has_rtp_execution = false;
+        source[i].native_active_queries = 0;
+    }
     settled_clock = 10;
     idle_checkpoint = completed_checkpoint = 0;
     completed_queue = H(VkQueue, 99);
@@ -452,6 +459,14 @@ static void success_and_no_query(bool sync2) {
     CHECK(run() == VK_SUCCESS);
     CHECK(!creates && !clones && !submitted && !observers && !quarantined && !discards && natives == 1 && results == 1);
     reset(sync2);
+    query_sources = false;
+    rtp_sources = true;
+    device.queries = NULL;
+    for (unsigned i = 0; i < 2; ++i) source[i].has_rtp_execution = true;
+    source[0].native_active_queries = 1;
+    CHECK(run() == VK_SUCCESS);
+    CHECK(creates == 1 && clones == 5 && fresh == 4 && observers == 1 && !admission_active && !device.queries);
+    reset(sync2);
     wait_only = true;
     for (unsigned row = 0; row < SOURCE_BATCHES; ++row) {
         input.legacy[row].commandBufferCount = 0;
@@ -488,6 +503,23 @@ static void observer_failures(bool sync2) {
         CHECK(natives == 1 && submitted == 1 && observers == 1 && !discards && !quarantined && batch.pending);
         CHECK(results == (errors[i] == VK_ERROR_DEVICE_LOST ? 2u : 1u) && last_query_result == expected);
         CHECK(events[event_count - 1] == (errors[i] == VK_ERROR_DEVICE_LOST ? QUERY_RESULT : OBSERVER));
+    }
+}
+static void rtp_only_failures(bool sync2) {
+    const VkResult errors[] = {VK_ERROR_OUT_OF_HOST_MEMORY, VK_ERROR_OUT_OF_DEVICE_MEMORY, VK_ERROR_UNKNOWN, VK_ERROR_DEVICE_LOST};
+    for (unsigned i = 0; i < VKRT_ARRAY_SIZE(errors); ++i) {
+        reset(sync2);
+        query_sources = false;
+        rtp_sources = true;
+        device.queries = NULL;
+        for (unsigned source_index = 0; source_index < 2; ++source_index) source[source_index].has_rtp_execution = true;
+        native_result = errors[i];
+        CHECK(run() == errors[i]);
+        CHECK(natives == 1 && clones == 5 && !observers && !submitted && !admission_active);
+        if (errors[i] == VK_ERROR_OUT_OF_HOST_MEMORY || errors[i] == VK_ERROR_OUT_OF_DEVICE_MEMORY)
+            CHECK(discards == 1 && !quarantined && batch.discarded);
+        else
+            CHECK(!discards && quarantined == 1 && batch.pending && batch.quarantined);
     }
 }
 static void failures(bool sync2) {
@@ -588,6 +620,7 @@ int main(void) {
     for (unsigned sync2 = 0; sync2 < 2; ++sync2) {
         success_and_no_query(sync2 != 0);
         observer_failures(sync2 != 0);
+        rtp_only_failures(sync2 != 0);
         failures(sync2 != 0);
     }
     idle_ordering();

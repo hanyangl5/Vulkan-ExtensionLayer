@@ -12,11 +12,10 @@ struct vkrt_query_admission;
  * overlap and unsupported recording contexts remain explicitly bounded. */
 VkResult vkrt_query_device_init(struct vkrt_device_data *dev);
 void vkrt_query_device_finish(struct vkrt_device_data *dev);
-void vkrt_query_forget_command_pool(struct vkrt_device_data *dev, VkCommandPool pool);
 VkResult vkrt_query_command_reset(struct vkrt_cmd_buffer_data *cb);
-bool vkrt_query_command_pool_info(struct vkrt_device_data *dev, VkCommandPool pool, uint32_t *family,
-                                  VkCommandPoolCreateFlags *flags);
-bool vkrt_query_command_requires_replay(const struct vkrt_cmd_buffer_data *cb);
+/* Query-only secondary qualification and publication bookkeeping. RTP-only
+ * recordings do not inherit native-query/timestamp restrictions from here. */
+bool vkrt_query_record_children(struct vkrt_cmd_buffer_data *cb, uint32_t count, const VkCommandBuffer *children);
 struct vkrt_query_submission {
     uint8_t identity;
     VkQueue queue;

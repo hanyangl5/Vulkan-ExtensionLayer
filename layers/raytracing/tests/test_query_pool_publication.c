@@ -26,6 +26,20 @@ static unsigned acquisitions, resets, native_creates;
         }                                                           \
     } while (0)
 #define HANDLE(type, value) ((type)(uintptr_t)(value))
+struct fixture_pool {
+    VkCommandPool pool;
+    uint32_t family;
+    VkCommandPoolCreateFlags flags;
+};
+static struct vkrt_device_data *pool_device;
+static const struct fixture_pool *recorded_pool;
+bool vkrt_execution_command_pool_info(struct vkrt_device_data *dev, VkCommandPool pool, uint32_t *family,
+                                      VkCommandPoolCreateFlags *flags) {
+    if (dev != pool_device || !recorded_pool || recorded_pool->pool != pool) return false;
+    *family = recorded_pool->family;
+    *flags = recorded_pool->flags;
+    return true;
+}
 enum copy_phase { COPY_WAIT_SCOPE, COPY_ACQUIRED, COPY_BOUND, COPY_PUSHED, COPY_DISPATCHED, COPY_VISIBLE, COPY_FINISHED };
 static struct {
     struct vkrt_device_data *device;
@@ -123,14 +137,15 @@ static VKAPI_ATTR void VKAPI_CALL copy_scope_transfer(VkCommandBuffer command, V
 static void native_wait_to_formatter_scope(void) {
     memset(&copy_scope, 0, sizeof(copy_scope));
     VkQueueFamilyProperties family = {.queueFlags = VK_QUEUE_COMPUTE_BIT, .timestampValidBits = 64};
-    struct query_command_pool recording_pool = {.pool = HANDLE(VkCommandPool, 305), .family = 0};
+    struct fixture_pool recording_pool = {.pool = HANDLE(VkCommandPool, 305), .family = 0};
     struct vkrt_query_device queries = {.families = &family,
                                         .family_count = 1,
-                                        .command_pools = &recording_pool,
                                         .layout = HANDLE(VkPipelineLayout, 303),
                                         .format = HANDLE(VkPipeline, 302)};
     vkrt_mutex_init(&queries.lock);
     struct vkrt_device_data dev = {.queries = &queries, .max_build_dispatch_x = 1};
+    pool_device = &dev;
+    recorded_pool = &recording_pool;
     dev.vtable.CmdPipelineBarrier = copy_scope_barrier;
     dev.vtable.CmdBindPipeline = copy_scope_bind;
     dev.vtable.CmdPushConstants = copy_scope_push;
@@ -663,10 +678,11 @@ int main(void) {
     CHECK(unaligned_storage[0] == 0xa5 && unaligned_storage[25] == 0xa5 && unaligned_storage[26] == 0xa5);
     CHECK(unaligned_payload[0] == 0xa5 && unaligned_payload[25] == 0xa5 && unaligned_payload[26] == 0xa5);
     VkQueueFamilyProperties family = {.queueFlags = VK_QUEUE_GRAPHICS_BIT, .timestampValidBits = 64};
-    struct query_command_pool recording_pool = {.pool = HANDLE(VkCommandPool, 5), .family = 0};
+    struct fixture_pool recording_pool = {.pool = HANDLE(VkCommandPool, 5), .family = 0};
     state.family_count = 1;
     state.families = &family;
-    state.command_pools = &recording_pool;
+    pool_device = &dev;
+    recorded_pool = &recording_pool;
     cb.pool = recording_pool.pool;
     CHECK(!record_allowed(&cb) && cb.record_result == VK_ERROR_FEATURE_NOT_PRESENT);
     cb.record_result = VK_SUCCESS;
@@ -686,9 +702,17 @@ int main(void) {
     dev.executions = (struct vkrt_execution_device *)(uintptr_t)1;
     CHECK(record_allowed(&cb));
     cb.has_virtual_queries = true;
-    CHECK(vkrt_query_command_requires_replay(&cb));
     cb.replaying = true;
-    CHECK(record_allowed(&cb) && !vkrt_query_command_requires_replay(&cb));
+    CHECK(record_allowed(&cb));
+    struct vkrt_cmd_buffer_data rtp_parent = {
+        .device_data = &dev, .native_active_queries = 1, .usage_flags = VK_COMMAND_BUFFER_USAGE_SIMULTANEOUS_USE_BIT};
+    struct vkrt_cmd_buffer_data rtp_child = {.cmd = HANDLE(VkCommandBuffer, 99), .device_data = &dev, .has_rtp_execution = true};
+    vkrt_map_object(VKRT_HKEY(rtp_child.cmd), &rtp_child);
+    CHECK(vkrt_query_record_children(&rtp_parent, 1, &rtp_child.cmd) && !rtp_parent.has_virtual_queries &&
+          rtp_parent.record_result == VK_SUCCESS && !rtp_parent.queries);
+    rtp_child.has_virtual_queries = true;
+    CHECK(!vkrt_query_record_children(&rtp_parent, 1, &rtp_child.cmd) && rtp_parent.record_result == VK_ERROR_FEATURE_NOT_PRESENT);
+    vkrt_unmap_object(VKRT_HKEY(rtp_child.cmd));
     vkrt_map_destroy(&vkrt_global.objects);
     if (!failures)
         printf(

@@ -11,7 +11,7 @@ VkResult vkrt_execution_collect(struct vkrt_device_data *dev, size_t *retired) {
     if (retired) *retired = 0;
     return VK_SUCCESS;
 }
-bool vkrt_query_command_requires_replay(const struct vkrt_cmd_buffer_data *cb) {
+bool vkrt_execution_command_requires_replay(const struct vkrt_cmd_buffer_data *cb) {
     (void)cb;
     return false;
 }

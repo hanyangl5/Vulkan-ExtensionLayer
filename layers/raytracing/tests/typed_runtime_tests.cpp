@@ -4,11 +4,13 @@
 #include "glsl_compiler.h"
 #include "bvh4_abi.h"
 #include <spirv-tools/libspirv.hpp>
+#include <spirv/unified1/spirv.hpp>
 #include <algorithm>
 #include <cstring>
 #include <fstream>
 #include <iostream>
 #include <stdexcept>
+#include <set>
 
 namespace {
 using namespace vel::rt;
@@ -209,6 +211,27 @@ bool Execute(bool private_frames, bool compile_only, const std::string &dump_pat
     for (uint32_t i = 0; i < 8; ++i)
         stages[i] = CompileTypedPipelineStage(native[i], "main", kinds[i], nullptr, "vel_rt_stage_" + std::to_string(i), config);
     auto program = BuildTypedRuntimeProgram(stages, groups, {2, UINT64_C(0x100000007)});
+    if (compile_only) {
+        // Exercise the production execution ABI from actual stage libraries,
+        // including the existing wide scalar/aggregate source fixtures.
+        for (const bool optimize : {false, true}) {
+            auto production = BuildTypedRuntimeProgram(stages, groups, {2, UINT64_C(0x100000007), true, optimize, true});
+            spvtools::SpirvTools validator(SPV_ENV_VULKAN_1_3);
+            Require(validator.Validate(production.spirv), "16-byte context/launch push runtime validation");
+            std::set<uint32_t> push_structs;
+            uint32_t highest_offset = 0;
+            for (size_t p = 5; p < production.spirv.size(); p += production.spirv[p] >> 16) {
+                const auto op = production.spirv[p] & 65535;
+                if (op == spv::OpTypePointer && production.spirv[p + 2] == spv::StorageClassPushConstant)
+                    push_structs.insert(production.spirv[p + 3]);
+            }
+            for (size_t p = 5; p < production.spirv.size(); p += production.spirv[p] >> 16)
+                if ((production.spirv[p] & 65535) == spv::OpMemberDecorate && push_structs.count(production.spirv[p + 1]) &&
+                    production.spirv[p + 3] == spv::DecorationOffset)
+                    highest_offset = std::max(highest_offset, production.spirv[p + 4]);
+            Require(highest_offset == 12, "Production launch base did not occupy the complete independent 16-byte range");
+        }
+    }
     if (!dump_path.empty()) {
         std::ofstream dump(dump_path, std::ios::binary);
         dump.write(reinterpret_cast<const char *>(program.spirv.data()), program.spirv.size() * 4);
@@ -216,7 +239,8 @@ bool Execute(bool private_frames, bool compile_only, const std::string &dump_pat
     spvtools::SpirvTools tools(SPV_ENV_VULKAN_1_3);
     Require(tools.Validate(program.spirv), "Final native runtime validation");
     Require(program.recommended_arena_bytes == plan.default_arena_bytes, "Private transport changed frame sizing");
-    std::cout << "Runtime SPIR-V validated; per-invocation Private arena=" << plan.default_arena_bytes << " bytes\n";
+    std::cout << "Runtime SPIR-V validated; per-invocation " << (private_frames ? "Private" : "BDA")
+              << " arena=" << plan.default_arena_bytes << " bytes\n";
     if (compile_only) return true;
     constexpr uint32_t count = 8, base = 2;
     constexpr uint64_t bytes = 65536, registry = 256, pages = 512, blas = 15360, tlas = 15872, sbt = 16384, pushes = 16896,

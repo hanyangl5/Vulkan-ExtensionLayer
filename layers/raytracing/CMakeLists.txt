@@ -516,6 +516,42 @@ if(BUILD_TESTING)
    target_link_libraries(test_rtp_api PRIVATE vkrt_cpu_bvh ${Vulkan_LIBRARIES})
    set_target_properties(test_rtp_api PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED ON)
    add_dependencies(test_rtp_api vkrt_rtp_api_spv)
+   set(VKRT_RTP_ARENA_SPV)
+   foreach(stage rgen rcall)
+      set(output ${CMAKE_CURRENT_BINARY_DIR}/rtp_arena.${stage}.spv)
+      add_custom_command(
+         OUTPUT ${output}
+         COMMAND ${VKRT_GLSLC} --target-env=vulkan1.2
+            ${CMAKE_CURRENT_SOURCE_DIR}/tests/rtp_arena.${stage} -o ${output}
+         COMMAND ${VKRT_SPIRV_VAL} --target-env vulkan1.2 ${output}
+         DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/tests/rtp_arena.${stage}
+         COMMENT "Compiling public RTP arena ${stage} fixture"
+         VERBATIM)
+      list(APPEND VKRT_RTP_ARENA_SPV ${output})
+   endforeach()
+   add_custom_target(vkrt_rtp_arena_spv DEPENDS ${VKRT_RTP_ARENA_SPV})
+   add_executable(test_rtp_arenas tests/test_rtp_arenas.c)
+   target_include_directories(test_rtp_arenas PRIVATE src ${VKRT_SHARED_HEADERS} ${Vulkan_INCLUDE_DIRS})
+   target_link_libraries(test_rtp_arenas PRIVATE vkrt_cpu_bvh ${Vulkan_LIBRARIES})
+   set_target_properties(test_rtp_arenas PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED ON)
+   add_dependencies(test_rtp_arenas vkrt_rtp_arena_spv)
+   add_test(NAME vkrt.rtp_arenas.software COMMAND test_rtp_arenas ${VKRT_RTP_ARENA_SPV})
+   add_test(NAME vkrt.rtp_arenas.submit2 COMMAND test_rtp_arenas ${VKRT_RTP_ARENA_SPV} --submit2)
+   add_test(NAME vkrt.rtp_arenas.disable_optimization COMMAND test_rtp_arenas ${VKRT_RTP_ARENA_SPV} --disable-optimization)
+   set_tests_properties(vkrt.rtp_arenas.software vkrt.rtp_arenas.submit2 vkrt.rtp_arenas.disable_optimization PROPERTIES
+      ENVIRONMENT "VK_LAYER_PATH=${CMAKE_BINARY_DIR}/layers;VK_INSTANCE_LAYERS=VK_LAYER_VKRT_SOFTWARE_RAY_QUERY;ENABLE_VKRT_SOFTWARE_RAY_QUERY=1;VK_LOADER_LAYERS_DISABLE=~implicit~"
+      LABELS "gpu;typed_rtp;no_native_rt" SKIP_RETURN_CODE 77 TIMEOUT 600)
+   add_executable(test_rtp_launch_plan tests/rtp_launch_plan_tests.cpp)
+   target_include_directories(test_rtp_launch_plan PRIVATE src)
+   set_target_properties(test_rtp_launch_plan PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
+   add_test(NAME vkrt.rtp_launch_plan COMMAND test_rtp_launch_plan)
+   set_tests_properties(vkrt.rtp_launch_plan PROPERTIES LABELS "offline;no_native_rt")
+   add_executable(test_private_pool tests/test_private_pool.c src/vkrt_private_pool.c)
+   target_include_directories(test_private_pool PRIVATE src ${CMAKE_CURRENT_BINARY_DIR} ${Vulkan_INCLUDE_DIRS})
+   target_link_libraries(test_private_pool PRIVATE Threads::Threads)
+   set_target_properties(test_private_pool PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED ON)
+   add_test(NAME vkrt.private_pool COMMAND test_private_pool)
+   set_tests_properties(vkrt.private_pool PROPERTIES LABELS "offline;no_native_rt")
    add_test(NAME vkrt.rtp_api.software COMMAND test_rtp_api ${VKRT_RTP_API_SPV})
    set_tests_properties(vkrt.rtp_api.software PROPERTIES
       ENVIRONMENT "VK_LAYER_PATH=${CMAKE_BINARY_DIR}/layers;VK_INSTANCE_LAYERS=VK_LAYER_VKRT_SOFTWARE_RAY_QUERY"

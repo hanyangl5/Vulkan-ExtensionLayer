@@ -390,7 +390,7 @@ static VKAPI_ATTR VkResult VKAPI_CALL DeviceWaitIdle(VkDevice device) {
 static bool needs_replay(struct vkrt_device_data *dev, VkCommandBuffer command) {
     if (!dev->executions) return false;
     struct vkrt_cmd_buffer_data *cb = VKRT_FIND(struct vkrt_cmd_buffer_data, command);
-    return vkrt_query_command_requires_replay(cb);
+    return vkrt_execution_command_requires_replay(cb);
 }
 static VkResult remap_commands(struct vkrt_device_data *dev, VkQueue queue, struct vkrt_execution_batch **batch, uint32_t count,
                                const VkCommandBuffer *commands, VkCommandBuffer **owned) {

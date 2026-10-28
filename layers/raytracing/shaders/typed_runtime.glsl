@@ -7,6 +7,10 @@ layout(local_size_x = 1, local_size_y = 1, local_size_z = 1) in;
 layout(push_constant, std430) uniform RtContextPush {
     uint low;
     uint high;
+#ifdef RT_LAUNCH_PUSH
+    uint launch_low;
+    uint launch_high;
+#endif
 } rt_context_push;
 #else
 layout(constant_id = 0) const uint rt_context_low = 0u;
@@ -563,7 +567,12 @@ void main() {
     else if (status != 0ul)
         status += localIndex * 4ul;
     rt_launch_size = uvec3(rt_p(rt_ctx + 40ul), rt_p(rt_ctx + 44ul), rt_p(rt_ctx + 48ul));
-    uint64_t xy, total, ray = rt_p64(rt_ctx + 56ul);
+    uint64_t xy, total;
+#ifdef RT_LAUNCH_PUSH
+    uint64_t ray = uint64_t(rt_context_push.launch_low) | (uint64_t(rt_context_push.launch_high) << 32);
+#else
+    uint64_t ray = rt_p64(rt_ctx + 56ul);
+#endif
     if (any(equal(rt_launch_size, uvec3(0u))) || !rt_product(uint64_t(rt_launch_size.x), uint64_t(rt_launch_size.y), xy) ||
         !rt_product(xy, uint64_t(rt_launch_size.z), total) || ray > ~0ul - localIndex)
         rt_fail(VEL_RT_STATUS_CONTEXT);

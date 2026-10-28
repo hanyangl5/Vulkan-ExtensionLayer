@@ -269,7 +269,7 @@ vkrt_CreateDevice(VkPhysicalDevice physicalDevice,
                    ((const VkDeviceGroupDeviceCreateInfo *)p)->physicalDeviceCount > 1)
                    data->query_backend_enabled = false;
            result = vkrt_query_device_init(data);
-           if (result == VK_SUCCESS && data->queries) result = vkrt_execution_device_init(data, pAllocator);
+           if (result == VK_SUCCESS) result = vkrt_execution_device_init(data, pAllocator);
        }
    }
    if (result == VK_SUCCESS) result = vkrt_shader_interface_init(data, pCreateInfo);

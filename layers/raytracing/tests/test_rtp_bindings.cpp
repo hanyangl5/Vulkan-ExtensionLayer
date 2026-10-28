@@ -10,9 +10,11 @@ extern "C" {
 #include "vkrt_as_registry.h"
 #include "vkrt_deferred.h"
 #include "vkrt_rtp.h"
+#include "typed_runtime_abi.h"
 struct vkrt_global vkrt_global = VKRT_GLOBAL_INITIALIZER;
 }
 #include <spirv-tools/libspirv.hpp>
+#include <spirv/unified1/spirv.hpp>
 #include <string>
 #include <array>
 #include <atomic>
@@ -129,9 +131,56 @@ std::set<VkShaderModule> native_shaders;
 std::set<VkPipeline> native_pipelines;
 std::vector<VkPipelineCreateFlags> native_flags;
 std::vector<VkPipelineCache> native_caches;
+struct MockLease {
+    vkrt_private_memory_class memory_class;
+    vkrt_private_slice slice;
+    std::vector<uint8_t> host;
+};
+std::map<vkrt_private_allocation *, MockLease> leases;
+uint64_t arena_ceiling = UINT64_MAX;
+unsigned arena_attempts = 0, context_attempts = 0;
+std::vector<uint32_t> dispatches;
+std::vector<std::array<uint64_t, 2>> trace_pushes;
+std::vector<VkBufferMemoryBarrier> trace_barriers;
+VKAPI_ATTR void VKAPI_CALL BindNativeCompute(VkCommandBuffer c, VkPipelineBindPoint point, VkPipeline pipeline) {
+    CHECK(c == command && point == VK_PIPELINE_BIND_POINT_COMPUTE && native_pipelines.count(pipeline));
+}
+VKAPI_ATTR void VKAPI_CALL TracePush(VkCommandBuffer c, VkPipelineLayout layout, VkShaderStageFlags stages, uint32_t offset,
+                                     uint32_t bytes, const void *data) {
+    CHECK(c == command && layouts.count(layout) && stages == VK_SHADER_STAGE_COMPUTE_BIT && !offset && bytes == 16);
+    std::array<uint64_t, 2> values{};
+    std::memcpy(values.data(), data, sizeof(values));
+    trace_pushes.push_back(values);
+}
+VKAPI_ATTR void VKAPI_CALL TraceDispatch(VkCommandBuffer c, uint32_t x, uint32_t y, uint32_t z) {
+    CHECK(c == command && x && y == 1 && z == 1);
+    dispatches.push_back(x);
+}
+VKAPI_ATTR void VKAPI_CALL TraceBarrier(VkCommandBuffer c, VkPipelineStageFlags source, VkPipelineStageFlags target,
+                                        VkDependencyFlags flags, uint32_t memory_count, const VkMemoryBarrier *, uint32_t count,
+                                        const VkBufferMemoryBarrier *barriers, uint32_t image_count, const VkImageMemoryBarrier *) {
+    CHECK(c == command && target == VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT && !flags && !memory_count && count == 1 && !image_count);
+    CHECK(source == VK_PIPELINE_STAGE_HOST_BIT || source == VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT);
+    CHECK(barriers->srcQueueFamilyIndex == VK_QUEUE_FAMILY_IGNORED && barriers->dstQueueFamilyIndex == VK_QUEUE_FAMILY_IGNORED);
+    if (source == VK_PIPELINE_STAGE_HOST_BIT)
+        CHECK(barriers->srcAccessMask == VK_ACCESS_HOST_WRITE_BIT && barriers->dstAccessMask == VK_ACCESS_SHADER_READ_BIT);
+    else
+        CHECK(barriers->srcAccessMask == (VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT) &&
+              barriers->dstAccessMask == barriers->srcAccessMask);
+    trace_barriers.push_back(*barriers);
+}
 VKAPI_ATTR VkResult VKAPI_CALL CreateNativeShader(VkDevice d, const VkShaderModuleCreateInfo *ci, const VkAllocationCallbacks *a,
                                                   VkShaderModule *out) {
     CHECK(d == device && !a && ci->codeSize && ci->pCode);
+    spvtools::SpirvTools validator(SPV_ENV_VULKAN_1_3);
+    CHECK(validator.Validate(ci->pCode, ci->codeSize / sizeof(uint32_t)));
+    uint32_t physical_accesses = 0;
+    for (size_t p = 5; p < ci->codeSize / sizeof(uint32_t); p += ci->pCode[p] >> 16) {
+        if ((ci->pCode[p] & 65535) == spv::OpConvertUToPtr) ++physical_accesses;
+        if ((ci->pCode[p] & 65535) == spv::OpName)
+            CHECK(std::strcmp(reinterpret_cast<const char *>(ci->pCode + p + 2), "vel_rt_private_frames") != 0);
+    }
+    CHECK(physical_accesses != 0);
     *out = Handle<VkShaderModule>(next_native++);
     CHECK(native_shaders.insert(*out).second);
     return VK_SUCCESS;
@@ -145,7 +194,7 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateNativePipeline(VkDevice d, VkPipelineCache 
     CHECK(d == device && count == 1 && !a);
     CHECK(!(ci->flags & ~VK_PIPELINE_CREATE_DISABLE_OPTIMIZATION_BIT) && !ci->basePipelineHandle);
     CHECK(ci->stage.stage == VK_SHADER_STAGE_COMPUTE_BIT && native_shaders.count(ci->stage.module));
-    CHECK(layouts.count(ci->layout) && layouts.at(ci->layout).pushes.size() == 1 && layouts.at(ci->layout).pushes[0].size == 8);
+    CHECK(layouts.count(ci->layout) && layouts.at(ci->layout).pushes.size() == 1 && layouts.at(ci->layout).pushes[0].size == 16);
     *out = VK_NULL_HANDLE;
     native_flags.push_back(ci->flags);
     native_caches.push_back(cache);
@@ -409,6 +458,80 @@ OpFunctionEnd
     CHECK(!result[0] && !result[1] && result[2] && native_pipelines.size() == 1 && native_shaders.empty());
     fail_native_at = 0;
     destroy(device, result[2], nullptr);
+    // Real production shader creation is budget-independent. Only replayed
+    // trace occurrences acquire distinct mutable slices; original capture is
+    // allocation-free. Force an allocation retry and a non-full final tile.
+    VkDynamicState dynamic = VK_DYNAMIC_STATE_RAY_TRACING_PIPELINE_STACK_SIZE_KHR;
+    VkPipelineDynamicStateCreateInfo dynamic_info{VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO};
+    dynamic_info.dynamicStateCount = 1;
+    dynamic_info.pDynamicStates = &dynamic;
+    ci.flags = 0;
+    ci.basePipelineHandle = VK_NULL_HANDLE;
+    ci.basePipelineIndex = -1;
+    ci.pDynamicState = &dynamic_info;
+    VkPipeline execution{};
+    CHECK(create(device, VK_NULL_HANDLE, VK_NULL_HANDLE, 1, &ci, nullptr, &execution) == VK_SUCCESS);
+    const auto compiled = native_creates;
+    CHECK(vkrt_rtp_bind_pipeline(&cb, VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR, execution));
+    auto stack = (PFN_vkCmdSetRayTracingPipelineStackSizeKHR)vkrt_rtp_proc("vkCmdSetRayTracingPipelineStackSizeKHR");
+    auto trace = (PFN_vkCmdTraceRaysKHR)vkrt_rtp_proc("vkCmdTraceRaysKHR");
+    stack(command, (2u << 20) + 1);
+    VkStridedDeviceAddressRegionKHR raygen{0x10000, 32, 32}, empty{};
+    const auto prior_contexts = context_attempts, prior_arenas = arena_attempts;
+    trace(command, &raygen, &empty, &empty, &empty, 5, 1, 1);
+    CHECK(cb.record_result == VK_SUCCESS && cb.has_rtp_execution && leases.empty() && context_attempts == prior_contexts &&
+          arena_attempts == prior_arenas && dispatches.empty());
+    cb.replaying = true;
+    const uint64_t stride = (2u << 20) + 16;
+    arena_ceiling = stride * 2;
+    trace(command, &raygen, &empty, &empty, &empty, 5, 1, 1);
+    CHECK(cb.record_result == VK_SUCCESS && native_creates == compiled && arena_attempts == prior_arenas + 2 &&
+          context_attempts == prior_contexts + 1 && leases.size() == 2);
+    CHECK(dispatches == std::vector<uint32_t>({2, 2, 1}) && trace_pushes.size() == 3 && trace_barriers.size() == 3);
+    const uint64_t root = trace_pushes.empty() ? 0 : trace_pushes[0][0];
+    for (size_t n = 0; n < trace_pushes.size(); ++n) CHECK(trace_pushes[n][0] == root && trace_pushes[n][1] == n * 2);
+    for (const auto &[identity, lease] : leases) {
+        (void)identity;
+        if (lease.memory_class == VKRT_PRIVATE_HOST_COHERENT) {
+            CHECK(lease.slice.size == VEL_RT_RUNTIME_CONTEXT_BYTES + 8 && lease.slice.address == root);
+            const auto *mapped = static_cast<const uint8_t *>(lease.slice.mapping);
+            auto value = [&](size_t offset) {
+                uint64_t v;
+                std::memcpy(&v, mapped + offset, 8);
+                return v;
+            };
+            CHECK(value(VEL_RT_RUN_ARENA_BYTES) == stride && value(VEL_RT_RUN_POOL_BYTES) == stride * 2 &&
+                  value(VEL_RT_RUN_INVOCATION_COUNT) == 2);
+        } else {
+            CHECK(!lease.slice.mapping && lease.slice.size == stride * 2);
+            for (size_t n = 1; n < trace_barriers.size(); ++n)
+                CHECK(trace_barriers[n].buffer == lease.slice.buffer && trace_barriers[n].offset == lease.slice.offset &&
+                      trace_barriers[n].size == lease.slice.size);
+        }
+    }
+    arena_ceiling = UINT64_MAX;
+    stack(command, (64u << 20) + 1);
+    trace(command, &raygen, &empty, &empty, &empty, 1, 1, 1);
+    CHECK(cb.record_result == VK_SUCCESS && native_creates == compiled && leases.size() == 4 && trace_pushes.back()[0] != root);
+    bool complete_large_arena = false;
+    for (const auto &[identity, lease] : leases) {
+        (void)identity;
+        complete_large_arena |= lease.memory_class == VKRT_PRIVATE_DEVICE_LOCAL_PREFERRED && lease.slice.size == (64u << 20) + 16;
+    }
+    CHECK(complete_large_arena);
+    const auto live = leases.size();
+    arena_ceiling = 0;
+    trace(command, &raygen, &empty, &empty, &empty, 1, 1, 1);
+    CHECK(cb.record_result == VK_ERROR_OUT_OF_DEVICE_MEMORY && leases.size() == live && native_creates == compiled);
+    cb.record_result = VK_SUCCESS;
+    arena_ceiling = UINT64_MAX;
+    vkrt_rtp_reset_command(&cb);
+    cb.replaying = cb.has_rtp_execution = false;
+    CHECK(leases.empty());
+    dispatches.clear();
+    trace_pushes.clear();
+    trace_barriers.clear();
+    destroy(device, execution, nullptr);
     CHECK(vkrt_rtp_destroy_shader(&dev, shader));
     destroy_layout(device, layout, nullptr);
     CHECK(layouts.empty() && native_pipelines.empty() && native_shaders.empty());
@@ -532,7 +655,7 @@ void ReplayLayoutLifetimes() {
     const auto set = Handle<VkDescriptorSetLayout>(99000);
     VkDescriptorSetLayoutCreateInfo definition{VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO};
     CHECK(vkrt_rtp_track_descriptor_layout(&dev, set, &definition) == VK_SUCCESS);
-    VkPushConstantRange pushes[] = {{VK_SHADER_STAGE_COMPUTE_BIT, 0, 8}, {VK_SHADER_STAGE_RAYGEN_BIT_KHR, 16, 4}};
+    VkPushConstantRange pushes[] = {{VK_SHADER_STAGE_COMPUTE_BIT, 0, 16}, {VK_SHADER_STAGE_RAYGEN_BIT_KHR, 16, 4}};
     VkPipelineLayoutCreateInfo ci{VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO};
     ci.setLayoutCount = 1;
     ci.pSetLayouts = &set;
@@ -578,7 +701,7 @@ void ReplayLayoutLifetimes() {
     binding.pDescriptorSets = &descriptor;
     binding.dynamicOffsetCount = 1;
     binding.pDynamicOffsets = &dynamic_offset;
-    expected_push_bytes = 8;
+    expected_push_bytes = 16;
     expected_stages = VK_SHADER_STAGE_COMPUTE_BIT;
     unsigned before = forwarded;
     bind2(command, &binding);
@@ -624,7 +747,7 @@ void PipelineLayoutAliases() {
     const auto set = Handle<VkDescriptorSetLayout>(90000);
     VkDescriptorSetLayoutCreateInfo empty{VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO};
     CHECK(vkrt_rtp_track_descriptor_layout(&dev, set, &empty) == VK_SUCCESS);
-    VkPushConstantRange push{VK_SHADER_STAGE_COMPUTE_BIT, 0, 8};
+    VkPushConstantRange push{VK_SHADER_STAGE_COMPUTE_BIT, 0, 16};
     VkPipelineLayoutCreateInfo ci{VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO};
     ci.setLayoutCount = 1;
     ci.pSetLayouts = &set;
@@ -764,6 +887,37 @@ extern "C" VkDeviceAddress vkrt_as_registry_address(vkrt_device_data *data) {
     CHECK(data == &dev);
     return 0;
 }
+extern "C" VkResult vkrt_private_pool_allocate_ex(vkrt_device_data *data, VkDeviceSize size, vkrt_private_memory_class memory_class,
+                                                  VkDeviceSize physical_alignment, VkDeviceSize native_offset_alignment,
+                                                  vkrt_private_slice *out) {
+    CHECK(data == &dev && native_offset_alignment == 1);
+    *out = {};
+    if (memory_class == VKRT_PRIVATE_DEVICE_LOCAL_PREFERRED) {
+        CHECK(physical_alignment == 16);
+        ++arena_attempts;
+        if (size > arena_ceiling) return VK_ERROR_OUT_OF_DEVICE_MEMORY;
+    } else {
+        CHECK(memory_class == VKRT_PRIVATE_HOST_COHERENT && physical_alignment == 8);
+        ++context_attempts;
+    }
+    auto identity = reinterpret_cast<vkrt_private_allocation *>(next_native++);
+    auto &lease = leases[identity];
+    lease.memory_class = memory_class;
+    if (memory_class == VKRT_PRIVATE_HOST_COHERENT) lease.host.resize(size_t(size) + 1);
+    lease.slice.buffer = Handle<VkBuffer>(next_native++);
+    lease.slice.offset = 13;  // Native offset alignment and physical BDA are independent.
+    lease.slice.size = size;
+    lease.slice.address = uint64_t(next_native++) << 32;
+    lease.slice.mapping = lease.host.empty() ? nullptr : lease.host.data() + 1;
+    lease.slice.allocation = identity;
+    *out = lease.slice;
+    return VK_SUCCESS;
+}
+extern "C" void vkrt_private_pool_release(vkrt_device_data *data, vkrt_private_slice *slice) {
+    CHECK(data == &dev);
+    if (slice->allocation) CHECK(leases.erase(slice->allocation) == 1);
+    *slice = {};
+}
 extern "C" bool vkrt_deferred_valid(vkrt_device_data *data, VkDeferredOperationKHR value) {
     CHECK(data == &dev);
     return !value;
@@ -781,6 +935,10 @@ int main() {
     dev.vtable.DestroyShaderModule = DestroyNativeShader;
     dev.vtable.CreateComputePipelinesInternal = CreateNativePipeline;
     dev.vtable.DestroyPipeline = DestroyNativePipeline;
+    dev.vtable.CmdBindPipeline = BindNativeCompute;
+    dev.vtable.CmdPushConstants = TracePush;
+    dev.vtable.CmdDispatch = TraceDispatch;
+    dev.vtable.CmdPipelineBarrier = TraceBarrier;
     cb.cmd = command;
     cb.device_data = &dev;
     vkrt_map_object(VKRT_HKEY(device), &dev);

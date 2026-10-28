@@ -54,12 +54,6 @@ struct query_child {
     struct query_child *next;
     VkCommandBuffer command;
 };
-struct query_command_pool {
-    struct query_command_pool *next;
-    VkCommandPool pool;
-    uint32_t family;
-    VkCommandPoolCreateFlags flags;
-};
 struct vkrt_query_command {
     struct vkrt_query_command *next;
     struct vkrt_cmd_buffer_data *owner;
@@ -79,7 +73,6 @@ struct vkrt_query_device {
     vkrt_mutex_t lock;
     struct query_pool *pools;
     struct vkrt_query_command *commands;
-    struct query_command_pool *command_pools;
     struct query_queue *queues;
     VkQueueFamilyProperties *families;
     uint32_t family_count;
@@ -247,7 +240,7 @@ static bool record_allowed(struct vkrt_cmd_buffer_data *cb) {
     }
     uint32_t family = UINT32_MAX;
     VkCommandPoolCreateFlags flags = 0;
-    vkrt_query_command_pool_info(cb->device_data, cb->pool, &family, &flags);
+    vkrt_execution_command_pool_info(cb->device_data, cb->pool, &family, &flags);
     struct vkrt_query_device *q = cb->device_data->queries;
     if ((flags & VK_COMMAND_POOL_CREATE_PROTECTED_BIT) || family >= q->family_count || !q->families[family].timestampValidBits ||
         !(q->families[family].queueFlags & VK_QUEUE_COMPUTE_BIT)) {
@@ -260,9 +253,6 @@ static bool record_allowed(struct vkrt_cmd_buffer_data *cb) {
 static bool capture_only(struct vkrt_cmd_buffer_data *cb) {
     cb->has_virtual_queries = true;
     return !cb->replaying && cb->replay.journal && cb->device_data->executions;
-}
-bool vkrt_query_command_requires_replay(const struct vkrt_cmd_buffer_data *cb) {
-    return cb && !cb->replaying && cb->has_virtual_queries;
 }
 enum query_dependency { QUERY_DEPENDENCY_PROPERTY, QUERY_DEPENDENCY_RESET, QUERY_DEPENDENCY_COPY };
 static void dependency(struct vkrt_device_data *dev, VkCommandBuffer command, enum query_dependency kind) {
@@ -750,11 +740,6 @@ void vkrt_query_device_finish(struct vkrt_device_data *dev) {
     struct vkrt_query_device *q = dev->queries;
     if (!q) return;
     while (q->pools) DestroyQueryPool(dev->device, (VkQueryPool)(uintptr_t)q->pools, pool_allocator(q->pools));
-    while (q->command_pools) {
-        struct query_command_pool *next = q->command_pools->next;
-        free(q->command_pools);
-        q->command_pools = next;
-    }
     while (q->queues) {
         struct query_queue *next = q->queues->next;
         query_queue_destroy(q->queues);
@@ -768,52 +753,7 @@ void vkrt_query_device_finish(struct vkrt_device_data *dev) {
     free(q);
     dev->queries = NULL;
 }
-static VKAPI_ATTR VkResult VKAPI_CALL CreateCommandPool(VkDevice device, const VkCommandPoolCreateInfo *info,
-                                                        const VkAllocationCallbacks *allocator, VkCommandPool *pool) {
-    struct vkrt_device_data *dev = VKRT_FIND(struct vkrt_device_data, device);
-    VkResult result = dev->vtable.CreateCommandPool(device, info, allocator, pool);
-    if (result != VK_SUCCESS || !dev->queries) return result;
-    struct query_command_pool *record = calloc(1, sizeof(*record));
-    if (!record) {
-        dev->vtable.DestroyCommandPool(device, *pool, allocator);
-        *pool = VK_NULL_HANDLE;
-        return VK_ERROR_OUT_OF_HOST_MEMORY;
-    }
-    vkrt_mutex_lock(&dev->queries->lock);
-    *record = (struct query_command_pool){dev->queries->command_pools, *pool, info->queueFamilyIndex, info->flags};
-    dev->queries->command_pools = record;
-    vkrt_mutex_unlock(&dev->queries->lock);
-    return VK_SUCCESS;
-}
-void vkrt_query_forget_command_pool(struct vkrt_device_data *dev, VkCommandPool pool) {
-    if (!dev->queries) return;
-    vkrt_mutex_lock(&dev->queries->lock);
-    struct query_command_pool **link = &dev->queries->command_pools;
-    while (*link && (*link)->pool != pool) link = &(*link)->next;
-    if (*link) {
-        struct query_command_pool *record = *link;
-        *link = record->next;
-        free(record);
-    }
-    vkrt_mutex_unlock(&dev->queries->lock);
-}
-bool vkrt_query_command_pool_info(struct vkrt_device_data *dev, VkCommandPool pool, uint32_t *family,
-                                  VkCommandPoolCreateFlags *flags) {
-    if (!dev || !dev->queries || !family || !flags) return false;
-    bool found = false;
-    vkrt_mutex_lock(&dev->queries->lock);
-    for (const struct query_command_pool *p = dev->queries->command_pools; p; p = p->next)
-        if (p->pool == pool) {
-            *family = p->family;
-            *flags = p->flags;
-            found = true;
-            break;
-        }
-    vkrt_mutex_unlock(&dev->queries->lock);
-    return found;
-}
-static VKAPI_ATTR void VKAPI_CALL CmdExecuteCommands(VkCommandBuffer command, uint32_t count, const VkCommandBuffer *children) {
-    struct vkrt_cmd_buffer_data *cb = VKRT_FIND(struct vkrt_cmd_buffer_data, command);
+bool vkrt_query_record_children(struct vkrt_cmd_buffer_data *cb, uint32_t count, const VkCommandBuffer *children) {
     if (cb->device_data->queries) {
         for (uint32_t i = 0; i < count; ++i) {
             struct vkrt_cmd_buffer_data *child = VKRT_FIND(struct vkrt_cmd_buffer_data, children[i]);
@@ -822,22 +762,22 @@ static VKAPI_ATTR void VKAPI_CALL CmdExecuteCommands(VkCommandBuffer command, ui
             if ((!execution_owned && (cb->usage_flags & VK_COMMAND_BUFFER_USAGE_SIMULTANEOUS_USE_BIT)) ||
                 cb->native_active_queries) {
                 cb->record_result = VK_ERROR_FEATURE_NOT_PRESENT;
-                return;
+                return false;
             }
             cb->has_virtual_queries = true;
             if (!cb->replaying && cb->replay.journal && cb->device_data->executions) continue;
             struct vkrt_query_command *state = command_state(cb);
-            if (!state) return;
+            if (!state) return false;
             struct query_child *record = malloc(sizeof(*record));
             if (!record) {
                 cb->record_result = VK_ERROR_OUT_OF_HOST_MEMORY;
-                return;
+                return false;
             }
             *record = (struct query_child){state->children, children[i]};
             state->children = record;
         }
     }
-    cb->device_data->vtable.CmdExecuteCommands(command, count, children);
+    return true;
 }
 static VKAPI_ATTR void VKAPI_CALL CmdBeginQuery(VkCommandBuffer command, VkQueryPool pool, uint32_t query,
                                                 VkQueryControlFlags flags) {
@@ -871,8 +811,6 @@ PFN_vkVoidFunction vkrt_query_pool_proc(const char *name) {
     ENTRY(CmdResetQueryPool);
     ENTRY(CmdWriteAccelerationStructuresPropertiesKHR);
     ENTRY(CmdCopyQueryPoolResults);
-    ENTRY(CreateCommandPool);
-    ENTRY(CmdExecuteCommands);
     ENTRY(CmdBeginQuery);
     ENTRY(CmdEndQuery);
     ENTRY(CmdBeginQueryIndexedEXT);

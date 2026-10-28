@@ -236,6 +236,9 @@ TypedRuntimeProgram BuildTypedRuntimeProgram(const std::vector<TypedContinuation
         << Filter(kTypedRuntimeTraversal, true);
     if (result.private_frame_words) out << "#define RT_PRIVATE_WORDS " << result.private_frame_words << "\n";
     if (options.context_via_push_constants) out << "#define RT_CONTEXT_PUSH 1\n";
+    Need(!options.launch_base_via_push_constants || options.context_via_push_constants,
+         "launch base push requires context push transport");
+    if (options.launch_base_via_push_constants) out << "#define RT_LAUNCH_PUSH 1\n";
     out << "const uint rt_stage_count=" << stages.size() << "u;\nconst uint rt_group_count=" << groups.size()
         << "u;\nconst uint rt_max_depth=" << options.max_ray_recursion_depth << "u;\nconst uint rt_triangle_type=" << triangle_type
         << "u;\nconst uint64_t rt_pipeline_id=" << options.pipeline_identity
