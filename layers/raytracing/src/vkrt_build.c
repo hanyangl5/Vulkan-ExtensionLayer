@@ -2,6 +2,7 @@
 #include "vkrt_layer.h"
 #include "vkrt_as_registry.h"
 #include "vkrt_build_layout.h"
+#include "vkrt_build_dispatch.h"
 #include "bvh_ir_builder.h"
 #include "vkrt_init.spv.h"
 #include "leaf_bvh4.spv.h"
@@ -18,6 +19,9 @@ VkResult vkrt_build_init(struct vkrt_device_data *dev)
    VkPhysicalDeviceProperties properties;
    dev->instance_data->vtable.GetPhysicalDeviceProperties(dev->physical_device, &properties);
    dev->max_build_dispatch_x = properties.limits.maxComputeWorkGroupCount[0];
+   dev->max_build_dispatch_y = properties.limits.maxComputeWorkGroupCount[1];
+   dev->max_build_dispatch_z = properties.limits.maxComputeWorkGroupCount[2];
+   if (!dev->max_build_dispatch_x || !dev->max_build_dispatch_y || !dev->max_build_dispatch_z) return VK_ERROR_FEATURE_NOT_PRESENT;
    VkPushConstantRange push = {VK_SHADER_STAGE_COMPUTE_BIT, 0, 128};
    VkPipelineLayoutCreateInfo layout = {
       .sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
@@ -82,18 +86,28 @@ void vkrt_build_finish(struct vkrt_device_data *dev)
 
 static void build_barrier(struct vkrt_device_data *dev, VkCommandBuffer cmd)
 {
-   VkMemoryBarrier b = {.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER,
-      .srcAccessMask = VK_ACCESS_MEMORY_WRITE_BIT, .dstAccessMask = VK_ACCESS_MEMORY_READ_BIT | VK_ACCESS_MEMORY_WRITE_BIT};
-   dev->vtable.CmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
-      VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, 0, 1, &b, 0, NULL, 0, NULL);
+    VkMemoryBarrier b = {.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER,
+                         .srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT,
+                         .dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT};
+    /* Every private build pass is a compute shader. Application input/output
+     * dependencies retain their original scopes through the public sync hooks;
+     * an unrelated stalled native stage is not a private-build predecessor. */
+    dev->vtable.CmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 1, &b, 0,
+                                   NULL, 0, NULL);
 }
 
 static void dispatch(struct vkrt_device_data *dev, VkCommandBuffer cmd,
    uint32_t pass, const void *args, uint32_t size, uint32_t groups)
 {
+    struct vkrt_build_dispatch_grid grid;
+    if (!vkrt_build_dispatch_grid(groups, dev->max_build_dispatch_x, dev->max_build_dispatch_y, dev->max_build_dispatch_z, &grid)) {
+        struct vkrt_cmd_buffer_data *cb = VKRT_FIND(struct vkrt_cmd_buffer_data, cmd);
+        if (cb) cb->record_result = VK_ERROR_INITIALIZATION_FAILED;
+        return;
+    }
    dev->vtable.CmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, dev->build_pipelines[pass]);
    dev->vtable.CmdPushConstants(cmd, dev->build_pipeline_layout, VK_SHADER_STAGE_COMPUTE_BIT, 0, size, args);
-   dev->vtable.CmdDispatch(cmd, groups, 1, 1);
+   dev->vtable.CmdDispatch(cmd, grid.x, grid.y, grid.z);
    build_barrier(dev, cmd);
 }
 
@@ -145,8 +159,7 @@ void vkrt_cmd_build_as(struct vkrt_device_data *dev, VkCommandBuffer cmd, uint32
          VKRT_LOG_ERR("unsupported geometry extension, format, index type or stride");
          break;
       }
-      if (!l.valid || l.as_size > as->size || l.ir.as_size >= UINT32_MAX || l.leaf_count >= (1u << 29) ||
-          (l.leaf_count + 63) / 64 > dev->max_build_dispatch_x) {
+      if (!l.valid || l.as_size > as->size || l.leaf_count > BVH_IR_MAX_LEAVES) {
           VKRT_LOG_ERR("BVH4 output too small or Mesa construction exceeds its current ID capacity");
           cb->record_result = VK_ERROR_OUT_OF_DEVICE_MEMORY;
           break;

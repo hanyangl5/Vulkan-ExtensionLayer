@@ -14,8 +14,9 @@ enum bvh_ir_stage {
    BVH_IR_STAGE_COUNT
 };
 
-/* emit must bind the corresponding common shader, push these bytes, dispatch
- * groups x 1 x 1, and make its writes visible before the next emit call.
+/* emit must bind the corresponding common shader, push these bytes, cover the
+ * logical group count with a checked XYZ grid, and make its writes visible
+ * before the next emit call. Shaders flatten the grid before range checking.
  * output_ir is independent of the final hardware AS. Both consumers use this
  * exact builder and schema; no backend or old-format detection occurs here.
  * For TLAS, blas_ir_addresses names a per-instance array of common BLAS IR
@@ -73,12 +74,11 @@ static inline VkResult bvh_ir_record_build(const VkAccelerationStructureBuildGeo
           info->pGeometries ? &info->pGeometries[g] : info->ppGeometries[g];
       if (g == 0)
          type = geom->geometryType;
-      if (geom->geometryType != type || !bvh_ir_supported_geometry(geom))
-         return VK_ERROR_FEATURE_NOT_PRESENT;
+      if ((uint32_t)geom->geometryType != type || !bvh_ir_supported_geometry(geom)) return VK_ERROR_FEATURE_NOT_PRESENT;
    }
    struct bvh_ir_build_layout l = bvh_ir_build_layout(info, NULL, ranges);
-   if (l.as_size >= UINT32_MAX || l.leaf_count >= (1u << 29))
-      return VK_ERROR_OUT_OF_DEVICE_MEMORY;
+   if (!l.valid || l.leaf_count > BVH_IR_MAX_LEAVES || address > UINT64_MAX - l.as_size || scratch > UINT64_MAX - l.scratch_size)
+       return VK_ERROR_OUT_OF_DEVICE_MEMORY;
    const VkAccelerationStructureGeometryKHR *first_geom =
        info->geometryCount ? (info->pGeometries ? &info->pGeometries[0] : info->ppGeometries[0]) : NULL;
    uint32_t geometry_type = first_geom ? first_geom->geometryType
@@ -90,7 +90,8 @@ static inline VkResult bvh_ir_record_build(const VkAccelerationStructureBuildGeo
       uint32_t capacity, geometry_type;
    } init = {address, scratch + l.counts, (uint32_t)l.leaf_count, geometry_type};
    emit(user, BVH_IR_STAGE_INIT, &init, sizeof(init), 1);
-   uint32_t leaf_offset = 0, first = 0;
+   uint64_t leaf_offset = 0;
+   uint32_t first = 0;
    for (uint32_t g = 0; g < info->geometryCount; ++g) {
       const VkAccelerationStructureGeometryKHR *geom =
           info->pGeometries ? &info->pGeometries[g] : info->ppGeometries[g];
@@ -132,7 +133,7 @@ static inline VkResult bvh_ir_record_build(const VkAccelerationStructureBuildGeo
       if (range->primitiveCount)
          emit(user, BVH_IR_STAGE_LEAF, &args, sizeof(args), (range->primitiveCount + 63) / 64);
       first += range->primitiveCount;
-      leaf_offset += range->primitiveCount * bvh_ir_leaf_stride(geom->geometryType);
+      leaf_offset += (uint64_t)range->primitiveCount * bvh_ir_leaf_stride(geom->geometryType);
    }
 
    uint32_t groups = (l.leaf_count + 255) / 256;
@@ -157,7 +158,7 @@ static inline VkResult bvh_ir_record_build(const VkAccelerationStructureBuildGeo
    tree.src_ids = sorted;
    tree.node_info = scratch + l.node_info;
    tree.header = address;
-   tree.internal_node_base = (uint32_t)(l.nodes - BVH_IR_NODE_OFFSET);
+   tree.internal_node_base = l.nodes - BVH_IR_NODE_OFFSET;
    uint32_t internals = l.leaf_count > 1 ? l.leaf_count - 1 : 1;
    emit(user, BVH_IR_STAGE_TREE, &tree, sizeof(tree), (internals + 63) / 64);
    struct lbvh_generate_ir_args bounds;
@@ -165,7 +166,7 @@ static inline VkResult bvh_ir_record_build(const VkAccelerationStructureBuildGeo
    bounds.bvh = address + BVH_IR_NODE_OFFSET;
    bounds.node_info = scratch + l.node_info;
    bounds.header = address;
-   bounds.internal_node_base = (uint32_t)(l.nodes - BVH_IR_NODE_OFFSET);
+   bounds.internal_node_base = l.nodes - BVH_IR_NODE_OFFSET;
    emit(user, BVH_IR_STAGE_BOUNDS, &bounds, sizeof(bounds), (internals + 63) / 64);
    return VK_SUCCESS;
 }

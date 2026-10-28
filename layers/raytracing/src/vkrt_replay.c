@@ -34,10 +34,12 @@ struct replay_arena {
 typedef VkResult (*replay_emitter)(const void *data, VkCommandBuffer target, vkrt_replay_resolve resolve, void *user,
                                    vkrt_replay_remap_child remap_child, const VkAllocationCallbacks *allocator,
                                    VkSystemAllocationScope scope);
+typedef VkResult (*replay_metadata)(const void *data, struct vkrt_replay_metadata *metadata);
 struct vkrt_replay_entry {
     struct vkrt_replay_entry *next;
     const char *name;
     replay_emitter emit;
+    replay_metadata describe;
     const void *data;
     struct replay_arena arena;
 };
@@ -140,13 +142,13 @@ static VkPipelineLayout replay_layout(struct replay_arena *arena, VkPipelineLayo
     }
     return stable;
 }
-static void replay_capture_end(struct vkrt_replay_context *context, const char *name, replay_emitter emit, void *data,
-                               struct replay_arena *arena) {
+static void replay_capture_end(struct vkrt_replay_context *context, const char *name, replay_emitter emit, replay_metadata describe,
+                               void *data, struct replay_arena *arena) {
     struct vkrt_replay_journal *journal = context->journal;
     if (arena->status == VK_SUCCESS) {
         struct vkrt_replay_entry *entry = replay_alloc(arena, 1, sizeof(*entry));
         if (entry) {
-            *entry = (struct vkrt_replay_entry){.name = name, .emit = emit, .data = data, .arena = *arena};
+            *entry = (struct vkrt_replay_entry){.name = name, .emit = emit, .describe = describe, .data = data, .arena = *arena};
             if (journal->last)
                 journal->last->next = entry;
             else
@@ -214,6 +216,14 @@ const struct vkrt_replay_entry *vkrt_replay_first(const struct vkrt_replay_journ
 }
 const struct vkrt_replay_entry *vkrt_replay_next(const struct vkrt_replay_entry *entry) { return entry ? entry->next : NULL; }
 const char *vkrt_replay_entry_name(const struct vkrt_replay_entry *entry) { return entry ? entry->name : NULL; }
+VkResult vkrt_replay_entry_metadata(const struct vkrt_replay_entry *entry, struct vkrt_replay_metadata *metadata) {
+    if (!metadata) return VK_ERROR_INITIALIZATION_FAILED;
+    memset(metadata, 0, sizeof(*metadata));
+    if (!entry) return VK_ERROR_INITIALIZATION_FAILED;
+    VkResult result = entry->describe ? entry->describe(entry->data, metadata) : VK_ERROR_FEATURE_NOT_PRESENT;
+    if (result != VK_SUCCESS) memset(metadata, 0, sizeof(*metadata));
+    return result;
+}
 VkResult vkrt_replay_entry_emit(const struct vkrt_replay_entry *entry, VkCommandBuffer target, vkrt_replay_resolve resolve,
                                 void *user, vkrt_replay_remap_child remap_child) {
     return entry && resolve

@@ -1,6 +1,12 @@
 /* SPDX-License-Identifier: MIT */
 #include "vkrt_layer.h"
+static VkResult test_storage_allocate(struct vkrt_device_data *, VkDeviceSize, bool, struct vkrt_private_slice *);
+static void test_storage_release(struct vkrt_device_data *, struct vkrt_private_slice *);
+#define vkrt_private_pool_allocate test_storage_allocate
+#define vkrt_private_pool_release test_storage_release
 #include "vkrt_query_pool.c"
+#undef vkrt_private_pool_allocate
+#undef vkrt_private_pool_release
 #include <stdatomic.h>
 #include <errno.h>
 
@@ -20,6 +26,234 @@ static unsigned acquisitions, resets, native_creates;
         }                                                           \
     } while (0)
 #define HANDLE(type, value) ((type)(uintptr_t)(value))
+enum copy_phase { COPY_WAIT_SCOPE, COPY_ACQUIRED, COPY_BOUND, COPY_PUSHED, COPY_DISPATCHED, COPY_VISIBLE, COPY_FINISHED };
+static struct {
+    struct vkrt_device_data *device;
+    VkCommandBuffer command;
+    VkPipelineStageFlags native_wait_scopes;
+    struct vkrt_query_format_args args;
+    struct vkrt_private_slice slice;
+    uint8_t storage[64];
+    enum copy_phase phase;
+    unsigned allocations, releases, pushes, dispatches;
+    bool active, acquired;
+} copy_scope;
+static VkResult test_storage_allocate(struct vkrt_device_data *dev, VkDeviceSize size, bool descriptor,
+                                      struct vkrt_private_slice *slice) {
+    CHECK(copy_scope.active && dev == copy_scope.device && size == 40 && descriptor);
+    if (!copy_scope.active) return VK_ERROR_OUT_OF_DEVICE_MEMORY;
+    copy_scope.slice = (struct vkrt_private_slice){.buffer = HANDLE(VkBuffer, 301),
+                                                   .offset = 16,
+                                                   .size = size,
+                                                   .address = UINT64_C(0x100000003),
+                                                   .mapping = copy_scope.storage,
+                                                   .allocation = (struct vkrt_private_allocation *)(uintptr_t)1};
+    *slice = copy_scope.slice;
+    ++copy_scope.allocations;
+    return VK_SUCCESS;
+}
+static void test_storage_release(struct vkrt_device_data *dev, struct vkrt_private_slice *slice) {
+    CHECK(copy_scope.active && dev == copy_scope.device && copy_scope.phase == COPY_FINISHED);
+    CHECK(slice->buffer == copy_scope.slice.buffer && slice->offset == copy_scope.slice.offset &&
+          slice->size == copy_scope.slice.size && slice->address == copy_scope.slice.address &&
+          slice->mapping == copy_scope.slice.mapping && slice->allocation == copy_scope.slice.allocation);
+    *slice = (struct vkrt_private_slice){0};
+    ++copy_scope.releases;
+}
+static VKAPI_ATTR void VKAPI_CALL copy_scope_barrier(VkCommandBuffer command, VkPipelineStageFlags source,
+                                                     VkPipelineStageFlags destination, VkDependencyFlags flags,
+                                                     uint32_t memory_count, const VkMemoryBarrier *memory, uint32_t buffer_count,
+                                                     const VkBufferMemoryBarrier *buffers, uint32_t image_count,
+                                                     const VkImageMemoryBarrier *images) {
+    CHECK(command == copy_scope.command && !flags && memory_count == 1 && !buffer_count && !buffers && !image_count && !images);
+    CHECK(memory->sType == VK_STRUCTURE_TYPE_MEMORY_BARRIER && !memory->pNext);
+    if (copy_scope.phase == COPY_WAIT_SCOPE) {
+        /* Semaphore acquisition can reach this formatter through native stage
+         * scopes, including TRANSFER waits in earlier queue submissions. The
+         * bridge must cover those scopes before any physical CS slot read. */
+        const bool covers_native_wait = source == VK_PIPELINE_STAGE_ALL_COMMANDS_BIT ||
+                                        (source & copy_scope.native_wait_scopes) == copy_scope.native_wait_scopes;
+        CHECK(covers_native_wait);
+        copy_scope.acquired = covers_native_wait && source == VK_PIPELINE_STAGE_ALL_COMMANDS_BIT &&
+                              memory->srcAccessMask == (VK_ACCESS_MEMORY_READ_BIT | VK_ACCESS_MEMORY_WRITE_BIT) &&
+                              destination == VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT &&
+                              memory->dstAccessMask == (VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT);
+        CHECK(copy_scope.acquired);
+        copy_scope.phase = COPY_ACQUIRED;
+    } else {
+        CHECK(copy_scope.phase == COPY_DISPATCHED);
+        CHECK(source == VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT && memory->srcAccessMask == VK_ACCESS_SHADER_WRITE_BIT &&
+              destination == VK_PIPELINE_STAGE_TRANSFER_BIT && memory->dstAccessMask == VK_ACCESS_TRANSFER_READ_BIT);
+        copy_scope.phase = COPY_VISIBLE;
+    }
+}
+static VKAPI_ATTR void VKAPI_CALL copy_scope_bind(VkCommandBuffer command, VkPipelineBindPoint point, VkPipeline pipeline) {
+    CHECK(command == copy_scope.command && point == VK_PIPELINE_BIND_POINT_COMPUTE && pipeline == HANDLE(VkPipeline, 302));
+    CHECK(copy_scope.phase == COPY_ACQUIRED);
+    copy_scope.phase = COPY_BOUND;
+}
+static VKAPI_ATTR void VKAPI_CALL copy_scope_push(VkCommandBuffer command, VkPipelineLayout layout, VkShaderStageFlags stages,
+                                                  uint32_t offset, uint32_t size, const void *data) {
+    CHECK(command == copy_scope.command && layout == HANDLE(VkPipelineLayout, 303) && stages == VK_SHADER_STAGE_COMPUTE_BIT &&
+          !offset && size == sizeof(copy_scope.args));
+    CHECK(copy_scope.phase == COPY_BOUND || copy_scope.phase == COPY_PUSHED);
+    memcpy(&copy_scope.args, data, sizeof(copy_scope.args));
+    copy_scope.phase = COPY_PUSHED;
+    ++copy_scope.pushes;
+}
+static VKAPI_ATTR void VKAPI_CALL copy_scope_dispatch(VkCommandBuffer command, uint32_t x, uint32_t y, uint32_t z) {
+    CHECK(command == copy_scope.command && x == 1 && y == 1 && z == 1 && copy_scope.phase == COPY_PUSHED);
+    CHECK(copy_scope.acquired); /* Check the bridge at the actual formatter execution endpoint. */
+    CHECK(copy_scope.args.input == 4096 && copy_scope.args.input_capacity == 64 &&
+          copy_scope.args.output == copy_scope.slice.address && copy_scope.args.output_capacity == 40 &&
+          copy_scope.args.stride == 24 && copy_scope.args.first_query == 1 && copy_scope.args.count == 2 &&
+          copy_scope.args.flags == (VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WITH_AVAILABILITY_BIT) && !copy_scope.args.reserved);
+    copy_scope.phase = COPY_DISPATCHED;
+    ++copy_scope.dispatches;
+}
+static VKAPI_ATTR void VKAPI_CALL copy_scope_transfer(VkCommandBuffer command, VkBuffer source, VkBuffer destination,
+                                                      uint32_t count, const VkBufferCopy *regions) {
+    CHECK(command == copy_scope.command && source == copy_scope.slice.buffer && destination == HANDLE(VkBuffer, 304));
+    CHECK(copy_scope.phase == COPY_VISIBLE && count == 2 && copy_scope.dispatches == 1);
+    for (uint32_t i = 0; i < count; ++i)
+        CHECK(regions[i].srcOffset == copy_scope.slice.offset + i * 24 && regions[i].dstOffset == 16 + i * 24 &&
+              regions[i].size == 16);
+    copy_scope.phase = COPY_FINISHED;
+}
+static void native_wait_to_formatter_scope(void) {
+    memset(&copy_scope, 0, sizeof(copy_scope));
+    VkQueueFamilyProperties family = {.queueFlags = VK_QUEUE_COMPUTE_BIT, .timestampValidBits = 64};
+    struct query_command_pool recording_pool = {.pool = HANDLE(VkCommandPool, 305), .family = 0};
+    struct vkrt_query_device queries = {.families = &family,
+                                        .family_count = 1,
+                                        .command_pools = &recording_pool,
+                                        .layout = HANDLE(VkPipelineLayout, 303),
+                                        .format = HANDLE(VkPipeline, 302)};
+    vkrt_mutex_init(&queries.lock);
+    struct vkrt_device_data dev = {.queries = &queries, .max_build_dispatch_x = 1};
+    dev.vtable.CmdPipelineBarrier = copy_scope_barrier;
+    dev.vtable.CmdBindPipeline = copy_scope_bind;
+    dev.vtable.CmdPushConstants = copy_scope_push;
+    dev.vtable.CmdDispatch = copy_scope_dispatch;
+    dev.vtable.CmdCopyBuffer = copy_scope_transfer;
+    struct vkrt_cmd_buffer_data cb = {
+        .cmd = HANDLE(VkCommandBuffer, 306), .device_data = &dev, .pool = recording_pool.pool, .replaying = true};
+    struct query_pool pool = {.magic = QUERY_POOL_MAGIC,
+                              .dev = &dev,
+                              .type = VK_QUERY_TYPE_ACCELERATION_STRUCTURE_COMPACTED_SIZE_KHR,
+                              .count = 4,
+                              .storage = {.address = 4096}};
+    VkQueryPool handle = (VkQueryPool)(uintptr_t)&pool;
+    vkrt_map_object(VKRT_HKEY(cb.cmd), &cb);
+    vkrt_map_object(VKRT_HKEY(handle), &pool);
+    copy_scope.device = &dev;
+    copy_scope.command = cb.cmd;
+    copy_scope.native_wait_scopes = VK_PIPELINE_STAGE_TRANSFER_BIT | VK_PIPELINE_STAGE_DRAW_INDIRECT_BIT;
+    copy_scope.active = true;
+    PFN_vkCmdCopyQueryPoolResults copy = (PFN_vkCmdCopyQueryPoolResults)vkrt_query_pool_proc("vkCmdCopyQueryPoolResults");
+    CHECK(copy);
+    copy(cb.cmd, handle, 1, 2, HANDLE(VkBuffer, 304), 16, 24, VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WITH_AVAILABILITY_BIT);
+    CHECK(cb.record_result == VK_SUCCESS && cb.has_virtual_queries && copy_scope.phase == COPY_FINISHED);
+    CHECK(copy_scope.allocations == 1 && copy_scope.pushes == 2 && copy_scope.dispatches == 1 && !copy_scope.releases);
+    CHECK(vkrt_query_command_reset(&cb) == VK_SUCCESS && !cb.queries && !queries.commands && copy_scope.releases == 1);
+    copy_scope.active = false;
+    vkrt_unmap_object(VKRT_HKEY(cb.cmd));
+    vkrt_unmap_object(VKRT_HKEY(handle));
+#ifndef _WIN32
+    pthread_mutex_destroy(&queries.lock);
+#endif
+}
+static struct {
+    VkCommandBuffer copy, publication;
+    struct publish_args args;
+    unsigned barriers, dispatches, timestamps;
+    bool reset, native_copy_pending;
+} publication_scope;
+static VKAPI_ATTR void VKAPI_CALL scope_copy(VkCommandBuffer command, VkBuffer source, VkBuffer destination, uint32_t count,
+                                             const VkBufferCopy *regions) {
+    CHECK(command == publication_scope.copy && command != publication_scope.publication);
+    CHECK(source && destination && count == 1 && regions[0].size == 8);
+    publication_scope.native_copy_pending = true;
+}
+static VKAPI_ATTR void VKAPI_CALL scope_barrier(VkCommandBuffer command, VkPipelineStageFlags source,
+                                                VkPipelineStageFlags destination, VkDependencyFlags flags, uint32_t memory_count,
+                                                const VkMemoryBarrier *memory, uint32_t buffer_count,
+                                                const VkBufferMemoryBarrier *buffers, uint32_t image_count,
+                                                const VkImageMemoryBarrier *images) {
+    CHECK(command == publication_scope.publication && !flags && memory_count == 1 && !buffer_count && !buffers && !image_count &&
+          !images);
+    CHECK(memory->sType == VK_STRUCTURE_TYPE_MEMORY_BARRIER && !memory->pNext);
+    if (!publication_scope.barriers) {
+        VkPipelineStageFlags required = VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT;
+        VkAccessFlags access = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;
+        if (publication_scope.reset) {
+            required |= VK_PIPELINE_STAGE_TRANSFER_BIT;
+            access |= VK_ACCESS_TRANSFER_READ_BIT | VK_ACCESS_TRANSFER_WRITE_BIT;
+        }
+        CHECK(source == required && memory->srcAccessMask == access);
+        CHECK(destination == VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT &&
+              memory->dstAccessMask == (VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT));
+        /* Query reset's implicit first scope includes the earlier COPY's
+         * native transfer, even when it was recorded in a different CB. */
+        if ((source & VK_PIPELINE_STAGE_TRANSFER_BIT) && (destination & VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT))
+            publication_scope.native_copy_pending = false;
+    } else {
+        CHECK(source == VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT &&
+              destination == (VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_HOST_BIT));
+    }
+    ++publication_scope.barriers;
+}
+static VKAPI_ATTR void VKAPI_CALL scope_bind(VkCommandBuffer command, VkPipelineBindPoint point, VkPipeline pipeline) {
+    CHECK(command == publication_scope.publication && point == VK_PIPELINE_BIND_POINT_COMPUTE && pipeline);
+}
+static VKAPI_ATTR void VKAPI_CALL scope_push(VkCommandBuffer command, VkPipelineLayout layout, VkShaderStageFlags stages,
+                                             uint32_t offset, uint32_t size, const void *data) {
+    CHECK(command == publication_scope.publication && layout && stages == VK_SHADER_STAGE_COMPUTE_BIT && !offset &&
+          size == sizeof(publication_scope.args));
+    memcpy(&publication_scope.args, data, sizeof(publication_scope.args));
+}
+static VKAPI_ATTR void VKAPI_CALL scope_dispatch(VkCommandBuffer command, uint32_t x, uint32_t y, uint32_t z) {
+    CHECK(command == publication_scope.publication && x == 1 && y == 1 && z == 1);
+    if (!publication_scope.dispatches) {
+        CHECK(publication_scope.args.count == 1 && publication_scope.args.reset == publication_scope.reset);
+        CHECK(publication_scope.native_copy_pending != publication_scope.reset);
+    } else {
+        CHECK(!publication_scope.args.count);
+    }
+    ++publication_scope.dispatches;
+}
+static VKAPI_ATTR void VKAPI_CALL scope_timestamp(VkCommandBuffer command, VkPipelineStageFlagBits stage, VkQueryPool pool,
+                                                  uint32_t query) {
+    CHECK(command == publication_scope.publication && stage == VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT && pool && !query);
+    CHECK(publication_scope.barriers == 2 && publication_scope.dispatches == 2);
+    ++publication_scope.timestamps;
+}
+static void reset_native_copy_order(void) {
+    struct vkrt_query_device queries = {.layout = HANDLE(VkPipelineLayout, 101), .publish = HANDLE(VkPipeline, 102)};
+    struct vkrt_device_data dev = {.queries = &queries, .max_build_dispatch_x = 1};
+    dev.vtable.CmdCopyBuffer = scope_copy;
+    dev.vtable.CmdPipelineBarrier = scope_barrier;
+    dev.vtable.CmdBindPipeline = scope_bind;
+    dev.vtable.CmdPushConstants = scope_push;
+    dev.vtable.CmdDispatch = scope_dispatch;
+    dev.vtable.CmdWriteTimestamp = scope_timestamp;
+    struct vkrt_cmd_buffer_data cb = {.cmd = HANDLE(VkCommandBuffer, 104), .device_data = &dev};
+    struct query_pool pool = {.count = 1, .storage = {.address = 4096}};
+    struct query_operation operation = {
+        .pool = &pool, .count = 1, .marker = HANDLE(VkQueryPool, 105), .payload = {.address = 8192}};
+    const VkBufferCopy region = {.size = 8};
+    for (unsigned reset = 0; reset < 2; ++reset) {
+        memset(&publication_scope, 0, sizeof(publication_scope));
+        publication_scope.copy = HANDLE(VkCommandBuffer, 103);
+        publication_scope.publication = cb.cmd;
+        publication_scope.reset = reset != 0;
+        dev.vtable.CmdCopyBuffer(publication_scope.copy, HANDLE(VkBuffer, 106), HANDLE(VkBuffer, 107), 1, &region);
+        CHECK(publication_scope.native_copy_pending);
+        publish_operation(&cb, &operation, reset != 0);
+        CHECK(publication_scope.barriers == 2 && publication_scope.dispatches == 2 && publication_scope.timestamps == 1);
+        CHECK(publication_scope.native_copy_pending != (reset != 0));
+    }
+}
 static uint64_t marker_availability[4];
 static const VkQueryPoolCreateInfo *native_create_info;
 static const VkAllocationCallbacks *native_create_allocator;
@@ -88,7 +322,7 @@ static VKAPI_ATTR void VKAPI_CALL drop_pipeline(VkDevice device, VkPipeline pipe
     CHECK(device == HANDLE(VkDevice, 1) && pipeline && !allocator);
     ++destroyed_pipelines;
 }
-static void pipeline_rollback_history(struct vkrt_device_data *dev, VkQueue queue, VkCommandBuffer copy) {
+static void pipeline_rollback_admission(struct vkrt_device_data *dev, VkQueue queue) {
     struct vkrt_device_dispatch saved = dev->vtable;
     dev->vtable.CreatePipelineLayout = make_layout;
     dev->vtable.CreateShaderModule = make_shader;
@@ -96,63 +330,23 @@ static void pipeline_rollback_history(struct vkrt_device_data *dev, VkQueue queu
     dev->vtable.DestroyShaderModule = drop_shader;
     dev->vtable.DestroyPipelineLayout = drop_layout;
     dev->vtable.DestroyPipeline = drop_pipeline;
+    struct vkrt_query_submission transaction = {0};
+    CHECK(vkrt_query_submit_begin(dev, &transaction, queue) == VK_SUCCESS);
+    struct vkrt_query_admission *admission = transaction.admission;
+    vkrt_query_submit_end(dev, &transaction);
     for (pipeline_fail_at = 1; pipeline_fail_at <= 3; ++pipeline_fail_at) {
         pipeline_calls = destroyed_modules = destroyed_layouts = destroyed_pipelines = 0;
-        struct query_queue *history = dev->queries->queues;
+        struct query_queue *queues = dev->queries->queues;
         vkrt_mutex_lock(&dev->queries->lock);
         CHECK(initialize_pipelines(dev) == VK_ERROR_OUT_OF_DEVICE_MEMORY);
         vkrt_mutex_unlock(&dev->queries->lock);
-        CHECK(dev->queries->queues == history);
+        CHECK(dev->queries->queues == queues);
         CHECK(!dev->queries->layout && !dev->queries->property && !dev->queries->publish && !dev->queries->format);
         CHECK(destroyed_modules == pipeline_fail_at && destroyed_layouts == 1 && destroyed_pipelines == pipeline_fail_at - 1);
-        struct vkrt_query_submission transaction = {0};
-        CHECK(vkrt_query_submit_qualify(dev, &transaction, queue, false, 1, &copy) == VK_ERROR_FEATURE_NOT_PRESENT);
+        CHECK(vkrt_query_submit_begin(dev, &transaction, queue) == VK_SUCCESS && transaction.admission == admission);
+        vkrt_query_submit_end(dev, &transaction);
     }
     dev->vtable = saved;
-}
-static void checkpoint_history(struct vkrt_device_data *dev, VkQueue queue, VkQueue other_queue, VkCommandBuffer copy) {
-    struct vkrt_query_submission unsafe = {0}, check = {0};
-    CHECK(vkrt_query_submit_qualify(dev, &unsafe, queue, true, 0, NULL) == VK_SUCCESS);
-    vkrt_query_submit_result(dev, &unsafe, VK_SUCCESS);
-    uint64_t checkpoint = vkrt_query_queue_checkpoint(dev);
-    unsafe = (struct vkrt_query_submission){0};
-    CHECK(vkrt_query_submit_qualify(dev, &unsafe, queue, true, 0, NULL) == VK_SUCCESS);
-    vkrt_query_submit_result(dev, &unsafe, VK_SUCCESS);
-    vkrt_query_queue_idle(dev, queue, checkpoint);
-    CHECK(vkrt_query_submit_qualify(dev, &check, queue, false, 1, &copy) == VK_ERROR_FEATURE_NOT_PRESENT);
-    vkrt_query_queue_idle(dev, queue, vkrt_query_queue_checkpoint(dev));
-    check = (struct vkrt_query_submission){0};
-    CHECK(vkrt_query_submit_qualify(dev, &check, queue, false, 1, &copy) == VK_SUCCESS);
-    unsafe = (struct vkrt_query_submission){0};
-    CHECK(vkrt_query_submit_qualify(dev, &unsafe, queue, true, 0, NULL) == VK_SUCCESS);
-    vkrt_query_submit_result(dev, &unsafe, VK_SUCCESS);
-    checkpoint = vkrt_query_queue_checkpoint(dev);
-    unsafe = (struct vkrt_query_submission){0};
-    CHECK(vkrt_query_submit_qualify(dev, &unsafe, other_queue, true, 0, NULL) == VK_SUCCESS);
-    vkrt_query_submit_result(dev, &unsafe, VK_SUCCESS);
-    vkrt_query_queue_idle(dev, VK_NULL_HANDLE, checkpoint);
-    check = (struct vkrt_query_submission){0};
-    CHECK(vkrt_query_submit_qualify(dev, &check, queue, false, 1, &copy) == VK_SUCCESS);
-    check = (struct vkrt_query_submission){0};
-    CHECK(vkrt_query_submit_qualify(dev, &check, other_queue, false, 1, &copy) == VK_ERROR_FEATURE_NOT_PRESENT);
-    vkrt_query_queue_idle(dev, VK_NULL_HANDLE, vkrt_query_queue_checkpoint(dev));
-}
-static void saturated_history(struct vkrt_device_data *dev, VkQueue queue, VkCommandBuffer copy) {
-    dev->queries->unsafe_epoch = UINT64_MAX - 1;
-    struct vkrt_query_submission transaction = {0};
-    CHECK(vkrt_query_submit_qualify(dev, &transaction, queue, true, 0, NULL) == VK_SUCCESS);
-    vkrt_query_submit_result(dev, &transaction, VK_SUCCESS);
-    uint64_t checkpoint = vkrt_query_queue_checkpoint(dev);
-    CHECK(checkpoint == UINT64_MAX);
-    vkrt_query_queue_idle(dev, queue, checkpoint);
-    transaction = (struct vkrt_query_submission){0};
-    CHECK(vkrt_query_submit_qualify(dev, &transaction, queue, false, 1, &copy) == VK_SUCCESS);
-    CHECK(vkrt_query_submit_qualify(dev, &transaction, queue, true, 0, NULL) == VK_SUCCESS);
-    vkrt_query_submit_result(dev, &transaction, VK_SUCCESS);
-    vkrt_query_queue_idle(dev, VK_NULL_HANDLE, checkpoint);
-    transaction = (struct vkrt_query_submission){0};
-    CHECK(vkrt_query_submit_qualify(dev, &transaction, queue, false, 1, &copy) == VK_ERROR_FEATURE_NOT_PRESENT);
-    CHECK(vkrt_query_queue_checkpoint(dev) == UINT64_MAX);
 }
 struct test_event {
 #ifdef _WIN32
@@ -214,7 +408,7 @@ static void event_finish(struct test_event *event) {
 struct admission_fixture {
     struct vkrt_device_data *dev;
     VkQueue queue, other_queue;
-    VkCommandBuffer copy;
+    atomic_uint publications;
     struct vkrt_query_admission *watched;
     struct test_event native_success, publish, contended, b_began, b_done, c_done;
 };
@@ -233,11 +427,11 @@ static void *admission_worker(void *opaque)
     struct vkrt_query_submission transaction = {0};
     if (worker->index == 0) {
         CHECK(vkrt_query_submit_begin(f->dev, &transaction, f->queue) == VK_SUCCESS);
-        CHECK(vkrt_query_submit_qualify(f->dev, &transaction, f->queue, true, 0, NULL) == VK_SUCCESS);
         /* Deterministic native-SUCCESS -> query-publication pause. */
         event_signal(&f->native_success);
         CHECK(event_wait(&f->publish, 5000));
         vkrt_query_submit_result(f->dev, &transaction, VK_SUCCESS);
+        atomic_store(&f->publications, 1);
         vkrt_query_submit_end(f->dev, &transaction);
     } else if (worker->index == 1) {
         /* Prove real contention while A is paused, rather than infer it from
@@ -254,13 +448,13 @@ static void *admission_worker(void *opaque)
         event_signal(&f->contended);
         CHECK(vkrt_query_submit_begin(f->dev, &transaction, f->queue) == VK_SUCCESS);
         event_signal(&f->b_began);
-        CHECK(vkrt_query_submit_qualify(f->dev, &transaction, f->queue, false, 1, &f->copy) == VK_ERROR_FEATURE_NOT_PRESENT);
-        vkrt_query_submit_result(f->dev, &transaction, VK_ERROR_FEATURE_NOT_PRESENT);
+        CHECK(atomic_load(&f->publications) == 1);
+        vkrt_query_submit_result(f->dev, &transaction, VK_SUCCESS);
         vkrt_query_submit_end(f->dev, &transaction);
         event_signal(&f->b_done);
     } else {
         CHECK(vkrt_query_submit_begin(f->dev, &transaction, f->other_queue) == VK_SUCCESS);
-        CHECK(vkrt_query_submit_qualify(f->dev, &transaction, f->other_queue, false, 1, &f->copy) == VK_SUCCESS);
+        CHECK(atomic_load(&f->publications) == 0);
         vkrt_query_submit_result(f->dev, &transaction, VK_SUCCESS);
         vkrt_query_submit_end(f->dev, &transaction);
         event_signal(&f->c_done);
@@ -268,9 +462,8 @@ static void *admission_worker(void *opaque)
     CHECK(!transaction.admission);
     return 0;
 }
-static void admission_ordering(struct vkrt_device_data *dev, VkQueue queue, VkQueue other_queue, VkCommandBuffer copy) {
-    vkrt_query_queue_idle(dev, VK_NULL_HANDLE, vkrt_query_queue_checkpoint(dev));
-    struct admission_fixture fixture = {.dev = dev, .queue = queue, .other_queue = other_queue, .copy = copy};
+static void admission_ordering(struct vkrt_device_data *dev, VkQueue queue, VkQueue other_queue) {
+    struct admission_fixture fixture = {.dev = dev, .queue = queue, .other_queue = other_queue};
     struct test_event *events[] = {&fixture.native_success, &fixture.publish, &fixture.contended,
                                    &fixture.b_began,        &fixture.b_done,  &fixture.c_done};
     for (unsigned i = 0; i < 6; ++i) event_init(events[i]);
@@ -309,10 +502,11 @@ static void admission_ordering(struct vkrt_device_data *dev, VkQueue queue, VkQu
     for (unsigned i = 0; i < 3; ++i) pthread_join(threads[i], NULL);
 #endif
     for (unsigned i = 0; i < 6; ++i) event_finish(events[i]);
-    vkrt_query_queue_idle(dev, VK_NULL_HANDLE, vkrt_query_queue_checkpoint(dev));
 }
 
 int main(void) {
+    native_wait_to_formatter_scope();
+    reset_native_copy_order();
     struct vkrt_query_device state = {0};
     vkrt_mutex_init(&state.lock);
     struct vkrt_device_data dev = {.device = HANDLE(VkDevice, 1), .queries = &state};
@@ -410,13 +604,17 @@ int main(void) {
     CHECK(slots[0].serial == 0 && out[0] == write_payload.value.value && out[1] == 1);
 
     /* Rollback never erases the cached public value or waits for future work. */
-    transaction = (struct vkrt_query_submission){0};
-    CHECK(vkrt_query_submit_prepare(&dev, &transaction, 1, &cb.cmd) == VK_SUCCESS);
-    vkrt_query_submit_result(&dev, &transaction, VK_ERROR_OUT_OF_HOST_MEMORY);
-    CHECK(!write_op.submitted && !reset_op.submitted);
-    CHECK(GetQueryPoolResults(dev.device, handle, 0, 1, sizeof(out), out, 32,
-                              VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WITH_AVAILABILITY_BIT) == VK_SUCCESS);
-    CHECK(out[0] == write_payload.value.value && out[1] == 1);
+    const VkResult rollback_errors[] = {VK_ERROR_OUT_OF_HOST_MEMORY, VK_ERROR_OUT_OF_DEVICE_MEMORY, VK_ERROR_UNKNOWN};
+    for (unsigned i = 0; i < VKRT_ARRAY_SIZE(rollback_errors); ++i) {
+        transaction = (struct vkrt_query_submission){0};
+        CHECK(vkrt_query_submit_prepare(&dev, &transaction, 1, &cb.cmd) == VK_SUCCESS);
+        CHECK(write_op.prepared == &transaction && reset_op.prepared == &transaction);
+        vkrt_query_submit_result(&dev, &transaction, rollback_errors[i]);
+        CHECK(!write_op.submitted && !reset_op.submitted && !write_op.prepared && !reset_op.prepared);
+        CHECK(GetQueryPoolResults(dev.device, handle, 0, 1, sizeof(out), out, 32,
+                                  VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WITH_AVAILABILITY_BIT) == VK_SUCCESS);
+        CHECK(out[0] == write_payload.value.value && out[1] == 1);
+    }
     /* An allocation failure before this transaction's preflight must not erase
      * an earlier completed but still unharvested execution. */
     write_op.submitted = true;
@@ -430,41 +628,9 @@ int main(void) {
                               VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WITH_AVAILABILITY_BIT) == VK_SUCCESS);
     CHECK(slots[0].serial == 1 && out[0] == write_payload.value.value);
     CHECK(later(0, UINT64_MAX) && !later(UINT64_MAX, 0));
-    /* Unsafe semaphore wait history belongs to the native queue and survives
-     * separate submit calls. Only successful native idle clears it. */
     VkQueue queue = HANDLE(VkQueue, 6), other_queue = HANDLE(VkQueue, 7);
-    struct query_scratch copy_scratch = {0};
-    command.scratch = &copy_scratch;
-    transaction = (struct vkrt_query_submission){0};
-    CHECK(vkrt_query_submit_qualify(&dev, &transaction, queue, true, 1, &cb.cmd) == VK_ERROR_FEATURE_NOT_PRESENT);
-    vkrt_query_submit_result(&dev, &transaction, VK_ERROR_FEATURE_NOT_PRESENT);
-    transaction = (struct vkrt_query_submission){0};
-    CHECK(vkrt_query_submit_qualify(&dev, &transaction, queue, false, 1, &cb.cmd) == VK_SUCCESS);
-    CHECK(vkrt_query_submit_qualify(&dev, &transaction, queue, true, 0, NULL) == VK_SUCCESS);
-    CHECK(vkrt_query_submit_qualify(&dev, &transaction, queue, false, 1, &cb.cmd) == VK_ERROR_FEATURE_NOT_PRESENT);
-    vkrt_query_submit_result(&dev, &transaction, VK_ERROR_FEATURE_NOT_PRESENT);
-    transaction = (struct vkrt_query_submission){0};
-    CHECK(vkrt_query_submit_qualify(&dev, &transaction, queue, true, 0, NULL) == VK_SUCCESS);
-    vkrt_query_submit_result(&dev, &transaction, VK_SUCCESS);
-    transaction = (struct vkrt_query_submission){0};
-    CHECK(vkrt_query_submit_qualify(&dev, &transaction, queue, false, 1, &cb.cmd) == VK_ERROR_FEATURE_NOT_PRESENT);
-    CHECK(vkrt_query_submit_qualify(&dev, &transaction, other_queue, false, 1, &cb.cmd) == VK_SUCCESS);
-    pipeline_rollback_history(&dev, queue, cb.cmd);
-    vkrt_query_queue_idle(&dev, other_queue, vkrt_query_queue_checkpoint(&dev));
-    transaction = (struct vkrt_query_submission){0};
-    CHECK(vkrt_query_submit_qualify(&dev, &transaction, queue, false, 1, &cb.cmd) == VK_ERROR_FEATURE_NOT_PRESENT);
-    vkrt_query_queue_idle(&dev, queue, vkrt_query_queue_checkpoint(&dev));
-    transaction = (struct vkrt_query_submission){0};
-    CHECK(vkrt_query_submit_qualify(&dev, &transaction, queue, false, 1, &cb.cmd) == VK_SUCCESS);
-    CHECK(vkrt_query_submit_qualify(&dev, &transaction, queue, true, 0, NULL) == VK_SUCCESS);
-    vkrt_query_submit_result(&dev, &transaction, VK_SUCCESS);
-    vkrt_query_queue_idle(&dev, VK_NULL_HANDLE, vkrt_query_queue_checkpoint(&dev));
-    transaction = (struct vkrt_query_submission){0};
-    CHECK(vkrt_query_submit_qualify(&dev, &transaction, queue, false, 1, &cb.cmd) == VK_SUCCESS);
-    checkpoint_history(&dev, queue, other_queue, cb.cmd);
-    admission_ordering(&dev, queue, other_queue, cb.cmd);
-    saturated_history(&dev, queue, cb.cmd);
-    command.scratch = NULL;
+    pipeline_rollback_admission(&dev, queue);
+    admission_ordering(&dev, queue, other_queue);
     while (state.queues) {
         struct query_queue *next = state.queues->next;
         query_queue_destroy(state.queues);
@@ -526,7 +692,7 @@ int main(void) {
     vkrt_map_destroy(&vkrt_global.objects);
     if (!failures)
         printf(
-            "Query publication epochs: PASS (acquire/cache/reset/rollback, pipeline retry history, idle checkpoint, admission "
-            "ordering, saturation)\n");
+            "Query publication epochs: PASS (acquire/cache/reset/rollback, pipeline retry/admission ordering, "
+            "native COPY-to-RESET and wait-to-formatter scopes)\n");
     return failures ? 1 : 0;
 }

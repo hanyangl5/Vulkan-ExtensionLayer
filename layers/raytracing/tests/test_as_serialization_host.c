@@ -93,10 +93,10 @@ static VKAPI_ATTR void VKAPI_CALL destroy_pipeline(VkDevice d, VkPipeline p, con
 static VKAPI_ATTR void VKAPI_CALL barrier(VkCommandBuffer cb, VkPipelineStageFlags src, VkPipelineStageFlags dst,
                                           VkDependencyFlags dep, uint32_t count, const VkMemoryBarrier *memory, uint32_t buffers,
                                           const VkBufferMemoryBarrier *b, uint32_t images, const VkImageMemoryBarrier *im) {
-    EXPECT(cb == H(VkCommandBuffer, 2) && src == VK_PIPELINE_STAGE_ALL_COMMANDS_BIT && src == dst && !dep && count == 1 &&
+    EXPECT(cb == H(VkCommandBuffer, 2) && src == VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT && src == dst && !dep && count == 1 &&
            !buffers && !images);
-    EXPECT(memory->srcAccessMask == VK_ACCESS_MEMORY_WRITE_BIT &&
-           memory->dstAccessMask == (VK_ACCESS_MEMORY_READ_BIT | VK_ACCESS_MEMORY_WRITE_BIT));
+    EXPECT(memory->srcAccessMask == VK_ACCESS_SHADER_WRITE_BIT &&
+           memory->dstAccessMask == (VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT));
     ++barriers;
 }
 static VKAPI_ATTR void VKAPI_CALL bind(VkCommandBuffer cb, VkPipelineBindPoint point, VkPipeline pipeline) {

@@ -52,8 +52,9 @@ qualification. Canonical typed RTP uses the same backend.
 
 ## Mesa construction IR adapter
 
-`mesa_ir_adapter.h` accepts separate header/node byte spans or the existing
-[VKRT v2 envelope](IR_CONTRACT_V2.md). Its scalar record
+`mesa_ir_adapter.h` accepts separate header/node byte spans, the existing
+[VKRT v2 envelope](IR_CONTRACT_V2.md), or the indexed
+[v3 construction envelope](IR_CONTRACT_V3.md). Its scalar record
 contract is the locally imported Mesa `d1a2854aec69179f2b80d1c7368771041181cda5`
 schema; it does not yet qualify every builder variant in the newer Mesa reference
 selected by the implementation goal. It reads bytes without alignment-dependent
@@ -69,8 +70,11 @@ preserved. Unsupported BUILD variants, invalid ranges/graphs/counts/bounds and
 unrepresentable transforms fail explicitly. The default input requires finite
 active bounds; this is not complete Vulkan exceptional-input coverage.
 
-Mesa construction IDs still have a 32-bit byte-offset ceiling. That is a remaining
-builder limitation, not a restriction of the 64-bit runtime layout planner.
+The production builder emits v3 record-index IDs and decodes addresses with
+64-bit arithmetic. The v2 compatibility decoder retains that older envelope's
+32-bit byte-offset boundary. This internal construction change does not alter
+the public runtime BVH4 or serialization ABI. Large physical allocations and
+additional builder variants still need qualification.
 
 ## GPU hierarchy encoder
 
@@ -91,8 +95,8 @@ hierarchy/header/parents only, leaving leaf records for a separate producer.
 CPU conversion of Mesa IR followed by GPU encoding is a component test, not the
 final GPU-only construction path.
 
-`bvh4_mesa_encode.comp` now provides a direct GPU path from the current default
-Mesa scalar IR v2 envelope. Its host contract is `bvh4_mesa_gpu.h`. The host plans
+`bvh4_mesa_encode.comp` provides a direct GPU path from the v2 and indexed v3
+Mesa scalar IR envelopes. Its host contract is `bvh4_mesa_gpu.h`. The host plans
 capacity-sized output/scratch from input capacity and geometry type; active
 counts and topology remain on GPU. Seven shader phases initialize maps/header,
 assign unique input parents and compact leaves, validate the source graph,

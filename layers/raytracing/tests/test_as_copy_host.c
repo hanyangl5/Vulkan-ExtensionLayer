@@ -27,9 +27,9 @@ VkDeviceAddress vkrt_as_backing_address(struct vkrt_device_data *dev, VkAccelera
 static VKAPI_ATTR void VKAPI_CALL barrier(VkCommandBuffer cmd, VkPipelineStageFlags src, VkPipelineStageFlags dst,
                                           VkDependencyFlags flags, uint32_t nm, const VkMemoryBarrier *memory, uint32_t nb,
                                           const VkBufferMemoryBarrier *b, uint32_t ni, const VkImageMemoryBarrier *im) {
-    CHECK(cmd == command && src == VK_PIPELINE_STAGE_ALL_COMMANDS_BIT && dst == src && !flags && nm == 1 && !nb && !ni);
-    CHECK(memory->srcAccessMask == VK_ACCESS_MEMORY_WRITE_BIT &&
-          memory->dstAccessMask == (VK_ACCESS_MEMORY_READ_BIT | VK_ACCESS_MEMORY_WRITE_BIT));
+    CHECK(cmd == command && src == VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT && dst == src && !flags && nm == 1 && !nb && !ni);
+    CHECK(memory->srcAccessMask == VK_ACCESS_SHADER_WRITE_BIT &&
+          memory->dstAccessMask == (VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT));
     ++barriers;
 }
 static VKAPI_ATTR void VKAPI_CALL bind(VkCommandBuffer cmd, VkPipelineBindPoint point, VkPipeline pipeline) {

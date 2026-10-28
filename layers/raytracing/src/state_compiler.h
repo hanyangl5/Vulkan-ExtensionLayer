@@ -150,7 +150,14 @@ struct TypedContinuationProgram {
 // Actual memory operations dispatch within the selected static root/path;
 // native pointer Phi/Select is not required by the transformed program.
 // Function/Private pointer variables, arrays, legal aggregate loads/stores and
-// unmasked OpCopyMemory use the same typed identity records. OpPtrAccessChain
+// OpCopyMemory use the same typed identity records. Persistent Load/Store/Copy
+// preserve Volatile/Nontemporal on the actual selected frame accesses; Aligned
+// is checked as a source promise while backing words use their own proven
+// alignment. CopyMemory's separate target/source masks are applied separately.
+// Mixed native/persistent copies pass a complete typed value through the
+// selected native-root branch, preserving pointer identity records in frames.
+// Memory operands that require another source memory model stay unsupported.
+// OpPtrAccessChain
 // preserves ArrayStride and folds signed Element advances into finite typed
 // route segments. Ordinary zero-index chains can omit and restore the actual
 // array stride, including through Phi/Select and pointer-valued memory. A

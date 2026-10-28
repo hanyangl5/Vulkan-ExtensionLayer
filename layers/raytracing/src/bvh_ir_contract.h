@@ -2,9 +2,10 @@
 #ifndef BVH_IR_CONTRACT_H
 #define BVH_IR_CONTRACT_H
 
-/* Shared XM/VKRT container. Mesa's 108-byte record ABI is unchanged.
- * Metadata is outside vk_ir_header; node IDs are relative to byte 128.
- * No legacy layouts are accepted. This file must be identical in both projects. */
+/* Layer-owned construction container. Mesa's 108-byte scalar header/record
+ * layout is retained. Metadata outside vk_ir_header identifies tagged byte
+ * IDs (v2) or record-index IDs with 64-bit address decoding (v3). Neither is
+ * the public runtime BVH4 or serialization ABI. */
 #define BVH_IR_HEADER_SIZE 108u
 #define BVH_IR_NODE_OFFSET 128u
 #define BVH_IR_MAGIC_OFFSET 108u
@@ -14,6 +15,11 @@
 #define BVH_IR_BUILD_FLAGS_OFFSET 124u
 #define BVH_IR_MAGIC 0x58424856u
 #define BVH_IR_VERSION 2u
+/* v2 stores tagged byte offsets. v3 stores tagged record indices so address
+ * arithmetic can cover large construction storage without widening child IDs.
+ * Mesa scalar records and the final public BVH4/serialization ABI are unchanged. */
+#define BVH_IR_INDEXED_VERSION 3u
+#define BVH_IR_MAX_LEAVES 0x1fffffffu
 #define BVH_IR_INVALID_ID 0xffffffffu
 #define BVH_IR_BOX_SIZE 40u
 #define BVH_IR_TRIANGLE_SIZE 68u

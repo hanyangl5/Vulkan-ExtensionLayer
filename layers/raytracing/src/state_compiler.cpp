@@ -302,8 +302,8 @@ class Compiler {
             for (const auto &global : interfaces) assembly += " " + global;
             assembly += "\nOpExecutionMode %sc_main LocalSize 1 1 1\n" + execution_modes.str();
         }
-        assembly +=
-            code.annotations + annotations.str() + code.declarations + declarations.str() + code.functions + functions.str();
+        assembly += code.annotations + annotations.str() + code.declarations + declarations.str() + code.functions +
+                    qualified_functions.str() + functions.str();
         spvtools::SpirvTools tools(config.emit_compute_entry ? SPV_ENV_VULKAN_1_3 : SPV_ENV_UNIVERSAL_1_5);
         std::string error;
         tools.SetMessageConsumer([&](spv_message_level_t, const char *, const spv_position_t &p, const char *message) {
@@ -371,6 +371,7 @@ class Compiler {
     std::map<uint32_t, const Instruction *> definitions;
     std::set<uint32_t> globals, needed_types, value_types;
     std::map<uint32_t, ContinuationTypeCodec> codecs;
+    std::map<uint32_t, std::map<std::string, std::string>> qualified_codecs;
     std::map<uint32_t, const ContinuationFrameSlot *> slots;
     std::map<uint32_t, const TypedInvocationVariable *> invocation_variables;
     std::map<uint32_t, const TypedPrivateVariable *> private_variables;
@@ -393,7 +394,7 @@ class Compiler {
     uint32_t pointer_words = 0, pointer_arithmetic_type = 0;
     std::set<uint64_t> wide_constants;
     std::vector<std::string> interfaces;
-    std::ostringstream source_caps, imports, extensions, execution_modes, annotations, declarations, functions;
+    std::ostringstream source_caps, imports, extensions, execution_modes, annotations, declarations, functions, qualified_functions;
     std::string gid, gid_type, group_count, pc_pointer;
     bool BDA() const { return config.transport != TypedFrameTransport::StorageBuffer; }
     void CollectBuiltins() {
@@ -1251,8 +1252,8 @@ class Compiler {
         const auto opcode_name = std::string(spvOpcodeString(i.op));
         const bool native = (i.op == spv::OpLoad && Storage(i.words.at(3)) == spv::StorageClassStorageBuffer) ||
                             (i.op == spv::OpStore && Storage(i.words.at(1)) == spv::StorageClassStorageBuffer) ||
-                            i.op == spv::OpArrayLength || opcode_name.find("Atomic") == 0 || i.op == spv::OpPtrEqual ||
-                            i.op == spv::OpPtrNotEqual || i.op == spv::OpPtrDiff;
+                            i.op == spv::OpCopyMemory || i.op == spv::OpArrayLength || opcode_name.find("Atomic") == 0 ||
+                            i.op == spv::OpPtrEqual || i.op == spv::OpPtrNotEqual || i.op == spv::OpPtrDiff;
         if (!native) return false;
         std::vector<uint32_t> pointers;
         bool needed = false;
@@ -1270,7 +1271,8 @@ class Compiler {
         std::function<void(size_t)> emit = [&](size_t index) {
             if (index == pointers.size()) {
                 const auto opcode = std::string(spvOpcodeString(i.op));
-                const bool memory = i.op == spv::OpLoad || i.op == spv::OpStore || opcode.find("Atomic") == 0;
+                const bool memory =
+                    i.op == spv::OpLoad || i.op == spv::OpStore || i.op == spv::OpCopyMemory || opcode.find("Atomic") == 0;
                 bool null = false;
                 for (const auto &[id, route] : active_pointer_routes) {
                     (void)id;
@@ -1285,6 +1287,9 @@ class Compiler {
                         declarations << value << " = OpUndef " << Type(i.type) << "\n";
                         Save(i.result, value);
                     }
+                } else if (CopyPersistentMemory(i)) {
+                } else if (i.op == spv::OpCopyMemory) {
+                    functions << Rewrite(i.text, [&](uint32_t id) { return NativeValue(id); }) << "\n";
                 } else if (i.op == spv::OpStore) {
                     const auto value_id = i.words.at(2);
                     const auto type = Def(value_id).type;
@@ -1794,19 +1799,134 @@ class Compiler {
         }
         functions << merge << " = OpLabel\nOpBranch %sc_dispatch_merge\n";
     }
+    struct PersistentAccess {
+        uint32_t flags = 0, alignment = 0;
+    };
+    PersistentAccess ParsePersistentAccess(const Instruction &i, size_t &cursor) const {
+        if (cursor == i.words.size()) return {};
+        PersistentAccess access;
+        const auto mask = i.words.at(cursor++);
+        const uint32_t supported = spv::MemoryAccessVolatileMask | spv::MemoryAccessAlignedMask | spv::MemoryAccessNontemporalMask;
+        if (mask & ~supported) Unsupported("persistent memory operands require additional source memory-model support");
+        access.flags = mask & (spv::MemoryAccessVolatileMask | spv::MemoryAccessNontemporalMask);
+        if (mask & spv::MemoryAccessAlignedMask) {
+            if (cursor == i.words.size()) Unsupported("persistent Aligned operand has no alignment");
+            access.alignment = i.words.at(cursor++);
+            if (!access.alignment || (access.alignment & (access.alignment - 1)))
+                Unsupported("persistent Aligned operand is not a nonzero power of two");
+        }
+        // Aligned promises the source object's alignment. Relocation uses a
+        // different, numeric identity/value representation; its codecs already
+        // use the proven alignment of each actual backing word (BDA Aligned4).
+        // Copying the source promise to every backing word would be incorrect.
+        return access;
+    }
+    std::string QualifiedCodec(uint32_t type, bool store, PersistentAccess access) {
+        const auto &codec = codecs.at(type);
+        const auto &original = store ? codec.store : codec.load;
+        if (!access.flags) return original;
+        auto found = qualified_codecs.find(access.flags);
+        if (found != qualified_codecs.end()) return found->second.at(original);
+
+        // Specialize the existing typed codec graph, including aggregate and
+        // pointer-identity children. Only real frame-word accesses get source
+        // qualifiers; compiler-owned Function counters/temporaries do not.
+        using Tokens = std::vector<std::string>;
+        std::vector<Tokens> lines;
+        std::set<std::string> names, frame_pointers;
+        for (const auto &[id, value] : codecs) {
+            (void)id;
+            names.insert(value.load);
+            names.insert(value.store);
+        }
+        std::istringstream input(code.functions);
+        std::string line, function;
+        while (std::getline(input, line)) {
+            std::istringstream stream(line);
+            Tokens tokens;
+            for (std::string token; stream >> token;) tokens.push_back(std::move(token));
+            if (tokens.size() > 2 && tokens[2] == "OpFunction") function = tokens[0];
+            if (!names.count(function)) continue;
+            if (tokens.size() > 3 && (tokens[2] == "OpAccessChain" || tokens[2] == "OpConvertUToPtr") &&
+                tokens[3] == code.word_pointer_type)
+                frame_pointers.insert(tokens[0]);
+            lines.push_back(tokens);
+            if (!tokens.empty() && tokens[0] == "OpFunctionEnd") function.clear();
+        }
+        std::map<std::string, std::string> replacements;
+        for (const auto &tokens : lines)
+            if (tokens.size() > 1 && tokens[1] == "=") replacements.emplace(tokens[0], Fresh());
+        auto &specialized = qualified_codecs[access.flags];
+        for (const auto &name : names) specialized[name] = replacements.at(name);
+        std::string qualifiers;
+        if (access.flags & spv::MemoryAccessVolatileMask) qualifiers = "Volatile";
+        if (access.flags & spv::MemoryAccessNontemporalMask)
+            qualifiers += (qualifiers.empty() ? "" : "|") + std::string("Nontemporal");
+        for (auto tokens : lines) {
+            size_t mask = SIZE_MAX;
+            if (tokens.size() > 4 && tokens[2] == "OpLoad" && frame_pointers.count(tokens[4])) mask = 5;
+            if (tokens.size() > 2 && tokens[0] == "OpStore" && frame_pointers.count(tokens[1])) mask = 3;
+            if (mask != SIZE_MAX) {
+                if (tokens.size() == mask)
+                    tokens.push_back(qualifiers);
+                else
+                    tokens[mask] = qualifiers + (tokens[mask] == "None" ? "" : "|" + tokens[mask]);
+            }
+            for (auto &token : tokens) {
+                const auto replacement = replacements.find(token);
+                if (replacement != replacements.end()) token = replacement->second;
+            }
+            for (size_t n = 0; n < tokens.size(); ++n) qualified_functions << (n ? " " : "") << tokens[n];
+            qualified_functions << "\n";
+        }
+        return specialized.at(original);
+    }
     bool CopyPersistentMemory(const Instruction &i) {
         if (i.op != spv::OpCopyMemory) return false;
         const auto target = i.words.at(1), source = i.words.at(2);
-        if (!IsPersistentStorage(Storage(target)) || !IsPersistentStorage(Storage(source))) return false;
+        const bool persistent_target = IsPersistentStorage(Storage(target));
+        const bool persistent_source = IsPersistentStorage(Storage(source)) || SystemPointer(source);
+        if (!persistent_target && !persistent_source) return false;
+        for (auto pointer : {target, source}) {
+            const auto found = pointer_plans.find(pointer);
+            if (found == pointer_plans.end() || active_pointer_routes.count(pointer)) continue;
+            if (found->second.routes.size() != 1 || !pointer_routes.at(*found->second.routes.begin()).first)
+                return false;  // The outer native-root switch must select this operation first.
+        }
         // Copy the logical value, including any numeric pointer identities,
         // rather than copying the implementation's native pointer bytes. A
         // complete source value is read before the target is written, so
         // aliases and whole aggregates retain ordinary CopyMemory semantics.
-        if (i.words.size() != 3) Unsupported("persistent CopyMemory memory operands require explicit frame-codec support");
+        size_t cursor = 3;
+        const auto target_access = ParsePersistentAccess(i, cursor);
+        const auto source_access = cursor == i.words.size() ? target_access : ParsePersistentAccess(i, cursor);
+        if (cursor != i.words.size()) Unsupported("extra persistent CopyMemory operands");
         const auto type = Def(Def(target).type).words.at(3);
-        const auto source_address = Offset(source), target_address = Offset(target);
-        const auto value = Op("OpFunctionCall " + ValueType(type) + " " + codecs.at(type).load + " %sc_base " + source_address);
-        Op("OpFunctionCall " + code.void_type + " " + codecs.at(type).store + " %sc_base " + target_address + " " + value);
+        auto native_operands = [&](PersistentAccess access, uint32_t pointer) {
+            std::string mask;
+            if (access.flags & spv::MemoryAccessVolatileMask) mask = "Volatile";
+            if (access.flags & spv::MemoryAccessNontemporalMask) mask += (mask.empty() ? "" : "|") + std::string("Nontemporal");
+            auto alignment = access.alignment;
+            if (PhysicalResourcePointer(pointer)) alignment = std::max(alignment, ScalarAlignment(type));
+            if (alignment) mask += (mask.empty() ? "" : "|") + std::string("Aligned");
+            return mask.empty() ? std::string() : " " + mask + (alignment ? " " + std::to_string(alignment) : "");
+        };
+        std::string value;
+        if (persistent_source)
+            value = Op("OpFunctionCall " + ValueType(type) + " " + QualifiedCodec(type, false, source_access) + " %sc_base " +
+                       Offset(source));
+        else {
+            value = Op("OpLoad " + ResourceType(type) + " " + NativeValue(source) + native_operands(source_access, source));
+            if (ResourceType(type) != ValueType(type)) value = Op("OpCopyLogical " + ValueType(type) + " " + value);
+        }
+        if (persistent_target)
+            Op("OpFunctionCall " + code.void_type + " " + QualifiedCodec(type, true, target_access) + " %sc_base " +
+               Offset(target) + " " + value);
+        else {
+            if (ResourceType(type) != ValueType(type)) value = Op("OpCopyLogical " + ResourceType(type) + " " + value);
+            const auto pointer = NativeValue(target);
+            functions << "OpStore " << pointer << " " << value << native_operands(target_access, target) << "\n";
+        }
         return true;
     }
     void Body(const State &state) {
@@ -1872,17 +1992,26 @@ class Compiler {
                 return;
             }
             if (CopyPersistentMemory(i) || RoutedPointerOperation(i)) continue;
+            if (i.op == spv::OpCopyMemory) {
+                functions << Rewrite(i.text, [&](uint32_t id) { return NativeValue(id); }) << "\n";
+                continue;
+            }
             if (i.op == spv::OpLoad && (IsPersistentStorage(Storage(i.words.at(3))) || SystemPointer(i.words.at(3)))) {
-                if (i.words.size() != 4) Unsupported("persistent local load memory operands");
+                size_t cursor = 4;
+                const auto access = ParsePersistentAccess(i, cursor);
+                if (cursor != i.words.size()) Unsupported("extra persistent load operands");
                 auto address = Offset(i.words.at(3));
-                Save(i.result, Op("OpFunctionCall " + ValueType(i.type) + " " + codecs.at(i.type).load + " %sc_base " + address));
+                Save(i.result, Op("OpFunctionCall " + ValueType(i.type) + " " + QualifiedCodec(i.type, false, access) +
+                                  " %sc_base " + address));
             } else if (i.op == spv::OpStore) {
                 if (IsPersistentStorage(Storage(i.words.at(1)))) {
-                    if (i.words.size() != 3) Unsupported("persistent local store memory operands");
+                    size_t cursor = 3;
+                    const auto access = ParsePersistentAccess(i, cursor);
+                    if (cursor != i.words.size()) Unsupported("extra persistent store operands");
                     auto type = Def(Def(i.words.at(1)).type).words.at(3);
                     auto address = Offset(i.words.at(1));
-                    Op("OpFunctionCall " + code.void_type + " " + codecs.at(type).store + " %sc_base " + address + " " +
-                       Value(i.words.at(2)));
+                    Op("OpFunctionCall " + code.void_type + " " + QualifiedCodec(type, true, access) + " %sc_base " + address +
+                       " " + Value(i.words.at(2)));
                 } else {
                     const auto value_id = i.words.at(2);
                     const auto type = Def(value_id).type;

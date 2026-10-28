@@ -39,7 +39,17 @@ uint stride() { return args.geometry_type == 0 ? 68 : args.geometry_type == 1 ? 
 uint leaf_kind() { return args.geometry_type == 0 ? 1 : args.geometry_type == 1 ? 2 : 3; }
 uint source_leaf_kind() { return args.geometry_type == 0 ? 0 : args.geometry_type == 1 ? 3 : 2; }
 uint64_t box_base() { return uint64_t(args.capacity) * uint64_t(stride()); }
-uint64_t source_node(uint id) { return source_ir() + 128 + uint64_t(id & OFFSET_MASK); }
+bool indexed_ir() { return source32(112) == 3; }
+uint internal_slot(uint id) {
+    return indexed_ir() ? id >> 2 : uint((uint64_t(id & OFFSET_MASK) - box_base()) / uint64_t(40));
+}
+uint leaf_slot(uint id) { return indexed_ir() ? id >> 2 : (id & OFFSET_MASK) / stride(); }
+uint64_t source_node(uint id) {
+    uint64_t offset = indexed_ir() ? ((id & 3) == 1 ? box_base() + uint64_t(id >> 2) * 40ul
+                                                                    : uint64_t(id >> 2) * uint64_t(stride()))
+                                  : uint64_t(id & OFFSET_MASK);
+    return source_ir() + 128ul + offset;
+}
 uint64_t box_address(uint index) { return args.source + 128 + box_base() + uint64_t(index) * uint64_t(40); }
 uint64_t map_address(uint index) { return args.mapping + uint64_t(index) * uint64_t(4); }
 uint64_t work_map_address(uint array, uint index) {
@@ -69,6 +79,10 @@ bool contains_box(uint64_t parent, uint64_t child) {
 bool valid_reference(uint id, uint parent_index) {
     uint64_t offset = uint64_t(id & OFFSET_MASK);
     if (id == INVALID) return false;
+    if (indexed_ir()) {
+        uint index = id >> 2;
+        return (id & 3) == 1 ? index < parent_index : (id & 3) == source_leaf_kind() && index < args.capacity;
+    }
     if ((id & 3) == 1) {
         return offset >= box_base() && (offset - box_base()) % uint64_t(40) == uint64_t(0) &&
                (offset - box_base()) / uint64_t(40) < uint64_t(parent_index);
@@ -77,8 +91,8 @@ bool valid_reference(uint id, uint parent_index) {
 }
 uint output_id(uint source_id) {
     if ((source_id & 3) == 1)
-        return read32(internal_map_address(uint((uint64_t(source_id & OFFSET_MASK) - box_base()) / uint64_t(40))));
-    uint source_slot = (source_id & OFFSET_MASK) / stride();
+        return read32(internal_map_address(internal_slot(source_id)));
+    uint source_slot = leaf_slot(source_id);
     return (leaf_kind() << 30) | read32(map_address(source_slot));
 }
 void emit_leaf_record(uint source_slot, uint index) {
@@ -146,7 +160,7 @@ void emit_leaf_record(uint source_slot, uint index) {
     write64(dst + 120, public_value);
 }
 void emit_leaf(uint source_id, uint parent) {
-    uint source_slot = (source_id & OFFSET_MASK) / stride();
+    uint source_slot = leaf_slot(source_id);
     uint index = read32(map_address(source_slot));
     write32(output_region(80) + uint64_t(index) * uint64_t(4), parent);
     emit_leaf_record(source_slot, index);
@@ -170,7 +184,7 @@ void refit(uint index) {
         if ((args.options & ~0x103u) != 0 || (args.options & 1u) == 0 || args.geometry_type > 2 ||
             read32(args.source) != 0x344c4556u || read32(args.source + 4) != 2 ||
             (read32(args.source + 12) & 0x80000000u) != 0 || nodes > (args.capacity > 1 ? args.capacity - 1 : 0) ||
-            source32(108) != 0x58424856u || source32(112) != 2 || source32(116) != args.capacity ||
+            source32(108) != 0x58424856u || (source32(112) != 2 && source32(112) != 3) || source32(116) != args.capacity ||
             source32(120) != args.geometry_type || leaves != active_count() || leaves > args.capacity)
             atomicOr(Word(args.status).value, 1);
         return;
@@ -250,15 +264,15 @@ void main() {
         write32(args.output_as + 28, 0);
         write32(args.output_as + 32, 0);
         for (uint field = 96; field < 120; field += 4) write32(args.output_as + field, 0);
-        if (args.source_size < uint64_t(128) || args.geometry_type > 2 || (args.options & ~3u) != 0 ||
+        if (args.source_size < uint64_t(128) || args.capacity > 0x1fffffffu || args.geometry_type > 2 || (args.options & ~3u) != 0 ||
             ((args.options & 2u) != 0 && (args.options & 1u) == 0) ||
             ((args.options & 1u) != 0 && args.runtime_blas != uint64_t(0))) { fail(1); return; }
         uint live = active_count(), internals = internal_count();
         uint64_t root_end = box_base() + uint64_t(internals) * uint64_t(40);
-        if (source32(108) != 0x58424856u || source32(112) != 2 || source32(116) != args.capacity ||
+        if (source32(108) != 0x58424856u || (source32(112) != 2 && source32(112) != 3) || source32(116) != args.capacity ||
             source32(120) != args.geometry_type || source32(124) != 0 || live > args.capacity ||
             internals != max(live, 2) - 1 || source32(36) != 1 || source32(40) != 1 ||
-            root_end > uint64_t(0xfffffffcu) + uint64_t(40) || uint64_t(128) + root_end > args.source_size) {
+            (!indexed_ir() && root_end > uint64_t(0xfffffffcu) + uint64_t(40)) || uint64_t(128) + root_end > args.source_size) {
             fail(1); return;
         }
         return;
@@ -279,8 +293,8 @@ void main() {
             }
             if (!valid_reference(id, index)) { fail(2); continue; }
             uint64_t address;
-            if ((id & 3) == 1) address = parent_map_address(uint((uint64_t(id & OFFSET_MASK) - box_base()) / uint64_t(40)));
-            else address = map_address((id & OFFSET_MASK) / stride());
+            if ((id & 3) == 1) address = parent_map_address(internal_slot(id));
+            else address = map_address(leaf_slot(id));
             if (atomicCompSwap(Word(address).value, INVALID, RESERVED) != INVALID) { fail(4); continue; }
             if ((id & 3) == 1) atomicExchange(Word(address).value, index);
             else atomicExchange(Word(address).value, atomicAdd(Word(args.output_as + 24 + args.geometry_type * 4).value, 1));

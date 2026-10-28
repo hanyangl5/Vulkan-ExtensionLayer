@@ -25,6 +25,7 @@
 #define VK_BVH_BUILD_HELPERS_H
 
 #include "vk_bvh_defines.h"
+#include "bvh_ir_contract.h"
 
 #ifndef VK_USED_BUILD_FLAGS
 #error "VK_USED_BUILD_FLAGS needs to be set to use helpers"
@@ -36,6 +37,16 @@ layout (constant_id = BUILD_FLAGS_ID) const int BUILD_FLAGS = 0;
 layout (constant_id = ROOT_FLAGS_OFFSET_ID) const int ROOT_FLAGS_OFFSET = -1;
 layout (constant_id = MORTON_SORT_WORKGROUP_SIZE_ID) const int MORTON_SORT_WORKGROUP_SIZE = 512;
 layout (constant_id = MORTON_SORT_KVS_PER_THREAD_ID) const int MORTON_SORT_KVS_PER_THREAD = 2;
+
+/* Logical invocation IDs must not restart at each native dispatch row/plane.
+ * Use wide arithmetic before the caller's bound check: padding may extend past
+ * the 32-bit source ID range even though every valid source ID fits it. */
+uint64_t vkrt_build_global_id(uint32_t local_size) {
+    uint64_t group =
+        uint64_t(gl_WorkGroupID.x) +
+        uint64_t(gl_NumWorkGroups.x) * (uint64_t(gl_WorkGroupID.y) + uint64_t(gl_NumWorkGroups.y) * uint64_t(gl_WorkGroupID.z));
+    return group * uint64_t(local_size) + uint64_t(gl_LocalInvocationID.x);
+}
 
 /* copied from u_math.h */
 uint32_t
@@ -57,10 +68,28 @@ from_emulated_float(int32_t bits)
    return intBitsToFloat(bits < 0 ? -2147483648 - bits : bits);
 }
 
-uint32_t
-ir_id_to_offset(uint32_t id)
-{
-   return id & (~3u);
+uint64_t ir_index_to_offset(uint32_t id, uint32_t capacity, uint32_t geometry_type) {
+    uint32_t kind = id & 3u;
+    uint64_t index = uint64_t(id >> 2);
+    uint64_t stride = geometry_type == 0 ? uint64_t(68) : geometry_type == 1 ? uint64_t(32) : uint64_t(96);
+    return kind == vk_ir_node_internal ? uint64_t(capacity) * stride + index * uint64_t(40) : index * stride;
+}
+
+uint32_t ir_offset_to_index(uint64_t offset, uint32_t capacity, uint32_t geometry_type, uint32_t type) {
+    uint64_t stride = geometry_type == 0 ? uint64_t(68) : geometry_type == 1 ? uint64_t(32) : uint64_t(96);
+    uint64_t index = type == vk_ir_node_internal ? (offset - uint64_t(capacity) * stride) / uint64_t(40) : offset / stride;
+    return (uint32_t(index) << 2) | type;
+}
+
+uint64_t ir_id_to_offset(VOID_REF bvh, uint32_t id) {
+    VOID_REF header = bvh - uint64_t(BVH_IR_NODE_OFFSET);
+    uint32_t version = DEREF(REF(uint32_t)(header + uint64_t(BVH_IR_VERSION_OFFSET)));
+    if (version == BVH_IR_INDEXED_VERSION) {
+        uint32_t capacity = DEREF(REF(uint32_t)(header + uint64_t(BVH_IR_LEAF_CAPACITY_OFFSET)));
+        uint32_t geometry_type = DEREF(REF(uint32_t)(header + uint64_t(BVH_IR_GEOMETRY_TYPE_OFFSET)));
+        return ir_index_to_offset(id, capacity, geometry_type);
+    }
+    return uint64_t(id & (~3u));
 }
 
 uint32_t
@@ -69,10 +98,15 @@ ir_id_to_type(uint32_t id)
    return id & 3u;
 }
 
-uint32_t
-pack_ir_node_id(uint32_t offset, uint32_t type)
-{
-   return offset | type;
+uint32_t pack_ir_node_id(VOID_REF bvh, uint64_t offset, uint32_t type) {
+    VOID_REF header = bvh - uint64_t(BVH_IR_NODE_OFFSET);
+    uint32_t version = DEREF(REF(uint32_t)(header + uint64_t(BVH_IR_VERSION_OFFSET)));
+    if (version == BVH_IR_INDEXED_VERSION) {
+        uint32_t capacity = DEREF(REF(uint32_t)(header + uint64_t(BVH_IR_LEAF_CAPACITY_OFFSET)));
+        uint32_t geometry_type = DEREF(REF(uint32_t)(header + uint64_t(BVH_IR_GEOMETRY_TYPE_OFFSET)));
+        return ir_offset_to_index(offset, capacity, geometry_type, type);
+    }
+    return uint32_t(offset) | type;
 }
 
 float
@@ -137,74 +171,74 @@ load_vertices(VOID_REF vertices, triangle_indices indices, uint32_t vertex_forma
    triangle_vertices result;
 
    for (uint32_t i = 0; i < 3; i++) {
-      VOID_REF vertex_ptr = OFFSET(vertices, indices.index[i] * stride);
-      vec4 vertex = vec4(0.0, 0.0, 0.0, 1.0);
+       VOID_REF vertex_ptr = OFFSET(vertices, uint64_t(indices.index[i]) * uint64_t(stride));
+       vec4 vertex = vec4(0.0, 0.0, 0.0, 1.0);
 
-      switch (vertex_format) {
-      case VK_FORMAT_R32G32_SFLOAT:
-         vertex.x = DEREF(INDEX(float, vertex_ptr, 0));
-         vertex.y = DEREF(INDEX(float, vertex_ptr, 1));
-         break;
-      case VK_FORMAT_R32G32B32_SFLOAT:
-      case VK_FORMAT_R32G32B32A32_SFLOAT:
-         vertex.x = DEREF(INDEX(float, vertex_ptr, 0));
-         vertex.y = DEREF(INDEX(float, vertex_ptr, 1));
-         vertex.z = DEREF(INDEX(float, vertex_ptr, 2));
-         break;
-      case VK_FORMAT_R16G16_SFLOAT:
-         vertex.x = DEREF(INDEX(float16_t, vertex_ptr, 0));
-         vertex.y = DEREF(INDEX(float16_t, vertex_ptr, 1));
-         break;
-      case VK_FORMAT_R16G16B16_SFLOAT:
-      case VK_FORMAT_R16G16B16A16_SFLOAT:
-         vertex.x = DEREF(INDEX(float16_t, vertex_ptr, 0));
-         vertex.y = DEREF(INDEX(float16_t, vertex_ptr, 1));
-         vertex.z = DEREF(INDEX(float16_t, vertex_ptr, 2));
-         break;
-      case VK_FORMAT_R16G16_SNORM:
-         vertex.x = max(-1.0, DEREF(INDEX(int16_t, vertex_ptr, 0)) / float(0x7FFF));
-         vertex.y = max(-1.0, DEREF(INDEX(int16_t, vertex_ptr, 1)) / float(0x7FFF));
-         break;
-      case VK_FORMAT_R16G16B16A16_SNORM:
-         vertex.x = max(-1.0, DEREF(INDEX(int16_t, vertex_ptr, 0)) / float(0x7FFF));
-         vertex.y = max(-1.0, DEREF(INDEX(int16_t, vertex_ptr, 1)) / float(0x7FFF));
-         vertex.z = max(-1.0, DEREF(INDEX(int16_t, vertex_ptr, 2)) / float(0x7FFF));
-         break;
-      case VK_FORMAT_R8G8_SNORM:
-         vertex.x = max(-1.0, DEREF(INDEX(int8_t, vertex_ptr, 0)) / float(0x7F));
-         vertex.y = max(-1.0, DEREF(INDEX(int8_t, vertex_ptr, 1)) / float(0x7F));
-         break;
-      case VK_FORMAT_R8G8B8A8_SNORM:
-         vertex.x = max(-1.0, DEREF(INDEX(int8_t, vertex_ptr, 0)) / float(0x7F));
-         vertex.y = max(-1.0, DEREF(INDEX(int8_t, vertex_ptr, 1)) / float(0x7F));
-         vertex.z = max(-1.0, DEREF(INDEX(int8_t, vertex_ptr, 2)) / float(0x7F));
-         break;
-      case VK_FORMAT_R16G16_UNORM:
-         vertex.x = DEREF(INDEX(uint16_t, vertex_ptr, 0)) / float(0xFFFF);
-         vertex.y = DEREF(INDEX(uint16_t, vertex_ptr, 1)) / float(0xFFFF);
-         break;
-      case VK_FORMAT_R16G16B16A16_UNORM:
-         vertex.x = DEREF(INDEX(uint16_t, vertex_ptr, 0)) / float(0xFFFF);
-         vertex.y = DEREF(INDEX(uint16_t, vertex_ptr, 1)) / float(0xFFFF);
-         vertex.z = DEREF(INDEX(uint16_t, vertex_ptr, 2)) / float(0xFFFF);
-         break;
-      case VK_FORMAT_R8G8_UNORM:
-         vertex.x = DEREF(INDEX(uint8_t, vertex_ptr, 0)) / float(0xFF);
-         vertex.y = DEREF(INDEX(uint8_t, vertex_ptr, 1)) / float(0xFF);
-         break;
-      case VK_FORMAT_R8G8B8A8_UNORM:
-         vertex.x = DEREF(INDEX(uint8_t, vertex_ptr, 0)) / float(0xFF);
-         vertex.y = DEREF(INDEX(uint8_t, vertex_ptr, 1)) / float(0xFF);
-         vertex.z = DEREF(INDEX(uint8_t, vertex_ptr, 2)) / float(0xFF);
-         break;
-      case VK_FORMAT_A2B10G10R10_UNORM_PACK32: {
-         uint32_t data = DEREF(REF(uint32_t)(vertex_ptr));
-         vertex.x = float(data & 0x3FF) / 0x3FF;
-         vertex.y = float((data >> 10) & 0x3FF) / 0x3FF;
-         vertex.z = float((data >> 20) & 0x3FF) / 0x3FF;
-         break;
-      }
-      }
+       switch (vertex_format) {
+           case VK_FORMAT_R32G32_SFLOAT:
+               vertex.x = DEREF(INDEX(float, vertex_ptr, 0));
+               vertex.y = DEREF(INDEX(float, vertex_ptr, 1));
+               break;
+           case VK_FORMAT_R32G32B32_SFLOAT:
+           case VK_FORMAT_R32G32B32A32_SFLOAT:
+               vertex.x = DEREF(INDEX(float, vertex_ptr, 0));
+               vertex.y = DEREF(INDEX(float, vertex_ptr, 1));
+               vertex.z = DEREF(INDEX(float, vertex_ptr, 2));
+               break;
+           case VK_FORMAT_R16G16_SFLOAT:
+               vertex.x = DEREF(INDEX(float16_t, vertex_ptr, 0));
+               vertex.y = DEREF(INDEX(float16_t, vertex_ptr, 1));
+               break;
+           case VK_FORMAT_R16G16B16_SFLOAT:
+           case VK_FORMAT_R16G16B16A16_SFLOAT:
+               vertex.x = DEREF(INDEX(float16_t, vertex_ptr, 0));
+               vertex.y = DEREF(INDEX(float16_t, vertex_ptr, 1));
+               vertex.z = DEREF(INDEX(float16_t, vertex_ptr, 2));
+               break;
+           case VK_FORMAT_R16G16_SNORM:
+               vertex.x = max(-1.0, DEREF(INDEX(int16_t, vertex_ptr, 0)) / float(0x7FFF));
+               vertex.y = max(-1.0, DEREF(INDEX(int16_t, vertex_ptr, 1)) / float(0x7FFF));
+               break;
+           case VK_FORMAT_R16G16B16A16_SNORM:
+               vertex.x = max(-1.0, DEREF(INDEX(int16_t, vertex_ptr, 0)) / float(0x7FFF));
+               vertex.y = max(-1.0, DEREF(INDEX(int16_t, vertex_ptr, 1)) / float(0x7FFF));
+               vertex.z = max(-1.0, DEREF(INDEX(int16_t, vertex_ptr, 2)) / float(0x7FFF));
+               break;
+           case VK_FORMAT_R8G8_SNORM:
+               vertex.x = max(-1.0, DEREF(INDEX(int8_t, vertex_ptr, 0)) / float(0x7F));
+               vertex.y = max(-1.0, DEREF(INDEX(int8_t, vertex_ptr, 1)) / float(0x7F));
+               break;
+           case VK_FORMAT_R8G8B8A8_SNORM:
+               vertex.x = max(-1.0, DEREF(INDEX(int8_t, vertex_ptr, 0)) / float(0x7F));
+               vertex.y = max(-1.0, DEREF(INDEX(int8_t, vertex_ptr, 1)) / float(0x7F));
+               vertex.z = max(-1.0, DEREF(INDEX(int8_t, vertex_ptr, 2)) / float(0x7F));
+               break;
+           case VK_FORMAT_R16G16_UNORM:
+               vertex.x = DEREF(INDEX(uint16_t, vertex_ptr, 0)) / float(0xFFFF);
+               vertex.y = DEREF(INDEX(uint16_t, vertex_ptr, 1)) / float(0xFFFF);
+               break;
+           case VK_FORMAT_R16G16B16A16_UNORM:
+               vertex.x = DEREF(INDEX(uint16_t, vertex_ptr, 0)) / float(0xFFFF);
+               vertex.y = DEREF(INDEX(uint16_t, vertex_ptr, 1)) / float(0xFFFF);
+               vertex.z = DEREF(INDEX(uint16_t, vertex_ptr, 2)) / float(0xFFFF);
+               break;
+           case VK_FORMAT_R8G8_UNORM:
+               vertex.x = DEREF(INDEX(uint8_t, vertex_ptr, 0)) / float(0xFF);
+               vertex.y = DEREF(INDEX(uint8_t, vertex_ptr, 1)) / float(0xFF);
+               break;
+           case VK_FORMAT_R8G8B8A8_UNORM:
+               vertex.x = DEREF(INDEX(uint8_t, vertex_ptr, 0)) / float(0xFF);
+               vertex.y = DEREF(INDEX(uint8_t, vertex_ptr, 1)) / float(0xFF);
+               vertex.z = DEREF(INDEX(uint8_t, vertex_ptr, 2)) / float(0xFF);
+               break;
+           case VK_FORMAT_A2B10G10R10_UNORM_PACK32: {
+               uint32_t data = DEREF(REF(uint32_t)(vertex_ptr));
+               vertex.x = float(data & 0x3FF) / 0x3FF;
+               vertex.y = float((data >> 10) & 0x3FF) / 0x3FF;
+               vertex.z = float((data >> 20) & 0x3FF) / 0x3FF;
+               break;
+           }
+       }
 
       result.vertex[i] = vertex;
    }
@@ -215,23 +249,22 @@ load_vertices(VOID_REF vertices, triangle_indices indices, uint32_t vertex_forma
 /* Fetch the flags of child nodes used to determine whether all/no children are opaque. */
 uint32_t fetch_child_flags(VOID_REF bvh, uint32_t node_ptr)
 {
-   VOID_REF node = OFFSET(bvh, ir_id_to_offset(node_ptr));
-   switch (ir_id_to_type(node_ptr)) {
-   case vk_ir_node_triangle:
-      return (DEREF(REF(vk_ir_triangle_node)(node)).geometry_id_and_flags & VK_GEOMETRY_OPAQUE) != 0
-               ? VK_BVH_BOX_FLAG_ONLY_OPAQUE
-               : VK_BVH_BOX_FLAG_NO_OPAQUE;
-   case vk_ir_node_internal:
-      return DEREF(REF(vk_ir_box_node)(node)).flags;
-   case vk_ir_node_instance:
-      return DEREF(REF(vk_ir_instance_node)(node)).root_flags;
-   case vk_ir_node_aabb:
-      return (DEREF(REF(vk_ir_aabb_node)(node)).geometry_id_and_flags & VK_GEOMETRY_OPAQUE) != 0
-             ? VK_BVH_BOX_FLAG_ONLY_OPAQUE
-             : VK_BVH_BOX_FLAG_NO_OPAQUE;
-   default:
-      return 0;
-   }
+    VOID_REF node = OFFSET(bvh, ir_id_to_offset(bvh, node_ptr));
+    switch (ir_id_to_type(node_ptr)) {
+        case vk_ir_node_triangle:
+            return (DEREF(REF(vk_ir_triangle_node)(node)).geometry_id_and_flags & VK_GEOMETRY_OPAQUE) != 0
+                       ? VK_BVH_BOX_FLAG_ONLY_OPAQUE
+                       : VK_BVH_BOX_FLAG_NO_OPAQUE;
+        case vk_ir_node_internal:
+            return DEREF(REF(vk_ir_box_node)(node)).flags;
+        case vk_ir_node_instance:
+            return DEREF(REF(vk_ir_instance_node)(node)).root_flags;
+        case vk_ir_node_aabb:
+            return (DEREF(REF(vk_ir_aabb_node)(node)).geometry_id_and_flags & VK_GEOMETRY_OPAQUE) != 0 ? VK_BVH_BOX_FLAG_ONLY_OPAQUE
+                                                                                                       : VK_BVH_BOX_FLAG_NO_OPAQUE;
+        default:
+            return 0;
+    }
 }
 
 /** Compute ceiling of integer quotient of A divided by B.

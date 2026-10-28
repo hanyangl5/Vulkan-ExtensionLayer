@@ -41,15 +41,47 @@ struct guard_dispatch {
     PFN_vkGetInstanceProcAddr gipa;
     PFN_GetPhysicalDeviceProcAddr gpdpa;
     PFN_vkGetDeviceProcAddr gdpa;
+    uint32_t dispatch_limits[3];
     struct guard_dispatch *next;
 };
 static struct guard_dispatch *guard_instances, *guard_devices;
 static uint64_t guard_checked_calls, guard_rejected_calls, guard_device_creates, guard_shader_definitions;
+static uint64_t guard_dispatches, guard_multidimensional_dispatches;
+static uint32_t guard_dispatch_max[3], guard_dispatch_limits[3];
+static int guard_force_dispatch_limits;
 static int guard_mask_discovery;
 static int guard_configured;
 static const char *guard_log_path;
 static uint64_t guard_pid;
 static char guard_load_id[96];
+
+/* This intentionally creates a nonconforming test profile. Never infer a
+ * Vulkan mandatory-limit proof from these small, explicitly audited limits. */
+static int guard_parse_dispatch_limits(const char *text, uint32_t limits[3]) {
+    if (!text) return 0;
+    uint32_t parsed[3];
+    for (uint32_t axis = 0; axis < 3; ++axis) {
+        uint32_t value = 0;
+        if (*text < '0' || *text > '9') return 0;
+        do {
+            uint32_t digit = (uint32_t)(*text++ - '0');
+            if (value > (UINT32_MAX - digit) / 10) return 0;
+            value = value * 10 + digit;
+        } while (*text >= '0' && *text <= '9');
+        if (!value || (axis < 2 ? *text != ',' : *text != 0)) return 0;
+        parsed[axis] = value;
+        if (axis < 2) ++text;
+    }
+    memcpy(limits, parsed, sizeof(parsed));
+    return 1;
+}
+
+static void guard_clamp_dispatch_limits(VkPhysicalDeviceProperties *properties) {
+    if (!guard_force_dispatch_limits) return;
+    for (uint32_t axis = 0; axis < 3; ++axis)
+        if (properties->limits.maxComputeWorkGroupCount[axis] > guard_dispatch_limits[axis])
+            properties->limits.maxComputeWorkGroupCount[axis] = guard_dispatch_limits[axis];
+}
 
 /* The loader can unload and reload this DLL between discovery and execution
  * in one process. Counters reset on reload; record the process and a per-load
@@ -101,9 +133,18 @@ static int guard_record(const char *event, const char *kind, const char *detail)
     guard_json_string(file, detail);
     fprintf(file,
             ",\"mode\":\"%s\",\"checked\":%" PRIu64 ",\"rejected\":%" PRIu64 ",\"devices\":%" PRIu64
-            ",\"shader_definitions\":%" PRIu64 "}\n",
-            guard_mask_discovery ? "mask-discovery" : "execution-only", guard_checked_calls, guard_rejected_calls,
-            guard_device_creates, guard_shader_definitions);
+            ",\"shader_definitions\":%" PRIu64,
+            guard_force_dispatch_limits ? "forced-dispatch-limits"
+            : guard_mask_discovery      ? "mask-discovery"
+                                        : "execution-only",
+            guard_checked_calls, guard_rejected_calls, guard_device_creates, guard_shader_definitions);
+    if (guard_force_dispatch_limits)
+        fprintf(file,
+                ",\"dispatch_limits\":[%u,%u,%u],\"dispatches\":%" PRIu64 ",\"multidimensional_dispatches\":%" PRIu64
+                ",\"dispatch_max\":[%u,%u,%u]",
+                guard_dispatch_limits[0], guard_dispatch_limits[1], guard_dispatch_limits[2], guard_dispatches,
+                guard_multidimensional_dispatches, guard_dispatch_max[0], guard_dispatch_max[1], guard_dispatch_max[2]);
+    fprintf(file, "}\n");
     int ok = !ferror(file);
     if (fclose(file)) ok = 0;
     return ok;
@@ -117,8 +158,20 @@ static int guard_configure(void) {
             return 0;
         }
         guard_log_path = getenv("VKRT_NO_RT_GUARD_LOG");
+        guard_force_dispatch_limits = 0;
         const char *mask = getenv("VKRT_NO_RT_GUARD_MASK_DISCOVERY");
         guard_mask_discovery = mask && !strcmp(mask, "1");
+        const char *dispatch = getenv("VKRT_NO_RT_GUARD_DISPATCH_LIMITS");
+        if (dispatch && *dispatch) {
+            if (guard_mask_discovery || !guard_parse_dispatch_limits(dispatch, guard_dispatch_limits)) {
+                guard_unlock();
+                fprintf(
+                    stderr,
+                    "VKRT no-native-RT guard dispatch limits require three positive decimal uint32 values and no discovery mask\n");
+                return 0;
+            }
+            guard_force_dispatch_limits = 1;
+        }
         guard_configured = guard_record("start", "configuration", "native-RT rejection boundary");
     }
     int ok = guard_configured;
@@ -267,13 +320,35 @@ static VKAPI_ATTR VkResult VKAPI_CALL guard_CreateDevice(VkPhysicalDevice physic
     if (!create) return VK_ERROR_INITIALIZATION_FAILED;
     struct guard_dispatch *data = calloc(1, sizeof(*data));
     if (!data) return VK_ERROR_OUT_OF_HOST_MEMORY;
+    uint32_t dispatch_limits[3] = {0};
+    if (guard_force_dispatch_limits) {
+        PFN_vkGetPhysicalDeviceProperties properties_proc =
+            parent.gipa ? (PFN_vkGetPhysicalDeviceProperties)parent.gipa(parent.instance, "vkGetPhysicalDeviceProperties") : NULL;
+        if (!properties_proc) {
+            free(data);
+            return VK_ERROR_INITIALIZATION_FAILED;
+        }
+        VkPhysicalDeviceProperties properties = {0};
+        properties_proc(physical, &properties);
+        guard_clamp_dispatch_limits(&properties);
+        for (uint32_t axis = 0; axis < 3; ++axis) {
+            dispatch_limits[axis] = properties.limits.maxComputeWorkGroupCount[axis];
+            if (!dispatch_limits[axis]) {
+                free(data);
+                return VK_ERROR_INITIALIZATION_FAILED;
+            }
+        }
+    }
     link->u.pLayerInfo = link->u.pLayerInfo->pNext;
     VkResult result = create(physical, info, allocator, device);
     if (result != VK_SUCCESS) {
         free(data);
         return result;
     }
-    *data = (struct guard_dispatch){.key = guard_key(*device), .device = *device, .gdpa = gdpa};
+    *data = (struct guard_dispatch){.key = guard_key(*device),
+                                    .device = *device,
+                                    .gdpa = gdpa,
+                                    .dispatch_limits = {dispatch_limits[0], dispatch_limits[1], dispatch_limits[2]}};
     guard_insert(data, 1);
     guard_lock();
     ++guard_device_creates;
@@ -306,7 +381,52 @@ static VKAPI_ATTR void VKAPI_CALL guard_GetPhysicalDeviceProperties2(VkPhysicalD
     if (!next && data.gipa)
         next = (PFN_vkGetPhysicalDeviceProperties2)data.gipa(data.instance, "vkGetPhysicalDeviceProperties2KHR");
     if (next) next(physical, properties);
+    guard_clamp_dispatch_limits(&properties->properties);
     if (guard_mask_discovery) guard_mask_properties(properties->pNext);
+}
+
+static VKAPI_ATTR void VKAPI_CALL guard_GetPhysicalDeviceProperties(VkPhysicalDevice physical,
+                                                                    VkPhysicalDeviceProperties *properties) {
+    struct guard_dispatch data = guard_find(physical, 0);
+    PFN_vkGetPhysicalDeviceProperties next =
+        data.gipa ? (PFN_vkGetPhysicalDeviceProperties)data.gipa(data.instance, "vkGetPhysicalDeviceProperties") : NULL;
+    if (next) next(physical, properties);
+    guard_clamp_dispatch_limits(properties);
+}
+
+static void guard_check_dispatch(VkCommandBuffer command, const uint32_t base[3], const uint32_t groups[3], const char *name) {
+    if (!guard_force_dispatch_limits) return;
+    struct guard_dispatch data = guard_find(command, 1);
+    GUARD_CHECK_VOID(!data.device, "dispatch_limits", name);
+    for (uint32_t axis = 0; axis < 3; ++axis)
+        GUARD_CHECK_VOID(base[axis] > data.dispatch_limits[axis] || groups[axis] > data.dispatch_limits[axis] - base[axis],
+                         "dispatch_limits", name);
+    guard_lock();
+    ++guard_dispatches;
+    guard_multidimensional_dispatches += groups[1] > 1 || groups[2] > 1;
+    for (uint32_t axis = 0; axis < 3; ++axis)
+        if (guard_dispatch_max[axis] < groups[axis]) guard_dispatch_max[axis] = groups[axis];
+    guard_unlock();
+}
+
+static VKAPI_ATTR void VKAPI_CALL guard_CmdDispatch(VkCommandBuffer command, uint32_t x, uint32_t y, uint32_t z) {
+    const uint32_t base[3] = {0}, groups[3] = {x, y, z};
+    guard_check_dispatch(command, base, groups, "vkCmdDispatch");
+    GUARD_NEXT(CmdDispatch, command, "CmdDispatch")(command, x, y, z);
+}
+
+static VKAPI_ATTR void VKAPI_CALL guard_CmdDispatchBase(VkCommandBuffer command, uint32_t bx, uint32_t by, uint32_t bz, uint32_t x,
+                                                        uint32_t y, uint32_t z) {
+    const uint32_t base[3] = {bx, by, bz}, groups[3] = {x, y, z};
+    guard_check_dispatch(command, base, groups, "vkCmdDispatchBase");
+    PFN_vkCmdDispatchBase next = GUARD_NEXT(CmdDispatchBase, command, "CmdDispatchBase");
+    if (!next) next = GUARD_NEXT(CmdDispatchBase, command, "CmdDispatchBaseKHR");
+    next(command, bx, by, bz, x, y, z);
+}
+
+static VKAPI_ATTR void VKAPI_CALL guard_CmdDispatchIndirect(VkCommandBuffer command, VkBuffer buffer, VkDeviceSize offset) {
+    if (guard_force_dispatch_limits) guard_fatal("uninspectable_dispatch", "vkCmdDispatchIndirect");
+    GUARD_NEXT(CmdDispatchIndirect, command, "CmdDispatchIndirect")(command, buffer, offset);
 }
 
 static VKAPI_ATTR VkResult VKAPI_CALL guard_EnumerateDeviceExtensionProperties(VkPhysicalDevice physical, const char *layer,
@@ -741,6 +861,7 @@ static PFN_vkVoidFunction guard_proc(const char *name) {
     ENTRY(DestroyDevice);
     ENTRY(GetPhysicalDeviceFeatures2);
     ENTRY(GetPhysicalDeviceProperties2);
+    ENTRY(GetPhysicalDeviceProperties);
     ENTRY(EnumerateDeviceExtensionProperties);
     ENTRY(CreateShaderModule);
     ENTRY(CreateShadersEXT);
@@ -753,6 +874,9 @@ static PFN_vkVoidFunction guard_proc(const char *name) {
     ENTRY(CmdBindPipeline);
     ENTRY(CmdPipelineBarrier);
     ENTRY(CmdPipelineBarrier2);
+    ENTRY(CmdDispatch);
+    ENTRY(CmdDispatchBase);
+    ENTRY(CmdDispatchIndirect);
     ENTRY(QueueSubmit);
     ENTRY(QueueSubmit2);
     ENTRY(CmdSetEvent);
@@ -779,6 +903,7 @@ static PFN_vkVoidFunction guard_proc(const char *name) {
 #undef ENTRY
     if (!strcmp(name, "vkGetPhysicalDeviceFeatures2KHR")) return (PFN_vkVoidFunction)guard_GetPhysicalDeviceFeatures2;
     if (!strcmp(name, "vkGetPhysicalDeviceProperties2KHR")) return (PFN_vkVoidFunction)guard_GetPhysicalDeviceProperties2;
+    if (!strcmp(name, "vkCmdDispatchBaseKHR")) return (PFN_vkVoidFunction)guard_CmdDispatchBase;
     if (!strcmp(name, "vkCmdPipelineBarrier2KHR")) return (PFN_vkVoidFunction)guard_CmdPipelineBarrier2;
     if (!strcmp(name, "vkQueueSubmit2KHR")) return (PFN_vkVoidFunction)guard_QueueSubmit2;
     if (!strcmp(name, "vkCmdSetEvent2KHR")) return (PFN_vkVoidFunction)guard_CmdSetEvent2;

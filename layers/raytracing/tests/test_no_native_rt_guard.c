@@ -4,7 +4,8 @@
  */
 #include "no_native_rt_guard_layer.c"
 
-static unsigned failures, native_devices, native_modules, native_buffers, native_barriers, native_submits;
+static unsigned failures, native_instances, native_devices, native_modules, native_buffers, native_barriers, native_submits;
+static unsigned native_dispatches, native_base_dispatches, native_indirect_dispatches;
 #define REQUIRE(x)                                          \
     do {                                                    \
         if (!(x)) {                                         \
@@ -19,12 +20,23 @@ static int instance_dispatch, device_dispatch;
 static struct fake_handle native_instance = {&instance_dispatch}, native_physical = {&instance_dispatch};
 static struct fake_handle native_device = {&device_dispatch}, native_command = {&device_dispatch},
                           native_queue = {&device_dispatch};
+static void environment(const char *name, const char *value) {
+#ifdef _WIN32
+    _putenv_s(name, value);
+#else
+    if (*value)
+        setenv(name, value, 1);
+    else
+        unsetenv(name);
+#endif
+}
 
 static VKAPI_ATTR void VKAPI_CALL driver_unknown(void) { REQUIRE(0); }
 static VKAPI_ATTR VkResult VKAPI_CALL driver_CreateInstance(const VkInstanceCreateInfo *info,
                                                             const VkAllocationCallbacks *allocator, VkInstance *instance) {
     (void)allocator;
     REQUIRE(info->sType == VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO);
+    ++native_instances;
     *instance = (VkInstance)&native_instance;
     return VK_SUCCESS;
 }
@@ -86,9 +98,33 @@ static VKAPI_ATTR void VKAPI_CALL driver_Features2(VkPhysicalDevice physical, Vk
 static VKAPI_ATTR void VKAPI_CALL driver_Properties2(VkPhysicalDevice physical, VkPhysicalDeviceProperties2 *properties) {
     REQUIRE(physical == (VkPhysicalDevice)&native_physical);
     properties->properties.vendorID = 123;
+    properties->properties.limits.maxComputeWorkGroupCount[0] = 17;
+    properties->properties.limits.maxComputeWorkGroupCount[1] = 5;
+    properties->properties.limits.maxComputeWorkGroupCount[2] = 11;
     for (VkBaseOutStructure *p = properties->pNext; p; p = p->pNext)
         if (p->sType == VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_PROPERTIES_KHR)
             ((VkPhysicalDeviceRayTracingPipelinePropertiesKHR *)p)->maxRayRecursionDepth = 31;
+}
+static VKAPI_ATTR void VKAPI_CALL driver_Properties(VkPhysicalDevice physical, VkPhysicalDeviceProperties *properties) {
+    VkPhysicalDeviceProperties2 local = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2};
+    driver_Properties2(physical, &local);
+    *properties = local.properties;
+}
+static VKAPI_ATTR void VKAPI_CALL driver_CmdDispatch(VkCommandBuffer command, uint32_t x, uint32_t y, uint32_t z) {
+    REQUIRE(command == (VkCommandBuffer)&native_command && x <= 17 && y <= 5 && z <= 11);
+    ++native_dispatches;
+}
+static VKAPI_ATTR void VKAPI_CALL driver_CmdDispatchBase(VkCommandBuffer command, uint32_t bx, uint32_t by, uint32_t bz, uint32_t x,
+                                                         uint32_t y, uint32_t z) {
+    REQUIRE(command == (VkCommandBuffer)&native_command && (uint64_t)bx + x <= 17 && (uint64_t)by + y <= 5 &&
+            (uint64_t)bz + z <= 11);
+    ++native_base_dispatches;
+}
+static VKAPI_ATTR void VKAPI_CALL driver_CmdDispatchIndirect(VkCommandBuffer command, VkBuffer buffer, VkDeviceSize offset) {
+    (void)buffer;
+    (void)offset;
+    REQUIRE(command == (VkCommandBuffer)&native_command);
+    ++native_indirect_dispatches;
 }
 static VKAPI_ATTR VkResult VKAPI_CALL driver_Extensions(VkPhysicalDevice physical, const char *layer, uint32_t *count,
                                                         VkExtensionProperties *properties) {
@@ -113,6 +149,9 @@ static VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL driver_GDPA(VkDevice device, con
     MOCK(CreateBuffer);
     MOCK(CmdPipelineBarrier2);
     MOCK(QueueSubmit2);
+    MOCK(CmdDispatch);
+    MOCK(CmdDispatchBase);
+    MOCK(CmdDispatchIndirect);
 #undef MOCK
     return (PFN_vkVoidFunction)driver_unknown;
 }
@@ -126,11 +165,24 @@ static VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL driver_GIPA(VkInstance instance,
 #undef MOCK
     if (!strcmp(name, "vkGetPhysicalDeviceFeatures2")) return (PFN_vkVoidFunction)driver_Features2;
     if (!strcmp(name, "vkGetPhysicalDeviceProperties2")) return (PFN_vkVoidFunction)driver_Properties2;
+    if (!strcmp(name, "vkGetPhysicalDeviceProperties")) return (PFN_vkVoidFunction)driver_Properties;
     if (!strcmp(name, "vkEnumerateDeviceExtensionProperties")) return (PFN_vkVoidFunction)driver_Extensions;
     return (PFN_vkVoidFunction)driver_unknown;
 }
 
 static void policy_controls(void) {
+    uint32_t limits[3];
+    REQUIRE(guard_parse_dispatch_limits("9,7,3", limits) && limits[0] == 9 && limits[1] == 7 && limits[2] == 3);
+    REQUIRE(guard_parse_dispatch_limits("4294967295,17,1", limits) && limits[0] == UINT32_MAX && limits[1] == 17 && limits[2] == 1);
+    const char *invalid_limits[] = {NULL,     "",       "0,2,2",          "2,0,2",  "2,2,0",  "2,2",   "2,2,2,2",
+                                    "+2,2,2", "-2,2,2", "4294967296,2,2", "2,2,2x", "2,2, 2", "2,2,2 "};
+    for (unsigned i = 0; i < sizeof(invalid_limits) / sizeof(invalid_limits[0]); ++i) {
+        limits[0] = 101;
+        limits[1] = 102;
+        limits[2] = 103;
+        REQUIRE(!guard_parse_dispatch_limits(invalid_limits[i], limits));
+        REQUIRE(limits[0] == 101 && limits[1] == 102 && limits[2] == 103);
+    }
     REQUIRE(guard_extension("VK_KHR_ray_query"));
     REQUIRE(guard_extension("VK_VENDOR_ray_tracing_future"));
     REQUIRE(!guard_extension("VK_KHR_deferred_host_operations"));
@@ -178,15 +230,18 @@ static void policy_controls(void) {
 
 int main(int argc, char **argv) {
     if (argc < 2) {
-        fprintf(stderr, "usage: test_no_native_rt_guard LOG_PATH [--fatal-control]\n");
+        fprintf(stderr, "usage: test_no_native_rt_guard LOG_PATH [CONTROL_MODE]\n");
         return 2;
     }
     remove(argv[1]);
-#ifdef _WIN32
-    _putenv_s("VKRT_NO_RT_GUARD_LOG", argv[1]);
-#else
-    setenv("VKRT_NO_RT_GUARD_LOG", argv[1], 1);
-#endif
+    const char *mode = argc > 2 ? argv[2] : "";
+    const int forced = !strncmp(mode, "--forced-", 9);
+    const int invalid_config = !strcmp(mode, "--invalid-dispatch-config-control") || !strcmp(mode, "--forced-mask-config-control");
+    environment("VKRT_NO_RT_GUARD_LOG", argv[1]);
+    environment("VKRT_NO_RT_GUARD_DISPATCH_LIMITS", !strcmp(mode, "--invalid-dispatch-config-control") ? "2,0,2"
+                                                    : forced                                           ? "9,7,3"
+                                                                                                       : "");
+    environment("VKRT_NO_RT_GUARD_MASK_DISCOVERY", !strcmp(mode, "--forced-mask-config-control") ? "1" : "");
     policy_controls();
     VkNegotiateLayerInterface negotiation = {.sType = LAYER_NEGOTIATE_INTERFACE_STRUCT, .loaderLayerInterfaceVersion = 2};
     REQUIRE(vkNegotiateLoaderLayerInterfaceVersion(&negotiation) == VK_SUCCESS);
@@ -198,6 +253,10 @@ int main(int argc, char **argv) {
     VkInstance instance;
     PFN_vkCreateInstance create_instance =
         (PFN_vkCreateInstance)negotiation.pfnGetInstanceProcAddr(VK_NULL_HANDLE, "vkCreateInstance");
+    if (invalid_config) {
+        REQUIRE(create_instance(&ii, NULL, &instance) == VK_ERROR_INITIALIZATION_FAILED && !native_instances);
+        return failures ? 1 : 0;
+    }
     REQUIRE(create_instance(&ii, NULL, &instance) == VK_SUCCESS && !ic.u.pLayerInfo);
     VkLayerDeviceLink dl = {.pfnNextGetInstanceProcAddr = driver_GIPA, .pfnNextGetDeviceProcAddr = driver_GDPA};
     VkLayerDeviceCreateInfo dc = {
@@ -208,13 +267,60 @@ int main(int argc, char **argv) {
     REQUIRE(create_device((VkPhysicalDevice)&native_physical, &di, NULL, &device) == VK_SUCCESS && native_devices == 1 &&
             !dc.u.pLayerInfo);
 
-    if (argc > 2 && !strcmp(argv[2], "--fatal-control")) {
+    if (!strcmp(mode, "--fatal-control")) {
         PFN_vkCmdTraceRaysKHR trace = (PFN_vkCmdTraceRaysKHR)negotiation.pfnGetDeviceProcAddr(device, "vkCmdTraceRaysKHR");
         trace((VkCommandBuffer)&native_command, NULL, NULL, NULL, NULL, 1, 1, 1);
         return 3; /* Unreachable: forbidden void calls must terminate. */
     }
 
-    if (argc > 2 && !strcmp(argv[2], "--positive-control")) {
+    if (forced) {
+        VkPhysicalDeviceProperties legacy;
+        ((PFN_vkGetPhysicalDeviceProperties)negotiation.pfnGetInstanceProcAddr(instance, "vkGetPhysicalDeviceProperties"))(
+            (VkPhysicalDevice)&native_physical, &legacy);
+        REQUIRE(legacy.vendorID == 123 && legacy.limits.maxComputeWorkGroupCount[0] == 9 &&
+                legacy.limits.maxComputeWorkGroupCount[1] == 5 && legacy.limits.maxComputeWorkGroupCount[2] == 3);
+        const char *property_names[] = {"vkGetPhysicalDeviceProperties2", "vkGetPhysicalDeviceProperties2KHR"};
+        for (unsigned i = 0; i < 2; ++i) {
+            VkPhysicalDeviceRayTracingPipelinePropertiesKHR rt_properties = {
+                .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_PROPERTIES_KHR};
+            VkPhysicalDeviceProperties2 properties = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2,
+                                                      .pNext = &rt_properties};
+            ((PFN_vkGetPhysicalDeviceProperties2)negotiation.pfnGetInstanceProcAddr(instance, property_names[i]))(
+                (VkPhysicalDevice)&native_physical, &properties);
+            REQUIRE(properties.properties.vendorID == legacy.vendorID && properties.pNext == &rt_properties &&
+                    properties.properties.limits.maxComputeWorkGroupCount[0] == 9 &&
+                    properties.properties.limits.maxComputeWorkGroupCount[1] == 5 &&
+                    properties.properties.limits.maxComputeWorkGroupCount[2] == 3 && rt_properties.maxRayRecursionDepth == 31);
+        }
+        PFN_vkCmdDispatch dispatch = (PFN_vkCmdDispatch)negotiation.pfnGetDeviceProcAddr(device, "vkCmdDispatch");
+        PFN_vkCmdDispatchBase base = (PFN_vkCmdDispatchBase)negotiation.pfnGetDeviceProcAddr(device, "vkCmdDispatchBaseKHR");
+        if (!strcmp(mode, "--forced-dispatch-fatal-control")) {
+            dispatch((VkCommandBuffer)&native_command, 10, 1, 1);
+            return 3;
+        }
+        if (!strcmp(mode, "--forced-native-limit-fatal-control")) {
+            dispatch((VkCommandBuffer)&native_command, 1, 6, 1);
+            return 3;
+        }
+        if (!strcmp(mode, "--forced-base-fatal-control")) {
+            base((VkCommandBuffer)&native_command, UINT32_MAX, 0, 0, 1, 1, 1);
+            return 3;
+        }
+        if (!strcmp(mode, "--forced-indirect-fatal-control")) {
+            ((PFN_vkCmdDispatchIndirect)negotiation.pfnGetDeviceProcAddr(device, "vkCmdDispatchIndirect"))(
+                (VkCommandBuffer)&native_command, (VkBuffer)(uintptr_t)1, 0);
+            return 3;
+        }
+        if (strcmp(mode, "--forced-no-dispatch-control")) {
+            dispatch((VkCommandBuffer)&native_command, 8, 5, 3);
+            base((VkCommandBuffer)&native_command, 1, 1, 1, 8, 4, 2);
+            REQUIRE(native_dispatches == 1 && native_base_dispatches == 1 && !native_indirect_dispatches && guard_dispatches == 2 &&
+                    guard_multidimensional_dispatches == 2 && guard_dispatch_max[0] == 8 && guard_dispatch_max[1] == 5 &&
+                    guard_dispatch_max[2] == 3);
+        }
+    }
+
+    if (!strcmp(mode, "--positive-control") || forced) {
         uint32_t plain[] = {0x07230203, 0x00010600, 0, 5, 0, (2u << 16) | 17, 1};
         VkShaderModuleCreateInfo plain_info = {
             .sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO, .codeSize = sizeof(plain), .pCode = plain};

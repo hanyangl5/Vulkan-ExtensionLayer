@@ -46,96 +46,94 @@ main(void)
    }
 
    if (id != VK_BVH_INVALID_NODE) {
-      REF(vk_ir_triangle_node) triangle_ptr = REF(vk_ir_triangle_node)OFFSET(args.bvh, ir_id_to_offset(id));
-      vk_ir_triangle_node triangle = DEREF(triangle_ptr);
+       REF(vk_ir_triangle_node) triangle_ptr = REF(vk_ir_triangle_node) OFFSET(args.bvh, ir_id_to_offset(args.bvh, id));
+       vk_ir_triangle_node triangle = DEREF(triangle_ptr);
 
-      vec3 v0 = vec3(triangle.coords[0][0], triangle.coords[0][1], triangle.coords[0][2]);
-      vec3 v1 = vec3(triangle.coords[1][0], triangle.coords[1][1], triangle.coords[1][2]);
-      vec3 v2 = vec3(triangle.coords[2][0], triangle.coords[2][1], triangle.coords[2][2]);
+       vec3 v0 = vec3(triangle.coords[0][0], triangle.coords[0][1], triangle.coords[0][2]);
+       vec3 v1 = vec3(triangle.coords[1][0], triangle.coords[1][1], triangle.coords[1][2]);
+       vec3 v2 = vec3(triangle.coords[2][0], triangle.coords[2][1], triangle.coords[2][2]);
 
-      vk_aabb bounds = triangle.base.aabb;
+       vk_aabb bounds = triangle.base.aabb;
 
-      while (true) {
-         uint32_t target_invocation = subgroupBallotFindLSB(subgroupBallot(true));
-         uint32_t target_id = subgroupShuffle(triangle.triangle_id, target_invocation);
-         uint32_t target_geometry_id_and_flags = subgroupShuffle(triangle.geometry_id_and_flags, target_invocation);
-         if (triangle.geometry_id_and_flags != target_geometry_id_and_flags)
-            continue;
+       while (true) {
+           uint32_t target_invocation = subgroupBallotFindLSB(subgroupBallot(true));
+           uint32_t target_id = subgroupShuffle(triangle.triangle_id, target_invocation);
+           uint32_t target_geometry_id_and_flags = subgroupShuffle(triangle.geometry_id_and_flags, target_invocation);
+           if (triangle.geometry_id_and_flags != target_geometry_id_and_flags) continue;
 
-         vec3 target_v0 = subgroupShuffle(v0, target_invocation);
-         vec3 target_v1 = subgroupShuffle(v1, target_invocation);
-         vec3 target_v2 = subgroupShuffle(v2, target_invocation);
+           vec3 target_v0 = subgroupShuffle(v0, target_invocation);
+           vec3 target_v1 = subgroupShuffle(v1, target_invocation);
+           vec3 target_v2 = subgroupShuffle(v2, target_invocation);
 
-         uint32_t shared_edges = 0xffffffff;
-         if (v0 == target_v1 && v1 == target_v0)
-            shared_edges = (0 << 2) | 0;
-         else if (v1 == target_v1 && v2 == target_v0)
-            shared_edges = (1 << 2) | 0;
-         else if (v2 == target_v1 && v0 == target_v0)
-            shared_edges = (2 << 2) | 0;
-         else if (v0 == target_v2 && v1 == target_v1)
-            shared_edges = (0 << 2) | 1;
-         else if (v1 == target_v2 && v2 == target_v1)
-            shared_edges = (1 << 2) | 1;
-         else if (v2 == target_v2 && v0 == target_v1)
-            shared_edges = (2 << 2) | 1;
-         else if (v0 == target_v0 && v1 == target_v2)
-            shared_edges = (0 << 2) | 2;
-         else if (v1 == target_v0 && v2 == target_v2)
-            shared_edges = (1 << 2) | 2;
-         else if (v2 == target_v0 && v0 == target_v2)
-            shared_edges = (2 << 2) | 2;
+           uint32_t shared_edges = 0xffffffff;
+           if (v0 == target_v1 && v1 == target_v0)
+               shared_edges = (0 << 2) | 0;
+           else if (v1 == target_v1 && v2 == target_v0)
+               shared_edges = (1 << 2) | 0;
+           else if (v2 == target_v1 && v0 == target_v0)
+               shared_edges = (2 << 2) | 0;
+           else if (v0 == target_v2 && v1 == target_v1)
+               shared_edges = (0 << 2) | 1;
+           else if (v1 == target_v2 && v2 == target_v1)
+               shared_edges = (1 << 2) | 1;
+           else if (v2 == target_v2 && v0 == target_v1)
+               shared_edges = (2 << 2) | 1;
+           else if (v0 == target_v0 && v1 == target_v2)
+               shared_edges = (0 << 2) | 2;
+           else if (v1 == target_v0 && v2 == target_v2)
+               shared_edges = (1 << 2) | 2;
+           else if (v2 == target_v0 && v0 == target_v2)
+               shared_edges = (2 << 2) | 2;
 
-         uint32_t v3_index = ((shared_edges >> 2) + 2) % 3;
-         vec3 v3 = vec3(triangle.coords[v3_index][0], triangle.coords[v3_index][1], triangle.coords[v3_index][2]);
+           uint32_t v3_index = ((shared_edges >> 2) + 2) % 3;
+           vec3 v3 = vec3(triangle.coords[v3_index][0], triangle.coords[v3_index][1], triangle.coords[v3_index][2]);
 
-         bool should_merge = shared_edges != 0xffffffff && gl_SubgroupInvocationID != target_invocation;
-         driver_should_merge_primitives(should_merge, target_id, triangle.triangle_id);
-         if (should_merge) {
-            vk_aabb merged_aabb;
-            merged_aabb.min = min(bounds.min, v3);
-            merged_aabb.max = max(bounds.max, v3);
-            float surface_area = aabb_surface_area(merged_aabb);
-            float min_surface_area = subgroupMin(surface_area);
-            if (surface_area != min_surface_area)
-               should_merge = false;
-         }
+           bool should_merge = shared_edges != 0xffffffff && gl_SubgroupInvocationID != target_invocation;
+           driver_should_merge_primitives(should_merge, target_id, triangle.triangle_id);
+           if (should_merge) {
+               vk_aabb merged_aabb;
+               merged_aabb.min = min(bounds.min, v3);
+               merged_aabb.max = max(bounds.max, v3);
+               float surface_area = aabb_surface_area(merged_aabb);
+               float min_surface_area = subgroupMin(surface_area);
+               if (surface_area != min_surface_area) should_merge = false;
+           }
 
-         uvec4 merge_mask = subgroupBallot(should_merge);
-         if (merge_mask == uvec4(0)) {
-            if (gl_SubgroupInvocationID == target_invocation)
+           uvec4 merge_mask = subgroupBallot(should_merge);
+           if (merge_mask == uvec4(0)) {
+               if (gl_SubgroupInvocationID == target_invocation)
+                   break;
+               else
+                   continue;
+           }
+
+           uint32_t merge_invocation = subgroupBallotFindLSB(merge_mask);
+           v3 = subgroupShuffle(v3, merge_invocation);
+           shared_edges = subgroupShuffle(shared_edges, merge_invocation);
+
+           uint32_t triangle_id1 = subgroupShuffle(triangle.triangle_id, merge_invocation);
+
+           if (gl_SubgroupInvocationID == target_invocation) {
+               REF(vk_ir_triangle_node_quad) quad = vk_ir_triangle_node_get_quad_ref(triangle_ptr);
+               DEREF(quad).coords[0] = v3.x;
+               DEREF(quad).coords[1] = v3.y;
+               DEREF(quad).coords[2] = v3.z;
+
+               bounds.min = min(bounds.min, v3);
+               bounds.max = max(bounds.max, v3);
+               DEREF(triangle_ptr).base.aabb = bounds;
+
+               triangle_id1 |= shared_edges << 28;
+
+               DEREF(quad).triangle_id = triangle_id1;
+
                break;
-            else
-               continue;
-         }
-
-         uint32_t merge_invocation = subgroupBallotFindLSB(merge_mask);
-         v3 = subgroupShuffle(v3, merge_invocation);
-         shared_edges = subgroupShuffle(shared_edges, merge_invocation);
-
-         uint32_t triangle_id1 = subgroupShuffle(triangle.triangle_id, merge_invocation);
-
-         if (gl_SubgroupInvocationID == target_invocation) {
-            REF(vk_ir_triangle_node_quad) quad = vk_ir_triangle_node_get_quad_ref(triangle_ptr);
-            DEREF(quad).coords[0] = v3.x;
-            DEREF(quad).coords[1] = v3.y;
-            DEREF(quad).coords[2] = v3.z;
-
-            bounds.min = min(bounds.min, v3);
-            bounds.max = max(bounds.max, v3);
-            DEREF(triangle_ptr).base.aabb = bounds;
-
-            triangle_id1 |= shared_edges << 28;
-
-            DEREF(quad).triangle_id = triangle_id1;
-
-            break;
-         }
-         if (gl_SubgroupInvocationID == merge_invocation) {
-            id = VK_BVH_INVALID_NODE;
-            break;
-         }
-      }
+           }
+           if (gl_SubgroupInvocationID == merge_invocation) {
+               id = VK_BVH_INVALID_NODE;
+               break;
+           }
+       }
 
       if (VK_TEST_BUILD_FLAG_64BIT_KEYS)
          DEREF(key64_id).id = id;

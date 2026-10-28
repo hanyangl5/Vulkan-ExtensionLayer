@@ -253,46 +253,46 @@ build_instance(inout vk_aabb bounds, VOID_REF src_ptr, VOID_REF dst_ptr, uint32_
 void
 main(void)
 {
-   uint32_t global_id = gl_GlobalInvocationID.x;
-   if (global_id >= args.primitive_count)
-      return;
-   uint32_t primitive_id = args.geom_data.first_id + global_id;
+    uint64_t global_id64 = vkrt_build_global_id(gl_WorkGroupSize.x);
+    if (global_id64 >= args.primitive_count) return;
+    uint32_t global_id = uint32_t(global_id64);
+    uint32_t primitive_id = args.geom_data.first_id + global_id;
 
-   uint32_t src_offset = global_id * args.geom_data.stride;
+    uint64_t src_offset = uint64_t(global_id) * uint64_t(args.geom_data.stride);
 
-   uint32_t dst_stride = vk_ir_node_size(args.geom_data.geometry_type);
-   uint32_t node_type;
-   if (args.geom_data.geometry_type == VK_GEOMETRY_TYPE_TRIANGLES_KHR)
-      node_type = vk_ir_node_triangle;
-   else if (args.geom_data.geometry_type == VK_GEOMETRY_TYPE_AABBS_KHR)
-      node_type = vk_ir_node_aabb;
-   else
-      node_type = vk_ir_node_instance;
+    uint32_t dst_stride = vk_ir_node_size(args.geom_data.geometry_type);
+    uint32_t node_type;
+    if (args.geom_data.geometry_type == VK_GEOMETRY_TYPE_TRIANGLES_KHR)
+        node_type = vk_ir_node_triangle;
+    else if (args.geom_data.geometry_type == VK_GEOMETRY_TYPE_AABBS_KHR)
+        node_type = vk_ir_node_aabb;
+    else
+        node_type = vk_ir_node_instance;
 
-   uint32_t dst_offset = args.leaf_offset + global_id * dst_stride;
-   VOID_REF dst_ptr = OFFSET(args.bvh, dst_offset);
+    uint64_t dst_offset = args.leaf_offset + uint64_t(global_id) * uint64_t(dst_stride);
+    VOID_REF dst_ptr = OFFSET(args.bvh, dst_offset);
 
-   vk_aabb bounds;
-   bool is_active;
-   if (args.geom_data.geometry_type == VK_GEOMETRY_TYPE_TRIANGLES_KHR) {
-      is_active = build_triangle(bounds, dst_ptr, args.geom_data, global_id);
-   } else if (args.geom_data.geometry_type == VK_GEOMETRY_TYPE_AABBS_KHR) {
-      VOID_REF src_ptr = OFFSET(args.geom_data.data, src_offset);
-      is_active = build_aabb(bounds, src_ptr, dst_ptr, args.geom_data.geometry_id, global_id);
-   } else {
-      VOID_REF src_ptr = OFFSET(args.geom_data.data, src_offset);
-      /* arrayOfPointers */
-      if (args.geom_data.stride == 8) {
-         src_ptr = DEREF(REF(VOID_REF)(src_ptr));
-      }
+    vk_aabb bounds;
+    bool is_active;
+    if (args.geom_data.geometry_type == VK_GEOMETRY_TYPE_TRIANGLES_KHR) {
+        is_active = build_triangle(bounds, dst_ptr, args.geom_data, global_id);
+    } else if (args.geom_data.geometry_type == VK_GEOMETRY_TYPE_AABBS_KHR) {
+        VOID_REF src_ptr = OFFSET(args.geom_data.data, src_offset);
+        is_active = build_aabb(bounds, src_ptr, dst_ptr, args.geom_data.geometry_id, global_id);
+    } else {
+        VOID_REF src_ptr = OFFSET(args.geom_data.data, src_offset);
+        /* arrayOfPointers */
+        if (args.geom_data.stride == 8) {
+            src_ptr = DEREF(REF(VOID_REF)(src_ptr));
+        }
 
-      is_active = build_instance(bounds, src_ptr, dst_ptr, global_id);
-   }
+        is_active = build_instance(bounds, src_ptr, dst_ptr, global_id);
+    }
 
    if (VK_TEST_BUILD_FLAG_ALWAYS_ACTIVE)
       is_active = true;
 
-   uint32_t id = is_active ? pack_ir_node_id(dst_offset, node_type) : VK_BVH_INVALID_NODE;
+   uint32_t id = is_active ? pack_ir_node_id(args.bvh, dst_offset, node_type) : VK_BVH_INVALID_NODE;
    DEREF(INDEX(uint32_t, args.ids, primitive_id)) = id;
 
    uvec4 ballot = subgroupBallot(is_active);

@@ -1,0 +1,38 @@
+// Copyright 2026 The Khronos Group Inc.
+// SPDX-License-Identifier: Apache-2.0
+#version 460
+#include "vkrt_bvh_preamble.h"
+#define VK_USED_BUILD_FLAGS 0
+#include "vk_bvh_helpers.h"
+layout(local_size_x = 64) in;
+layout(push_constant, scalar) uniform Args {
+    uint64_t cases, outputs;
+    uint count;
+} args;
+struct Case {
+    uint id, capacity, geometry_type, reserved;
+    uint64_t base, expected_address, expected_offset;
+};
+TYPE(Case, 8);
+void main() {
+    uint i = gl_GlobalInvocationID.x;
+    if (i >= args.count) return;
+    Case test = DEREF(INDEX(Case, args.cases, i));
+    // These are the exact codecs used by the production v3 pack/decode route.
+    uint64_t offset = ir_index_to_offset(test.id, test.capacity, test.geometry_type);
+    uint packed = ir_offset_to_index(offset, test.capacity, test.geometry_type, test.id & 3u);
+    uint64_t address = test.base + offset;
+    uint error = uint(offset != test.expected_offset) | (uint(address != test.expected_address) << 1) |
+                 (uint(packed != test.id) << 2);
+    // The artificial segment base is an integer, never dereferenced itself.
+    // Only the fully decoded, independently checked real BDA is converted to a
+    // pointer. An accidental narrow multiply produces an error, not a bad read.
+    uint value = 0;
+    if (error == 0) value = DEREF(REF(uint32_t)(address));
+    VOID_REF destination = args.outputs + uint64_t(i) * 32ul;
+    DEREF(REF(uint32_t)(destination)) = uint(offset);
+    DEREF(REF(uint32_t)(destination + 4ul)) = uint(offset >> 32);
+    DEREF(REF(uint32_t)(destination + 8ul)) = packed;
+    DEREF(REF(uint32_t)(destination + 12ul)) = value;
+    DEREF(REF(uint32_t)(destination + 16ul)) = error;
+}

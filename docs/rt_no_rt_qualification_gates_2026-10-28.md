@@ -11,6 +11,12 @@ if subsequent changes move the listed lines. The separate frozen-DLL 50-case
 CTS run was in progress when this document was prepared; no outcome from that
 run is asserted here. No build, GPU test, or CTS run was performed for this audit.
 
+Subsequent [indexed-construction and acquisition work](rt_indexed_build_acquire_2026-10-28.md)
+removes the audited 4-GiB/X-only construction gates and adds the two mandatory
+query capability requirements to the public candidate. Those later changes do
+not retroactively alter this audit or close its remaining discovery, property,
+queue/group, allocation and physical-device qualification gates.
+
 ## Fixed specification and SDK baseline
 
 The local baseline is Vulkan SDK **1.4.357.0**, with `VK_HEADER_VERSION=357` in

@@ -45,8 +45,8 @@ uint32_t
 push_node(uint32_t children[2], vk_aabb bounds[2])
 {
    uint32_t internal_node_index = atomicAdd(DEREF(args.header).ir_internal_node_count, 1);
-   uint32_t dst_offset = args.internal_node_offset + internal_node_index * SIZEOF(vk_ir_box_node);
-   uint32_t dst_id = pack_ir_node_id(dst_offset, vk_ir_node_internal);
+   uint64_t dst_offset = args.internal_node_offset + uint64_t(internal_node_index) * uint64_t(SIZEOF(vk_ir_box_node));
+   uint32_t dst_id = pack_ir_node_id(args.bvh, dst_offset, vk_ir_node_internal);
    REF(vk_ir_box_node) dst_node = REF(vk_ir_box_node)(OFFSET(args.bvh, dst_offset));
 
    vk_aabb total_bounds;
@@ -120,7 +120,7 @@ load_bounds(VOID_REF ids, uint32_t iter, uint32_t task_index, uint32_t lds_base,
       if (id == VK_BVH_INVALID_NODE)
          continue;
 
-      VOID_REF addr = OFFSET(args.bvh, ir_id_to_offset(id));
+      VOID_REF addr = OFFSET(args.bvh, ir_id_to_offset(args.bvh, id));
       REF(vk_ir_node) node = REF(vk_ir_node)(addr);
 
       shared_bounds[i - lds_base] = DEREF(node).aabb;
@@ -149,7 +149,7 @@ main(void)
    if (DEREF(args.header).active_leaf_count <= 2) {
       if (gl_GlobalInvocationID.x == 0) {
          uint32_t internal_node_index = atomicAdd(DEREF(args.header).ir_internal_node_count, 1);
-         uint32_t dst_offset = args.internal_node_offset + internal_node_index * SIZEOF(vk_ir_box_node);
+         uint64_t dst_offset = args.internal_node_offset + uint64_t(internal_node_index) * uint64_t(SIZEOF(vk_ir_box_node));
          REF(vk_ir_box_node) dst_node = REF(vk_ir_box_node)(OFFSET(args.bvh, dst_offset));
 
          vk_aabb total_bounds;
@@ -165,7 +165,7 @@ main(void)
                child_id = DEREF(INDEX(key32_id_pair, src_ids, i)).id;
 
             if (child_id != VK_BVH_INVALID_NODE) {
-               VOID_REF node = OFFSET(args.bvh, ir_id_to_offset(child_id));
+               VOID_REF node = OFFSET(args.bvh, ir_id_to_offset(args.bvh, child_id));
                REF(vk_ir_node) child = REF(vk_ir_node)(node);
                vk_aabb bounds = DEREF(child).aabb;
 

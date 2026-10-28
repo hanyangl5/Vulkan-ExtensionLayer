@@ -40,11 +40,12 @@ layout(push_constant) uniform CONSTS
 void
 main(void)
 {
-   uint32_t global_id = gl_GlobalInvocationID.x;
+   uint64_t global_id64 = vkrt_build_global_id(gl_WorkGroupSize.x);
 
    uint32_t internal_node_count = max(DEREF(args.header).active_leaf_count, 2) - 1;
-   if (global_id >= internal_node_count)
+   if (global_id64 >= internal_node_count)
       return;
+   uint32_t global_id = uint32_t(global_id64);
 
    uint32_t idx = global_id;
 
@@ -72,8 +73,8 @@ main(void)
        */
       uint32_t dst_idx = atomicAdd(DEREF(args.header).ir_internal_node_count, 1);
 
-      uint32_t current_offset = args.internal_node_base + dst_idx * SIZEOF(vk_ir_box_node);
-      uint32_t current_id = pack_ir_node_id(current_offset, vk_ir_node_internal);
+      uint64_t current_offset = args.internal_node_base + uint64_t(dst_idx) * uint64_t(SIZEOF(vk_ir_box_node));
+      uint32_t current_id = pack_ir_node_id(args.bvh, current_offset, vk_ir_node_internal);
 
       REF(vk_ir_box_node) node = REF(vk_ir_box_node)(OFFSET(args.bvh, current_offset));
       vk_aabb bounds = previous_bounds;
@@ -92,7 +93,7 @@ main(void)
 
       if (previous_child_index == -1) {
          if (children[0] != VK_BVH_INVALID_NODE) {
-            uint32_t child_offset = ir_id_to_offset(children[0]);
+            uint64_t child_offset = ir_id_to_offset(args.bvh, children[0]);
             REF(vk_ir_node) child = REF(vk_ir_node)(OFFSET(args.bvh, child_offset));
             vk_aabb child_bounds = DEREF(child).aabb;
             bounds.min = min(bounds.min, child_bounds.min);
@@ -109,7 +110,7 @@ main(void)
 
       /* Fetch the non-cached child */
       if (children[1 - previous_child_index] != VK_BVH_INVALID_NODE) {
-         uint32_t child_offset = ir_id_to_offset(children[1 - previous_child_index]);
+         uint64_t child_offset = ir_id_to_offset(args.bvh, children[1 - previous_child_index]);
          REF(vk_ir_node) child = REF(vk_ir_node)(OFFSET(args.bvh, child_offset));
          vk_aabb child_bounds = DEREF(child).aabb;
          bounds.min = min(bounds.min, child_bounds.min);

@@ -87,7 +87,87 @@ def main(executable, output):
                 pass
             else:
                 raise AssertionError(f"audit accepted invalid evidence mutation {index}")
-    print(f"No-native-RT guard controls PASS: positive execution, discovery/reload segments, 13 blocked attacks, fatal void-call exit86, {len(mutations)} invalid-evidence rejections")
+
+    expected_limits = (9, 7, 3)
+    forced_cases = (("forced", "--forced-dispatch-control", 0, None),
+                    ("forced-empty", "--forced-no-dispatch-control", 0, None),
+                    ("forced-oversize", "--forced-dispatch-fatal-control", 86, "dispatch_limits"),
+                    ("forced-native", "--forced-native-limit-fatal-control", 86, "dispatch_limits"),
+                    ("forced-base", "--forced-base-fatal-control", 86, "dispatch_limits"),
+                    ("forced-indirect", "--forced-indirect-fatal-control", 86, "uninspectable_dispatch"),
+                    ("forced-invalid", "--invalid-dispatch-config-control", 0, None),
+                    ("forced-mask", "--forced-mask-config-control", 0, None))
+    for name, mode, expected_exit, reject_kind in forced_cases:
+        path = (output / f"{name}.jsonl").resolve()
+        result = subprocess.run([str(executable), str(path), mode], **common)
+        (output / f"{name}.stdout.txt").write_bytes(result.stdout)
+        if result.returncode != expected_exit:
+            raise AssertionError(f"{name} returned {result.returncode}, expected {expected_exit}: {result.stdout.decode(errors='replace')}")
+        if name in ("forced-invalid", "forced-mask"):
+            assert not path.exists(), "invalid configuration must fail before starting a guard instance"
+            continue
+        forced_records = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
+        try:
+            audit(path)
+        except ValueError:
+            pass
+        else:
+            raise AssertionError(f"default auditor accepted artificial dispatch limits in {name}")
+        if name == "forced":
+            forced_good = audit(path, expected_dispatch_limits=expected_limits)
+            assert forced_good["mode"] == "forced-dispatch-limits" and forced_good["dispatches"] == 2
+            assert forced_good["multidimensional_dispatches"] == 2 and forced_good["dispatch_max"] == [8, 5, 3]
+            assert forced_good["dispatch_limits"] == list(expected_limits)
+            good_forced_records = forced_records
+        else:
+            if reject_kind:
+                rejects = [r for r in forced_records if r["event"] == "reject"]
+                assert len(rejects) == 1 and rejects[0]["kind"] == reject_kind
+            try:
+                audit(path, expected_dispatch_limits=expected_limits)
+            except ValueError:
+                pass
+            else:
+                raise AssertionError(f"dedicated auditor accepted rejected or dispatch-free evidence {name}")
+
+    forced_discovery = copy.deepcopy(discovery)
+    for record in forced_discovery:
+        record.update(pid=good_forced_records[0]["pid"], mode="forced-dispatch-limits", dispatch_limits=list(expected_limits),
+                      dispatches=0, multidimensional_dispatches=0, dispatch_max=[0, 0, 0])
+    assert audit_records(forced_discovery + good_forced_records, expected_dispatch_limits=expected_limits)["loads"] == 2
+    forced_mutations = []
+    for change in ("limits", "empty", "max", "multi", "bool", "mode"):
+        bad = copy.deepcopy(good_forced_records)
+        if change == "limits":
+            bad[-1]["dispatch_limits"][2] = 4
+        elif change == "empty":
+            bad[-1]["dispatches"] = bad[-1]["multidimensional_dispatches"] = 0
+        elif change == "max":
+            bad[-1]["dispatch_max"][0] = 10
+        elif change == "multi":
+            bad[-1]["multidimensional_dispatches"] = 3
+        elif change == "bool":
+            bad[-1]["dispatches"] = True
+        else:
+            bad[-1]["mode"] = "execution-only"
+        forced_mutations.append(bad)
+    for index, bad in enumerate(forced_mutations):
+        try:
+            audit_records(bad, expected_dispatch_limits=expected_limits)
+        except ValueError:
+            pass
+        else:
+            raise AssertionError(f"dedicated auditor accepted forced-profile mutation {index}")
+    disguised = copy.deepcopy(good_forced_records)
+    for record in disguised:
+        record["mode"] = "execution-only"
+    try:
+        audit_records(disguised)
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("default auditor accepted forced fields relabeled as execution-only")
+    print(f"No-native-RT guard controls PASS: positive execution, discovery/reload segments, 13 blocked attacks, fatal void-call exit86, {len(mutations)} invalid-evidence rejections; forced-limit property/dispatch/base/indirect/configuration controls and {len(forced_mutations)} dedicated-audit mutations")
 
 
 if __name__ == "__main__":

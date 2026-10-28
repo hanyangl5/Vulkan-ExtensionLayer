@@ -579,6 +579,11 @@ if(BUILD_TESTING)
    set_target_properties(test_sync_execution PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED ON)
    add_test(NAME vkrt.sync_execution COMMAND test_sync_execution)
    set_tests_properties(vkrt.sync_execution PROPERTIES LABELS "offline;no_native_rt")
+   add_executable(test_build_dispatch tests/test_build_dispatch.c)
+   target_include_directories(test_build_dispatch PRIVATE src)
+   set_target_properties(test_build_dispatch PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED ON)
+   add_test(NAME vkrt.build_dispatch COMMAND test_build_dispatch)
+   set_tests_properties(vkrt.build_dispatch PROPERTIES LABELS "offline;no_native_rt")
    add_executable(test_query_replay tests/test_query_replay.c)
    target_include_directories(test_query_replay PRIVATE src tests ${Vulkan_INCLUDE_DIRS})
    target_link_libraries(test_query_replay PRIVATE ${Vulkan_LIBRARIES} Threads::Threads)
@@ -587,6 +592,18 @@ if(BUILD_TESTING)
    set_tests_properties(vkrt.query_replay.software PROPERTIES
       ENVIRONMENT "VK_LAYER_PATH=${CMAKE_BINARY_DIR}/layers;VK_INSTANCE_LAYERS=VK_LAYER_VKRT_SOFTWARE_RAY_QUERY;VK_LOADER_LAYERS_DISABLE=~implicit~"
       LABELS "gpu;query_publication" SKIP_RETURN_CODE 77 TIMEOUT 180)
+   add_executable(test_query_acquire tests/test_query_acquire.c)
+   target_include_directories(test_query_acquire PRIVATE src tests ${Vulkan_INCLUDE_DIRS})
+   target_link_libraries(test_query_acquire PRIVATE ${Vulkan_LIBRARIES} Threads::Threads)
+   set_target_properties(test_query_acquire PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED ON)
+   add_test(NAME vkrt.query_acquire.software COMMAND test_query_acquire)
+   set_tests_properties(vkrt.query_acquire.software PROPERTIES
+      ENVIRONMENT "VK_LAYER_PATH=${CMAKE_BINARY_DIR}/layers;VK_INSTANCE_LAYERS=VK_LAYER_VKRT_SOFTWARE_RAY_QUERY;ENABLE_VKRT_SOFTWARE_RAY_QUERY=1;VK_LOADER_LAYERS_DISABLE=~implicit~"
+      LABELS "gpu;query_publication;no_native_rt" SKIP_RETURN_CODE 77 TIMEOUT 180)
+   add_test(NAME vkrt.query_acquire.native COMMAND test_query_acquire)
+   set_tests_properties(vkrt.query_acquire.native PROPERTIES
+      ENVIRONMENT "VK_INSTANCE_LAYERS=;VK_LOADER_LAYERS_DISABLE=~implicit~"
+      LABELS "gpu;native_rt" SKIP_RETURN_CODE 77 TIMEOUT 180)
    add_executable(test_query_signal_order tests/test_query_signal_order.c)
    target_include_directories(test_query_signal_order PRIVATE src tests ${Vulkan_INCLUDE_DIRS})
    target_link_libraries(test_query_signal_order PRIVATE ${Vulkan_LIBRARIES} Threads::Threads)

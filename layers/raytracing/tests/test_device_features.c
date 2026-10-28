@@ -305,6 +305,7 @@ static VKAPI_ATTR VkResult VKAPI_CALL mock_create(VkPhysicalDevice p, const VkDe
     unsigned core2 = 0, storage16 = 0, storage8 = 0, int8 = 0, scalar = 0, memory = 0, bda = 0;
     unsigned descriptor = 0;
     unsigned pointers = 0;
+    unsigned host_reset = 0, atomic64 = 0;
     for (const VkBaseInStructure *next = info->pNext; next; next = next->pNext) {
         switch (next->sType) {
             case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2: {
@@ -335,6 +336,8 @@ static VKAPI_ATTR VkResult VKAPI_CALL mock_create(VkPhysicalDevice p, const VkDe
                 ++memory;
                 ++bda;
                 ++descriptor;
+                ++host_reset;
+                ++atomic64;
                 break;
             case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_INDEXING_FEATURES:
                 EXPECT_NODE(VkPhysicalDeviceDescriptorIndexingFeatures, next,
@@ -350,11 +353,13 @@ static VKAPI_ATTR VkResult VKAPI_CALL mock_create(VkPhysicalDevice p, const VkDe
                 EXPECT_NODE(
                     VkPhysicalDeviceHostQueryResetFeatures, next,
                     if (query_capabilities == 3 && vkrt_device_uses_virtual_rt(original)) expected.hostQueryReset = VK_TRUE);
+                ++host_reset;
                 break;
             case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_ATOMIC_INT64_FEATURES:
                 EXPECT_NODE(VkPhysicalDeviceShaderAtomicInt64Features, next,
                             if (query_capabilities == 3 && vkrt_device_uses_virtual_rt(original))
                                 expected.shaderBufferInt64Atomics = VK_TRUE);
+                ++atomic64;
                 break;
             case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_16BIT_STORAGE_FEATURES:
                 EXPECT_NODE(VkPhysicalDevice16BitStorageFeatures, next, expected.storageBuffer16BitAccess = VK_TRUE);
@@ -408,6 +413,8 @@ static VKAPI_ATTR VkResult VKAPI_CALL mock_create(VkPhysicalDevice p, const VkDe
     REQUIRE(core2 <= 1 && storage16 == 1 && storage8 == 1 && int8 == 1 && scalar == 1 && memory == 1 && bda == 1);
     REQUIRE(descriptor <= 1 && (!expect_private_dynamic_indexing || descriptor == 1));
     REQUIRE(pointers <= 1 && (!expect_private_dynamic_indexing || pointers == 1));
+    REQUIRE(host_reset <= 1 && atomic64 <= 1);
+    if (vkrt_device_uses_virtual_rt(original)) REQUIRE(host_reset == 1 && atomic64 == 1);
     if (downstream_result == VK_SUCCESS) *device = created_device;
     return downstream_result;
 }
@@ -494,7 +501,7 @@ static void defaults(void) {
     missing_resource = 0;
     downstream_result = VK_SUCCESS;
     expect_private_dynamic_indexing = false;
-    query_capabilities = 0;
+    query_capabilities = 3;
 }
 
 static void non_rt_boundary(void) {
@@ -750,7 +757,8 @@ static void versions_and_opaque_chains(void) {
     static const char *required[] = {VK_KHR_16BIT_STORAGE_EXTENSION_NAME,       VK_KHR_8BIT_STORAGE_EXTENSION_NAME,
                                      VK_KHR_SHADER_FLOAT16_INT8_EXTENSION_NAME, VK_EXT_SCALAR_BLOCK_LAYOUT_EXTENSION_NAME,
                                      VK_KHR_VULKAN_MEMORY_MODEL_EXTENSION_NAME, VK_KHR_BUFFER_DEVICE_ADDRESS_EXTENSION_NAME,
-                                     VK_KHR_VARIABLE_POINTERS_EXTENSION_NAME,   VK_EXT_DESCRIPTOR_INDEXING_EXTENSION_NAME};
+                                     VK_KHR_VARIABLE_POINTERS_EXTENSION_NAME,   VK_EXT_DESCRIPTOR_INDEXING_EXTENSION_NAME,
+                                     VK_EXT_HOST_QUERY_RESET_EXTENSION_NAME,    VK_KHR_SHADER_ATOMIC_INT64_EXTENSION_NAME};
     for (uint32_t instance_api = 0; instance_api < 3; ++instance_api) {
         for (uint32_t device_api = 0; device_api < 3; ++device_api) {
             instance.api_version = VK_MAKE_VERSION(1, instance_api, 0);
@@ -875,7 +883,8 @@ static void descriptor_array_feature(void) {
     const char *required[] = {VK_KHR_16BIT_STORAGE_EXTENSION_NAME,       VK_KHR_8BIT_STORAGE_EXTENSION_NAME,
                               VK_KHR_SHADER_FLOAT16_INT8_EXTENSION_NAME, VK_EXT_SCALAR_BLOCK_LAYOUT_EXTENSION_NAME,
                               VK_KHR_VULKAN_MEMORY_MODEL_EXTENSION_NAME, VK_KHR_BUFFER_DEVICE_ADDRESS_EXTENSION_NAME,
-                              VK_KHR_VARIABLE_POINTERS_EXTENSION_NAME,   VK_EXT_DESCRIPTOR_INDEXING_EXTENSION_NAME};
+                              VK_KHR_VARIABLE_POINTERS_EXTENSION_NAME,   VK_EXT_DESCRIPTOR_INDEXING_EXTENSION_NAME,
+                              VK_EXT_HOST_QUERY_RESET_EXTENSION_NAME,    VK_KHR_SHADER_ATOMIC_INT64_EXTENSION_NAME};
     for (uint32_t application_version = 0; application_version < 3; ++application_version) {
         for (uint32_t device_version = 0; device_version < 3; ++device_version) {
             instance.api_version = VK_MAKE_VERSION(1, application_version, 0);
@@ -900,7 +909,8 @@ static void descriptor_array_feature(void) {
     basic.enabledExtensionCount = 1;
     expected_extensions[0] = descriptor_alias;
     expected_extension_count = 1;
-    for (unsigned i = 1; i < 6; ++i) expected_extensions[expected_extension_count++] = required[i];
+    for (unsigned i = 1; i < VKRT_ARRAY_SIZE(required); ++i)
+        if (i != 6 && i != 7) expected_extensions[expected_extension_count++] = required[i];
     REQUIRE(call(&basic) == VK_SUCCESS);
 
     instance.api_version = VK_API_VERSION_1_0;
@@ -1162,6 +1172,68 @@ static void descriptor_profile_boundary(void) {
     REQUIRE(call_non_rt(&basic) == VK_SUCCESS && resource_queries == before);
 }
 
+static void query_backend_boundary(void) {
+    const char *rt_extensions[] = {VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME, VK_KHR_RAY_QUERY_EXTENSION_NAME,
+                                   VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME};
+    for (unsigned capabilities = 0; capabilities < 4; ++capabilities) {
+        defaults();
+        query_capabilities = capabilities;
+        expect_private_dynamic_indexing = true;
+        const VkResult expected = capabilities == 3 ? VK_SUCCESS : VK_ERROR_FEATURE_NOT_PRESENT;
+        struct vkrt_resource_profile profile, saved_profile;
+        memset(&profile, 0xa5, sizeof(profile));
+        saved_profile = profile;
+        REQUIRE(vkrt_native_backend_eligible(&instance, physical));
+        REQUIRE(vkrt_virtual_rt_resource_profile(&instance, physical, &profile) == (capabilities == 3));
+        if (capabilities != 3) REQUIRE(!memcmp(&profile, &saved_profile, sizeof(profile)));
+
+        basic.enabledExtensionCount = 1;
+        VkPhysicalDeviceVulkan12Features aggregate = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES};
+        for (unsigned i = 0; i < VKRT_ARRAY_SIZE(rt_extensions); ++i) {
+            basic.ppEnabledExtensionNames = &rt_extensions[i];
+            basic.pNext = NULL; /* Private query features need no application request. */
+            unsigned before = creates;
+            REQUIRE(call(&basic) == expected);
+            REQUIRE(creates == before + (capabilities == 3));
+            basic.pNext = &aggregate;
+            before = creates;
+            REQUIRE(call(&basic) == expected);
+            REQUIRE(creates == before + (capabilities == 3));
+        }
+        REQUIRE(!aggregate.hostQueryReset && !aggregate.shaderBufferInt64Atomics);
+
+        /* A feature-only RT request has the same mandatory query dependency. */
+        VkPhysicalDeviceRayQueryFeaturesKHR rq = {
+            .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_QUERY_FEATURES_KHR, .pNext = &aggregate, .rayQuery = VK_TRUE};
+        basic.pNext = &rq;
+        basic.enabledExtensionCount = 0;
+        basic.ppEnabledExtensionNames = NULL;
+        unsigned before = creates;
+        REQUIRE(call(&basic) == expected);
+        REQUIRE(creates == before + (capabilities == 3));
+        REQUIRE(rq.rayQuery && rq.pNext == &aggregate && !aggregate.hostQueryReset && !aggregate.shaderBufferInt64Atomics);
+
+        /* Missing query support must not change ordinary source-binary
+         * eligibility or force query features onto a shader-object device. */
+        VkPhysicalDeviceShaderObjectFeaturesEXT shader = {
+            .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_OBJECT_FEATURES_EXT, .pNext = &aggregate, .shaderObject = VK_TRUE};
+        const char *extension = VK_EXT_SHADER_OBJECT_EXTENSION_NAME;
+        basic.pNext = &shader;
+        basic.enabledExtensionCount = 1;
+        basic.ppEnabledExtensionNames = &extension;
+        expected_extensions[0] = extension;
+        expected_extension_count = 1;
+        before = resource_queries;
+        REQUIRE(call(&basic) == VK_SUCCESS && resource_queries == before);
+        REQUIRE(shader.shaderObject && !aggregate.hostQueryReset && !aggregate.shaderBufferInt64Atomics);
+        basic.pNext = NULL;
+        basic.enabledExtensionCount = 0;
+        basic.ppEnabledExtensionNames = NULL;
+        expected_extension_count = 0;
+        REQUIRE(call_non_rt(&basic) == VK_SUCCESS);
+    }
+}
+
 int main(void) {
     non_rt_boundary();
     shader_object_backend();
@@ -1174,22 +1246,7 @@ int main(void) {
     rejection();
     per_stage_descriptor_interaction();
     descriptor_profile_boundary();
-    for (unsigned capabilities = 0; capabilities < 4; ++capabilities) {
-        defaults();
-        query_capabilities = capabilities;
-        expect_private_dynamic_indexing = true;
-        const char *extension = VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME;
-        basic.enabledExtensionCount = 1;
-        basic.ppEnabledExtensionNames = &extension;
-        REQUIRE(call(&basic) == VK_SUCCESS);
-        VkPhysicalDeviceVulkan12Features aggregate = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES};
-        basic.pNext = &aggregate;
-        REQUIRE(call(&basic) == VK_SUCCESS);
-        REQUIRE(!aggregate.hostQueryReset && !aggregate.shaderBufferInt64Atomics);
-        basic.enabledExtensionCount = 0;
-        basic.pNext = NULL;
-        REQUIRE(call_non_rt(&basic) == VK_SUCCESS);
-    }
+    query_backend_boundary();
     printf("No-native-RT device creation boundary: %s (%u failures, %u creates, %u capability queries)\n",
            failures ? "FAIL" : "PASS", failures, creates, queries);
     return failures ? 1 : 0;

@@ -594,33 +594,88 @@ now recorded as an observation, not a portable early-progress requirement.
 The native logical-stage executor, complete no-RT profile, production large-AS
 limits and M0-M5 qualification remain open.
 
+## 2026-10-28 indexed construction and native acquisition checkpoint
+
+The [new checkpoint](rt_indexed_build_acquire_2026-10-28.md) removes the
+production construction IR's 4-GiB byte-offset gate and X-only dispatch gate.
+Indexed v3 IDs use 64-bit address decoding, with v2 decoder compatibility and
+unchanged public BVH4/serialization formats. Maximum-count host checks,
+21 GPU codec reads (15 synthetic wide offsets), a failing truncation mutation,
+and public BUILD/RQ under forced `(2,2,64)` dispatch limits provide distinct
+component evidence. Three builder/encoder GPU components also pass with their
+validation option enabled. Actual giant allocations and complete numerical
+qualification remain open.
+
+Query COPY now accepts original narrow native waits through its
+ALL_COMMANDS-to-CS acquire bridge. The old rejection/history/epoch machinery,
+query-copy metadata walker and query-free observer batches were removed.
+Per-execution query resource fences, settled retirement, per-queue admission and
+synchronous source-error handling remain. RESET retains the native-transfer
+completion edge after COPY. Public native acquisition passes ten cases; final
+software acquisition and repeated/overlapping replay pass in both VVL orders
+with synchronization validation and zero-rejection guard logs. The GPU
+compute-only-bridge mutation still passes two cases on this driver; it is not
+a successful negative control. Independent host COPY/RESET scope mutations
+fail as expected. Earlier invalid fixtures and rejected-submit diagnostics
+remain retained.
+
+The public RT candidate now requires the current query backend's host reset
+and buffer-int64-atomic support. Ordinary shader-object eligibility stays
+independent. Complete software properties/discovery, query-capable queue and
+device-group behavior, private memory budgets and physical no-RT qualification
+remain open. Journal metadata is a separately tested capture component; it does
+not constitute a native logical-stage executor.
+
+Typed access operands and CopyMemory paths have validation plus two basic BDA
+and four enhanced SSBO/BDA GPU observations. The enhanced matrix uses actual
+independent buffers and 16-lane NonUniform descriptor arrays. Large PrivateArray
+execution still returns DEVICE_LOST; all diagnostic variants and a native GLSL
+control fail. Device-fault capture reports invalid writes for both the lowered
+and native controls, without proving the underlying cause. Production RTP
+still uses PrivateArray, so scalable production arena integration is the next
+concrete delivery gate. BDA component passes do not close that requirement.
+
+The final integrated build passes 38/38 offline checks and the parent RT target.
+The frozen pre-profile/cleanup DLL passes 50/50 guarded external CTS. The final
+DLL separately passes 13/13 relevant CTS. These snapshots, raw failures and
+qualification boundaries are recorded in the checkpoint and its manifest.
+No complete M0-M5 milestone or full-goal completion is claimed.
+
 ## Next work
 
 Per-execution query replay now has public repeated/overlapping GPU executions
 and external CTS observations. It does not complete arbitrary command replay or
-logical-stage submission semantics. The next architectural slice is a native
-logical-stage executor; the no-RT profile and large-construction gates must be
-proved in parallel, before enabling complete no-RT discovery. These are planned
+logical-stage submission semantics. The next production slice is execution-owned
+BDA arenas for RTP, including generic replay, checked tiling and lifetime/error
+proofs. Complete synchronization
+semantics, the no-RT profile and large-construction qualification proceed in
+parallel before enabling complete no-RT discovery. These are planned
 exit checks, not claims that the missing features are implemented.
 
 | Priority | Deliverable | Evidence needed before closing it |
 | --- | --- | --- |
-| 1 | Native execution of logical-stage dependencies | Single-native-queue timeline readiness followed by real native acquisition and slice replay; source wait/signal scopes and memory visibility; then binary/external acquisition and native multi-stage gates. CPU permitted schedules and bounded early-signal observations are not portable forward-progress guarantees |
-| Parallel M0/M1 | Complete no-RT discovery, resource and construction contract | One shared software feature/property/device-create profile, mandatory query prerequisites, complete resource budgets, removal of the production 4-GiB IR and one-dimensional dispatch ceilings, masked-discovery public execution, then physical no-RT qualification |
+| 1 | Scalable RTP arenas and generic execution replay | Production BDA frames without a small stack cap; checked tile/tail/3D launches; shared-pool allocation; independent arenas for simultaneous primary/secondary occurrences; native submission failures and fence retirement; operation independent of optional query initialization |
+| Parallel M4 | Complete logical-stage synchronization semantics | Source semaphore/barrier/event/ownership scopes, native-query interactions and qualified queues/groups. Query COPY uses the proved native bridge. CPU schedules and early-signal timing alone establish neither a correctness failure nor a requirement for a general queue worker |
+| Parallel M0/M1 | Complete no-RT discovery, resource and construction contract | One shared software feature/property/device-create profile, mandatory query prerequisites, complete resource budgets, qualification of production indexed construction and XYZ dispatch, masked-discovery public execution, then physical no-RT qualification |
 | Parallel compiler | Remaining typed compiler memory/resource semantics | Access operands and source memory-model rules, multiple real descriptor roots and NonUniform arrays, large values and execution modes, with independent GPU oracles in the actual BDA/PrivateArray transport as applicable |
 | Replay integration | Remaining command schemas and native-query interactions | Inline-layout/template retention, complete entrypoint admission, mixed native scopes, state preservation and simultaneous public execution qualification; existing explicit restrictions are not final support |
 | Final qualification | Complete mandatory behavior and platform matrix | Requirement-to-evidence mapping, broader AS/RQ/RTP CTS, targeted original failures, builder/count/numerical cases, cross-vendor physical no-RT and POSIX runs |
 
-The principal architectural uncertainty is logical-stage execution: software
-AS/RTP/native compute operations share a physical stage, but source semaphore
-scopes do not. Query replay alone cannot solve that problem. Likewise, passing
+The concrete production blocker is large invocation-private RTP storage, for
+which a native GLSL control also faults. Scalable BDA arenas need generic
+per-execution ownership. AS/RTP/native compute share a physical stage while
+source scopes differ; complete mapping still requires proof, but no mandatory
+forward-progress counterexample currently establishes that a queue worker is
+the only solution. The query acquire bridge closes its specific narrow-wait gap.
+Passing
 the execution-only native-RT guard does not close no-RT discovery, because that
 test mode retains native discovery for CTS selection.
 
 The [no-RT qualification audit](rt_no_rt_qualification_gates_2026-10-28.md)
-identifies the current discovery/property gaps, mandatory query prerequisites
-and production construction ceilings. It specifies gates for a complete shared
-software profile; it does not enable no-RT discovery or complete M0/M1.
+identifies discovery/property gaps and qualification gates at its audited
+baseline. The new indexed construction and mandatory-query prerequisite fixes
+supersede those particular source findings. Complete software discovery and
+M0/M1 qualification remain open.
 
 Detailed remaining work, grouped by subsystem rather than priority:
 
@@ -643,7 +698,8 @@ Detailed remaining work, grouped by subsystem rather than priority:
    BDA root classification and resource/value aggregate types are now fixed;
    traditional descriptor-backed opaque values now cross suspension. Qualify the
    new logical StorageBuffer pointer Phi/Select/helper route with
-   multiple descriptor roots and real descriptor-array NonUniform execution;
+   multiple descriptor roots and real descriptor-array NonUniform execution
+   beyond the new passing SSBO/BDA matrix; resolve PrivateArray device loss and
    complete remaining pointer arithmetic/memory variants, mutable opaque encodings
    and the full argument/return ABI. Complete descriptor disturbance, push-descriptor
    and descriptor-buffer interoperability, and pipeline option/API coverage before
@@ -656,15 +712,18 @@ Detailed remaining work, grouped by subsystem rather than priority:
    environment before claiming general binary compatibility.
 4. Extend the now-shared RQ/RTP builder, BVH4 traversal and AS object model.
    Four-child GPU collapse and topology-preserving refit execute in production.
-   The production build still rejects Mesa IR at 4 GiB and leaf dispatch beyond
-   `maxComputeWorkGroupCount[0]`; reference planner tests above those sizes do
-   not remove these limits. Implement segmented/chunked construction and qualify
-   additional UPDATE/numerical cases and large construction IDs. Wire
-   PLOC/HPLOC only with complete host contracts. M1 remains incomplete.
+   The production IR v3/XYZ changes remove the old 4-GiB byte-offset
+   and X-only dispatch gates. Complete integration, actual large-allocation
+   qualification where resources permit, additional UPDATE/numerical cases and
+   large construction IDs; synthetic address tests alone do not close these.
+   Wire PLOC/HPLOC only with complete host contracts. M1 remains incomplete.
 5. Complete public AS queries beyond the now-tested execution-owned route. Its
    actual GPU properties, repeated/overlapping replay and native completion
-   acquisition execute selected external CTS. Complete logical-stage scheduling,
-   remaining command schemas, native query interaction and queue/device qualification.
+   acquisition execute selected external CTS. Complete native synchronization
+   scopes, remaining command schemas, native query interaction and queue/device
+   qualification. The current query backend still requires compute queues with
+   timestamp support; graphics-only query copying and multi-device groups need
+   a qualified implementation or a truthful exposed contract.
    Preserve source wait scopes rather than imposing whole-submit waits. The
    early startup crash has recurred; investigate it while retaining all original
    failures and recheck evidence. Do not count skips as passes.

@@ -18,7 +18,7 @@ void main()
    else if (i < 6) value = 0x80800000u;
    if (i == 9 || i == 10) value = 1;
    if (i == BVH_IR_MAGIC_OFFSET / 4) value = BVH_IR_MAGIC;
-   if (i == BVH_IR_VERSION_OFFSET / 4) value = BVH_IR_VERSION;
+   if (i == BVH_IR_VERSION_OFFSET / 4) value = BVH_IR_INDEXED_VERSION;
    if (i == BVH_IR_LEAF_CAPACITY_OFFSET / 4) value = args.leaf_capacity;
    if (i == BVH_IR_GEOMETRY_TYPE_OFFSET / 4) value = args.geometry_type;
    if (i < BVH_IR_NODE_OFFSET / 4)

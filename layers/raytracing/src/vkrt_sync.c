@@ -369,10 +369,8 @@ static VKAPI_ATTR VkResult VKAPI_CALL QueueWaitIdle(VkQueue queue) {
     struct vkrt_device_data *dev = VKRT_FIND(struct vkrt_device_data, queue);
     if (!dev || !dev->vtable.QueueWaitIdle) return VK_ERROR_INITIALIZATION_FAILED;
     uint64_t checkpoint = vkrt_execution_checkpoint(dev);
-    uint64_t query_checkpoint = vkrt_query_queue_checkpoint(dev);
     VkResult result = dev->vtable.QueueWaitIdle(queue);
     if (result == VK_SUCCESS) {
-        vkrt_query_queue_idle(dev, queue, query_checkpoint);
         vkrt_execution_queue_completed(dev, queue, checkpoint);
         result = vkrt_execution_collect(dev, NULL);
     }
@@ -382,18 +380,12 @@ static VKAPI_ATTR VkResult VKAPI_CALL DeviceWaitIdle(VkDevice device) {
     struct vkrt_device_data *dev = VKRT_FIND(struct vkrt_device_data, device);
     if (!dev || !dev->vtable.DeviceWaitIdle) return VK_ERROR_INITIALIZATION_FAILED;
     uint64_t checkpoint = vkrt_execution_checkpoint(dev);
-    uint64_t query_checkpoint = vkrt_query_queue_checkpoint(dev);
     VkResult result = dev->vtable.DeviceWaitIdle(device);
     if (result == VK_SUCCESS) {
-        vkrt_query_queue_idle(dev, VK_NULL_HANDLE, query_checkpoint);
         vkrt_execution_queue_completed(dev, VK_NULL_HANDLE, checkpoint);
         result = vkrt_execution_collect(dev, NULL);
     }
     return result;
-}
-static bool query_wait_protects_compute(VkPipelineStageFlags2 mask) {
-    return (stages(mask) & (VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT |
-                            VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT)) != 0;
 }
 static bool needs_replay(struct vkrt_device_data *dev, VkCommandBuffer command) {
     if (!dev->executions) return false;
@@ -462,13 +454,6 @@ static VKAPI_ATTR VkResult VKAPI_CALL QueueSubmit(VkQueue queue, uint32_t count,
    }
    if (result == VK_SUCCESS) result = vkrt_query_submit_begin(dev, &transaction, queue);
    for (uint32_t i = 0; i < count && result == VK_SUCCESS; ++i) {
-       bool unsafe_wait = false;
-       for (uint32_t j = 0; j < infos[i].waitSemaphoreCount; ++j)
-           unsafe_wait |= !query_wait_protects_compute(infos[i].pWaitDstStageMask[j]);
-       result =
-           vkrt_query_submit_qualify(dev, &transaction, queue, unsafe_wait, infos[i].commandBufferCount, infos[i].pCommandBuffers);
-   }
-   for (uint32_t i = 0; i < count && result == VK_SUCCESS; ++i) {
        VkCommandBuffer *commands = NULL;
        result = remap_commands(dev, queue, &batch, infos[i].commandBufferCount, infos[i].pCommandBuffers, &commands);
        if (commands) local[i].pCommandBuffers = commands;
@@ -514,14 +499,6 @@ static VKAPI_ATTR VkResult VKAPI_CALL QueueSubmit2(VkQueue queue, uint32_t count
       local[copied].pWaitSemaphoreInfos = w; local[copied].pSignalSemaphoreInfos = sig;
    }
    if (result == VK_SUCCESS) result = vkrt_query_submit_begin(dev, &transaction, queue);
-   for (uint32_t i = 0; i < count && result == VK_SUCCESS; ++i) {
-       bool unsafe_wait = false;
-       for (uint32_t j = 0; j < infos[i].waitSemaphoreInfoCount; ++j)
-           unsafe_wait |= !query_wait_protects_compute(infos[i].pWaitSemaphoreInfos[j].stageMask);
-       result = vkrt_query_submit_qualify(dev, &transaction, queue, unsafe_wait, 0, NULL);
-       for (uint32_t j = 0; j < infos[i].commandBufferInfoCount && result == VK_SUCCESS; ++j)
-           result = vkrt_query_submit_qualify(dev, &transaction, queue, false, 1, &infos[i].pCommandBufferInfos[j].commandBuffer);
-   }
    for (uint32_t i = 0; i < count && result == VK_SUCCESS; ++i) {
        bool replay = false;
        for (uint32_t j = 0; j < infos[i].commandBufferInfoCount; ++j)

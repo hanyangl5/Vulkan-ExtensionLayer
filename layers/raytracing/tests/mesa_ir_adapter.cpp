@@ -117,6 +117,9 @@ MesaAdapted AdaptMesaIr(const MesaIrInput& input, const std::vector<uint32_t>& g
     if (input.build_flags != BVH_IR_SUPPORTED_INPUT_FLAGS) throw std::invalid_argument("Mesa IR unsupported BUILD variant");
     const uint32_t type = uint32_t(input.geometry_type);
     if (type > 2) throw std::invalid_argument("Mesa IR geometry type");
+    if (input.id_version != BVH_IR_VERSION && input.id_version != BVH_IR_INDEXED_VERSION)
+        throw std::invalid_argument("Mesa IR node-ID version");
+    const bool indexed = input.id_version == BVH_IR_INDEXED_VERSION;
     const uint32_t stride = type == 0 ? BVH_IR_TRIANGLE_SIZE : type == 1 ? BVH_IR_AABB_SIZE : BVH_IR_INSTANCE_SIZE;
     const uint32_t leaf_kind = type == 0 ? kMesaTriangle : type == 1 ? kMesaAabb : kMesaInstance;
     const uint32_t active = header.U32(24), internal_count = header.U32(32);
@@ -126,7 +129,8 @@ MesaAdapted AdaptMesaIr(const MesaIrInput& input, const std::vector<uint32_t>& g
     }
     const uint64_t leaf_bytes = uint64_t(input.leaf_capacity) * stride;
     const uint64_t root_offset = leaf_bytes + uint64_t(internal_count - 1) * BVH_IR_BOX_SIZE;
-    if (root_offset > kMesaOffsetMask || (active && uint64_t(active) * 2 - 1 > VEL_RT_BVH4_MAX_COUNT)) {
+    if ((!indexed && root_offset > kMesaOffsetMask) || (indexed && input.leaf_capacity > BVH_IR_MAX_LEAVES) ||
+        (active && uint64_t(active) * 2 - 1 > VEL_RT_BVH4_MAX_COUNT)) {
         throw std::overflow_error("Mesa IR construction node-ID capacity");
     }
     nodes.Region(0, root_offset + BVH_IR_BOX_SIZE);
@@ -145,7 +149,7 @@ MesaAdapted AdaptMesaIr(const MesaIrInput& input, const std::vector<uint32_t>& g
     ValidateBounds(root_bounds);
     if (!Contains(header_bounds, root_bounds)) throw std::invalid_argument("Mesa IR header bounds not conservative");
 
-    uint32_t start_id = uint32_t(root_offset) | kMesaBox;
+    uint32_t start_id = indexed ? ((internal_count - 1) << 2) | kMesaBox : uint32_t(root_offset) | kMesaBox;
     size_t boxes_seen = 0;
     std::vector<uint8_t> seen_boxes(internal_count, 0);
     if (active == 1) {
@@ -170,7 +174,9 @@ MesaAdapted AdaptMesaIr(const MesaIrInput& input, const std::vector<uint32_t>& g
         const Work current = work.back();
         work.pop_back();
         const uint32_t kind = current.id & 3u;
-        const uint64_t offset = current.id & kMesaOffsetMask;
+        const uint64_t offset = indexed ? (kind == kMesaBox ? leaf_bytes + uint64_t(current.id >> 2) * BVH_IR_BOX_SIZE
+                                                            : uint64_t(current.id >> 2) * stride)
+                                        : current.id & kMesaOffsetMask;
         if (current.id == BVH_IR_INVALID_ID) throw std::invalid_argument("Mesa IR invalid child in nonempty tree");
         BuildNode node;
         if (kind == kMesaBox) {
@@ -266,7 +272,8 @@ MesaAdapted AdaptMesaContainerV2(ByteSpan input, const std::vector<uint32_t>& ge
                                  const BlasAddressResolver& resolve_blas) {
     const Reader reader(input);
     reader.Region(0, BVH_IR_NODE_OFFSET);
-    if (reader.U32(BVH_IR_MAGIC_OFFSET) != BVH_IR_MAGIC || reader.U32(BVH_IR_VERSION_OFFSET) != BVH_IR_VERSION) {
+    const uint32_t version = reader.U32(BVH_IR_VERSION_OFFSET);
+    if (reader.U32(BVH_IR_MAGIC_OFFSET) != BVH_IR_MAGIC || (version != BVH_IR_VERSION && version != BVH_IR_INDEXED_VERSION)) {
         throw std::invalid_argument("Mesa IR unsupported container identity");
     }
     const auto* data = static_cast<const uint8_t*>(input.data);
@@ -274,7 +281,8 @@ MesaAdapted AdaptMesaContainerV2(ByteSpan input, const std::vector<uint32_t>& ge
                     {data + BVH_IR_NODE_OFFSET, input.size - BVH_IR_NODE_OFFSET},
                     reader.U32(BVH_IR_LEAF_CAPACITY_OFFSET),
                     MesaGeometryType(reader.U32(BVH_IR_GEOMETRY_TYPE_OFFSET)),
-                    reader.U32(BVH_IR_BUILD_FLAGS_OFFSET)};
+                    reader.U32(BVH_IR_BUILD_FLAGS_OFFSET),
+                    version};
     return AdaptMesaIr(raw, geometry_flags, resolve_blas);
 }
 

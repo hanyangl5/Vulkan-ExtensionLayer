@@ -8,8 +8,8 @@
 #include <stdexcept>
 
 namespace vel::rt::bvh4 {
-// Direct GPU encoder for the default Mesa scalar IR in the existing VKRT v2
-// envelope. The host knows only input capacity/type, not GPU active counts or
+// Direct GPU encoder for the default Mesa scalar IR with explicit v2 tagged
+// byte IDs or v3 tagged record indices. The host knows only capacity/type, not GPU active counts or
 // topology. Plan output for capacity-1 nodes (zero for capacity <= 1), capacity
 // leaves of the given kind, and vel_rt_mesa_mapping_words(capacity) words.
 // Header offsets/total_size are initialized from that capacity plan. Source,
@@ -40,8 +40,9 @@ namespace vel::rt::bvh4 {
 // Production RQ/RTP share this encoder. It retains even-depth input internals
 // and expands their odd-depth children into two to four output children.
 // Parallel pointer jumping derives depth parity without polling or a fixed
-// tree-depth limit. Mesa construction IDs remain 32-bit byte offsets; output
-// and workspace math is 64-bit. This is a two-level collapse, not SAH selection.
+// tree-depth limit. v3 construction IDs use 30-bit record indices plus kind;
+// v2 decoding retains its explicit byte-ID ceiling. Output, v3 source offsets
+// and workspace math are 64-bit. This is a two-level collapse, not SAH selection.
 // Active bounds/vertices must be finite. Transform inversion currently uses
 // scaled FP32 arithmetic and rejects singular/unrepresentable results; numerical
 // qualification of ill-conditioned legal transforms remains a separate gate.

@@ -8,8 +8,8 @@
  *
  * Every occurrence executes RESET -> BUILD -> WRITE -> COPY. Query reset's
  * scopes order earlier/later uses of the same index. ALL_COMMANDS barriers also
- * order AS/scratch/input/result-buffer hazards. Across submissions, timeline
- * waits are ALL_COMMANDS. These tests do not require narrower-wait scheduling.
+ * order AS/scratch/input/result-buffer hazards. Core replay submissions use
+ * ALL_COMMANDS waits; additional COPY cases acquire prior TRANSFER-scoped waits.
  */
 #ifndef _WIN32
 #define _POSIX_C_SOURCE 200809L
@@ -35,7 +35,7 @@ static VkResult replay_create_device(VkPhysicalDevice, const VkDeviceCreateInfo 
 #include <pthread.h>
 #endif
 
-enum { INPUT_COUNT = 5, QUERY_COUNT = 2, RESULT_STRIDE = 32, EPOCH_BYTES = QUERY_COUNT * RESULT_STRIDE, ARCHIVE_SLOTS = 9 };
+enum { INPUT_COUNT = 5, QUERY_COUNT = 2, RESULT_STRIDE = 32, EPOCH_BYTES = QUERY_COUNT * RESULT_STRIDE, ARCHIVE_SLOTS = 13 };
 static const uint64_t timeout_ns = UINT64_C(15000000000);
 static const uint64_t gap = UINT64_C(0xcdcdcdcdcdcdcdcd);
 static atomic_uint validation_errors;
@@ -536,6 +536,99 @@ completed:
     puts("query replay: overlapping submissions, independent execution copies, prefix GetResults before suffix wait passed");
 }
 
+static void wait_history_acquisition(const struct scene *scene, bool sync2, bool binary, unsigned slot) {
+    VkCommandBuffer copy = allocate_command(VK_COMMAND_BUFFER_LEVEL_PRIMARY);
+    begin_command(copy, VK_COMMAND_BUFFER_LEVEL_PRIMARY, false);
+    barrier(copy);
+    vkCmdFillBuffer(copy, scene->results.buf, 0, EPOCH_BYTES, 0xcdcdcdcd);
+    barrier(copy);
+    for (unsigned i = 0; i < QUERY_COUNT; ++i)
+        copy_query(copy, scene->pools[i], 0, 1, scene->results.buf, i * RESULT_STRIDE, RESULT_STRIDE,
+                   VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WITH_AVAILABILITY_BIT | VK_QUERY_RESULT_WAIT_BIT);
+    inline_control(copy, scene, (int)slot, -1);
+    CHECK(vkEndCommandBuffer(copy));
+    VkSemaphore gate = VK_NULL_HANDLE, acquired = VK_NULL_HANDLE;
+    const uint64_t one = 1;
+    if (binary) {
+        VkSemaphoreCreateInfo info = {.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO};
+        CHECK(vkCreateSemaphore(g_dev, &info, NULL, &acquired));
+        /* Binary waits require their entire semaphore signal dependency chain
+         * to have been submitted. A producer waiting for a future host timeline
+         * signal is invalid (03238/03873). With this single-queue fixture, use a
+         * completed producer. Only timeline cases cover an unresolved wait. */
+        VkFence producer_fence = create_fence();
+        VkSubmitInfo producer = {.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO, .signalSemaphoreCount = 1, .pSignalSemaphores = &acquired};
+        CHECK(queue_submit(g_queue, 1, &producer, producer_fence));
+        wait_fence(producer_fence);
+        vkDestroyFence(g_dev, producer_fence, NULL);
+    } else {
+        gate = create_timeline();
+        acquired = gate;
+    }
+    VkFence acquired_fence = create_fence(), copy_fence = create_fence();
+    VkResult result;
+    if (sync2) {
+        PFN_vkQueueSubmit2 submit2 = (PFN_vkQueueSubmit2)vkGetDeviceProcAddr(g_dev, "vkQueueSubmit2KHR");
+        REQUIRE(submit2 != NULL);
+        if (!submit2) exit(1);
+        VkSemaphoreSubmitInfo wait = {.sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO,
+                                      .semaphore = acquired,
+                                      .value = binary ? 0 : one,
+                                      .stageMask = VK_PIPELINE_STAGE_2_TRANSFER_BIT};
+        VkSubmitInfo2 source = {
+            .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO_2, .waitSemaphoreInfoCount = 1, .pWaitSemaphoreInfos = &wait};
+        CHECK(submit2(g_queue, 1, &source, acquired_fence));
+        if (!binary) REQUIRE(vkGetFenceStatus(g_dev, acquired_fence) == VK_NOT_READY);
+        VkCommandBufferSubmitInfo command = {.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO, .commandBuffer = copy};
+        VkSubmitInfo2 work = {
+            .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO_2, .commandBufferInfoCount = 1, .pCommandBufferInfos = &command};
+        result = submit2(g_queue, 1, &work, copy_fence);
+    } else {
+        const VkPipelineStageFlags transfer = VK_PIPELINE_STAGE_TRANSFER_BIT;
+        VkTimelineSemaphoreSubmitInfo timeline = {
+            .sType = VK_STRUCTURE_TYPE_TIMELINE_SEMAPHORE_SUBMIT_INFO, .waitSemaphoreValueCount = 1, .pWaitSemaphoreValues = &one};
+        VkSubmitInfo source = {.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
+                               .pNext = binary ? NULL : &timeline,
+                               .waitSemaphoreCount = 1,
+                               .pWaitSemaphores = &acquired,
+                               .pWaitDstStageMask = &transfer};
+        CHECK(queue_submit(g_queue, 1, &source, acquired_fence));
+        if (!binary) REQUIRE(vkGetFenceStatus(g_dev, acquired_fence) == VK_NOT_READY);
+        VkSubmitInfo work = {.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO, .commandBufferCount = 1, .pCommandBuffers = &copy};
+        result = queue_submit(g_queue, 1, &work, copy_fence);
+    }
+    /* COPY must be accepted while the older timeline wait is still pending.
+     * Host release is unconditional, including a failed submission; no early
+     * execution or signal observation is needed to release the source gate. */
+    if (!binary) signal_value(gate, 1);
+    CHECK(result);
+    wait_fence(acquired_fence);
+    REQUIRE(vkGetFenceStatus(g_dev, acquired_fence) == VK_SUCCESS);
+    /* A later public fence includes earlier fence signal operations. Retain
+     * this prefix proof as well as the original source and COPY caller fences;
+     * none of them is a prerequisite for accepting the COPY above. */
+    VkFence prefix_fence = create_fence();
+    VkSubmitInfo prefix = {.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO};
+    CHECK(queue_submit(g_queue, 1, &prefix, prefix_fence));
+    wait_fence(prefix_fence);
+    REQUIRE(vkGetFenceStatus(g_dev, prefix_fence) == VK_SUCCESS);
+    wait_fence(copy_fence);
+    check_archive(scene, slot, 3);
+    vkFreeCommandBuffers(g_dev, g_pool, 1, &copy);
+    vkDestroyFence(g_dev, prefix_fence, NULL);
+    vkDestroyFence(g_dev, copy_fence, NULL);
+    vkDestroyFence(g_dev, acquired_fence, NULL);
+    if (binary) vkDestroySemaphore(g_dev, acquired, NULL);
+    if (gate) vkDestroySemaphore(g_dev, gate, NULL);
+    printf("query replay: %s wait history (%s) accepts COPY before waiting the source fence; results pass without queue idle\n",
+           binary ? "binary" : "timeline", sync2 ? "Submit2" : "Submit");
+    if (binary)
+        puts("query replay: binary producer completed before wait; no unresolved-binary-wait coverage");
+    else
+        printf("query replay: unresolved timeline fence and pending-wait COPY acceptance verified (%s)\n",
+               sync2 ? "Submit2" : "Submit");
+}
+
 int main(void) {
     const char *layers = getenv("VK_INSTANCE_LAYERS");
     if (!layers || !strstr(layers, "VK_LAYER_VKRT_SOFTWARE_RAY_QUERY")) {
@@ -607,6 +700,7 @@ int main(void) {
     repeated_primary(&scene, query);
     repeated_secondary(&scene);
     overlapping_submissions(&scene, query);
+    for (unsigned mode = 0; mode < 4; ++mode) wait_history_acquisition(&scene, (mode & 1) != 0, (mode & 2) != 0, 9 + mode);
     for (unsigned i = ARCHIVE_SLOTS * EPOCH_BYTES; i < scene.archive.size; ++i)
         REQUIRE(((const uint8_t *)scene.archive.mapped)[i] == 0xa5);
     vkFreeCommandBuffers(g_dev, g_pool, 1, &query);

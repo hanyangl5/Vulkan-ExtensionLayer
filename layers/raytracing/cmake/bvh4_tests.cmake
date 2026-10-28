@@ -78,14 +78,28 @@ add_custom_command(OUTPUT "${VEL_RT_MESA_ENCODE_SPV}"
     COMMAND "${VEL_RT_SPIRV_VAL}" --target-env vulkan1.2 --scalar-block-layout "${VEL_RT_MESA_ENCODE_SPV}"
     DEPENDS "${_bvh4_shaders}/bvh4_mesa_encode.comp" "${_bvh4_shaders}/as_address.glsl" "${_bvh4_shaders}/bvh4_abi.glsl" VERBATIM)
 add_custom_target(vel_rt_bvh4_mesa_encode_spv DEPENDS "${VEL_RT_MESA_ENCODE_SPV}")
+set(VEL_RT_INDEXED_ADDRESS_SPV "${_bvh4_binary}/bvh_ir_indexed_address.spv")
+file(GLOB VEL_RT_INDEXED_ADDRESS_DEPS CONFIGURE_DEPENDS "${_bvh4_shaders}/*.h" "${_bvh4_headers}/*.h")
+add_custom_command(OUTPUT "${VEL_RT_INDEXED_ADDRESS_SPV}"
+    COMMAND "${CMAKE_COMMAND}" -E make_directory "${_bvh4_binary}"
+    COMMAND "${VEL_RT_GLSLC}" --target-env=vulkan1.2 -fshader-stage=compute
+        -I "${_bvh4_shaders}" -I "${_bvh4_headers}"
+        "${_bvh4_tests}/bvh_ir_indexed_address.comp" -o "${VEL_RT_INDEXED_ADDRESS_SPV}"
+    COMMAND "${VEL_RT_SPIRV_VAL}" --target-env vulkan1.2 --scalar-block-layout "${VEL_RT_INDEXED_ADDRESS_SPV}"
+    DEPENDS "${_bvh4_tests}/bvh_ir_indexed_address.comp" ${VEL_RT_INDEXED_ADDRESS_DEPS} VERBATIM)
+add_custom_target(vel_rt_bvh_ir_indexed_address_spv DEPENDS "${VEL_RT_INDEXED_ADDRESS_SPV}")
 add_executable(vel_rt_bvh4_gpu_tests "${_bvh4_tests}/bvh4_gpu_tests.cpp")
 target_compile_definitions(vel_rt_bvh4_gpu_tests PRIVATE _CRT_SECURE_NO_WARNINGS)
 target_link_libraries(vel_rt_bvh4_gpu_tests PRIVATE vel_rt_bvh4_reference Vulkan::Vulkan)
 set_target_properties(vel_rt_bvh4_gpu_tests PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
 _bvh4_sanitize(vel_rt_bvh4_gpu_tests)
-add_dependencies(vel_rt_bvh4_gpu_tests vel_rt_bvh4_encode_spv vel_rt_bvh4_mesa_encode_spv)
+add_dependencies(vel_rt_bvh4_gpu_tests vel_rt_bvh4_encode_spv vel_rt_bvh4_mesa_encode_spv vel_rt_bvh_ir_indexed_address_spv)
 add_test(NAME portable_bvh4_gpu_encode COMMAND vel_rt_bvh4_gpu_tests "${VEL_RT_ENCODE_SPV}" "${VEL_RT_MESA_ENCODE_SPV}")
 set_tests_properties(portable_bvh4_gpu_encode PROPERTIES
+    ENVIRONMENT "VK_INSTANCE_LAYERS=" LABELS "gpu;software_compute;no_native_rt" SKIP_RETURN_CODE 77 TIMEOUT 120)
+add_test(NAME portable_bvh_ir_indexed_address COMMAND vel_rt_bvh4_gpu_tests
+    "${VEL_RT_ENCODE_SPV}" "${VEL_RT_MESA_ENCODE_SPV}" --indexed-addressing "${VEL_RT_INDEXED_ADDRESS_SPV}")
+set_tests_properties(portable_bvh_ir_indexed_address PROPERTIES
     ENVIRONMENT "VK_INSTANCE_LAYERS=" LABELS "gpu;software_compute;no_native_rt" SKIP_RETURN_CODE 77 TIMEOUT 120)
 
 if(VEL_RT_MESA_BUILDER_TESTS)

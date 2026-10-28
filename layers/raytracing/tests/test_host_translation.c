@@ -49,25 +49,6 @@ VkResult vkrt_execution_batch_discard(struct vkrt_execution_batch *batch) {
     abort();
     return VK_ERROR_UNKNOWN;
 }
-VkResult vkrt_query_submit_qualify(struct vkrt_device_data *dev, struct vkrt_query_submission *transaction, VkQueue queue,
-                                   bool unsafe_wait, uint32_t count, const VkCommandBuffer *commands) {
-    (void)dev;
-    (void)transaction;
-    (void)queue;
-    (void)unsafe_wait;
-    (void)count;
-    (void)commands;
-    return VK_SUCCESS;
-}
-uint64_t vkrt_query_queue_checkpoint(struct vkrt_device_data *dev) {
-    (void)dev;
-    return 0;
-}
-void vkrt_query_queue_idle(struct vkrt_device_data *dev, VkQueue queue, uint64_t checkpoint) {
-    (void)dev;
-    (void)queue;
-    (void)checkpoint;
-}
 VkResult vkrt_query_submit_begin(struct vkrt_device_data *dev, struct vkrt_query_submission *transaction, VkQueue queue) {
     (void)dev;
     (void)transaction;
@@ -753,7 +734,7 @@ static VKAPI_ATTR void VKAPI_CALL mock_event_wait2(VkCommandBuffer cmd, uint32_t
 static VKAPI_ATTR void VKAPI_CALL mock_timestamp(VkCommandBuffer cmd, VkPipelineStageFlagBits mask, VkQueryPool pool,
                                                  uint32_t query) {
     ++timestamps;
-    REQUIRE(cmd == command && mask == expected_event_stage && !(mask & native_stages));
+    REQUIRE(cmd == command && (VkPipelineStageFlags2)mask == expected_event_stage && !(mask & native_stages));
     REQUIRE(pool == HANDLE(VkQueryPool, 304) && query == 17);
 }
 static VKAPI_ATTR void VKAPI_CALL mock_timestamp2(VkCommandBuffer cmd, VkPipelineStageFlags2 mask, VkQueryPool pool,

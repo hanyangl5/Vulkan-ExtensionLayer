@@ -59,7 +59,6 @@ static void reset_state(struct vkrt_cmd_buffer_data *cb)
    cb->native_active_queries = 0;
    cb->usage_flags = 0;
    cb->has_virtual_queries = false;
-   cb->has_virtual_query_copy = false;
 }
 
 /* Caller holds the per-device list lock. */

@@ -65,7 +65,7 @@ calculate_normalized_center(REF(vk_ir_header) header, VOID_REF bvh, uint32_t id)
 {
       if (id == VK_BVH_INVALID_NODE)
          return vec3(0.0);
-      uint32_t offset = (id == VK_BVH_INVALID_NODE) ? 0 : ir_id_to_offset(id);
+      uint64_t offset = (id == VK_BVH_INVALID_NODE) ? uint64_t(0) : ir_id_to_offset(bvh, id);
       vk_aabb bounds = DEREF(REF(vk_ir_node)OFFSET(bvh, offset)).aabb;
       vec3 center = (bounds.min + bounds.max) * 0.5;
 
@@ -513,11 +513,14 @@ void
 main()
 {
    uint32_t kv_count = args.leaf_count;
+   /* Native XYZ packing may add padding workgroups. The cooperative task
+    * counters and merge parity depend on logical jobs, not physical grid size. */
+   uint32_t logical_groups = max(1u, DIV_ROUND_UP(kv_count, KEYVALS_PER_WG));
 
    uint32_t num_wgs_done = 0;
    while (true) {
       uint32_t cur_wg_id;
-      if (gl_NumWorkGroups.x == 1) {
+      if (logical_groups == 1) {
          cur_wg_id = 0;
          if (num_wgs_done > 0)
             break;
@@ -530,7 +533,7 @@ main()
 
          cur_wg_id = shared_wg_id;
 
-         if (cur_wg_id >= gl_NumWorkGroups.x)
+         if (cur_wg_id >= logical_groups)
             break;
 
          barrier();
@@ -571,7 +574,7 @@ main()
       ++num_wgs_done;
    }
 
-   uint32_t max_log2_multiplier = findMSB(gl_NumWorkGroups.x - 1) + 1;
+   uint32_t max_log2_multiplier = findMSB(logical_groups - 1) + 1;
 
    uint32_t group_counter_base = 0;
    uint32_t last_log2_multiplier = 0;
@@ -597,7 +600,7 @@ main()
       last_log2_multiplier = log2_multiplier;
       uint32_t cur_wg_id = shared_wg_id;
 
-      if (cur_wg_id >= gl_NumWorkGroups.x) {
+      if (cur_wg_id >= logical_groups) {
          ++log2_multiplier;
          continue;
       }
@@ -606,7 +609,7 @@ main()
       if (gl_LocalInvocationID.x == 0) {
          while (atomicLoad(DEREF(INDEX(morton_ready_count, args.counts, log2_multiplier - 1)).done, gl_ScopeDevice,
                            gl_StorageSemanticsBuffer,
-                           gl_SemanticsAcquire | gl_SemanticsMakeVisible) < gl_NumWorkGroups.x) {}
+                           gl_SemanticsAcquire | gl_SemanticsMakeVisible) < logical_groups) {}
       }
 
       barrier();

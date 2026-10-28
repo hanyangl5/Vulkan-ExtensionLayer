@@ -34,6 +34,7 @@ inline void Box(std::vector<uint8_t>& data, size_t offset, const Bounds& bounds,
 
 struct Fixture {
     uint32_t capacity, active, type, stride, internal_count;
+    bool indexed = false;
     std::vector<uint8_t> bytes;
     Fixture(uint32_t capacity_value, uint32_t active_value, uint32_t type_value)
         : capacity(capacity_value),
@@ -62,8 +63,23 @@ struct Fixture {
     ByteSpan Span() const { return {bytes.data(), bytes.size()}; }
     size_t Leaf(uint32_t slot) const { return 128 + size_t(slot) * stride; }
     size_t Internal(uint32_t index) const { return 128 + size_t(capacity) * stride + size_t(index) * 40; }
-    uint32_t LeafId(uint32_t slot) const { return slot * stride | (type == 0 ? 0u : type == 1 ? 3u : 2u); }
-    uint32_t InternalId(uint32_t index) const { return (capacity * stride + index * 40) | 1u; }
+    uint32_t LeafId(uint32_t slot) const { return (indexed ? slot * 4 : slot * stride) | (type == 0 ? 0u : type == 1 ? 3u : 2u); }
+    uint32_t InternalId(uint32_t index) const { return (indexed ? index * 4 : capacity * stride + index * 40) | 1u; }
+    void UseIndexedIds() {
+        if (indexed) return;
+        for (uint32_t box = 0; box < internal_count; ++box)
+            for (uint32_t child = 0; child < 2; ++child) {
+                const size_t offset = Internal(box) + 24 + child * 4;
+                uint32_t id = 0;
+                for (unsigned byte = 0; byte < 4; ++byte) id |= uint32_t(bytes.at(offset + byte)) << (byte * 8);
+                if (id == 0xffffffffu) continue;
+                const uint32_t kind = id & 3u, address = id & 0xfffffffcu;
+                const uint32_t index = kind == 1 ? (address - capacity * stride) / 40 : address / stride;
+                U32(bytes, offset, index * 4 | kind);
+            }
+        indexed = true;
+        U32(bytes, 112, 3);
+    }
     void InternalBox(uint32_t index, uint32_t left, uint32_t right, Bounds bounds) {
         const size_t offset = Internal(index);
         Box(bytes, offset, bounds);

@@ -32,7 +32,7 @@ static inline struct vkrt_build_layout vkrt_build_layout(const VkAccelerationStr
     VkDeviceSize cursor = sizeof(VelRtBvh4Header), unused;
     VkDeviceSize internals = l.leaf_count > 1 ? l.leaf_count - 1 : 0;
     VkDeviceSize map_words = 0;
-    if (l.leaf_count > VEL_RT_BVH4_MAX_COUNT) goto invalid;
+    if (!l.ir.valid || l.leaf_count > VEL_RT_BVH4_MAX_COUNT) goto invalid;
     map_words = vel_rt_mesa_mapping_words((uint32_t)l.leaf_count);
     if (info->geometryCount) type = (info->pGeometries ? &info->pGeometries[0] : info->ppGeometries[0])->geometryType;
     if (type > 2u) goto invalid;

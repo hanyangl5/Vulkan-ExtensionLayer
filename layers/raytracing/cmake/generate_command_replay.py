@@ -156,7 +156,7 @@ class Generator:
                  "    if (context && context->journal) {",
                  "        struct replay_arena arena = replay_capture_begin(context);",
                  "        replay_unsupported(&arena);",
-                 "        replay_capture_end(context, \"" + n + "\", NULL, NULL, &arena);",
+                 "        replay_capture_end(context, \"" + n + "\", NULL, NULL, NULL, &arena);",
                  "    }",
                  "    VKRT_PFN_" + n + " proc = context && context->resolve ? (VKRT_PFN_" + n + ")context->resolve(context->user, \"" + n + "\") : NULL;"]
         if ret == "void":
@@ -489,6 +489,250 @@ class Generator:
             return t + " " + n + ";"
         return decl + ";"
 
+    def metadata(self, c, params):
+        """Reviewed stage facts; registry state-only is distinct from work.
+
+        Never classify a new action by an English prefix or its native queue
+        capabilities. Unknown action/synchronization semantics fail the metadata
+        query while leaving capture/replay untouched.
+        """
+        n = c.findtext("./proto/name")
+        names = {name_of(p) for p in params[1:]}
+        stage = "VK_PIPELINE_STAGE_2_"
+        flag = "VKRT_REPLAY_"
+        lines = []
+
+        def kind(k, logical=None, physical=None, flags=()):
+            lines.append("    metadata->kind = VKRT_REPLAY_" + k + ";")
+            if logical:
+                lines.append("    metadata->logical_stages = " + logical + ";")
+            if physical:
+                lines.append("    metadata->physical_stages = " + physical + ";")
+            if flags:
+                lines.append("    metadata->flags = " + " | ".join(flag + f for f in flags) + ";")
+
+        def assign(path, expr):
+            lines.append("    metadata->data." + path + " = " + expr + ";")
+
+        def source(path, member):
+            assign(path, "saved->" + member)
+
+        def required(member):
+            lines.append("    if (!saved->" + member + ") return VK_ERROR_FEATURE_NOT_PRESENT;")
+
+        if n == "vkCmdPipelineBarrier" or n == "vkCmdWaitEvents":
+            kind("BARRIER" if n == "vkCmdPipelineBarrier" else "EVENT_WAIT", flags=("RAW_SCOPES",))
+            source("sync.src_stage_mask", "srcStageMask")
+            source("sync.dst_stage_mask", "dstStageMask")
+            if "dependencyFlags" in names:
+                source("sync.dependency_flags", "dependencyFlags")
+            for field, member in (("memory_barrier_count", "memoryBarrierCount"),
+                                  ("buffer_barrier_count", "bufferMemoryBarrierCount"),
+                                  ("image_barrier_count", "imageMemoryBarrierCount"),
+                                  ("memory_barriers", "pMemoryBarriers"),
+                                  ("buffer_barriers", "pBufferMemoryBarriers"),
+                                  ("image_barriers", "pImageMemoryBarriers")):
+                source("sync." + field, member)
+            if n == "vkCmdWaitEvents":
+                source("sync.event_count", "eventCount")
+                source("sync.events", "pEvents")
+        elif n in ("vkCmdPipelineBarrier2", "vkCmdSetEvent2", "vkCmdWaitEvents2"):
+            kind({"vkCmdPipelineBarrier2": "BARRIER", "vkCmdSetEvent2": "EVENT_SET", "vkCmdWaitEvents2": "EVENT_WAIT"}[n],
+                 flags=("RAW_SCOPES",))
+            assign("sync.synchronization2", "true")
+            if n == "vkCmdWaitEvents2":
+                source("sync.event_count", "eventCount")
+                source("sync.events", "pEvents")
+                source("sync.dependency_info_count", "eventCount")
+                source("sync.dependency_infos", "pDependencyInfos")
+            else:
+                assign("sync.dependency_info_count", "1")
+                source("sync.dependency_infos", "pDependencyInfo")
+                if n == "vkCmdSetEvent2":
+                    source("sync.event", "event")
+        elif n in ("vkCmdSetEvent", "vkCmdResetEvent", "vkCmdResetEvent2"):
+            kind("EVENT_SET" if n == "vkCmdSetEvent" else "EVENT_RESET", flags=("RAW_SCOPES",))
+            source("sync.event", "event")
+            source("sync.src_stage_mask", "stageMask")
+            if n == "vkCmdResetEvent2":
+                assign("sync.synchronization2", "true")
+        elif n in ("vkCmdBeginQuery", "vkCmdBeginQueryIndexedEXT", "vkCmdEndQuery", "vkCmdEndQueryIndexedEXT",
+                   "vkCmdResetQueryPool", "vkCmdCopyQueryPoolResults", "vkCmdWriteTimestamp", "vkCmdWriteTimestamp2"):
+            query_kinds = {"vkCmdBeginQuery": "QUERY_BEGIN", "vkCmdBeginQueryIndexedEXT": "QUERY_BEGIN",
+                           "vkCmdEndQuery": "QUERY_END", "vkCmdEndQueryIndexedEXT": "QUERY_END",
+                           "vkCmdResetQueryPool": "QUERY_RESET", "vkCmdCopyQueryPoolResults": "QUERY_COPY",
+                           "vkCmdWriteTimestamp": "QUERY_TIMESTAMP", "vkCmdWriteTimestamp2": "QUERY_TIMESTAMP"}
+            flags = ["QUERY_POOL_CONTEXT"]
+            if "stage" in names:
+                flags.append("RAW_SCOPES")
+            copy = n == "vkCmdCopyQueryPoolResults"
+            kind(query_kinds[n], stage + "COPY_BIT" if copy else None, stage + "COPY_BIT" if copy else None, flags)
+            source("query.pool", "queryPool")
+            source("query.first", "firstQuery" if "firstQuery" in names else "query")
+            if "queryCount" in names:
+                source("query.count", "queryCount")
+            else:
+                assign("query.count", "1")
+            if "index" in names:
+                source("query.index", "index")
+            if "flags" in names:
+                source("query.result_flags" if copy else "query.control_flags", "flags")
+            if "stage" in names:
+                source("query.stage_mask", "stage")
+            if copy:
+                source("query.destination", "dstBuffer")
+                source("query.offset", "dstOffset")
+                source("query.stride", "stride")
+        elif n == "vkCmdWriteAccelerationStructuresPropertiesKHR":
+            kind("AS_PROPERTY", physical=stage + "COMPUTE_SHADER_BIT", flags=("LOWERED", "AS_COPY_CONTEXT"))
+            source("query.pool", "queryPool")
+            source("query.first", "firstQuery")
+            source("query.count", "accelerationStructureCount")
+            source("query.type", "queryType")
+            source("query.acceleration_structures", "pAccelerationStructures")
+        elif n in ("vkCmdBuildAccelerationStructuresKHR", "vkCmdBuildAccelerationStructuresIndirectKHR"):
+            indirect = n.endswith("IndirectKHR")
+            # AS indirect arguments execute at AS BUILD, not DRAW_INDIRECT.
+            kind("AS_BUILD", stage + "ACCELERATION_STRUCTURE_BUILD_BIT_KHR", stage + "COMPUTE_SHADER_BIT",
+                 ("LOWERED", "INDIRECT") if indirect else ("LOWERED",))
+            source("as_build.count", "infoCount")
+            source("as_build.infos", "pInfos")
+            if indirect:
+                source("as_build.indirect_addresses", "pIndirectDeviceAddresses")
+                source("as_build.indirect_strides", "pIndirectStrides")
+                source("as_build.max_primitive_counts", "ppMaxPrimitiveCounts")
+            else:
+                source("as_build.ranges", "ppBuildRangeInfos")
+        elif n in ("vkCmdCopyAccelerationStructureKHR", "vkCmdCopyAccelerationStructureToMemoryKHR",
+                   "vkCmdCopyMemoryToAccelerationStructureKHR"):
+            kind("AS_COPY", physical=stage + "COMPUTE_SHADER_BIT", flags=("LOWERED", "AS_COPY_CONTEXT"))
+            variants = {"vkCmdCopyAccelerationStructureKHR": ("AS_CLONE_COMPACT", "copy"),
+                        "vkCmdCopyAccelerationStructureToMemoryKHR": ("AS_SERIALIZE", "serialize"),
+                        "vkCmdCopyMemoryToAccelerationStructureKHR": ("AS_DESERIALIZE", "deserialize")}
+            variant, field = variants[n]
+            assign("as_copy.kind", flag + variant)
+            source("as_copy." + field, "pInfo")
+        elif n in ("vkCmdTraceRaysKHR", "vkCmdTraceRaysIndirectKHR", "vkCmdTraceRaysIndirect2KHR"):
+            indirect = n != "vkCmdTraceRaysKHR"
+            logical = stage + "RAY_TRACING_SHADER_BIT_KHR"
+            if indirect:
+                logical += " | " + stage + "DRAW_INDIRECT_BIT"
+            kind("TRACE", logical, stage + "COMPUTE_SHADER_BIT",
+                 ("LOWERED", "INDIRECT") if indirect else ("LOWERED",))
+            if "pRaygenShaderBindingTable" in names:
+                for field, member in (("raygen", "pRaygenShaderBindingTable"), ("miss", "pMissShaderBindingTable"),
+                                      ("hit", "pHitShaderBindingTable"), ("callable", "pCallableShaderBindingTable")):
+                    source("trace." + field, member)
+            if indirect:
+                source("trace.indirect_address", "indirectDeviceAddress")
+            else:
+                for member in ("width", "height", "depth"):
+                    source("trace." + member, member)
+        elif n == "vkCmdExecuteCommands":
+            kind("EXECUTE_SECONDARIES")
+            source("children.count", "commandBufferCount")
+            source("children.commands", "pCommandBuffers")
+        elif n in ("vkCmdBeginRenderPass", "vkCmdBeginRenderPass2", "vkCmdNextSubpass", "vkCmdNextSubpass2",
+                   "vkCmdEndRenderPass", "vkCmdEndRenderPass2", "vkCmdBeginRendering", "vkCmdEndRendering"):
+            k = "RENDER_BEGIN" if n.startswith("vkCmdBegin") else "RENDER_NEXT" if n.startswith("vkCmdNext") else "RENDER_END"
+            kind(k, flags=("GRAPHICS_CONTEXT",))
+            assign("render.kind", flag + ("DYNAMIC_RENDERING" if n.endswith("Rendering") else "RENDER_PASS"))
+            if "pRenderPassBegin" in names:
+                source("render.render_pass", "pRenderPassBegin")
+            if "pRenderingInfo" in names:
+                source("render.rendering", "pRenderingInfo")
+            if "contents" in names:
+                source("render.contents", "contents")
+            if "pSubpassBeginInfo" in names:
+                required("pSubpassBeginInfo")
+                source("render.subpass_begin", "pSubpassBeginInfo")
+                assign("render.contents", "saved->pSubpassBeginInfo->contents")
+            if "pSubpassEndInfo" in names:
+                source("render.subpass_end", "pSubpassEndInfo")
+        elif n in ("vkCmdBeginConditionalRenderingEXT", "vkCmdEndConditionalRenderingEXT"):
+            kind("CONDITIONAL_BEGIN" if n.startswith("vkCmdBegin") else "CONDITIONAL_END")
+            if "pConditionalRenderingBegin" in names:
+                source("conditional.begin", "pConditionalRenderingBegin")
+        elif n in ("vkCmdBeginTransformFeedbackEXT", "vkCmdEndTransformFeedbackEXT"):
+            kind("TRANSFORM_FEEDBACK_BEGIN" if n.startswith("vkCmdBegin") else "TRANSFORM_FEEDBACK_END",
+                 stage + "TRANSFORM_FEEDBACK_BIT_EXT", stage + "TRANSFORM_FEEDBACK_BIT_EXT")
+            source("transform_feedback.first", "firstCounterBuffer")
+            source("transform_feedback.count", "counterBufferCount")
+            source("transform_feedback.counter_buffers", "pCounterBuffers")
+            source("transform_feedback.counter_offsets", "pCounterBufferOffsets")
+        elif n in ("vkCmdDispatch", "vkCmdDispatchBase", "vkCmdDispatchIndirect"):
+            logical = stage + "COMPUTE_SHADER_BIT"
+            if n == "vkCmdDispatchIndirect":
+                logical += " | " + stage + "DRAW_INDIRECT_BIT"
+            kind("ACTION", logical, logical, ("INDIRECT",) if n == "vkCmdDispatchIndirect" else ())
+        elif n in ("vkCmdCopyBuffer", "vkCmdCopyBuffer2", "vkCmdCopyImage", "vkCmdCopyImage2",
+                   "vkCmdCopyBufferToImage", "vkCmdCopyBufferToImage2", "vkCmdCopyImageToBuffer", "vkCmdCopyImageToBuffer2",
+                   "vkCmdUpdateBuffer", "vkCmdFillBuffer", "vkCmdClearColorImage", "vkCmdClearDepthStencilImage",
+                   "vkCmdBlitImage", "vkCmdBlitImage2", "vkCmdResolveImage", "vkCmdResolveImage2"):
+            s = "CLEAR_BIT" if n in ("vkCmdUpdateBuffer", "vkCmdFillBuffer", "vkCmdClearColorImage", "vkCmdClearDepthStencilImage") else \
+                "BLIT_BIT" if n.startswith("vkCmdBlit") else "RESOLVE_BIT" if n.startswith("vkCmdResolve") else "COPY_BIT"
+            kind("ACTION", stage + s, stage + s)
+        elif n in ("vkCmdDraw", "vkCmdDrawIndexed", "vkCmdDrawIndirect", "vkCmdDrawIndexedIndirect",
+                   "vkCmdDrawIndirectCount", "vkCmdDrawIndexedIndirectCount", "vkCmdDrawIndirectByteCountEXT",
+                   "vkCmdDrawMultiEXT", "vkCmdDrawMultiIndexedEXT", "vkCmdDrawMeshTasksNV", "vkCmdDrawMeshTasksIndirectNV",
+                   "vkCmdDrawMeshTasksIndirectCountNV", "vkCmdDrawMeshTasksEXT", "vkCmdDrawMeshTasksIndirectEXT",
+                   "vkCmdDrawMeshTasksIndirectCountEXT", "vkCmdClearAttachments"):
+            indirect = "Indirect" in n
+            flags = ("GRAPHICS_CONTEXT", "INDIRECT") if indirect else ("GRAPHICS_CONTEXT",)
+            kind("ACTION", stage + "DRAW_INDIRECT_BIT" if indirect else None,
+                 stage + "DRAW_INDIRECT_BIT" if indirect else None, flags)
+        elif c.get("tasks", "").split(",") == ["state"]:
+            # Registry task classification states that no action or sync work
+            # is performed. This is not a prefix-based guess for new commands.
+            kind("STATE")
+            assign("state.kind", flag + "STATE_DYNAMIC")
+            assign("state.bind_point", "VK_PIPELINE_BIND_POINT_MAX_ENUM")
+            if c.get("renderpass") == "inside":
+                lines.append("    metadata->flags |= VKRT_REPLAY_RENDER_LOCAL;")
+            if c.get("videocoding") == "inside":
+                lines.append("    metadata->flags |= VKRT_REPLAY_VIDEO_LOCAL;")
+            if n in ("vkCmdSetRenderingAttachmentLocations", "vkCmdSetRenderingInputAttachmentIndices"):
+                lines.append("    metadata->flags |= VKRT_REPLAY_RENDER_LOCAL;")
+            if "pipelineBindPoint" in names:
+                source("state.bind_point", "pipelineBindPoint")
+            if n == "vkCmdBindPipeline":
+                assign("state.kind", flag + "STATE_PIPELINE")
+                source("state.pipeline", "pipeline")
+            elif n == "vkCmdBindShadersEXT":
+                assign("state.kind", flag + "STATE_SHADERS")
+                lines.append("    if (saved->stageCount && !saved->pStages) return VK_ERROR_FEATURE_NOT_PRESENT;")
+                source("state.shader_count", "stageCount")
+                source("state.shader_stages", "pStages")
+                source("state.shaders", "pShaders")
+                lines.extend(["    for (uint32_t i = 0; i < saved->stageCount; ++i)",
+                              "        metadata->data.state.affected_stages |= saved->pStages[i];"])
+            elif n in ("vkCmdPushConstants", "vkCmdPushConstants2"):
+                assign("state.kind", flag + "STATE_PUSH_CONSTANTS")
+                if "stageFlags" in names:
+                    source("state.affected_stages", "stageFlags")
+            elif n in ("vkCmdBindIndexBuffer", "vkCmdBindIndexBuffer2", "vkCmdBindIndexBuffer3KHR", "vkCmdBindVertexBuffers",
+                       "vkCmdBindVertexBuffers2", "vkCmdBindVertexBuffers3KHR", "vkCmdSetVertexInputEXT"):
+                assign("state.kind", flag + "STATE_VERTEX_INDEX")
+            elif n == "vkCmdSetDeviceMask":
+                assign("state.kind", flag + "STATE_DEVICE_MASK")
+                source("state.device_mask", "deviceMask")
+            elif n == "vkCmdSetRayTracingPipelineStackSizeKHR":
+                assign("state.kind", flag + "STATE_RT_STACK")
+                source("state.stack_size", "pipelineStackSize")
+            elif "Descriptor" in n:
+                assign("state.kind", flag + "STATE_DESCRIPTORS")
+            info_stages = {"vkCmdBindDescriptorSets2": "pBindDescriptorSetsInfo", "vkCmdPushConstants2": "pPushConstantsInfo",
+                           "vkCmdPushDescriptorSet2": "pPushDescriptorSetInfo",
+                           "vkCmdSetDescriptorBufferOffsets2EXT": "pSetDescriptorBufferOffsetsInfo",
+                           "vkCmdBindDescriptorBufferEmbeddedSamplers2EXT": "pBindDescriptorBufferEmbeddedSamplersInfo"}
+            if n in info_stages:
+                member = info_stages[n]
+                required(member)
+                assign("state.affected_stages", "saved->" + member + "->stageFlags")
+        else:
+            return []
+        return lines
+
     def command(self, n, c, params):
         ret = c.findtext("./proto/type")
         args = [name_of(p) for p in params]
@@ -551,6 +795,12 @@ class Generator:
         else:
             lines.append("    return result;")
         lines.append("}")
+        metadata = self.metadata(c, params)
+        if metadata:
+            lines.extend(["static VkResult replay_metadata_" + n + "(const void *data, struct vkrt_replay_metadata *metadata) {",
+                          "    const struct replay_args_" + n + " *saved = data;", "    (void)saved;"])
+            lines.extend(metadata)
+            lines.extend(["    return VK_SUCCESS;", "}"])
         sig = ", ".join(self.shape(p)[2] for p in params)
         lines.extend(["static VKAPI_ATTR " + ret + " VKAPI_CALL replay_record_" + n + "(" + sig + ") {",
                       "    struct vkrt_replay_context *context = vkrt_replay_lookup_context(" + first + ");",
@@ -562,7 +812,8 @@ class Generator:
         initializers = ["." + a + " = " + a for a in args[1:]] or [".unused = 0"]
         lines.append("            struct replay_args_" + n + " source = {" + ", ".join(initializers) + "};")
         lines.append("            replay_clone_args_" + n + "(arena, saved, &source);")
-        lines.extend(["        }", "        replay_capture_end(context, \"" + n + "\", replay_emit_" + n + ", saved, arena);", "    }",
+        describe = "replay_metadata_" + n if metadata else "NULL"
+        lines.extend(["        }", "        replay_capture_end(context, \"" + n + "\", replay_emit_" + n + ", " + describe + ", saved, arena);", "    }",
                       "    PFN_" + n + " proc = context && context->resolve ? (PFN_" + n + ")context->resolve(context->user, \"" + n + "\") : NULL;"])
         if ret == "void":
             lines.append("    if (proc) proc(" + ", ".join(args) + ");")
@@ -641,7 +892,7 @@ class Generator:
                 if parent in edges:
                     edges[parent].add(target)
         command_manifest = []
-        for n, _, params in self.commands:
+        for n, command, params in self.commands:
             seen, pending = set(), [self.canonical(p.findtext("type")) for p in params[1:]]
             while pending:
                 t = pending.pop()
@@ -652,10 +903,12 @@ class Generator:
             restrictions = {t: self.struct_reasons[t] for t in sorted(seen) if t in self.struct_reasons}
             command_manifest.append({"name": n,
                                      "capture": "unsupported" if n in self.command_reasons else "typed_with_runtime_schema_checks",
+                                     "metadata": "reviewed_or_registry_state" if self.metadata(command, params) else "incomplete",
                                      "reasons": self.command_reasons.get(n, []),
                                      "conditional_schema_restrictions": restrictions})
         for n, _, _, _, _ in forwarding:
             command_manifest.append({"name": n, "capture": "unsupported",
+                                     "metadata": "incomplete",
                                      "reasons": ["ABI-only forwarding: command is absent from the selected core header; actual invocation fails capture without reading opaque inputs"],
                                      "conditional_schema_restrictions": {}})
         command_manifest.sort(key=lambda x: x["name"])
@@ -664,6 +917,8 @@ class Generator:
                     "header_sha256": hashlib.sha256(self.header.read_bytes()).hexdigest(),
                     "policy": "Typed command inputs are owned; unknown pNext, opaque schemas, and unsupported union cases fail capture. Native handles obey Vulkan object lifetimes. Pipeline layouts are normalized by the caller callback. Device-address unions retain address bits, opaque checkpoint markers retain identity.",
                     "command_count": len(wrapped_names), "typed_struct_count": len(self.reachable),
+                    "metadata_command_count": sum(c["metadata"] != "incomplete" for c in command_manifest),
+                    "metadata_policy": "Reviewed action/synchronization facts and registry state-only tasks; raw scopes and context flags are not complete dependency/replay certificates. Unknown action semantics fail metadata queries without poisoning ordinary capture/replay.",
                     "commands": command_manifest,
                     "conditional_struct_restrictions": self.struct_reasons,
                     "manual_pointer_rules": self.MANUAL_POINTER_RULES,

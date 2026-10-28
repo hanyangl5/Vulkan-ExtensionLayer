@@ -17,15 +17,15 @@ enum class MesaGeometryType : uint32_t { Triangles = 0, Aabbs = 1, Instances = 2
 
 // Mesa's scalar record ABI, as declared in layers/raytracing/src/vk_bvh_defines.h.
 // Unlike the optional VKRT v2 envelope, Mesa itself takes header and node bases
-// separately. Node IDs contain a 32-bit byte offset and a two-bit node kind.
-// This adapter does not replace that construction-time capacity limit with an
-// assertion that the final BVH4 representation has a 32-bit byte-offset limit.
+// separately. Legacy v2 IDs contain tagged byte offsets; the layer's v3 build
+// adaptation uses tagged record indices and decodes their addresses in uint64.
 struct MesaIrInput {
     ByteSpan header;
     ByteSpan nodes;
     uint32_t leaf_capacity = 0;
     MesaGeometryType geometry_type = MesaGeometryType::Triangles;
     uint32_t build_flags = 0;
+    uint32_t id_version = 2;
 };
 
 using BlasAddressResolver = std::function<uint64_t(uint64_t)>;
@@ -59,8 +59,8 @@ struct MesaAdapted {
 MesaAdapted AdaptMesaIr(const MesaIrInput& input, const std::vector<uint32_t>& geometry_flags,
                         const BlasAddressResolver& resolve_blas = {});
 
-// Convenience reader for the existing VKRT v2 envelope documented in
-// layers/raytracing/docs/IR_CONTRACT_V2.md. It is not a Mesa or runtime BVH4 container ABI.
+// Convenience reader retaining its historical name; accepts the v2 byte-ID and
+// v3 indexed-ID envelopes. Neither is the public runtime BVH4/serialization ABI.
 MesaAdapted AdaptMesaContainerV2(ByteSpan input, const std::vector<uint32_t>& geometry_flags,
                                  const BlasAddressResolver& resolve_blas = {});
 

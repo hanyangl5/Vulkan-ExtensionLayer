@@ -237,6 +237,53 @@ static void RejectInstances() {
     Reject([&] { AdaptMesaContainerV2(mutation.Span(), {}, identity); });
 }
 
+static void IndexedInputs() {
+    std::vector<Fixture> inputs;
+    inputs.push_back(SparseTriangles());
+    inputs.push_back(InstanceFixture());
+    Fixture aabbs(5, 2, 1);
+    aabbs.Aabb(0, {{0, 0, 0}, {1, 1, 1}}, 71, 0);
+    aabbs.Aabb(4, {{2, 0, 0}, {3, 1, 1}}, 29, 1);
+    aabbs.InternalBox(0, aabbs.LeafId(0), aabbs.LeafId(4), {{0, 0, 0}, {3, 1, 1}});
+    inputs.push_back(aabbs);
+    Fixture empty(7, 0, 0);
+    empty.Empty();
+    inputs.push_back(empty);
+    for (auto fixture : inputs) {
+        const std::vector<uint32_t> flags = fixture.type == 0 ? SparseTriangleFlags() : std::vector<uint32_t>{0, 2};
+        auto resolver = [](uint64_t address) { return address ^ UINT64_C(0xedf800000000); };
+        const auto expected = AdaptMesaContainerV2(fixture.Span(), flags, resolver);
+        fixture.UseIndexedIds();
+        const auto actual = AdaptMesaContainerV2(fixture.Span(), flags, resolver);
+        Check(actual.root == expected.root && actual.tree.size() == expected.tree.size(), "indexed root/topology size");
+        for (size_t i = 0; i < actual.tree.size(); ++i) {
+            const auto& a = actual.tree[i];
+            const auto& b = expected.tree[i];
+            Check(a.left == b.left && a.right == b.right && a.leaf_id == b.leaf_id && a.bounds.min == b.bounds.min &&
+                      a.bounds.max == b.bounds.max,
+                  "indexed topology and bounds");
+        }
+        auto records_match = [](const auto& a, const auto& b) {
+            return a.size() == b.size() && (a.empty() || !std::memcmp(a.data(), b.data(), a.size() * sizeof(a[0])));
+        };
+        Check(records_match(actual.triangles, expected.triangles) && records_match(actual.aabbs, expected.aabbs) &&
+                  records_match(actual.instances, expected.instances),
+              "indexed leaf records/flags/addresses");
+        Check(actual.triangle_source_slots == expected.triangle_source_slots &&
+                  actual.aabb_source_slots == expected.aabb_source_slots &&
+                  actual.instance_source_slots == expected.instance_source_slots,
+              "indexed sparse source identity");
+    }
+    auto bad = SparseTriangles();
+    bad.UseIndexedIds();
+    U32(bad.bytes, bad.Internal(1) + 24, 0xfffffffdu);
+    Reject([&] { AdaptMesaContainerV2(bad.Span(), SparseTriangleFlags()); });
+    bad = SparseTriangles();
+    bad.UseIndexedIds();
+    U32(bad.bytes, 116, 0x20000000u);
+    Reject<std::overflow_error>([&] { AdaptMesaContainerV2(bad.Span(), SparseTriangleFlags()); });
+}
+
 int main() {
     try {
         Triangles();
@@ -246,6 +293,7 @@ int main() {
         RejectContainersAndHeaders();
         RejectGraphsAndRecords();
         RejectInstances();
+        IndexedInputs();
         std::cout << "PASS: Mesa scalar IR adapter, sparse records/IDs/flags/transforms, deep trees and malformed inputs\n";
         return 0;
     } catch (const std::exception& error) {

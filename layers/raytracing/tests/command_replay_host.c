@@ -222,6 +222,18 @@ static void replay(vkrt_replay_remap_child child) {
     assert(vkrt_replay_emit(source_context.journal, target_command, resolve, NULL, child) == VK_SUCCESS);
     replaying = false;
 }
+static const struct vkrt_replay_entry *entry_at(size_t index) {
+    const struct vkrt_replay_entry *entry = vkrt_replay_first(source_context.journal);
+    while (entry && index--) entry = vkrt_replay_next(entry);
+    assert(entry);
+    return entry;
+}
+static struct vkrt_replay_metadata metadata_at(size_t index) {
+    struct vkrt_replay_metadata metadata;
+    memset(&metadata, 0xff, sizeof(metadata));
+    assert(vkrt_replay_entry_metadata(entry_at(index), &metadata) == VK_SUCCESS);
+    return metadata;
+}
 static void test_begin(void) {
     VkFormat formats[] = {VK_FORMAT_R8G8B8A8_UNORM, VK_FORMAT_R16G16B16A16_SFLOAT};
     VkCommandBufferInheritanceRenderingInfo rendering = {.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_INHERITANCE_RENDERING_INFO,
@@ -337,6 +349,10 @@ static void test_barrier(void) {
     image.image = VK_NULL_HANDLE;
     assert(vkrt_replay_journal_count(source_context.journal) == 1);
     assert(!strcmp(vkrt_replay_entry_name(vkrt_replay_first(source_context.journal)), "vkCmdPipelineBarrier2KHR"));
+    struct vkrt_replay_metadata metadata = metadata_at(0);
+    assert(metadata.kind == VKRT_REPLAY_BARRIER && metadata.data.sync.synchronization2 &&
+           metadata.data.sync.dependency_info_count == 1 && metadata.data.sync.dependency_infos != &info &&
+           metadata.data.sync.dependency_infos[0].pImageMemoryBarriers->image == HANDLE(VkImage, 9));
     replay(NULL);
     assert(!strcmp(last_resolved, "vkCmdPipelineBarrier2KHR"));
     assert(record_calls == 1 && emit_calls == 1);
@@ -370,6 +386,16 @@ static void test_build(void) {
     memset(addresses, 0, sizeof(addresses));
     memset(strides, 0, sizeof(strides));
     memset(maximums, 0, sizeof(maximums));
+    struct vkrt_replay_metadata direct = metadata_at(0), indirect = metadata_at(1);
+    assert(direct.kind == VKRT_REPLAY_AS_BUILD && direct.flags == VKRT_REPLAY_LOWERED);
+    assert(direct.logical_stages == VK_PIPELINE_STAGE_2_ACCELERATION_STRUCTURE_BUILD_BIT_KHR &&
+           direct.physical_stages == VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
+    assert(direct.data.as_build.count == 1 && direct.data.as_build.infos != &info &&
+           direct.data.as_build.ranges[0][0].primitiveCount == 3);
+    assert(indirect.kind == VKRT_REPLAY_AS_BUILD && (indirect.flags & VKRT_REPLAY_INDIRECT));
+    assert(indirect.logical_stages == VK_PIPELINE_STAGE_2_ACCELERATION_STRUCTURE_BUILD_BIT_KHR &&
+           !(indirect.logical_stages & VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT));
+    assert(indirect.data.as_build.indirect_addresses[0] == 0x4000 && indirect.data.as_build.max_primitive_counts[0][1] == 9);
     replay(NULL);
     assert(emit_calls == 2);
 }
@@ -438,6 +464,10 @@ static void test_children(void) {
     VkCommandBuffer children[] = {HANDLE(VkCommandBuffer, 10), HANDLE(VkCommandBuffer, 11)};
     ((PFN_vkCmdExecuteCommands)vkrt_replay_proc("vkCmdExecuteCommands"))(source_command, 2, children);
     memset(children, 0, sizeof(children));
+    struct vkrt_replay_metadata metadata = metadata_at(0);
+    assert(metadata.kind == VKRT_REPLAY_EXECUTE_SECONDARIES && !metadata.logical_stages && !metadata.physical_stages);
+    assert(metadata.data.children.count == 2 && metadata.data.children.commands != children &&
+           metadata.data.children.commands[1] == HANDLE(VkCommandBuffer, 11));
     replay(remap);
     replay(remap);
     replaying = true;
@@ -472,7 +502,321 @@ static void test_stride_and_selector(void) {
     ((PFN_vkCmdBuildClusterAccelerationStructureIndirectNV)vkrt_replay_proc("vkCmdBuildClusterAccelerationStructureIndirectNV"))(
         source_command, &info);
     triangles.maxClusterVertexCount = 0;
+    struct vkrt_replay_metadata metadata;
+    memset(&metadata, 0xff, sizeof(metadata));
+    assert(vkrt_replay_entry_metadata(entry_at(0), &metadata) == VK_ERROR_FEATURE_NOT_PRESENT);
+    assert(metadata.kind == VKRT_REPLAY_UNKNOWN && !metadata.logical_stages && !metadata.physical_stages && !metadata.flags);
+    assert(vkrt_replay_journal_status(source_context.journal) == VK_SUCCESS);
     replay(NULL);
+}
+
+static void test_query_metadata(void) {
+    reset();
+    const VkQueryPool pool = HANDLE(VkQueryPool, 91);
+    VkAccelerationStructureKHR structures[] = {HANDLE(VkAccelerationStructureKHR, 30), HANDLE(VkAccelerationStructureKHR, 31),
+                                               HANDLE(VkAccelerationStructureKHR, 32)};
+    ((PFN_vkCmdResetQueryPool)vkrt_replay_proc("vkCmdResetQueryPool"))(source_command, pool, 9, 3);
+    ((PFN_vkCmdWriteAccelerationStructuresPropertiesKHR)vkrt_replay_proc("vkCmdWriteAccelerationStructuresPropertiesKHR"))(
+        source_command, 3, structures, VK_QUERY_TYPE_ACCELERATION_STRUCTURE_SERIALIZATION_SIZE_KHR, pool, 9);
+    ((PFN_vkCmdCopyQueryPoolResults)vkrt_replay_proc("vkCmdCopyQueryPoolResults"))(
+        source_command, pool, 9, 3, HANDLE(VkBuffer, 92), UINT64_C(0x100000004), 32,
+        VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WITH_AVAILABILITY_BIT | VK_QUERY_RESULT_WAIT_BIT);
+    ((PFN_vkCmdWriteTimestamp2KHR)vkrt_replay_proc("vkCmdWriteTimestamp2KHR"))(source_command, VK_PIPELINE_STAGE_2_COPY_BIT,
+                                                                               HANDLE(VkQueryPool, 93), 15);
+    ((PFN_vkCmdBeginQueryIndexedEXT)vkrt_replay_proc("vkCmdBeginQueryIndexedEXT"))(source_command, HANDLE(VkQueryPool, 94), 5,
+                                                                                   VK_QUERY_CONTROL_PRECISE_BIT, 2);
+    ((PFN_vkCmdEndQueryIndexedEXT)vkrt_replay_proc("vkCmdEndQueryIndexedEXT"))(source_command, HANDLE(VkQueryPool, 94), 5, 2);
+    memset(structures, 0, sizeof(structures));
+    struct vkrt_replay_metadata reset_query = metadata_at(0), property = metadata_at(1), copy = metadata_at(2);
+    assert(reset_query.kind == VKRT_REPLAY_QUERY_RESET && reset_query.data.query.pool == pool &&
+           reset_query.data.query.first == 9 && reset_query.data.query.count == 3);
+    assert(!reset_query.logical_stages && !reset_query.physical_stages && reset_query.flags == VKRT_REPLAY_QUERY_POOL_CONTEXT);
+    assert(property.kind == VKRT_REPLAY_AS_PROPERTY && property.data.query.pool == pool && property.data.query.first == 9 &&
+           property.data.query.count == 3 &&
+           property.data.query.type == VK_QUERY_TYPE_ACCELERATION_STRUCTURE_SERIALIZATION_SIZE_KHR &&
+           property.data.query.acceleration_structures != structures &&
+           property.data.query.acceleration_structures[2] == HANDLE(VkAccelerationStructureKHR, 32));
+    assert(property.flags == (VKRT_REPLAY_LOWERED | VKRT_REPLAY_AS_COPY_CONTEXT) && !property.logical_stages &&
+           property.physical_stages == VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
+    assert(copy.kind == VKRT_REPLAY_QUERY_COPY && copy.logical_stages == VK_PIPELINE_STAGE_2_COPY_BIT &&
+           copy.physical_stages == VK_PIPELINE_STAGE_2_COPY_BIT && copy.flags == VKRT_REPLAY_QUERY_POOL_CONTEXT);
+    assert(copy.data.query.destination == HANDLE(VkBuffer, 92) && copy.data.query.offset == UINT64_C(0x100000004) &&
+           copy.data.query.stride == 32 &&
+           copy.data.query.result_flags ==
+               (VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WITH_AVAILABILITY_BIT | VK_QUERY_RESULT_WAIT_BIT));
+    struct vkrt_replay_metadata timestamp = metadata_at(3), begin = metadata_at(4), end = metadata_at(5);
+    assert(timestamp.kind == VKRT_REPLAY_QUERY_TIMESTAMP && timestamp.data.query.stage_mask == VK_PIPELINE_STAGE_2_COPY_BIT &&
+           timestamp.data.query.first == 15 && timestamp.data.query.count == 1 && !timestamp.logical_stages &&
+           timestamp.flags == (VKRT_REPLAY_QUERY_POOL_CONTEXT | VKRT_REPLAY_RAW_SCOPES));
+    assert(begin.kind == VKRT_REPLAY_QUERY_BEGIN && begin.data.query.index == 2 && begin.data.query.first == 5 &&
+           begin.data.query.control_flags == VK_QUERY_CONTROL_PRECISE_BIT && !begin.logical_stages);
+    assert(end.kind == VKRT_REPLAY_QUERY_END && end.data.query.index == 2 && end.data.query.first == 5 && !end.logical_stages);
+}
+
+static void test_virtual_work_metadata(void) {
+    reset();
+    VkCopyAccelerationStructureInfoKHR copy = {.sType = VK_STRUCTURE_TYPE_COPY_ACCELERATION_STRUCTURE_INFO_KHR,
+                                               .src = HANDLE(VkAccelerationStructureKHR, 31),
+                                               .dst = HANDLE(VkAccelerationStructureKHR, 32),
+                                               .mode = VK_COPY_ACCELERATION_STRUCTURE_MODE_CLONE_KHR};
+    VkCopyAccelerationStructureToMemoryInfoKHR serialize = {
+        .sType = VK_STRUCTURE_TYPE_COPY_ACCELERATION_STRUCTURE_TO_MEMORY_INFO_KHR,
+        .src = copy.src,
+        .dst.deviceAddress = UINT64_C(0x100000008),
+        .mode = VK_COPY_ACCELERATION_STRUCTURE_MODE_SERIALIZE_KHR};
+    VkCopyMemoryToAccelerationStructureInfoKHR deserialize = {
+        .sType = VK_STRUCTURE_TYPE_COPY_MEMORY_TO_ACCELERATION_STRUCTURE_INFO_KHR,
+        .src.deviceAddress = UINT64_C(0x200000008),
+        .dst = copy.dst,
+        .mode = VK_COPY_ACCELERATION_STRUCTURE_MODE_DESERIALIZE_KHR};
+    ((PFN_vkCmdCopyAccelerationStructureKHR)vkrt_replay_proc("vkCmdCopyAccelerationStructureKHR"))(source_command, &copy);
+    ((PFN_vkCmdCopyAccelerationStructureToMemoryKHR)vkrt_replay_proc("vkCmdCopyAccelerationStructureToMemoryKHR"))(source_command,
+                                                                                                                   &serialize);
+    ((PFN_vkCmdCopyMemoryToAccelerationStructureKHR)vkrt_replay_proc("vkCmdCopyMemoryToAccelerationStructureKHR"))(source_command,
+                                                                                                                   &deserialize);
+    VkStridedDeviceAddressRegionKHR regions[] = {{0x1000, 32, 32}, {0x2000, 32, 64}, {0x3000, 32, 64}, {0x4000, 32, 64}};
+    ((PFN_vkCmdTraceRaysKHR)vkrt_replay_proc("vkCmdTraceRaysKHR"))(source_command, &regions[0], &regions[1], &regions[2],
+                                                                   &regions[3], 4, 3, 2);
+    ((PFN_vkCmdTraceRaysIndirectKHR)vkrt_replay_proc("vkCmdTraceRaysIndirectKHR"))(source_command, &regions[0], &regions[1],
+                                                                                   &regions[2], &regions[3], UINT64_C(0x300000000));
+    ((PFN_vkCmdTraceRaysIndirect2KHR)vkrt_replay_proc("vkCmdTraceRaysIndirect2KHR"))(source_command, UINT64_C(0x400000000));
+    memset(&copy, 0, sizeof(copy));
+    memset(&serialize, 0, sizeof(serialize));
+    memset(&deserialize, 0, sizeof(deserialize));
+    memset(regions, 0, sizeof(regions));
+    struct vkrt_replay_metadata metadata = metadata_at(0);
+    assert(metadata.kind == VKRT_REPLAY_AS_COPY && metadata.flags == (VKRT_REPLAY_LOWERED | VKRT_REPLAY_AS_COPY_CONTEXT) &&
+           !metadata.logical_stages && metadata.physical_stages == VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
+    assert(metadata.data.as_copy.kind == VKRT_REPLAY_AS_CLONE_COMPACT && metadata.data.as_copy.copy != &copy &&
+           metadata.data.as_copy.copy->src == HANDLE(VkAccelerationStructureKHR, 31));
+    metadata = metadata_at(1);
+    assert(metadata.data.as_copy.kind == VKRT_REPLAY_AS_SERIALIZE && metadata.data.as_copy.serialize != &serialize &&
+           metadata.data.as_copy.serialize->dst.deviceAddress == UINT64_C(0x100000008));
+    metadata = metadata_at(2);
+    assert(metadata.data.as_copy.kind == VKRT_REPLAY_AS_DESERIALIZE && metadata.data.as_copy.deserialize != &deserialize &&
+           metadata.data.as_copy.deserialize->src.deviceAddress == UINT64_C(0x200000008));
+    metadata = metadata_at(3);
+    assert(metadata.kind == VKRT_REPLAY_TRACE && metadata.flags == VKRT_REPLAY_LOWERED &&
+           metadata.logical_stages == VK_PIPELINE_STAGE_2_RAY_TRACING_SHADER_BIT_KHR &&
+           metadata.physical_stages == VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT && metadata.data.trace.width == 4 &&
+           metadata.data.trace.height == 3 && metadata.data.trace.depth == 2 && metadata.data.trace.raygen != regions &&
+           metadata.data.trace.hit->deviceAddress == 0x3000);
+    metadata = metadata_at(4);
+    assert(metadata.flags == (VKRT_REPLAY_LOWERED | VKRT_REPLAY_INDIRECT) &&
+           metadata.logical_stages == (VK_PIPELINE_STAGE_2_RAY_TRACING_SHADER_BIT_KHR | VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT) &&
+           metadata.data.trace.indirect_address == UINT64_C(0x300000000));
+    metadata = metadata_at(5);
+    assert(metadata.kind == VKRT_REPLAY_TRACE && metadata.data.trace.indirect_address == UINT64_C(0x400000000) &&
+           !metadata.data.trace.raygen);
+
+    reset();
+    const uint32_t bytes = 12;
+    ((PFN_vkCmdUpdateBuffer)vkrt_replay_proc("vkCmdUpdateBuffer"))(source_command, HANDLE(VkBuffer, 35), 0, 4, &bytes);
+    metadata = metadata_at(0);
+    /* UpdateBuffer is in the pinned Clear Commands chapter, not Copy Commands. */
+    assert(metadata.logical_stages == VK_PIPELINE_STAGE_2_CLEAR_BIT && metadata.physical_stages == VK_PIPELINE_STAGE_2_CLEAR_BIT);
+    VkConditionalRenderingBeginInfoEXT conditional = {.sType = VK_STRUCTURE_TYPE_CONDITIONAL_RENDERING_BEGIN_INFO_EXT,
+                                                      .buffer = HANDLE(VkBuffer, 36),
+                                                      .offset = 20,
+                                                      .flags = VK_CONDITIONAL_RENDERING_INVERTED_BIT_EXT};
+    VkBuffer counters[] = {HANDLE(VkBuffer, 37), HANDLE(VkBuffer, 38)};
+    VkDeviceSize offsets[] = {16, 32};
+    ((PFN_vkCmdBeginConditionalRenderingEXT)vkrt_replay_proc("vkCmdBeginConditionalRenderingEXT"))(source_command, &conditional);
+    ((PFN_vkCmdEndConditionalRenderingEXT)vkrt_replay_proc("vkCmdEndConditionalRenderingEXT"))(source_command);
+    ((PFN_vkCmdBeginTransformFeedbackEXT)vkrt_replay_proc("vkCmdBeginTransformFeedbackEXT"))(source_command, 1, 2, counters,
+                                                                                             offsets);
+    ((PFN_vkCmdEndTransformFeedbackEXT)vkrt_replay_proc("vkCmdEndTransformFeedbackEXT"))(source_command, 1, 2, counters, offsets);
+    memset(&conditional, 0, sizeof(conditional));
+    memset(counters, 0, sizeof(counters));
+    memset(offsets, 0, sizeof(offsets));
+    metadata = metadata_at(1);
+    assert(metadata.kind == VKRT_REPLAY_CONDITIONAL_BEGIN && metadata.data.conditional.begin != &conditional &&
+           metadata.data.conditional.begin->offset == 20 &&
+           metadata.data.conditional.begin->flags == VK_CONDITIONAL_RENDERING_INVERTED_BIT_EXT);
+    assert(metadata_at(2).kind == VKRT_REPLAY_CONDITIONAL_END);
+    metadata = metadata_at(3);
+    assert(metadata.kind == VKRT_REPLAY_TRANSFORM_FEEDBACK_BEGIN && metadata.data.transform_feedback.first == 1 &&
+           metadata.data.transform_feedback.count == 2 && metadata.data.transform_feedback.counter_buffers != counters &&
+           metadata.data.transform_feedback.counter_buffers[1] == HANDLE(VkBuffer, 38) &&
+           metadata.data.transform_feedback.counter_offsets[1] == 32);
+    assert(metadata_at(4).kind == VKRT_REPLAY_TRANSFORM_FEEDBACK_END);
+}
+
+static void test_sync_metadata(void) {
+    reset();
+    VkMemoryBarrier memory = {.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER,
+                              .srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT,
+                              .dstAccessMask = VK_ACCESS_INDIRECT_COMMAND_READ_BIT};
+    VkBufferMemoryBarrier buffer = {.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER,
+                                    .srcAccessMask = VK_ACCESS_ACCELERATION_STRUCTURE_WRITE_BIT_KHR,
+                                    .dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT,
+                                    .srcQueueFamilyIndex = 3,
+                                    .dstQueueFamilyIndex = 5,
+                                    .buffer = HANDLE(VkBuffer, 21),
+                                    .offset = 24,
+                                    .size = 48};
+    VkImageMemoryBarrier image = {.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+                                  .oldLayout = VK_IMAGE_LAYOUT_GENERAL,
+                                  .newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                                  .image = HANDLE(VkImage, 22),
+                                  .subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 2, 3, 0, 4}};
+    ((PFN_vkCmdPipelineBarrier)vkrt_replay_proc("vkCmdPipelineBarrier"))(
+        source_command, VK_PIPELINE_STAGE_ACCELERATION_STRUCTURE_BUILD_BIT_KHR | VK_PIPELINE_STAGE_TRANSFER_BIT,
+        VK_PIPELINE_STAGE_VERTEX_INPUT_BIT, VK_DEPENDENCY_BY_REGION_BIT, 1, &memory, 1, &buffer, 1, &image);
+    memset(&memory, 0, sizeof(memory));
+    memset(&buffer, 0, sizeof(buffer));
+    memset(&image, 0, sizeof(image));
+    struct vkrt_replay_metadata metadata = metadata_at(0);
+    assert(metadata.kind == VKRT_REPLAY_BARRIER && metadata.flags == VKRT_REPLAY_RAW_SCOPES && !metadata.logical_stages &&
+           !metadata.physical_stages && !metadata.data.sync.synchronization2);
+    assert(metadata.data.sync.src_stage_mask ==
+               (VK_PIPELINE_STAGE_ACCELERATION_STRUCTURE_BUILD_BIT_KHR | VK_PIPELINE_STAGE_TRANSFER_BIT) &&
+           metadata.data.sync.dst_stage_mask == VK_PIPELINE_STAGE_VERTEX_INPUT_BIT &&
+           metadata.data.sync.dependency_flags == VK_DEPENDENCY_BY_REGION_BIT);
+    assert(metadata.data.sync.memory_barriers != &memory &&
+           metadata.data.sync.memory_barriers[0].srcAccessMask == VK_ACCESS_SHADER_WRITE_BIT);
+    assert(metadata.data.sync.buffer_barriers != &buffer && metadata.data.sync.buffer_barriers[0].offset == 24 &&
+           metadata.data.sync.buffer_barriers[0].size == 48 && metadata.data.sync.buffer_barriers[0].srcQueueFamilyIndex == 3 &&
+           metadata.data.sync.buffer_barriers[0].dstQueueFamilyIndex == 5);
+    assert(metadata.data.sync.image_barriers != &image &&
+           metadata.data.sync.image_barriers[0].newLayout == VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL &&
+           metadata.data.sync.image_barriers[0].subresourceRange.levelCount == 3);
+
+    VkMemoryBarrier2 barriers[] = {{.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER_2,
+                                    .srcStageMask = VK_PIPELINE_STAGE_2_COPY_BIT,
+                                    .dstStageMask = VK_PIPELINE_STAGE_2_ACCELERATION_STRUCTURE_BUILD_BIT_KHR,
+                                    .srcAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT,
+                                    .dstAccessMask = VK_ACCESS_2_ACCELERATION_STRUCTURE_READ_BIT_KHR},
+                                   {.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER_2,
+                                    .srcStageMask = VK_PIPELINE_STAGE_2_ACCELERATION_STRUCTURE_COPY_BIT_KHR,
+                                    .dstStageMask = VK_PIPELINE_STAGE_2_HOST_BIT,
+                                    .srcAccessMask = VK_ACCESS_2_ACCELERATION_STRUCTURE_WRITE_BIT_KHR,
+                                    .dstAccessMask = VK_ACCESS_2_HOST_READ_BIT}};
+    VkDependencyInfo dependencies[] = {
+        {.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO, .memoryBarrierCount = 1, .pMemoryBarriers = &barriers[0]},
+        {.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO, .memoryBarrierCount = 1, .pMemoryBarriers = &barriers[1]}};
+    VkEvent events[] = {HANDLE(VkEvent, 23), HANDLE(VkEvent, 24)};
+    ((PFN_vkCmdWaitEvents2KHR)vkrt_replay_proc("vkCmdWaitEvents2KHR"))(source_command, 2, events, dependencies);
+    ((PFN_vkCmdSetEvent2KHR)vkrt_replay_proc("vkCmdSetEvent2KHR"))(source_command, events[0], &dependencies[0]);
+    ((PFN_vkCmdResetEvent2KHR)vkrt_replay_proc("vkCmdResetEvent2KHR"))(source_command, events[1], VK_PIPELINE_STAGE_2_CLEAR_BIT);
+    memset(barriers, 0, sizeof(barriers));
+    memset(dependencies, 0, sizeof(dependencies));
+    memset(events, 0, sizeof(events));
+    metadata = metadata_at(1);
+    assert(metadata.kind == VKRT_REPLAY_EVENT_WAIT && metadata.data.sync.synchronization2 && metadata.data.sync.event_count == 2 &&
+           metadata.data.sync.dependency_info_count == 2 && metadata.data.sync.events != events &&
+           metadata.data.sync.events[1] == HANDLE(VkEvent, 24));
+    const VkDependencyInfo *owned = metadata.data.sync.dependency_infos;
+    assert(owned != dependencies && owned[0].pMemoryBarriers != &barriers[0] &&
+           owned[0].pMemoryBarriers[0].srcStageMask == VK_PIPELINE_STAGE_2_COPY_BIT &&
+           owned[1].pMemoryBarriers[0].srcStageMask == VK_PIPELINE_STAGE_2_ACCELERATION_STRUCTURE_COPY_BIT_KHR &&
+           owned[1].pMemoryBarriers[0].dstStageMask == VK_PIPELINE_STAGE_2_HOST_BIT);
+    metadata = metadata_at(2);
+    assert(metadata.kind == VKRT_REPLAY_EVENT_SET && metadata.data.sync.event == HANDLE(VkEvent, 23) &&
+           metadata.data.sync.dependency_info_count == 1 &&
+           metadata.data.sync.dependency_infos[0].pMemoryBarriers[0].dstAccessMask ==
+               VK_ACCESS_2_ACCELERATION_STRUCTURE_READ_BIT_KHR);
+    metadata = metadata_at(3);
+    assert(metadata.kind == VKRT_REPLAY_EVENT_RESET && metadata.data.sync.event == HANDLE(VkEvent, 24) &&
+           metadata.data.sync.synchronization2 && metadata.data.sync.src_stage_mask == VK_PIPELINE_STAGE_2_CLEAR_BIT);
+    VkEvent legacy_events[] = {HANDLE(VkEvent, 25), HANDLE(VkEvent, 26)};
+    ((PFN_vkCmdWaitEvents)vkrt_replay_proc("vkCmdWaitEvents"))(source_command, 2, legacy_events, VK_PIPELINE_STAGE_TRANSFER_BIT,
+                                                               VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, NULL, 0, NULL, 0, NULL);
+    ((PFN_vkCmdSetEvent)vkrt_replay_proc("vkCmdSetEvent"))(source_command, legacy_events[0], VK_PIPELINE_STAGE_TRANSFER_BIT);
+    ((PFN_vkCmdResetEvent)vkrt_replay_proc("vkCmdResetEvent"))(source_command, legacy_events[1],
+                                                               VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT);
+    memset(legacy_events, 0, sizeof(legacy_events));
+    metadata = metadata_at(4);
+    assert(metadata.kind == VKRT_REPLAY_EVENT_WAIT && !metadata.data.sync.synchronization2 &&
+           metadata.data.sync.src_stage_mask == VK_PIPELINE_STAGE_TRANSFER_BIT &&
+           metadata.data.sync.dst_stage_mask == VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT &&
+           metadata.data.sync.events != legacy_events && metadata.data.sync.events[1] == HANDLE(VkEvent, 26));
+    assert(metadata_at(5).kind == VKRT_REPLAY_EVENT_SET && metadata_at(5).data.sync.event == HANDLE(VkEvent, 25));
+    assert(metadata_at(6).kind == VKRT_REPLAY_EVENT_RESET && metadata_at(6).data.sync.event == HANDLE(VkEvent, 26));
+}
+
+static void test_state_work_and_scope_metadata(void) {
+    reset();
+    ((PFN_vkCmdBindPipeline)vkrt_replay_proc("vkCmdBindPipeline"))(source_command, VK_PIPELINE_BIND_POINT_COMPUTE,
+                                                                   HANDLE(VkPipeline, 50));
+    VkShaderStageFlagBits stages[] = {VK_SHADER_STAGE_VERTEX_BIT, VK_SHADER_STAGE_FRAGMENT_BIT};
+    VkShaderEXT shaders[] = {HANDLE(VkShaderEXT, 51), HANDLE(VkShaderEXT, 52)};
+    ((PFN_vkCmdBindShadersEXT)vkrt_replay_proc("vkCmdBindShadersEXT"))(source_command, 2, stages, shaders);
+    ((PFN_vkCmdDispatchIndirect)vkrt_replay_proc("vkCmdDispatchIndirect"))(source_command, HANDLE(VkBuffer, 53), 16);
+    ((PFN_vkCmdFillBuffer)vkrt_replay_proc("vkCmdFillBuffer"))(source_command, HANDLE(VkBuffer, 53), 0, 16, 0);
+    ((PFN_vkCmdDrawIndexed)vkrt_replay_proc("vkCmdDrawIndexed"))(source_command, 3, 1, 0, 0, 0);
+    VkClearValue clear = {.color.uint32 = {1, 2, 3, 4}};
+    VkRenderPassBeginInfo pass = {.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO,
+                                  .renderPass = HANDLE(VkRenderPass, 54),
+                                  .framebuffer = HANDLE(VkFramebuffer, 55),
+                                  .renderArea.extent = {4, 4},
+                                  .clearValueCount = 1,
+                                  .pClearValues = &clear};
+    VkSubpassBeginInfo begin = {.sType = VK_STRUCTURE_TYPE_SUBPASS_BEGIN_INFO,
+                                .contents = VK_SUBPASS_CONTENTS_SECONDARY_COMMAND_BUFFERS};
+    VkSubpassEndInfo end = {.sType = VK_STRUCTURE_TYPE_SUBPASS_END_INFO};
+    ((PFN_vkCmdBeginRenderPass2KHR)vkrt_replay_proc("vkCmdBeginRenderPass2KHR"))(source_command, &pass, &begin);
+    ((PFN_vkCmdNextSubpass2KHR)vkrt_replay_proc("vkCmdNextSubpass2KHR"))(source_command, &begin, &end);
+    ((PFN_vkCmdEndRenderPass2KHR)vkrt_replay_proc("vkCmdEndRenderPass2KHR"))(source_command, &end);
+    VkRenderingAttachmentInfo color = {.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
+                                       .imageView = HANDLE(VkImageView, 56),
+                                       .imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL};
+    VkRenderingInfo rendering = {.sType = VK_STRUCTURE_TYPE_RENDERING_INFO,
+                                 .renderArea.extent = {4, 4},
+                                 .layerCount = 1,
+                                 .colorAttachmentCount = 1,
+                                 .pColorAttachments = &color};
+    ((PFN_vkCmdBeginRenderingKHR)vkrt_replay_proc("vkCmdBeginRenderingKHR"))(source_command, &rendering);
+    ((PFN_vkCmdEndRenderingKHR)vkrt_replay_proc("vkCmdEndRenderingKHR"))(source_command);
+    uint32_t locations[] = {1, 0};
+    VkRenderingAttachmentLocationInfo location_info = {.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_LOCATION_INFO,
+                                                       .colorAttachmentCount = 2,
+                                                       .pColorAttachmentLocations = locations};
+    ((PFN_vkCmdSetRenderingAttachmentLocationsKHR)vkrt_replay_proc("vkCmdSetRenderingAttachmentLocationsKHR"))(source_command,
+                                                                                                               &location_info);
+    memset(stages, 0, sizeof(stages));
+    memset(shaders, 0, sizeof(shaders));
+    memset(&pass, 0, sizeof(pass));
+    memset(&clear, 0, sizeof(clear));
+    memset(&begin, 0, sizeof(begin));
+    memset(&end, 0, sizeof(end));
+    memset(&color, 0, sizeof(color));
+    memset(&rendering, 0, sizeof(rendering));
+    struct vkrt_replay_metadata metadata = metadata_at(0);
+    assert(metadata.kind == VKRT_REPLAY_STATE && metadata.data.state.kind == VKRT_REPLAY_STATE_PIPELINE &&
+           metadata.data.state.bind_point == VK_PIPELINE_BIND_POINT_COMPUTE &&
+           metadata.data.state.pipeline == HANDLE(VkPipeline, 50) && !metadata.logical_stages);
+    metadata = metadata_at(1);
+    assert(metadata.kind == VKRT_REPLAY_STATE && metadata.data.state.kind == VKRT_REPLAY_STATE_SHADERS &&
+           metadata.data.state.shader_count == 2 && metadata.data.state.shader_stages != stages &&
+           metadata.data.state.shaders != shaders && metadata.data.state.shaders[1] == HANDLE(VkShaderEXT, 52) &&
+           metadata.data.state.affected_stages == (VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT));
+    metadata = metadata_at(2);
+    assert(metadata.kind == VKRT_REPLAY_ACTION && metadata.flags == VKRT_REPLAY_INDIRECT &&
+           metadata.logical_stages == (VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT | VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT) &&
+           metadata.logical_stages == metadata.physical_stages);
+    metadata = metadata_at(3);
+    assert(metadata.kind == VKRT_REPLAY_ACTION && metadata.logical_stages == VK_PIPELINE_STAGE_2_CLEAR_BIT &&
+           metadata.physical_stages == VK_PIPELINE_STAGE_2_CLEAR_BIT);
+    metadata = metadata_at(4);
+    assert(metadata.kind == VKRT_REPLAY_ACTION && metadata.flags == VKRT_REPLAY_GRAPHICS_CONTEXT && !metadata.logical_stages &&
+           !metadata.physical_stages);
+    metadata = metadata_at(5);
+    assert(metadata.kind == VKRT_REPLAY_RENDER_BEGIN && metadata.data.render.kind == VKRT_REPLAY_RENDER_PASS &&
+           metadata.data.render.render_pass != &pass && metadata.data.render.render_pass->renderPass == HANDLE(VkRenderPass, 54) &&
+           metadata.data.render.render_pass->pClearValues[0].color.uint32[3] == 4 &&
+           metadata.data.render.contents == VK_SUBPASS_CONTENTS_SECONDARY_COMMAND_BUFFERS);
+    assert(metadata_at(6).kind == VKRT_REPLAY_RENDER_NEXT && metadata_at(7).kind == VKRT_REPLAY_RENDER_END);
+    metadata = metadata_at(8);
+    assert(metadata.kind == VKRT_REPLAY_RENDER_BEGIN && metadata.data.render.kind == VKRT_REPLAY_DYNAMIC_RENDERING &&
+           metadata.data.render.rendering != &rendering &&
+           metadata.data.render.rendering->pColorAttachments[0].imageView == HANDLE(VkImageView, 56));
+    assert(metadata_at(9).kind == VKRT_REPLAY_RENDER_END && metadata_at(9).data.render.kind == VKRT_REPLAY_DYNAMIC_RENDERING);
+    metadata = metadata_at(10);
+    assert(metadata.kind == VKRT_REPLAY_STATE && metadata.flags == VKRT_REPLAY_RENDER_LOCAL && !metadata.logical_stages);
+    assert(vkrt_replay_entry_metadata(entry_at(0), NULL) == VK_ERROR_INITIALIZATION_FAILED);
+    memset(&metadata, 0xff, sizeof(metadata));
+    assert(vkrt_replay_entry_metadata(NULL, &metadata) == VK_ERROR_INITIALIZATION_FAILED && metadata.kind == VKRT_REPLAY_UNKNOWN);
 }
 static void test_rejected_inputs(void) {
     reset();
@@ -557,6 +901,24 @@ static VKAPI_ATTR void VKAPI_CALL release(void *user, void *p) {
         free(p);
     }
 }
+static void test_metadata_no_allocation(void) {
+    struct vkrt_replay_journal *previous = source_context.journal;
+    struct allocation_state state = {.fail_after = UINT32_MAX};
+    VkAllocationCallbacks callbacks = {.pUserData = &state, .pfnAllocation = allocation, .pfnFree = release};
+    source_context.journal = vkrt_replay_journal_create(&callbacks, VK_SYSTEM_ALLOCATION_SCOPE_COMMAND);
+    assert(source_context.journal);
+    ((PFN_vkCmdResetQueryPool)vkrt_replay_proc("vkCmdResetQueryPool"))(source_command, HANDLE(VkQueryPool, 81), 4, 7);
+    const unsigned calls = state.calls;
+    state.fail_after = calls;
+    for (unsigned i = 0; i < 10; ++i) {
+        struct vkrt_replay_metadata metadata = metadata_at(0);
+        assert(metadata.kind == VKRT_REPLAY_QUERY_RESET && metadata.data.query.count == 7 && state.calls == calls);
+    }
+    assert(vkrt_replay_journal_status(source_context.journal) == VK_SUCCESS);
+    vkrt_replay_journal_destroy(source_context.journal);
+    assert(!state.live);
+    source_context.journal = previous;
+}
 static void test_oom(void) {
     vkrt_replay_journal_destroy(source_context.journal);
     source_context.journal = NULL;
@@ -598,11 +960,17 @@ int main(void) {
     test_fixed_array();
     test_children();
     test_stride_and_selector();
+    test_query_metadata();
+    test_virtual_work_metadata();
+    test_sync_metadata();
+    test_state_work_and_scope_metadata();
     test_rejected_inputs();
     test_header_unavailable_commands();
+    test_metadata_no_allocation();
     test_oom();
     puts(
-        "command replay host: begin/chain/arrays/AS/descriptors/layout/children/stride/selector/ABI blockers/rejections/OOM "
+        "command replay host: begin/chain/arrays/AS/descriptors/layout/children/stride/selector/stage facts/owned metadata/ABI "
+        "blockers/rejections/OOM "
         "passed");
     return 0;
 }

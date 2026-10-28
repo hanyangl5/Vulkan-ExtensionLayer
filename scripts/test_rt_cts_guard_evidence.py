@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 import tempfile
 import unittest
+from unittest.mock import patch
 
 from run_rt_cts import guard_evidence, run_environment
 
@@ -52,6 +53,13 @@ class GuardEvidenceTests(unittest.TestCase):
         self.assertNotIn("VK_INSTANCE_LAYERS", env)
         self.assertNotIn("VKRT_NO_RT_GUARD_LOG", env)
         self.assertNotIn("VKRT_NO_RT_GUARD_MASK_DISCOVERY", env)
+
+    def test_forced_dispatch_profile_does_not_leak_into_cts(self):
+        with patch.dict("os.environ", {"VKRT_NO_RT_GUARD_DISPATCH_LIMITS": "2,2,64"}):
+            for mode in ("native", "software-rt"):
+                env, meta = run_environment(mode, None if mode == "native" else Path("fallback"))
+                self.assertNotIn("VKRT_NO_RT_GUARD_DISPATCH_LIMITS", env)
+                self.assertEqual(meta["unset_inherited"]["VKRT_NO_RT_GUARD_DISPATCH_LIMITS"], "2,2,64")
 
 
 if __name__ == "__main__":

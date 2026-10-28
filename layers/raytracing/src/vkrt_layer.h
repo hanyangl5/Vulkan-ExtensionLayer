@@ -78,6 +78,8 @@ struct vkrt_device_data {
    VkPipelineLayout copy_pipeline_layout;
    VkPipeline copy_pipeline;
    uint32_t                    max_build_dispatch_x;
+   uint32_t max_build_dispatch_y;
+   uint32_t max_build_dispatch_z;
    struct vkrt_cmd_buffer_data *command_buffers;
    vkrt_mutex_t                command_buffers_lock;
 };
@@ -95,7 +97,6 @@ struct vkrt_cmd_buffer_data {
     VkCommandBufferUsageFlags usage_flags;
     uint32_t native_active_queries;
     bool has_virtual_queries;
-    bool has_virtual_query_copy;
     struct vkrt_rtp_command *rtp;
     VkCommandBuffer cmd;
     struct vkrt_device_data *device_data;

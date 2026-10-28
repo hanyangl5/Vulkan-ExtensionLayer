@@ -158,8 +158,9 @@ def run_environment(mode, snapshot, validation_dir=None, guard_dir=None):
     if validation_dir or guard_dir:
         overrides["VK_LAYER_PATH"] = os.pathsep.join(
             [str(path) for path in (snapshot, guard_dir, validation_dir) if path is not None])
-    env.pop("VKRT_NO_RT_GUARD_LOG", None)
-    env.pop("VKRT_NO_RT_GUARD_MASK_DISCOVERY", None)
+    for key in ("VKRT_NO_RT_GUARD_LOG", "VKRT_NO_RT_GUARD_MASK_DISCOVERY", "VKRT_NO_RT_GUARD_DISPATCH_LIMITS"):
+        if key in env:
+            removed[key] = env.pop(key)
     env.update(overrides)
     # Keep reproducibility-relevant driver/loader inputs without dumping API
     # keys, credentials or unrelated inherited process environment variables.

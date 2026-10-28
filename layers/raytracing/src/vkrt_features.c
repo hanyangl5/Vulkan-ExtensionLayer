@@ -226,7 +226,10 @@ static bool virtual_rt_resource_profile(struct vkrt_instance_data *inst, VkPhysi
     if (!physical || !profile || !query_backend) return false;
     struct vkrt_resource_profile local;
     bool queries = false;
-    if (!native_backend_capabilities(inst, physical, &queries) ||
+    /* The public AS query types are mandatory RT functionality. Their current
+     * backend needs private host reset and buffer int64 atomic support even
+     * when the application does not request either feature itself. */
+    if (!native_backend_capabilities(inst, physical, &queries) || !queries ||
         !vkrt_query_resource_profile(inst->vtable.GetPhysicalDeviceProperties2, inst->vtable.GetPhysicalDeviceFeatures2, physical,
                                      &local, NULL))
         return false;

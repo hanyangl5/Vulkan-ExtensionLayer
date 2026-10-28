@@ -366,7 +366,7 @@ struct morton_ready_count {
 #define NAN      (0.0 / 0.0)
 #define NAN_F16  (0.0hf / 0.0hf)
 
-#define INDEX(type, ptr, index) REF(type)(OFFSET(ptr, (index)*SIZEOF(type)))
+#define INDEX(type, ptr, index) REF(type)(OFFSET(ptr, uint64_t(index) * uint64_t(SIZEOF(type))))
 
 TYPE(int8_t, 1);
 TYPE(uint8_t, 1);
@@ -447,7 +447,7 @@ struct leaf_args {
    VOID_REF ids;
 
    vk_bvh_geometry_data geom_data;
-   uint32_t leaf_offset;
+   uint64_t leaf_offset;
    uint32_t primitive_count;
    VOID_REF blas_ir_addresses;
 };
@@ -483,7 +483,7 @@ struct lbvh_main_args {
    VOID_REF src_ids;
    VOID_REF node_info;
    REF(vk_ir_header) header;
-   uint32_t internal_node_base;
+   uint64_t internal_node_base;
 };
 
 #define VK_LBVH_GENERATE_IR_BUILD_FLAGS (VK_BUILD_FLAG_PROPAGATE_CULL_FLAGS)
@@ -492,7 +492,7 @@ struct lbvh_generate_ir_args {
    VOID_REF bvh;
    VOID_REF node_info;
    REF(vk_ir_header) header;
-   uint32_t internal_node_base;
+   uint64_t internal_node_base;
 };
 
 #define PLOC_WORKGROUP_SIZE 1024
@@ -505,7 +505,7 @@ struct ploc_args {
    REF(vk_ir_header) header;
    VOID_REF ids_0;
    VOID_REF ids_1;
-   uint32_t internal_node_offset;
+   uint64_t internal_node_offset;
 };
 
 #define VK_HPLOC_BUILD_FLAGS (VK_BUILD_FLAG_PROPAGATE_CULL_FLAGS | VK_BUILD_FLAG_64BIT_KEYS)
@@ -515,7 +515,7 @@ struct hploc_args {
    VOID_REF bvh;
    REF(key32_id_pair) ids;
    VOID_REF ranges;
-   uint32_t internal_node_base;
+   uint64_t internal_node_base;
 };
 
 #define PAIR_TRIANGLES_WORKGROUP_SIZE 256

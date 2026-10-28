@@ -19,7 +19,6 @@ enum event {
     COLLECT,
     BEGIN,
     END,
-    QUALIFY,
     CREATE,
     CLONE,
     PREPARE,
@@ -30,9 +29,7 @@ enum event {
     OBSERVER,
     QUARANTINE,
     CHECKPOINT,
-    QUERY_CHECKPOINT,
     NATIVE_IDLE,
-    QUERY_IDLE,
     COMPLETED
 };
 struct vkrt_global vkrt_global = VKRT_GLOBAL_INITIALIZER;
@@ -44,18 +41,17 @@ static const VkFence completion = H(VkFence, 4);
 static const VkQueue other_queue = H(VkQueue, 5);
 static unsigned event_count, cases;
 static enum event events[EVENT_CAPACITY];
-static unsigned collects, qualifies, creates, clones, fresh, prepares, natives, observers, results, discards, submitted,
-    quarantined;
+static unsigned collects, creates, clones, fresh, prepares, natives, observers, results, discards, submitted, quarantined;
 static unsigned checkpoints, completions;
-static unsigned begins, ends, query_checkpoints;
-static unsigned fail_qualify, fail_clone, fail_prepare;
+static unsigned begins, ends;
+static unsigned fail_clone, fail_prepare;
 static VkResult collect_result, begin_result, create_result, native_result, observer_result, idle_result, last_query_result;
-static bool use_submit2, query_sources, helper_enabled, zero_batches, prepared_active, caller_has_fence;
+static VkResult clone_failure_result;
+static bool use_submit2, query_sources, helper_enabled, zero_batches, wait_only, prepared_active, caller_has_fence;
 static bool admission_active;
 static VkCommandBuffer emitted[MAX_COMMANDS], prepared[MAX_COMMANDS];
 static size_t emitted_count, prepared_count;
 static uint64_t settled_clock, idle_checkpoint, completed_checkpoint;
-static uint64_t query_epoch, query_idle_checkpoint, query_cleared_checkpoint;
 static VkQueue completed_queue;
 static unsigned retired;
 static bool idle_probe;
@@ -97,8 +93,7 @@ static bool needs_query(VkCommandBuffer command) {
     CHECK(false);
     return false;
 }
-static unsigned expected_qualifies(void) { return zero_batches ? 0 : use_submit2 ? 7 : 2; }
-static unsigned expected_clone_calls(void) { return !zero_batches && query_sources && helper_enabled ? 5 : 0; }
+static unsigned expected_clone_calls(void) { return !zero_batches && !wait_only && query_sources && helper_enabled ? 5 : 0; }
 static VkPipelineStageFlags2 translated(VkPipelineStageFlags2 mask) {
     /* Independent expected mapping: preserve every unrelated flag. */
     if (mask & VK_PIPELINE_STAGE_2_ACCELERATION_STRUCTURE_BUILD_BIT_KHR)
@@ -123,7 +118,7 @@ VkResult vkrt_execution_collect(struct vkrt_device_data *dev, size_t *retired_co
 }
 VkResult vkrt_execution_batch_create(struct vkrt_device_data *dev, VkQueue q, struct vkrt_execution_batch **out) {
     CHECK(dev == &device && q == queue && out && !*out && helper_enabled && !batch.created);
-    CHECK(qualifies == expected_qualifies()); /* All source qualification precedes remapping. */
+    CHECK(begins == 1 && !ends && admission_active && !prepares && !natives);
     ++creates;
     note(CREATE);
     if (create_result != VK_SUCCESS) return create_result;
@@ -135,7 +130,7 @@ VkResult vkrt_execution_batch_clone(struct vkrt_execution_batch *b, VkCommandBuf
     CHECK(b == &batch && batch.created && !batch.pending && !batch.discarded && target);
     ++clones;
     note(CLONE);
-    if (clones == fail_clone) return VK_ERROR_OUT_OF_HOST_MEMORY;
+    if (clones == fail_clone) return clone_failure_result;
     *target = needs_query(original) ? H(VkCommandBuffer, 100 + ++fresh) : original;
     CHECK(emitted_count < MAX_COMMANDS);
     emitted[emitted_count++] = *target;
@@ -175,7 +170,7 @@ VkResult vkrt_execution_batch_discard(struct vkrt_execution_batch *b) {
 }
 VkResult vkrt_query_submit_begin(struct vkrt_device_data *dev, struct vkrt_query_submission *transaction, VkQueue q) {
     CHECK(dev == &device && transaction && !transaction->admission && q == queue && !admission_active);
-    CHECK(collects == 1 && !begins && !ends && !qualifies && !creates && !prepares && !natives && !results);
+    CHECK(collects == 1 && !begins && !ends && !creates && !prepares && !natives && !results);
     ++begins;
     note(BEGIN);
     if (!dev->queries) return VK_SUCCESS;
@@ -195,35 +190,9 @@ void vkrt_query_submit_end(struct vkrt_device_data *dev, struct vkrt_query_submi
     transaction->admission = NULL;
     admission_active = false;
 }
-VkResult vkrt_query_submit_qualify(struct vkrt_device_data *dev, struct vkrt_query_submission *transaction, VkQueue q, bool unsafe,
-                                   uint32_t count, const VkCommandBuffer *commands) {
-    CHECK(dev == &device && q == queue && transaction && !creates && !prepares && !natives);
-    CHECK(begins == 1 && !ends && admission_active == (dev->queries != NULL));
-    ++qualifies;
-    note(QUALIFY);
-    if (!use_submit2) {
-        unsigned row = qualifies - 1;
-        CHECK(row < SOURCE_BATCHES && count == input.legacy[row].commandBufferCount && commands == input.commands[row]);
-        CHECK(unsafe == (row == 1));
-    } else {
-        /* Each batch qualifies its original wait scope, then its original CBs. */
-        const unsigned sequence_counts[] = {0, 1, 1, 1, 0, 1, 1};
-        CHECK(qualifies <= VKRT_ARRAY_SIZE(sequence_counts) && count == sequence_counts[qualifies - 1]);
-        if (qualifies == 1 || qualifies == 5) {
-            CHECK(!commands && unsafe == (qualifies == 5));
-        } else {
-            unsigned row = qualifies < 5 ? 0 : 1;
-            unsigned column = qualifies < 5 ? qualifies - 2 : qualifies - 6;
-            CHECK(commands == &input.commands2[row][column].commandBuffer && !unsafe);
-        }
-    }
-    transaction->queue = q;
-    transaction->unsafe_waits |= unsafe;
-    return qualifies == fail_qualify ? VK_ERROR_FEATURE_NOT_PRESENT : VK_SUCCESS;
-}
 VkResult vkrt_query_submit_prepare(struct vkrt_device_data *dev, const struct vkrt_query_submission *transaction, uint32_t count,
                                    const VkCommandBuffer *commands) {
-    CHECK(dev == &device && transaction->queue == queue && qualifies == expected_qualifies() && !natives);
+    CHECK(dev == &device && transaction->queue == (dev->queries ? queue : VK_NULL_HANDLE) && !natives);
     CHECK(begins == 1 && !ends && admission_active == (dev->queries != NULL));
     CHECK(clones == expected_clone_calls());
     ++prepares;
@@ -251,21 +220,6 @@ void vkrt_query_submit_result(struct vkrt_device_data *dev, const struct vkrt_qu
     prepared_active = false;
     last_query_result = result;
 }
-uint64_t vkrt_query_queue_checkpoint(struct vkrt_device_data *dev) {
-    CHECK(dev == &device && idle_probe && checkpoints == 1 && !query_checkpoints && !admission_active);
-    CHECK(event_count && events[event_count - 1] == CHECKPOINT);
-    ++query_checkpoints;
-    query_idle_checkpoint = query_epoch;
-    note(QUERY_CHECKPOINT);
-    return query_idle_checkpoint;
-}
-void vkrt_query_queue_idle(struct vkrt_device_data *dev, VkQueue q, uint64_t checkpoint) {
-    CHECK(dev == &device && (q == queue || q == VK_NULL_HANDLE));
-    CHECK(idle_probe && checkpoints == 1 && query_checkpoints == 1 && events[event_count - 1] == NATIVE_IDLE);
-    CHECK(!admission_active && checkpoint == query_idle_checkpoint && checkpoint < query_epoch);
-    query_cleared_checkpoint = checkpoint;
-    note(QUERY_IDLE);
-}
 uint64_t vkrt_execution_checkpoint(struct vkrt_device_data *dev) {
     CHECK(dev == &device && idle_probe && !checkpoints && !completions && !event_count);
     ++checkpoints;
@@ -275,7 +229,7 @@ uint64_t vkrt_execution_checkpoint(struct vkrt_device_data *dev) {
 }
 void vkrt_execution_queue_completed(struct vkrt_device_data *dev, VkQueue q, uint64_t checkpoint) {
     CHECK(dev == &device && idle_probe && checkpoints == 1 && !completions && !collects && idle_result == VK_SUCCESS);
-    CHECK(checkpoint == idle_checkpoint && checkpoint < settled_clock && events[event_count - 1] == QUERY_IDLE);
+    CHECK(checkpoint == idle_checkpoint && checkpoint < settled_clock && events[event_count - 1] == NATIVE_IDLE);
     ++completions;
     completed_queue = q;
     completed_checkpoint = checkpoint;
@@ -302,7 +256,7 @@ static VKAPI_ATTR VkResult VKAPI_CALL native_legacy(VkQueue q, uint32_t count, c
     CHECK(q == queue && fence == (caller_has_fence ? caller_fence : VK_NULL_HANDLE) && !natives && !results && !discards &&
           !submitted);
     CHECK(begins == 1 && !ends && admission_active == (device.queries != NULL));
-    CHECK(prepared_count == (zero_batches ? 0 : 5));
+    CHECK(prepared_count == (zero_batches || wait_only ? 0 : 5));
     ++natives;
     note(NATIVE);
     const unsigned source_count = zero_batches ? 0 : SOURCE_BATCHES;
@@ -330,7 +284,7 @@ static VKAPI_ATTR VkResult VKAPI_CALL native_sync2(VkQueue q, uint32_t count, co
     CHECK(q == queue && fence == (caller_has_fence ? caller_fence : VK_NULL_HANDLE) && !natives && !results && !discards &&
           !submitted);
     CHECK(begins == 1 && !ends && admission_active == (device.queries != NULL));
-    CHECK(prepared_count == (zero_batches ? 0 : 5));
+    CHECK(prepared_count == (zero_batches || wait_only ? 0 : 5));
     ++natives;
     note(NATIVE);
     const unsigned source_count = zero_batches ? 0 : SOURCE_BATCHES;
@@ -366,36 +320,31 @@ static VKAPI_ATTR VkResult VKAPI_CALL native_sync2(VkQueue q, uint32_t count, co
     return native_result;
 }
 static VKAPI_ATTR VkResult VKAPI_CALL native_queue_idle(VkQueue q) {
-    CHECK(q == queue && checkpoints == 1 && query_checkpoints == 1 && events[event_count - 1] == QUERY_CHECKPOINT &&
-          !admission_active);
+    CHECK(q == queue && checkpoints == 1 && events[event_count - 1] == CHECKPOINT && !admission_active);
     note(NATIVE_IDLE);
     ++settled_clock; /* A concurrent submission settles after the captured bound. */
-    ++query_epoch;
     return idle_result;
 }
 static VKAPI_ATTR VkResult VKAPI_CALL native_device_idle(VkDevice dev) {
-    CHECK(dev == device.device && checkpoints == 1 && query_checkpoints == 1 && events[event_count - 1] == QUERY_CHECKPOINT &&
-          !admission_active);
+    CHECK(dev == device.device && checkpoints == 1 && events[event_count - 1] == CHECKPOINT && !admission_active);
     note(NATIVE_IDLE);
     ++settled_clock;
-    ++query_epoch;
     return idle_result;
 }
 
 static void reset(bool sync2) {
-    event_count = collects = qualifies = creates = clones = fresh = prepares = natives = observers = results = discards =
-        submitted = quarantined = checkpoints = completions = retired = begins = ends = query_checkpoints = 0;
-    fail_qualify = fail_clone = fail_prepare = 0;
+    event_count = collects = creates = clones = fresh = prepares = natives = observers = results = discards = submitted =
+        quarantined = checkpoints = completions = retired = begins = ends = 0;
+    fail_clone = fail_prepare = 0;
     emitted_count = prepared_count = 0;
     collect_result = begin_result = create_result = native_result = observer_result = idle_result = VK_SUCCESS;
+    clone_failure_result = VK_ERROR_OUT_OF_HOST_MEMORY;
     last_query_result = VK_ERROR_UNKNOWN;
     use_submit2 = sync2;
     query_sources = helper_enabled = caller_has_fence = true;
-    zero_batches = prepared_active = idle_probe = admission_active = false;
+    zero_batches = wait_only = prepared_active = idle_probe = admission_active = false;
     settled_clock = 10;
     idle_checkpoint = completed_checkpoint = 0;
-    query_epoch = 700;
-    query_idle_checkpoint = query_cleared_checkpoint = 0;
     completed_queue = H(VkQueue, 99);
     memset(retention, 0, sizeof(retention));
     retention[0].queue = retention[2].queue = retention[3].queue = queue;
@@ -490,8 +439,8 @@ static VkResult run(void) {
 static void success_and_no_query(bool sync2) {
     reset(sync2);
     CHECK(run() == VK_SUCCESS);
-    CHECK(qualifies == expected_qualifies() && creates == 1 && clones == 5 && fresh == 4 && natives == 1 && results == 1 &&
-          submitted == 1 && observers == 1 && !discards && !quarantined && batch.pending);
+    CHECK(creates == 1 && clones == 5 && fresh == 4 && natives == 1 && results == 1 && submitted == 1 && observers == 1 &&
+          !discards && !quarantined && batch.pending);
     CHECK(emitted[0] != emitted[2] && emitted[0] != emitted[4] && emitted[2] != emitted[4]);
     CHECK(emitted[1] == source[2].cmd && emitted[3] != source[1].cmd);
     reset(sync2);
@@ -503,6 +452,17 @@ static void success_and_no_query(bool sync2) {
     CHECK(run() == VK_SUCCESS);
     CHECK(!creates && !clones && !submitted && !observers && !quarantined && !discards && natives == 1 && results == 1);
     reset(sync2);
+    wait_only = true;
+    for (unsigned row = 0; row < SOURCE_BATCHES; ++row) {
+        input.legacy[row].commandBufferCount = 0;
+        input.sync2[row].commandBufferInfoCount = 0;
+    }
+    CHECK(run() == VK_SUCCESS);
+    /* An ordinary wait-only source keeps the original batches and fence. It
+     * does not allocate a replay batch or issue a hidden observation. */
+    CHECK(!creates && !clones && !submitted && !observers && !quarantined && !discards && natives == 1 && results == 1);
+    CHECK(prepares == (sync2 ? 0u : SOURCE_BATCHES));
+    reset(sync2);
     helper_enabled = false;
     device.executions = NULL;
     CHECK(run() == VK_SUCCESS);
@@ -510,7 +470,7 @@ static void success_and_no_query(bool sync2) {
     reset(sync2);
     zero_batches = true;
     CHECK(run() == VK_SUCCESS);
-    CHECK(!qualifies && !creates && !clones && !prepares && natives == 1 && !submitted && !observers && !quarantined && !discards);
+    CHECK(!creates && !clones && !prepares && natives == 1 && !submitted && !observers && !quarantined && !discards);
     reset(sync2);
     device.queries = NULL;
     query_sources = false;
@@ -534,21 +494,18 @@ static void failures(bool sync2) {
     reset(sync2);
     collect_result = VK_ERROR_DEVICE_LOST;
     CHECK(run() == VK_ERROR_DEVICE_LOST);
-    CHECK(!qualifies && !creates && !clones && !prepares && !natives && !results && !discards && !submitted && !observers &&
-          !quarantined && !begins && !ends);
-    const VkResult begin_errors[] = {VK_ERROR_OUT_OF_HOST_MEMORY, VK_ERROR_OUT_OF_DEVICE_MEMORY, VK_ERROR_DEVICE_LOST};
+    CHECK(!creates && !clones && !prepares && !natives && !results && !discards && !submitted && !observers && !quarantined &&
+          !begins && !ends);
+    const VkResult begin_errors[] = {VK_ERROR_OUT_OF_HOST_MEMORY, VK_ERROR_OUT_OF_DEVICE_MEMORY, VK_ERROR_DEVICE_LOST,
+                                     VK_ERROR_UNKNOWN};
     for (unsigned i = 0; i < VKRT_ARRAY_SIZE(begin_errors); ++i) {
         reset(sync2);
         begin_result = begin_errors[i];
         CHECK(run() == begin_errors[i]);
-        CHECK(begins == 1 && ends == 1 && results == 1 && !admission_active && !qualifies && !creates && !clones && !prepares &&
-              !natives && !observers && !discards && !submitted && !quarantined);
+        CHECK(begins == 1 && ends == 1 && results == 1 && !admission_active && !creates && !clones && !prepares && !natives &&
+              !observers && !discards && !submitted && !quarantined);
         CHECK(event_count == 4 && events[1] == BEGIN && events[2] == QUERY_RESULT && events[3] == END);
     }
-    reset(sync2);
-    fail_qualify = 2;
-    CHECK(run() == VK_ERROR_FEATURE_NOT_PRESENT);
-    CHECK(!creates && !clones && !prepares && !natives && results == 1 && !discards && !submitted);
     reset(sync2);
     create_result = VK_ERROR_OUT_OF_DEVICE_MEMORY;
     CHECK(run() == VK_ERROR_OUT_OF_DEVICE_MEMORY);
@@ -557,6 +514,12 @@ static void failures(bool sync2) {
     fail_clone = 3;
     CHECK(run() == VK_ERROR_OUT_OF_HOST_MEMORY);
     CHECK(creates == 1 && clones == 3 && fresh == 1 && !prepares && !natives && results == 1 && discards == 1 && !submitted);
+    reset(sync2);
+    fail_clone = 3;
+    clone_failure_result = VK_ERROR_UNKNOWN;
+    CHECK(run() == VK_ERROR_UNKNOWN);
+    CHECK(creates == 1 && clones == 3 && fresh == 1 && !prepares && !natives && results == 1 && discards == 1 && !submitted &&
+          !quarantined);
     reset(sync2);
     fail_prepare = 2;
     CHECK(run() == VK_ERROR_OUT_OF_DEVICE_MEMORY);
@@ -571,6 +534,11 @@ static void failures(bool sync2) {
         else
             CHECK(!discards && !submitted && !observers && quarantined == 1 && batch.pending && batch.quarantined &&
                   !batch.discarded);
+        reset(sync2);
+        query_sources = false;
+        native_result = errors[i];
+        CHECK(run() == errors[i] && natives == 1 && results == 1);
+        CHECK(!creates && !clones && !submitted && !observers && !discards && !quarantined);
     }
 }
 static void idle_ordering(void) {
@@ -588,18 +556,16 @@ static void idle_ordering(void) {
                 PFN_vkQueueWaitIdle proc = (PFN_vkQueueWaitIdle)vkrt_sync_proc("vkQueueWaitIdle");
                 result = proc(queue);
             }
-            CHECK(events[0] == CHECKPOINT && events[1] == QUERY_CHECKPOINT && events[2] == NATIVE_IDLE && checkpoints == 1 &&
-                  query_checkpoints == 1 && idle_checkpoint == 10 && settled_clock == 11 && query_idle_checkpoint == 700 &&
-                  query_epoch == 701 && !begins && !ends && !admission_active);
+            CHECK(events[0] == CHECKPOINT && events[1] == NATIVE_IDLE && checkpoints == 1 && idle_checkpoint == 10 &&
+                  settled_clock == 11 && !begins && !ends && !admission_active);
             if (failure == 1)
-                CHECK(result == idle_result && event_count == 3 && !completions && !retired && !collects &&
-                      !query_cleared_checkpoint);
+                CHECK(result == idle_result && event_count == 2 && !completions && !retired && !collects);
             else {
                 /* Explicit idle retires its pre-call settled prefix before
                  * optional observation collection reports an independent error. */
-                CHECK(result == collect_result && event_count == 6 && events[3] == QUERY_IDLE && events[4] == COMPLETED &&
-                      events[5] == COLLECT && collects == 1 && completions == 1 && completed_checkpoint == 10 &&
-                      query_cleared_checkpoint == 700 && completed_queue == (dev ? VK_NULL_HANDLE : queue));
+                CHECK(result == collect_result && event_count == 4 && events[2] == COMPLETED && events[3] == COLLECT &&
+                      collects == 1 && completions == 1 && completed_checkpoint == 10 &&
+                      completed_queue == (dev ? VK_NULL_HANDLE : queue));
                 CHECK(retired == (dev ? 2u : 1u) && retention[0].retired && retention[1].retired == (dev != 0) &&
                       !retention[2].retired && !retention[3].retired);
             }

@@ -802,6 +802,8 @@ static void MesaCases(Context& ctx) {
             mesa_test::Fixture empty(capacity, 0, type);
             empty.Empty();
             RunMesa(ctx, empty, {});
+            empty.UseIndexedIds();
+            RunMesa(ctx, empty, {});
         }
     const auto sparse = mesa_test::SparseTriangles();
     const auto flags = mesa_test::SparseTriangleFlags();
@@ -830,6 +832,9 @@ static void MesaCases(Context& ctx) {
         balanced.InternalBox(2, balanced.InternalId(0), balanced.InternalId(1), bounds);
         RunMesa(ctx, balanced, type == 2 ? std::vector<uint32_t>{} : std::vector<uint32_t>{3},
                 type == 2 ? blas : std::vector<uint64_t>{});
+        balanced.UseIndexedIds();
+        RunMesa(ctx, balanced, type == 2 ? std::vector<uint32_t>{} : std::vector<uint32_t>{3},
+                type == 2 ? blas : std::vector<uint64_t>{});
     }
     constexpr uint32_t count = 4096;
     mesa_test::Fixture deep(count * 2, count, 1);
@@ -852,7 +857,7 @@ static void MesaCases(Context& ctx) {
     RunMesa(ctx, instances, {}, blas, MesaGpuMetadata, {}, VEL_RT_MESA_GPU_IDENTITY_BLAS);
     RunMesa(ctx, instances, {}, {}, MesaGpuMetadata, {}, 4u);
     auto bad = sparse;
-    mesa_test::U32(bad.bytes, 112, 3);
+    mesa_test::U32(bad.bytes, 112, 4);
     RunMesa(ctx, bad, flags, {}, MesaGpuMetadata);
     bad = sparse;
     mesa_test::U32(bad.bytes, bad.Internal(1) + 24, 0xfffffffdu);
@@ -1155,24 +1160,142 @@ static void MesaBuilderCases(Context& ctx) {
         }
 }
 
+static void IndexedAddressCases(Context& ctx, const char* path) {
+    struct Case {
+        uint32_t id, capacity, type, reserved;
+        uint64_t base, address, offset;
+    };
+    static_assert(sizeof(Case) == 40);
+    std::vector<Case> cases;
+    // Independent byte-layout oracle, deliberately not the production decoder.
+    for (uint32_t type = 0; type < 3; ++type) {
+        const uint32_t stride = type == 0 ? 68 : type == 1 ? 32 : 96;
+        const uint32_t kind = type == 0 ? 0 : type == 1 ? 3 : 2;
+        for (uint32_t index : {0u, UINT32_MAX / stride, UINT32_MAX / stride + 1, 0x1ffffffeu}) {
+            cases.push_back({index * 4 | kind, 0x1fffffffu, type, 0, 0, 0, uint64_t(index) * stride});
+        }
+        for (uint32_t index : {0u, 1u, 0x1ffffffdu}) {
+            cases.push_back({index * 4 | 1u, 0x1fffffffu, type, 0, 0, 0, UINT64_C(0x1fffffff) * stride + uint64_t(index) * 40});
+        }
+    }
+    const auto count = uint32_t(cases.size());
+    auto input = ctx.Allocate(cases.size() * sizeof(Case) + 256);
+    auto targets = ctx.Allocate(count * 4 + 256);
+    auto output = ctx.Allocate(count * 32 + 256);
+    for (uint32_t i = 0; i < count; ++i) {
+        const uint32_t value = 0x6ac30000u ^ (i * 0x12345u);
+        std::memcpy(targets.mapped + 128 + i * 4, &value, 4);
+        cases[i].address = targets.address + 128 + uint64_t(i) * 4;
+        // Integer modulo arithmetic supplies a synthetic segment base. The
+        // actual dereference must land in the independently allocated target.
+        cases[i].base = cases[i].address - cases[i].offset;
+    }
+    std::memcpy(input.mapped + 128, cases.data(), cases.size() * sizeof(Case));
+    std::ifstream file(path, std::ios::binary | std::ios::ate);
+    Check(file.good(), "indexed addressing shader unavailable");
+    const auto bytes = file.tellg();
+    Check(bytes > 0 && bytes % 4 == 0, "indexed addressing shader size");
+    std::vector<uint32_t> code(size_t(bytes) / 4);
+    file.seekg(0);
+    Check(bool(file.read(reinterpret_cast<char*>(code.data()), bytes)), "indexed addressing shader read");
+    VkShaderModuleCreateInfo smci{VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO};
+    smci.codeSize = size_t(bytes);
+    smci.pCode = code.data();
+    VkShaderModule module;
+    VkCheck(vkCreateShaderModule(ctx.device, &smci, nullptr, &module));
+    VkComputePipelineCreateInfo pci{VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO};
+    pci.layout = ctx.layout;
+    pci.stage = VkPipelineShaderStageCreateInfo{VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO};
+    pci.stage.stage = VK_SHADER_STAGE_COMPUTE_BIT;
+    pci.stage.module = module;
+    pci.stage.pName = "main";
+    VkPipeline pipeline;
+    VkCheck(vkCreateComputePipelines(ctx.device, VK_NULL_HANDLE, 1, &pci, nullptr, &pipeline));
+    vkDestroyShaderModule(ctx.device, module, nullptr);
+    VkCommandBufferAllocateInfo allocate{VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO};
+    allocate.commandPool = ctx.pool;
+    allocate.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+    allocate.commandBufferCount = 1;
+    VkCommandBuffer command;
+    VkCheck(vkAllocateCommandBuffers(ctx.device, &allocate, &command));
+    VkCommandBufferBeginInfo begin{VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
+    VkCheck(vkBeginCommandBuffer(command, &begin));
+    vkCmdBindPipeline(command, VK_PIPELINE_BIND_POINT_COMPUTE, pipeline);
+    struct {
+        uint64_t cases, output;
+        uint32_t count, reserved;
+    } args{input.address + 128, output.address + 128, count, 0};
+    vkCmdPushConstants(command, ctx.layout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(args), &args);
+    vkCmdDispatch(command, 1, 1, 1);
+    VkMemoryBarrier barrier{VK_STRUCTURE_TYPE_MEMORY_BARRIER};
+    barrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+    barrier.dstAccessMask = VK_ACCESS_HOST_READ_BIT;
+    vkCmdPipelineBarrier(command, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_HOST_BIT, 0, 1, &barrier, 0, nullptr, 0,
+                         nullptr);
+    VkCheck(vkEndCommandBuffer(command));
+    VkSubmitInfo submit{VK_STRUCTURE_TYPE_SUBMIT_INFO};
+    submit.commandBufferCount = 1;
+    submit.pCommandBuffers = &command;
+    VkFenceCreateInfo fci{VK_STRUCTURE_TYPE_FENCE_CREATE_INFO};
+    VkFence fence;
+    VkCheck(vkCreateFence(ctx.device, &fci, nullptr, &fence));
+    VkCheck(vkQueueSubmit(ctx.queue, 1, &submit, fence));
+    VkCheck(vkWaitForFences(ctx.device, 1, &fence, VK_TRUE, UINT64_MAX));
+    vkDestroyFence(ctx.device, fence, nullptr);
+    vkFreeCommandBuffers(ctx.device, ctx.pool, 1, &command);
+    vkDestroyPipeline(ctx.device, pipeline, nullptr);
+    std::vector<uint8_t> observed(count * 32 + 256);
+    std::memcpy(observed.data(), output.mapped, observed.size());
+    const bool source_unchanged = !std::memcmp(input.mapped + 128, cases.data(), cases.size() * sizeof(Case));
+    ctx.Free(output);
+    ctx.Free(targets);
+    ctx.Free(input);
+    unsigned wide = 0;
+    for (uint32_t i = 0; i < count; ++i) {
+        uint64_t offset;
+        uint32_t fields[3];
+        std::memcpy(&offset, observed.data() + 128 + i * 32, 8);
+        std::memcpy(fields, observed.data() + 136 + i * 32, sizeof(fields));
+        Check(offset == cases[i].offset && fields[0] == cases[i].id && fields[1] == (0x6ac30000u ^ (i * 0x12345u)) && !fields[2],
+              "indexed 64-bit offset/roundtrip/physical read");
+        wide += offset > UINT32_MAX;
+        for (size_t byte = 20; byte < 32; ++byte) Check(observed[128 + i * 32 + byte] == 0xa5, "indexed row gap overwritten");
+    }
+    Check(wide >= 12, "indexed oracle did not exercise offsets above four GiB");
+    for (size_t guard = 0; guard < 128; ++guard)
+        Check(observed[guard] == 0xa5 && observed[128 + count * 32 + guard] == 0xa5, "indexed output guard overwritten");
+    Check(source_unchanged, "indexed source cases mutated");
+    std::cout << "Indexed IR GPU codecs: " << count << " exact address/ID/read cases, " << wide
+              << " offsets above four GiB, all leaf kinds and internal records passed\n";
+}
+
 int main(int argc, char** argv) {
     try {
         const bool builder = argc == 5 && std::strcmp(argv[3], "--mesa-builder") == 0;
-        Check(argc == 3 || builder,
-              "usage: vel_rt_bvh4_gpu_tests <bvh4_encode.spv> <bvh4_mesa_encode.spv> [--mesa-builder <shader-dir>]");
+        const bool indexed = argc == 5 && std::strcmp(argv[3], "--indexed-addressing") == 0;
+        Check(argc == 3 || builder || indexed,
+              "usage: vel_rt_bvh4_gpu_tests <bvh4_encode.spv> <bvh4_mesa_encode.spv> [--mesa-builder "
+              "<shader-dir>|--indexed-addressing <shader.spv>]");
         Context ctx;
-        if (!ctx.Init(argv[1], std::getenv("VEL_RT_BVH4_VALIDATION") != nullptr, builder)) {
+        if (!ctx.Init(argv[1], std::getenv("VEL_RT_BVH4_VALIDATION") != nullptr, builder || indexed)) {
             std::cout
-                << (builder ? "SKIP: Mesa builder compute/int8/int16/storage/memory-model/float-control prerequisites unavailable\n"
-                            : "SKIP: Vulkan 1.2 compute/BDA/scalar/int64 device unavailable\n");
+                << (builder || indexed
+                        ? "SKIP: Mesa builder compute/int8/int16/storage/memory-model/float-control prerequisites unavailable\n"
+                        : "SKIP: Vulkan 1.2 compute/BDA/scalar/int64 device unavailable\n");
             return 77;
+        }
+        if (indexed) {
+            IndexedAddressCases(ctx, argv[4]);
+            Check(validation_errors == 0, "indexed addressing Vulkan validation errors");
+            return 0;
         }
         ctx.InitMesa(argv[2]);
         if (builder) {
             ctx.InitBuilder(argv[4]);
             MesaBuilderCases(ctx);
             Check(validation_errors == 0, "Vulkan validation errors");
-            std::cout << "Mesa GPU BUILD -> shared four-child BVH4: 8 triangle/AABB scenes, sparse and multigeometry inputs, "
+            std::cout << "Mesa GPU BUILD indexed IR v3 -> shared four-child BVH4: 8 triangle/AABB scenes, sparse and multigeometry "
+                         "inputs, "
                          "same-command-buffer encoding passed\n";
             return 0;
         }
@@ -1194,7 +1317,7 @@ int main(int argc, char** argv) {
         RefitCases(ctx);
         Check(validation_errors == 0, "Vulkan validation errors");
         std::cout << "BVH4 GPU encode: empty, 28 shuffled trees, deep tree, Mesa adapter input, chunks, bounds, parents and guards "
-                     "passed; direct Mesa GPU four-child triangle/AABB/TLAS collapse, sparse/empty/deep graphs and rejection "
+                     "passed; direct Mesa GPU v2/v3 four-child triangle/AABB/TLAS collapse, sparse/empty/deep graphs and rejection "
                      "checks passed; topology-preserving refit of sparse/multigeometry triangle/AABB/TLAS trees, "
                      "empty/singleton/deep roots, changed records and in/out-of-place guards passed\n";
         return 0;

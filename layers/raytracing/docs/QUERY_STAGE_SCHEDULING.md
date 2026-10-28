@@ -4,9 +4,33 @@
 # Query logical-stage scheduling
 
 Status: independently tested planning component; **not connected to native queue
-submission**. `vkrt_stage_schedule.c` does not remove the query backend's unsafe
-wait rejection. Command replay and per-execution query storage are necessary
-building blocks, but they do not provide a correct native scheduling executor.
+submission**. Production query COPY now uses a native acquire-to-compute bridge;
+its former narrow-wait rejection and historical-wait tracking were removed.
+See the [acquisition checkpoint](../../../docs/rt_indexed_build_acquire_2026-10-28.md).
+The planner below retains a distinct experimental executor contract.
+
+## Production query acquisition
+
+The original native semaphore wait and the formatter's ALL_COMMANDS-to-compute
+memory barrier form a scope chain. The barrier includes the source wait stage
+and makes query publication writes visible to the real formatter accesses;
+the following compute-to-transfer barrier protects the native result copy.
+This requires neither an intervening dummy transfer nor a second semaphore
+consumption. Earlier wait scopes also extend to later submissions.
+
+The public matrix checks final values, availability and padding for native and
+software execution, including pending timelines and two queues. It imposes no
+early-progress deadline. Both VVL orders pass with synchronization validation.
+A compute-only-bridge GPU mutation still passes on this driver; it is retained
+as an inconclusive negative observation. Independent host barrier oracles catch
+that mutation. These observations and the normative scope-chain reasoning
+support this particular production route, not arbitrary scope widening.
+
+The readiness/token planner contract below is not a claim that production must
+poll timeline counters or build a general asynchronous queue worker. No valid
+forward-progress counterexample currently proves that architecture necessary.
+Complete public stage/event/ownership and native-query interactions still
+require qualification.
 
 ## Scope hazards and progress limits
 

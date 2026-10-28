@@ -25,6 +25,7 @@ static bool hide_deferred;
 static const char *last_layer;
 static struct vkrt_resource_native native_resources;
 static unsigned qualification_queries, legacy_properties_queries, properties2_queries, uuid_queries;
+static unsigned query_capabilities = 3;
 
 #define INDEX_FIELDS(F)                                     \
     F(maxUpdateAfterBindDescriptorsInAllPools)              \
@@ -97,13 +98,13 @@ static void resource_defaults(void) {
     m->maxDescriptorSetTotalBuffersDynamic = m->maxDescriptorSetUpdateAfterBindTotalBuffersDynamic = 31;
 }
 
-/* The production component predicate is independently tested with the real
- * planner in test_device_features. This boundary spy deliberately uses that
- * same pure planner, while preserving its transactional output contract. */
+/* The production predicate is independently tested in test_device_features.
+ * This discovery boundary spy supplies its mandatory-query decision and uses
+ * the same pure budget planner, preserving transactional output on rejection. */
 bool vkrt_virtual_rt_resource_profile(struct vkrt_instance_data *inst, VkPhysicalDevice p, struct vkrt_resource_profile *profile) {
     REQUIRE(inst == VKRT_FIND(struct vkrt_instance_data, physical) && p == physical);
     ++qualification_queries;
-    return vkrt_plan_resource_profile(&native_resources, profile, NULL);
+    return query_capabilities == 3 && vkrt_plan_resource_profile(&native_resources, profile, NULL);
 }
 static VKAPI_ATTR void VKAPI_CALL mock_properties(VkPhysicalDevice p, VkPhysicalDeviceProperties *properties) {
     REQUIRE(p == physical);
@@ -523,8 +524,7 @@ static void properties(void) {
     ignore_rt_features = false;
 }
 
-static void budget_failure(PFN_vkEnumerateDeviceExtensionProperties enumerate, PFN_vkGetPhysicalDeviceFeatures2 query) {
-    native_resources.properties.limits.maxPerStageDescriptorStorageBuffers = 16;
+static void expect_rt_masked(PFN_vkEnumerateDeviceExtensionProperties enumerate, PFN_vkGetPhysicalDeviceFeatures2 query) {
     VkPhysicalDeviceRayTracingPipelineFeaturesKHR rtp = {.sType =
                                                              VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_FEATURES_KHR};
     VkPhysicalDeviceRayQueryFeaturesKHR rq = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_QUERY_FEATURES_KHR, .pNext = &rtp};
@@ -548,7 +548,25 @@ static void budget_failure(PFN_vkEnumerateDeviceExtensionProperties enumerate, P
         REQUIRE(count == (capacity < visible ? capacity : visible));
         for (uint32_t i = 0; i < count; ++i) REQUIRE(!strcmp(output[i].extensionName, visible_names[i + 3]));
     }
+}
+
+static void budget_failure(PFN_vkEnumerateDeviceExtensionProperties enumerate, PFN_vkGetPhysicalDeviceFeatures2 query) {
+    native_resources.properties.limits.maxPerStageDescriptorStorageBuffers = 16;
+    expect_rt_masked(enumerate, query);
     resource_defaults();
+}
+
+static void query_backend_failure(PFN_vkEnumerateDeviceExtensionProperties enumerate, PFN_vkGetPhysicalDeviceFeatures2 query) {
+    native_rt = VK_TRUE;
+    for (unsigned missing = 1; missing <= 2; ++missing) {
+        query_capabilities = 3 & ~missing; /* host reset, then buffer atomic64 */
+        expect_rt_masked(enumerate, query);
+        PFN_vkGetPhysicalDeviceProperties legacy = (void *)vkrt_discovery_proc("vkGetPhysicalDeviceProperties");
+        VkPhysicalDeviceProperties actual;
+        legacy(physical, &actual);
+        REQUIRE(!memcmp(&actual, &native_resources.properties, sizeof(actual)));
+    }
+    query_capabilities = 3;
 }
 
 int main(void) {
@@ -567,6 +585,7 @@ int main(void) {
     enumeration(enumerate);
     properties();
     budget_failure(enumerate, query);
+    query_backend_failure(enumerate, query);
     features(query, &instance);
     vkrt_unmap_object(VKRT_HKEY(physical));
     printf("Descriptor discovery property modes: 5; legacy queries %u, Properties2/UUID compositions %u/%u\n",
