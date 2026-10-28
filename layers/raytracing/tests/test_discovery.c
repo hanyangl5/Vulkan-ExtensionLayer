@@ -109,7 +109,7 @@ bool vkrt_virtual_rt_profile(struct vkrt_instance_data *inst, VkPhysicalDevice p
     REQUIRE(inst == VKRT_FIND(struct vkrt_instance_data, physical) && p == physical);
     ++qualification_queries;
     struct vkrt_resource_profile resources;
-    if (query_capabilities != 3 || !vkrt_plan_resource_profile(&native_resources, &resources, NULL)) return false;
+    if ((query_capabilities & 2) == 0 || !vkrt_plan_resource_profile(&native_resources, &resources, NULL)) return false;
     vkrt_software_rt_profile_init(&resources, profile);
     return true;
 }
@@ -740,14 +740,28 @@ static void budget_failure(PFN_vkEnumerateDeviceExtensionProperties enumerate, P
 
 static void query_backend_failure(PFN_vkEnumerateDeviceExtensionProperties enumerate, PFN_vkGetPhysicalDeviceFeatures2 query) {
     native_rt = VK_TRUE;
-    for (unsigned missing = 1; missing <= 2; ++missing) {
-        query_capabilities = 3 & ~missing; /* host reset, then buffer atomic64 */
+    for (unsigned missing = 2; missing <= 2; ++missing) {
+        query_capabilities = 3 & ~missing; /* Buffer atomic64 remains mandatory; core events remove host-reset need. */
         expect_rt_masked(enumerate, query);
         PFN_vkGetPhysicalDeviceProperties legacy = (void *)vkrt_discovery_proc("vkGetPhysicalDeviceProperties");
         VkPhysicalDeviceProperties actual;
         legacy(physical, &actual);
         REQUIRE(!memcmp(&actual, &native_resources.properties, sizeof(actual)));
     }
+    /* Native RT and hostQueryReset are both absent; core events still provide
+     * the mandatory software query marker and discovery stays consistent. */
+    query_capabilities = 2;
+    native_rt = VK_FALSE;
+    VkPhysicalDeviceAccelerationStructureFeaturesKHR as = {
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_FEATURES_KHR};
+    VkPhysicalDeviceRayQueryFeaturesKHR rq = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_QUERY_FEATURES_KHR, .pNext = &as};
+    VkPhysicalDeviceRayTracingPipelineFeaturesKHR rtp = {
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_FEATURES_KHR, .pNext = &rq};
+    VkPhysicalDeviceFeatures2 f = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2, .pNext = &rtp};
+    query(physical, &f);
+    REQUIRE(as.accelerationStructure && rq.rayQuery && rtp.rayTracingPipeline);
+    uint32_t count = 0;
+    REQUIRE(enumerate(physical, NULL, &count, NULL) == VK_SUCCESS && count == VKRT_ARRAY_SIZE(visible_names));
     query_capabilities = 3;
 }
 

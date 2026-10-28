@@ -15,6 +15,7 @@ struct vkrt_software_rt_profile {
     struct vkrt_resource_profile resources;
     VkPhysicalDeviceAccelerationStructurePropertiesKHR as;
     VkPhysicalDeviceRayTracingPipelinePropertiesKHR rtp;
+    bool query_marker_uses_events;
 };
 
 /* Copy resource facts and detach internal output-chain links. Input may alias

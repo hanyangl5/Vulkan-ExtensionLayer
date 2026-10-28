@@ -4,6 +4,15 @@
 #include "vkrt_rt_capabilities.h"
 #include "vkrt_resource_profile.h"
 #include "vkrt_software_profile.h"
+#include <vulkan/vulkan_beta.h>
+
+/* The full SDK beta type is available without globally enabling provisional
+ * enums. Keep its pinned registry sType local to this translation unit. */
+#define VKRT_PORTABILITY_FEATURES ((VkStructureType)1000163000)
+enum query_marker { QUERY_MARKER_NONE, QUERY_MARKER_EVENT, QUERY_MARKER_TIMESTAMP };
+struct query_capabilities {
+    bool atomic64, host_reset;
+};
 
 struct backend_extension {
     const char *name;
@@ -51,7 +60,12 @@ static bool extension_present(const VkExtensionProperties *extensions, uint32_t 
         if (!strcmp(extensions[i].extensionName, name)) return true;
     return false;
 }
-static bool backend_aliases_available(struct vkrt_instance_data *inst, VkPhysicalDevice physical, bool queries) {
+static bool backend_extension_needed(const struct backend_extension *required, enum query_marker marker) {
+    return !required->query_only ||
+           (marker != QUERY_MARKER_NONE &&
+            (marker == QUERY_MARKER_TIMESTAMP || strcmp(required->name, VK_EXT_HOST_QUERY_RESET_EXTENSION_NAME)));
+}
+static bool backend_aliases_available(struct vkrt_instance_data *inst, VkPhysicalDevice physical, enum query_marker marker) {
     if (inst->api_version >= VK_API_VERSION_1_2) return true;
     VkExtensionProperties *extensions;
     uint32_t count;
@@ -59,11 +73,55 @@ static bool backend_aliases_available(struct vkrt_instance_data *inst, VkPhysica
     bool available = true;
     for (size_t i = 0; i < VKRT_ARRAY_SIZE(backend_extensions); ++i) {
         const struct backend_extension *required = &backend_extensions[i];
-        if ((required->query_only && !queries) || inst->api_version >= required->promoted) continue;
+        if (!backend_extension_needed(required, marker) || inst->api_version >= required->promoted) continue;
         available &= extension_present(extensions, count, required->name);
     }
     free(extensions);
     return available;
+}
+static bool native_events_supported(struct vkrt_instance_data *inst, VkPhysicalDevice physical, bool *events) {
+    VkExtensionProperties *extensions;
+    uint32_t count;
+    if (native_extensions(inst, physical, &extensions, &count) != VK_SUCCESS) return false;
+    bool portability = extension_present(extensions, count, VK_KHR_PORTABILITY_SUBSET_EXTENSION_NAME);
+    free(extensions);
+    *events = true; /* Events are mandatory core functionality outside portability subset. */
+    if (portability) {
+        VkPhysicalDevicePortabilitySubsetFeaturesKHR subset = {.sType = VKRT_PORTABILITY_FEATURES};
+        VkPhysicalDeviceFeatures2 features = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2, .pNext = &subset};
+        if (!inst->vtable.GetPhysicalDeviceFeatures2) return false;
+        inst->vtable.GetPhysicalDeviceFeatures2(physical, &features);
+        *events = subset.events != VK_FALSE;
+    }
+    return true;
+}
+/* Explicit substrate for the no-events portability backend. This does not
+ * implement timestamp-free fallback queries: every usable compute family must
+ * support the native timestamp marker. The ordinary core-event path skips it. */
+static bool timestamp_fallback_substrate(struct vkrt_instance_data *inst, VkPhysicalDevice physical) {
+    PFN_vkGetPhysicalDeviceQueueFamilyProperties get =
+        inst->vtable.GetInstanceProcAddr ? (PFN_vkGetPhysicalDeviceQueueFamilyProperties)inst->vtable.GetInstanceProcAddr(
+                                               inst->instance, "vkGetPhysicalDeviceQueueFamilyProperties")
+                                         : NULL;
+    if (!get) return false;
+    uint32_t count = 0;
+    get(physical, &count, NULL);
+    if (!count || (uint64_t)count > SIZE_MAX / sizeof(VkQueueFamilyProperties)) return false;
+    uint32_t capacity = count;
+    VkQueueFamilyProperties *families = calloc(capacity, sizeof(*families));
+    if (!families) return false;
+    get(physical, &count, families);
+    bool usable_compute = false, eligible = count == capacity;
+    for (uint32_t i = 0; eligible && i < count; ++i) {
+        if (!families[i].queueCount || !(families[i].queueFlags & VK_QUEUE_COMPUTE_BIT)) continue;
+        usable_compute = true;
+        if (!families[i].timestampValidBits) eligible = false;
+    }
+    free(families);
+    return eligible && usable_compute;
+}
+static size_t device_chain_size(VkStructureType type) {
+    return type == VKRT_PORTABILITY_FEATURES ? sizeof(VkPhysicalDevicePortabilitySubsetFeaturesKHR) : vkrt_chain_size(type);
 }
 /* Base AS/RQ/RTP objects and shaders use the shared layer backend. Consume
  * their requests instead of enabling native RT on the downstream device. */
@@ -158,7 +216,7 @@ static VkResult create_without_rt(PFN_vkCreateDevice create, VkPhysicalDevice ph
         result = virtual_feature(p, &remove, &uses_rt);
         if (result != VK_SUCCESS) goto done;
         if (remove) continue;
-        size_t size = vkrt_chain_size(p->sType);
+        size_t size = device_chain_size(p->sType);
         if (!size) {
             result = VK_ERROR_EXTENSION_NOT_PRESENT;
             goto done;
@@ -204,7 +262,8 @@ done:
 /* This is the existing GPU component prerequisite predicate. It is shared by
  * device feature augmentation and the shader-binary compatibility domain; it
  * is not a claim that the complete public RT profile has been qualified. */
-static bool native_backend_capabilities(struct vkrt_instance_data *inst, VkPhysicalDevice physical, bool *query_backend) {
+static bool native_backend_capabilities(struct vkrt_instance_data *inst, VkPhysicalDevice physical,
+                                        struct query_capabilities *query) {
     if (!inst || inst->api_version < VK_API_VERSION_1_1) return false;
     VkPhysicalDeviceBufferDeviceAddressFeatures bda = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_BUFFER_DEVICE_ADDRESS_FEATURES};
     VkPhysicalDeviceVulkanMemoryModelFeatures memory = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_MEMORY_MODEL_FEATURES,
@@ -231,7 +290,7 @@ static bool native_backend_capabilities(struct vkrt_instance_data *inst, VkPhysi
         !inst->vtable.GetPhysicalDeviceProperties2)
         return false;
     inst->vtable.GetPhysicalDeviceFeatures2(physical, &supported);
-    *query_backend = host_reset.hostQueryReset && atomic64.shaderBufferInt64Atomics;
+    *query = (struct query_capabilities){atomic64.shaderBufferInt64Atomics != VK_FALSE, host_reset.hostQueryReset != VK_FALSE};
     if (!supported.features.shaderInt64 || !supported.features.shaderInt16 || !storage16.storageBuffer16BitAccess ||
         !storage8.storageBuffer8BitAccess || !int8.shaderInt8 || !scalar.scalarBlockLayout || !bda.bufferDeviceAddress ||
         !memory.vulkanMemoryModel || !memory.vulkanMemoryModelDeviceScope) {
@@ -278,12 +337,12 @@ static bool native_backend_capabilities(struct vkrt_instance_data *inst, VkPhysi
         return false;
     }
 
-    return backend_aliases_available(inst, physical, false);
+    return backend_aliases_available(inst, physical, QUERY_MARKER_NONE);
 }
 
 bool vkrt_native_backend_eligible(struct vkrt_instance_data *inst, VkPhysicalDevice physical) {
-    bool query_backend;
-    return native_backend_capabilities(inst, physical, &query_backend);
+    struct query_capabilities query;
+    return native_backend_capabilities(inst, physical, &query);
 }
 
 /* The public RT resource contract is stricter than the shader lowering
@@ -293,16 +352,20 @@ static bool virtual_rt_profile(struct vkrt_instance_data *inst, VkPhysicalDevice
                                bool *query_backend) {
     if (!physical || !profile || !query_backend) return false;
     struct vkrt_resource_profile local;
-    bool queries = false;
-    /* The public AS query types are mandatory RT functionality. Their current
-     * backend needs private host reset and buffer int64 atomic support even
-     * when the application does not request either feature itself. */
-    if (!native_backend_capabilities(inst, physical, &queries) || !queries || !backend_aliases_available(inst, physical, true) ||
+    struct query_capabilities query;
+    bool events;
+    if (!native_backend_capabilities(inst, physical, &query) || !query.atomic64 ||
+        !native_events_supported(inst, physical, &events))
+        return false;
+    enum query_marker marker = events ? QUERY_MARKER_EVENT : query.host_reset ? QUERY_MARKER_TIMESTAMP : QUERY_MARKER_NONE;
+    if (marker == QUERY_MARKER_NONE || (marker == QUERY_MARKER_TIMESTAMP && !timestamp_fallback_substrate(inst, physical)) ||
+        !backend_aliases_available(inst, physical, marker) ||
         !vkrt_query_resource_profile(inst->vtable.GetPhysicalDeviceProperties2, inst->vtable.GetPhysicalDeviceFeatures2, physical,
                                      &local, NULL))
         return false;
     vkrt_software_rt_profile_init(&local, profile);
-    *query_backend = queries;
+    profile->query_marker_uses_events = events;
+    *query_backend = true;
     return true;
 }
 
@@ -337,6 +400,10 @@ VkResult vkrt_create_device_with_features(struct vkrt_instance_data *inst, VkPhy
     bool uses_virtual_rt = vkrt_device_uses_virtual_rt(ci);
     if (uses_virtual_rt) {
         for (const VkBaseInStructure *p = ci->pNext; p; p = p->pNext)
+            if (p->sType == VK_STRUCTURE_TYPE_DEVICE_GROUP_DEVICE_CREATE_INFO &&
+                ((const VkDeviceGroupDeviceCreateInfo *)p)->physicalDeviceCount > 1)
+                return VK_ERROR_FEATURE_NOT_PRESENT;
+        for (const VkBaseInStructure *p = ci->pNext; p; p = p->pNext)
             if (p->sType == VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PER_STAGE_DESCRIPTOR_SET_FEATURES_NV &&
                 ((const VkPhysicalDevicePerStageDescriptorSetFeaturesNV *)p)->perStageDescriptorSet)
                 return VK_ERROR_FEATURE_NOT_PRESENT;
@@ -357,7 +424,7 @@ VkResult vkrt_create_device_with_features(struct vkrt_instance_data *inst, VkPhy
         bool remove;
         VkResult check = virtual_feature(p, &remove, &uses_virtual_rt);
         if (check != VK_SUCCESS) return check;
-        if (remove || augmented_feature(p->sType)) last_change = p;
+        if (remove || augmented_feature(p->sType) || (uses_virtual_rt && p->sType == VKRT_PORTABILITY_FEATURES)) last_change = p;
     }
     bool consume_library = false;
     for (uint32_t i = 0; i < ci->enabledExtensionCount; ++i) {
@@ -379,13 +446,24 @@ VkResult vkrt_create_device_with_features(struct vkrt_instance_data *inst, VkPhy
     const VkBaseInStructure *borrowed = last_change ? last_change->pNext : ci->pNext;
     bool query_backend = false;
     struct vkrt_software_rt_profile software_profile;
+    struct query_capabilities native_query;
     bool eligible = uses_virtual_rt ? virtual_rt_profile(inst, physical, &software_profile, &query_backend)
-                                    : native_backend_capabilities(inst, physical, &query_backend);
+                                    : native_backend_capabilities(inst, physical, &native_query);
     if (!eligible) {
         if (uses_virtual_rt) return VK_ERROR_FEATURE_NOT_PRESENT;
         return create_without_rt(create, physical, ci, alloc, device, consume_library);
     }
     query_backend &= uses_virtual_rt;
+    enum query_marker marker = !query_backend                              ? QUERY_MARKER_NONE
+                               : software_profile.query_marker_uses_events ? QUERY_MARKER_EVENT
+                                                                           : QUERY_MARKER_TIMESTAMP;
+    bool private_host_reset = marker == QUERY_MARKER_TIMESTAMP;
+    bool private_portability_events = marker == QUERY_MARKER_EVENT;
+    bool portability_enabled = false;
+    for (uint32_t i = 0; i < ci->enabledExtensionCount; ++i)
+        portability_enabled |= !strcmp(ci->ppEnabledExtensionNames[i], VK_KHR_PORTABILITY_SUBSET_EXTENSION_NAME);
+    private_portability_events &= portability_enabled;
+    VkPhysicalDevicePortabilitySubsetFeaturesKHR portability = {.sType = VKRT_PORTABILITY_FEATURES, .events = VK_TRUE};
     VkPhysicalDeviceBufferDeviceAddressFeatures bda = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_BUFFER_DEVICE_ADDRESS_FEATURES};
     VkPhysicalDeviceVulkanMemoryModelFeatures memory = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_MEMORY_MODEL_FEATURES};
     VkPhysicalDeviceScalarBlockLayoutFeatures scalar = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SCALAR_BLOCK_LAYOUT_FEATURES};
@@ -405,7 +483,7 @@ VkResult vkrt_create_device_with_features(struct vkrt_instance_data *inst, VkPhy
         result = virtual_feature(p, &remove, &uses_virtual_rt);
         if (result != VK_SUCCESS) goto done;
         if (remove) continue;
-        size_t size = vkrt_chain_size(p->sType);
+        size_t size = device_chain_size(p->sType);
         if (!size) {
             result = VK_ERROR_EXTENSION_NOT_PRESENT;
             goto done;
@@ -429,8 +507,9 @@ VkResult vkrt_create_device_with_features(struct vkrt_instance_data *inst, VkPhy
     bool has_descriptor = false;
     bool has_pointers = false;
     bool has_host_reset = false, has_atomic64 = false;
+    bool has_portability = false;
     for (VkBaseOutStructure *p = head; p != (VkBaseOutStructure *)borrowed; p = p->pNext) {
-        switch (p->sType) {
+        switch ((uint32_t)p->sType) {
             case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2:
                 features = &((VkPhysicalDeviceFeatures2 *)p)->features;
                 has_features2 = true;
@@ -448,7 +527,8 @@ VkResult vkrt_create_device_with_features(struct vkrt_instance_data *inst, VkPhy
                 f->shaderStorageBufferArrayNonUniformIndexing = VK_TRUE;
                 has8 = has_int8 = has_scalar = has_memory = has_bda = true;
                 has_descriptor = true;
-                if (query_backend) f->hostQueryReset = f->shaderBufferInt64Atomics = VK_TRUE;
+                if (private_host_reset) f->hostQueryReset = VK_TRUE;
+                if (query_backend) f->shaderBufferInt64Atomics = VK_TRUE;
                 has_host_reset = has_atomic64 = true;
                 break;
             }
@@ -461,12 +541,16 @@ VkResult vkrt_create_device_with_features(struct vkrt_instance_data *inst, VkPhy
                 has_pointers = true;
                 break;
             case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_HOST_QUERY_RESET_FEATURES:
-                if (query_backend) ((VkPhysicalDeviceHostQueryResetFeatures *)p)->hostQueryReset = VK_TRUE;
+                if (private_host_reset) ((VkPhysicalDeviceHostQueryResetFeatures *)p)->hostQueryReset = VK_TRUE;
                 has_host_reset = true;
                 break;
             case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_ATOMIC_INT64_FEATURES:
                 if (query_backend) ((VkPhysicalDeviceShaderAtomicInt64Features *)p)->shaderBufferInt64Atomics = VK_TRUE;
                 has_atomic64 = true;
+                break;
+            case VKRT_PORTABILITY_FEATURES:
+                if (private_portability_events) ((VkPhysicalDevicePortabilitySubsetFeaturesKHR *)p)->events = VK_TRUE;
+                has_portability = true;
                 break;
             case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_16BIT_STORAGE_FEATURES:
                 ((VkPhysicalDevice16BitStorageFeatures *)p)->storageBuffer16BitAccess = VK_TRUE;
@@ -528,7 +612,8 @@ VkResult vkrt_create_device_with_features(struct vkrt_instance_data *inst, VkPhy
     PREPEND(bda, has_bda);
     PREPEND(descriptor, has_descriptor);
     PREPEND(pointers, has_pointers);
-    PREPEND(host_reset, has_host_reset || !query_backend);
+    PREPEND(portability, has_portability || !private_portability_events);
+    PREPEND(host_reset, has_host_reset || !private_host_reset);
     PREPEND(atomic64, has_atomic64 || !query_backend);
 #undef PREPEND
     size_t required_count = VKRT_ARRAY_SIZE(backend_extensions);
@@ -558,7 +643,7 @@ VkResult vkrt_create_device_with_features(struct vkrt_instance_data *inst, VkPhy
         /* Do not require extension aliases when the application uses core
          * features: implementations may expose core 1.2 without those names. */
         const struct backend_extension *required = &backend_extensions[i];
-        if ((required->query_only && !query_backend) ||
+        if (!backend_extension_needed(required, marker) ||
             (inst->api_version >= required->promoted && properties.apiVersion >= required->promoted))
             continue;
         bool found = false;

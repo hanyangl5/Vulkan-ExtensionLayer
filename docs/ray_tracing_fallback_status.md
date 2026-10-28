@@ -18,7 +18,7 @@ work prioritizes the mandatory AS/RQ/RTP baseline; known newer-feature exclusion
 must be explicit. CTS/regression outcomes remain categorized evidence, with no
 requirement to make unrelated optional suites all pass. See the goal's
 [compatibility and test scope](ray_tracing_fallback_goal.md#compatibility-and-test-scope).
-The latest slice is the [software discovery and compatibility checkpoint](rt_software_discovery_2026-10-28.md).
+The latest slice is the [Event-based AS query checkpoint](rt_query_events_2026-10-28.md).
 
 Source is consolidated under `layers/raytracing`: production C/C++ and ABI
 headers in `src`, all production GPU code in `shaders`, fixtures/oracles in
@@ -74,6 +74,7 @@ the final layout, passing build/local checks and the 16-case external CTS rechec
 - [x] Replace production RTP PrivateArray frames with tiled, execution-owned BDA arenas and generic primary/secondary replay.
 - [x] Retire obsolete destination PrivateArray code, retain source Private semantics, and compile the private backend as genuine SPIR-V 1.4.
 - [x] Unify software discovery/device/resource planning and verify masked public selection/execution with bounded optional compatibility gates.
+- [x] Publish execution-owned AS queries without native timestamps on the Event-backed singleton compute path, with explicit fallback qualification and injected-capability/public/CTS evidence.
 - [ ] M0: complete all capability, no-native-RT, resource ABI, and continuation proofs.
 - [ ] M1: integrate Mesa builders, GPU BVH4 encoding/refit, and shared AS objects.
 - [ ] M2: complete Ray Query lowering and state semantics.
@@ -731,6 +732,39 @@ formatted DLL's external CTS slice 13/13 with 27302 native-boundary checks and
 zero rejections/validation markers. The preliminary 50-case observation is a
 different frozen DLL and overlaps the thirteen cases; it is not 63 unique cases.
 
+## 2026-10-28 Event-based query checkpoint
+
+Mandatory AS queries no longer use private timestamps on the normal core
+Event-backed path. Each replay operation owns a fresh host-queryable native
+event and coherent payload; the CS-to-HOST barrier and real CS sentinel remain.
+SET permits harvesting, while completion fences/proofs still govern retirement.
+Native errors and known-complete-but-RESET observations fail explicitly and
+remain visible through void cleanup paths.
+
+The shared profile selects Event without private hostQueryReset/alias injection.
+Only portability devices without native Event support select the timestamp
+fallback, with actual host reset and complete usable-compute-family timestamp
+qualification. Missing required native entry points no longer silently disable
+queries. Software RT multi-device groups now fail explicitly before native
+creation; their implementation remains open.
+
+The [checkpoint](rt_query_events_2026-10-28.md) and
+[manifest](rt_query_events_2026-10-28.json) retain all preliminary observations
+and exact final sources/DLL. Offline checks passed 47/47; final public GPU runs
+passed 11/11 with three native controls, plus an expected old-DLL failure.
+Thirteen external CTS cases passed with native RT fully masked and timestamps
+injected as unavailable: 27282 boundary checks, zero rejections/timestamp
+writes/validation markers, and 20 actual Event signals/status observations.
+This is not physical timestamp-free/no-RT qualification.
+
+The obsolete query-pool GPU fixture is removed after extracting its valid
+command-buffer/pool-reset result-lifetime checks into the new public fixture.
+Replay/acquire tests retain stronger independent result, padding, occurrence,
+overlap, host-reader and narrow-wait coverage. Its incorrect compacted-size
+growth and old rejection assumptions, missing transfer dependency and unsafe
+host-gate structure remain documented with raw evidence rather than retained
+as current regressions. Full M0-M5 remain open.
+
 ## Next work
 
 Execution-owned BDA RTP arenas, generic replay and the software discovery
@@ -742,7 +776,7 @@ The following are exit checks, not implemented-feature claims.
 
 | Priority | Deliverable | Evidence needed before closing it |
 | --- | --- | --- |
-| 1 | Complete mandatory query/queue qualification | Remove the extra timestamp requirement for valid compute queues with timestampValidBits=0; qualify protected execution, multi-device groups and pool-specific native query scopes; align discovery/admission with the actual supported substrate |
+| 1 | Complete mandatory profile/resource qualification | Qualify protected execution, multi-device groups and pool-specific native query scopes; account for private/native resource budgets without reducing the mandatory public contract |
 | Parallel M4 | Complete logical-stage synchronization semantics | Source semaphore/barrier/event/ownership scopes, native-query interactions and qualified queues/groups. Query COPY uses the proved native bridge. CPU schedules and early-signal timing alone establish neither a correctness failure nor a requirement for a general queue worker |
 | Parallel M0/M1 | Complete no-RT resource and construction contract | Extend the shared software candidate profile to complete resource budgets and queue qualification; qualify production indexed construction and XYZ dispatch, then physical no-RT execution |
 | Parallel compiler | Remaining typed compiler memory/resource semantics | Access operands and source memory-model rules, multiple real descriptor roots and NonUniform arrays, large values and execution modes, with independent GPU oracles in the production BDA transport and applicable component transports |
@@ -811,9 +845,10 @@ Detailed remaining work, grouped by subsystem rather than priority:
    actual GPU properties, repeated/overlapping replay and native completion
    acquisition execute selected external CTS. Complete native synchronization
    scopes, remaining command schemas, native query interaction and queue/device
-   qualification. The current query backend still requires compute queues with
-   timestamp support; valid timestamp-zero compute queues and multi-device
-   groups need a qualified implementation or a truthful exposed contract.
+   qualification. The Event-backed query implementation now handles timestamp-zero
+   compute queues; only its explicitly qualified no-Event portability fallback
+   requires timestamps. Multi-device/protected combinations remain unsupported
+   and need further implementation/profile qualification.
    Generic reset/copy queue flags do not alone establish a legal AS-pool case
    on graphics/video-only families; query-type family restrictions also apply.
    Preserve source wait scopes rather than imposing whole-submit waits. The

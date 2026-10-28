@@ -63,6 +63,9 @@ struct vkrt_device_dispatch {
    PFN_vkCmdEndQuery CmdEndQuery;
    PFN_vkCmdBeginQueryIndexedEXT CmdBeginQueryIndexedEXT;
    PFN_vkCmdEndQueryIndexedEXT CmdEndQueryIndexedEXT;
+   PFN_vkCreateEvent CreateEvent;
+   PFN_vkDestroyEvent DestroyEvent;
+   PFN_vkGetEventStatus GetEventStatus;
    PFN_vkCreateGraphicsPipelines            CreateGraphicsPipelines;
    PFN_vkCreateComputePipelines             CreateComputePipelines;
    PFN_vkCreateRenderPass CreateRenderPass;
@@ -237,6 +240,9 @@ vkrt_device_dispatch_load(struct vkrt_device_dispatch *t,
    VKRT_LOAD_D(CmdEndQuery);
    VKRT_LOAD_D(CmdBeginQueryIndexedEXT);
    VKRT_LOAD_D(CmdEndQueryIndexedEXT);
+   VKRT_LOAD_D(CreateEvent);
+   VKRT_LOAD_D(DestroyEvent);
+   VKRT_LOAD_D(GetEventStatus);
    VKRT_LOAD_D(CreateCommandPool);
    VKRT_LOAD_D(CmdExecuteCommands);
    VKRT_LOAD_D(CmdCopyBuffer);

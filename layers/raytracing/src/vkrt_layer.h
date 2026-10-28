@@ -62,6 +62,7 @@ struct vkrt_device_data {
    struct vkrt_execution_device *executions;
    PFN_vkSetDeviceLoaderData set_loader_data;
    bool query_backend_enabled;
+   bool query_marker_uses_events;
    struct vkrt_rtp_state *rtp;
    /* Immutable enabled queue families. Hidden AS cells are shared across
     * every family the application can use, without exposed ownership state. */

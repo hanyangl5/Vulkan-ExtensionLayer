@@ -13,6 +13,36 @@ from run_rt_cts import guard_evidence, run_environment
 
 
 class GuardEvidenceTests(unittest.TestCase):
+    def test_zero_timestamps_require_explicit_injection_and_audit(self):
+        with patch.dict("os.environ", {"VKRT_NO_RT_GUARD_ZERO_TIMESTAMPS": "1"}):
+            for mode in ("native", "software-rt"):
+                env, meta = run_environment(mode, None if mode == "native" else Path("fallback"))
+                self.assertNotIn("VKRT_NO_RT_GUARD_ZERO_TIMESTAMPS", env)
+                self.assertEqual(meta["unset_inherited"]["VKRT_NO_RT_GUARD_ZERO_TIMESTAMPS"], "1")
+        env, _ = run_environment("software-rt", Path("fallback"), guard_dir=Path("guard"),
+                                 mask_native_rt_discovery=True, zero_timestamps=True)
+        self.assertEqual(env["VKRT_NO_RT_GUARD_ZERO_TIMESTAMPS"], "1")
+        with self.assertRaises(ValueError):
+            run_environment("software-rt", Path("fallback"), zero_timestamps=True)
+        with self.assertRaises(ValueError):
+            run_environment("native", None, guard_dir=Path("guard"), zero_timestamps=True)
+        done = dict(schema_version=2, pid=123, load_id="zero-load", event="summary",
+                    mode="mask-discovery+zero-timestamps", devices=1, shader_definitions=3, checked=12, rejected=0,
+                    discovery_mask_version=1, zero_timestamp_version=1, rt_boundary_enforced=True,
+                    queue_family_queries=2, zero_timestamp_families=1, timestamp_properties_queries=1,
+                    timestamp_write_attempts=0, event_signals=2, event_status_queries=1)
+        counters = {key: 0 for key in ("devices", "shader_definitions", "checked", "queue_family_queries",
+                                      "zero_timestamp_families", "timestamp_properties_queries", "event_signals",
+                                      "event_status_queries")}
+        records = [dict(done, **counters, event="start"), dict(done, event="instance"), done]
+        with tempfile.TemporaryDirectory() as directory:
+            log = Path(directory) / "zero.jsonl"
+            log.write_text("".join(json.dumps(record) + "\n" for record in records), encoding="utf-8")
+            evidence, error = guard_evidence(log, expected_discovery_mask=True, expected_zero_timestamps=True)
+            self.assertTrue(evidence["verified"], error)
+            self.assertFalse(guard_evidence(log, expected_discovery_mask=True)[0]["verified"])
+            self.assertFalse(guard_evidence(log, expected_zero_timestamps=True)[0]["verified"])
+
     def test_masked_discovery_requires_explicit_complete_profile(self):
         audit = runpy.run_path(str(Path(__file__).resolve().parents[1] / "layers/raytracing/tests/no_native_rt_guard_audit.py"))["audit_records"]
         done = dict(schema_version=2, pid=123, load_id="masked-load", event="summary", mode="mask-discovery", devices=1,

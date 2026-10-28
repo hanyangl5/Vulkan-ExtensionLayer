@@ -50,10 +50,17 @@ static uint64_t guard_dispatches, guard_multidimensional_dispatches;
 static uint32_t guard_dispatch_max[3], guard_dispatch_limits[3];
 static int guard_force_dispatch_limits;
 static int guard_mask_discovery;
+/* Zero timestamps alone is a native control, not an RT rejection boundary.
+ * Combining it with the explicit discovery mask keeps the full RT boundary. */
+static int guard_zero_timestamps;
+static uint64_t guard_queue_family_queries, guard_zero_timestamp_families, guard_timestamp_write_attempts;
+static uint64_t guard_timestamp_properties_queries, guard_event_signals, guard_event_status_queries;
 static int guard_configured;
 static const char *guard_log_path;
 static uint64_t guard_pid;
 static char guard_load_id[96];
+
+static int guard_rt_boundary_enforced(void) { return !guard_zero_timestamps || guard_mask_discovery; }
 
 /* This intentionally creates a nonconforming test profile. Never infer a
  * Vulkan mandatory-limit proof from these small, explicitly audited limits. */
@@ -134,11 +141,20 @@ static int guard_record(const char *event, const char *kind, const char *detail)
     fprintf(file,
             ",\"mode\":\"%s\",\"checked\":%" PRIu64 ",\"rejected\":%" PRIu64 ",\"devices\":%" PRIu64
             ",\"shader_definitions\":%" PRIu64,
-            guard_force_dispatch_limits ? "forced-dispatch-limits"
-            : guard_mask_discovery      ? "mask-discovery"
-                                        : "execution-only",
+            guard_zero_timestamps         ? (guard_mask_discovery ? "mask-discovery+zero-timestamps" : "zero-timestamps")
+            : guard_force_dispatch_limits ? "forced-dispatch-limits"
+            : guard_mask_discovery        ? "mask-discovery"
+                                          : "execution-only",
             guard_checked_calls, guard_rejected_calls, guard_device_creates, guard_shader_definitions);
     if (guard_mask_discovery) fprintf(file, ",\"discovery_mask_version\":1");
+    if (guard_zero_timestamps)
+        fprintf(file,
+                ",\"zero_timestamp_version\":1,\"rt_boundary_enforced\":%s,\"queue_family_queries\":%" PRIu64
+                ",\"zero_timestamp_families\":%" PRIu64 ",\"timestamp_write_attempts\":%" PRIu64
+                ",\"timestamp_properties_queries\":%" PRIu64 ",\"event_signals\":%" PRIu64 ",\"event_status_queries\":%" PRIu64,
+                guard_rt_boundary_enforced() ? "true" : "false", guard_queue_family_queries, guard_zero_timestamp_families,
+                guard_timestamp_write_attempts, guard_timestamp_properties_queries, guard_event_signals,
+                guard_event_status_queries);
     if (guard_force_dispatch_limits)
         fprintf(file,
                 ",\"dispatch_limits\":[%u,%u,%u],\"dispatches\":%" PRIu64 ",\"multidimensional_dispatches\":%" PRIu64
@@ -162,13 +178,15 @@ static int guard_configure(void) {
         guard_force_dispatch_limits = 0;
         const char *mask = getenv("VKRT_NO_RT_GUARD_MASK_DISCOVERY");
         guard_mask_discovery = mask && !strcmp(mask, "1");
+        const char *zero = getenv("VKRT_NO_RT_GUARD_ZERO_TIMESTAMPS");
+        guard_zero_timestamps = zero && !strcmp(zero, "1");
         const char *dispatch = getenv("VKRT_NO_RT_GUARD_DISPATCH_LIMITS");
         if (dispatch && *dispatch) {
-            if (guard_mask_discovery || !guard_parse_dispatch_limits(dispatch, guard_dispatch_limits)) {
+            if (guard_mask_discovery || guard_zero_timestamps || !guard_parse_dispatch_limits(dispatch, guard_dispatch_limits)) {
                 guard_unlock();
-                fprintf(
-                    stderr,
-                    "VKRT no-native-RT guard dispatch limits require three positive decimal uint32 values and no discovery mask\n");
+                fprintf(stderr,
+                        "VKRT guard dispatch limits require three positive decimal uint32 values and no discovery/zero-timestamp "
+                        "profile\n");
                 return 0;
             }
             guard_force_dispatch_limits = 1;
@@ -305,9 +323,10 @@ static VKAPI_ATTR void VKAPI_CALL guard_DestroyInstance(VkInstance instance, con
 static VKAPI_ATTR VkResult VKAPI_CALL guard_CreateDevice(VkPhysicalDevice physical, const VkDeviceCreateInfo *info,
                                                          const VkAllocationCallbacks *allocator, VkDevice *device) {
     for (uint32_t i = 0; i < info->enabledExtensionCount; ++i)
-        GUARD_CHECK_RESULT(guard_extension(info->ppEnabledExtensionNames[i]), "native_rt_device_extension",
-                           info->ppEnabledExtensionNames[i]);
-    GUARD_CHECK_RESULT(guard_feature_chain(info->pNext), "native_rt_device_feature", "vkCreateDevice");
+        GUARD_CHECK_RESULT(guard_rt_boundary_enforced() && guard_extension(info->ppEnabledExtensionNames[i]),
+                           "native_rt_device_extension", info->ppEnabledExtensionNames[i]);
+    GUARD_CHECK_RESULT(guard_rt_boundary_enforced() && guard_feature_chain(info->pNext), "native_rt_device_feature",
+                       "vkCreateDevice");
     VkLayerDeviceCreateInfo *link = NULL;
     for (const VkBaseInStructure *p = info->pNext; p; p = p->pNext)
         if (p->sType == VK_STRUCTURE_TYPE_LOADER_DEVICE_CREATE_INFO &&
@@ -353,7 +372,8 @@ static VKAPI_ATTR VkResult VKAPI_CALL guard_CreateDevice(VkPhysicalDevice physic
     guard_insert(data, 1);
     guard_lock();
     ++guard_device_creates;
-    int ok = guard_record("device", "created_without_native_rt", "vkCreateDevice");
+    int ok =
+        guard_record("device", guard_rt_boundary_enforced() ? "created_without_native_rt" : "native_rt_allowed", "vkCreateDevice");
     guard_unlock();
     if (!ok) _Exit(87);
     return result;
@@ -374,6 +394,14 @@ static VKAPI_ATTR void VKAPI_CALL guard_GetPhysicalDeviceFeatures2(VkPhysicalDev
     if (guard_mask_discovery) guard_mask_features(features->pNext);
 }
 
+static void guard_zero_timestamp_properties(VkPhysicalDeviceProperties *properties) {
+    if (!guard_zero_timestamps) return;
+    properties->limits.timestampComputeAndGraphics = VK_FALSE;
+    guard_lock();
+    ++guard_timestamp_properties_queries;
+    guard_unlock();
+}
+
 static VKAPI_ATTR void VKAPI_CALL guard_GetPhysicalDeviceProperties2(VkPhysicalDevice physical,
                                                                      VkPhysicalDeviceProperties2 *properties) {
     struct guard_dispatch data = guard_find(physical, 0);
@@ -383,6 +411,7 @@ static VKAPI_ATTR void VKAPI_CALL guard_GetPhysicalDeviceProperties2(VkPhysicalD
         next = (PFN_vkGetPhysicalDeviceProperties2)data.gipa(data.instance, "vkGetPhysicalDeviceProperties2KHR");
     if (next) next(physical, properties);
     guard_clamp_dispatch_limits(&properties->properties);
+    guard_zero_timestamp_properties(&properties->properties);
     if (guard_mask_discovery) guard_mask_properties(properties->pNext);
 }
 
@@ -393,6 +422,44 @@ static VKAPI_ATTR void VKAPI_CALL guard_GetPhysicalDeviceProperties(VkPhysicalDe
         data.gipa ? (PFN_vkGetPhysicalDeviceProperties)data.gipa(data.instance, "vkGetPhysicalDeviceProperties") : NULL;
     if (next) next(physical, properties);
     guard_clamp_dispatch_limits(properties);
+    guard_zero_timestamp_properties(properties);
+}
+
+static void guard_note_zero_queue_families(uint32_t families) {
+    if (!guard_zero_timestamps) return;
+    guard_lock();
+    ++guard_queue_family_queries;
+    guard_zero_timestamp_families += families;
+    guard_unlock();
+}
+
+static VKAPI_ATTR void VKAPI_CALL guard_GetPhysicalDeviceQueueFamilyProperties(VkPhysicalDevice physical, uint32_t *count,
+                                                                               VkQueueFamilyProperties *properties) {
+    struct guard_dispatch data = guard_find(physical, 0);
+    PFN_vkGetPhysicalDeviceQueueFamilyProperties next = data.gipa ? (PFN_vkGetPhysicalDeviceQueueFamilyProperties)data.gipa(
+                                                                        data.instance, "vkGetPhysicalDeviceQueueFamilyProperties")
+                                                                  : NULL;
+    if (!next) guard_fatal("missing_queue_family_entrypoint", "vkGetPhysicalDeviceQueueFamilyProperties");
+    next(physical, count, properties);
+    if (guard_zero_timestamps && properties)
+        for (uint32_t i = 0; i < *count; ++i) properties[i].timestampValidBits = 0;
+    guard_note_zero_queue_families(properties ? *count : 0);
+}
+
+static VKAPI_ATTR void VKAPI_CALL guard_GetPhysicalDeviceQueueFamilyProperties2(VkPhysicalDevice physical, uint32_t *count,
+                                                                                VkQueueFamilyProperties2 *properties) {
+    struct guard_dispatch data = guard_find(physical, 0);
+    PFN_vkGetPhysicalDeviceQueueFamilyProperties2 next = data.gipa ? (PFN_vkGetPhysicalDeviceQueueFamilyProperties2)data.gipa(
+                                                                         data.instance, "vkGetPhysicalDeviceQueueFamilyProperties2")
+                                                                   : NULL;
+    if (!next && data.gipa)
+        next =
+            (PFN_vkGetPhysicalDeviceQueueFamilyProperties2)data.gipa(data.instance, "vkGetPhysicalDeviceQueueFamilyProperties2KHR");
+    if (!next) guard_fatal("missing_queue_family_entrypoint", "vkGetPhysicalDeviceQueueFamilyProperties2");
+    next(physical, count, properties);
+    if (guard_zero_timestamps && properties)
+        for (uint32_t i = 0; i < *count; ++i) properties[i].queueFamilyProperties.timestampValidBits = 0;
+    guard_note_zero_queue_families(properties ? *count : 0);
 }
 
 static VKAPI_ATTR void VKAPI_CALL guard_GetPhysicalDeviceFormatProperties(VkPhysicalDevice physical, VkFormat format,
@@ -498,7 +565,7 @@ static VKAPI_ATTR VkResult VKAPI_CALL guard_EnumerateDeviceExtensionProperties(V
 
 static VKAPI_ATTR VkResult VKAPI_CALL guard_CreateShaderModule(VkDevice device, const VkShaderModuleCreateInfo *info,
                                                                const VkAllocationCallbacks *allocator, VkShaderModule *module) {
-    const char *reason = guard_spirv(info->pCode, info->codeSize);
+    const char *reason = guard_rt_boundary_enforced() ? guard_spirv(info->pCode, info->codeSize) : NULL;
     GUARD_CHECK_RESULT(reason != NULL, reason ? reason : "spirv", "vkCreateShaderModule");
     VkResult result = GUARD_NEXT(CreateShaderModule, device, "CreateShaderModule")(device, info, allocator, module);
     if (result == VK_SUCCESS) {
@@ -623,7 +690,12 @@ static VKAPI_ATTR VkResult VKAPI_CALL guard_QueueSubmit2(VkQueue queue, uint32_t
 }
 
 static VKAPI_ATTR void VKAPI_CALL guard_CmdSetEvent(VkCommandBuffer command, VkEvent event, VkPipelineStageFlags stage) {
-    GUARD_CHECK_VOID(guard_stages(stage), "native_rt_event_stage", "vkCmdSetEvent");
+    GUARD_CHECK_VOID(guard_rt_boundary_enforced() && guard_stages(stage), "native_rt_event_stage", "vkCmdSetEvent");
+    if (guard_zero_timestamps) {
+        guard_lock();
+        ++guard_event_signals;
+        guard_unlock();
+    }
     GUARD_NEXT(CmdSetEvent, command, "CmdSetEvent")(command, event, stage);
 }
 
@@ -652,7 +724,12 @@ static VKAPI_ATTR void VKAPI_CALL guard_CmdWaitEvents(VkCommandBuffer command, u
 }
 
 static VKAPI_ATTR void VKAPI_CALL guard_CmdSetEvent2(VkCommandBuffer command, VkEvent event, const VkDependencyInfo *info) {
-    GUARD_CHECK_VOID(guard_dependency(info), "native_rt_event_dependency", "vkCmdSetEvent2");
+    GUARD_CHECK_VOID(guard_rt_boundary_enforced() && guard_dependency(info), "native_rt_event_dependency", "vkCmdSetEvent2");
+    if (guard_zero_timestamps) {
+        guard_lock();
+        ++guard_event_signals;
+        guard_unlock();
+    }
     PFN_vkCmdSetEvent2 next = GUARD_NEXT(CmdSetEvent2, command, "CmdSetEvent2");
     if (!next) next = GUARD_NEXT(CmdSetEvent2, command, "CmdSetEvent2KHR");
     next(command, event, info);
@@ -676,16 +753,37 @@ static VKAPI_ATTR void VKAPI_CALL guard_CmdWaitEvents2(VkCommandBuffer command, 
 
 static VKAPI_ATTR void VKAPI_CALL guard_CmdWriteTimestamp(VkCommandBuffer command, VkPipelineStageFlagBits stage, VkQueryPool pool,
                                                           uint32_t query) {
+    if (guard_zero_timestamps) {
+        guard_lock();
+        ++guard_timestamp_write_attempts;
+        guard_unlock();
+        guard_fatal("zero_timestamp_write", "vkCmdWriteTimestamp");
+    }
     GUARD_CHECK_VOID(guard_stages(stage), "native_rt_timestamp_stage", "vkCmdWriteTimestamp");
     GUARD_NEXT(CmdWriteTimestamp, command, "CmdWriteTimestamp")(command, stage, pool, query);
 }
 
 static VKAPI_ATTR void VKAPI_CALL guard_CmdWriteTimestamp2(VkCommandBuffer command, VkPipelineStageFlags2 stage, VkQueryPool pool,
                                                            uint32_t query) {
+    if (guard_zero_timestamps) {
+        guard_lock();
+        ++guard_timestamp_write_attempts;
+        guard_unlock();
+        guard_fatal("zero_timestamp_write", "vkCmdWriteTimestamp2");
+    }
     GUARD_CHECK_VOID(guard_stages(stage), "native_rt_timestamp_stage", "vkCmdWriteTimestamp2");
     PFN_vkCmdWriteTimestamp2 next = GUARD_NEXT(CmdWriteTimestamp2, command, "CmdWriteTimestamp2");
     if (!next) next = GUARD_NEXT(CmdWriteTimestamp2, command, "CmdWriteTimestamp2KHR");
     next(command, stage, pool, query);
+}
+
+static VKAPI_ATTR VkResult VKAPI_CALL guard_GetEventStatus(VkDevice device, VkEvent event) {
+    if (guard_zero_timestamps) {
+        guard_lock();
+        ++guard_event_status_queries;
+        guard_unlock();
+    }
+    return GUARD_NEXT(GetEventStatus, device, "GetEventStatus")(device, event);
 }
 
 static VKAPI_ATTR VkResult VKAPI_CALL guard_CreateRenderPass(VkDevice device, const VkRenderPassCreateInfo *info,
@@ -887,10 +985,25 @@ static PFN_vkVoidFunction guard_proc(const char *name) {
     ENTRY(GetPhysicalDeviceFeatures2);
     ENTRY(GetPhysicalDeviceProperties2);
     ENTRY(GetPhysicalDeviceProperties);
+    ENTRY(GetPhysicalDeviceQueueFamilyProperties);
+    ENTRY(GetPhysicalDeviceQueueFamilyProperties2);
     ENTRY(GetPhysicalDeviceFormatProperties);
     ENTRY(GetPhysicalDeviceFormatProperties2);
     ENTRY(EnumerateDeviceExtensionProperties);
     ENTRY(CreateShaderModule);
+    ENTRY(CmdWriteTimestamp);
+    ENTRY(CmdWriteTimestamp2);
+    ENTRY(CmdSetEvent);
+    ENTRY(CmdSetEvent2);
+    ENTRY(GetEventStatus);
+    if (!strcmp(name, "vkGetPhysicalDeviceProperties2KHR")) return (PFN_vkVoidFunction)guard_GetPhysicalDeviceProperties2;
+    if (!strcmp(name, "vkGetPhysicalDeviceQueueFamilyProperties2KHR"))
+        return (PFN_vkVoidFunction)guard_GetPhysicalDeviceQueueFamilyProperties2;
+    if (!strcmp(name, "vkCmdWriteTimestamp2KHR")) return (PFN_vkVoidFunction)guard_CmdWriteTimestamp2;
+    if (!strcmp(name, "vkCmdSetEvent2KHR")) return (PFN_vkVoidFunction)guard_CmdSetEvent2;
+    /* This native control changes timestamps only. RT commands, stage flags,
+     * extension enables, descriptors and shaders remain driver-native. */
+    if (!guard_rt_boundary_enforced()) return NULL;
     ENTRY(CreateShadersEXT);
     ENTRY(CreateBuffer);
     ENTRY(CreateQueryPool);

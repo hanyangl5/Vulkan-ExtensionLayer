@@ -189,6 +189,11 @@ init_vulkan(void)
       free(devs);
    }
 
+   VkPhysicalDeviceProperties properties;
+   vkGetPhysicalDeviceProperties(g_pdev, &properties);
+   printf("Physical API %u.%u; timestampComputeAndGraphics=%u\n", VK_API_VERSION_MAJOR(properties.apiVersion),
+          VK_API_VERSION_MINOR(properties.apiVersion), properties.limits.timestampComputeAndGraphics);
+
    uint32_t qn = 0;
    vkGetPhysicalDeviceQueueFamilyProperties(g_pdev, &qn, NULL);
    VkQueueFamilyProperties *qp = calloc(qn, sizeof(*qp));

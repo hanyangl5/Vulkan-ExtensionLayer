@@ -404,9 +404,6 @@ add_executable(test_gpu_build tests/test_gpu_build.c)
 target_link_libraries(test_gpu_build PRIVATE vkrt_cpu_bvh ${Vulkan_LIBRARIES})
 set_target_properties(test_gpu_build PROPERTIES C_STANDARD 11)
 add_dependencies(test_gpu_build vkrt_test_rq_spv vkrt_test_rq11_spv)
-add_executable(test_query_pool_gpu tests/test_query_pool_gpu.c)
-target_link_libraries(test_query_pool_gpu PRIVATE vkrt_cpu_bvh ${Vulkan_LIBRARIES} Threads::Threads)
-set_target_properties(test_query_pool_gpu PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED ON)
 set(VKRT_SHADER_OBJECT_RQ_SPV ${CMAKE_CURRENT_BINARY_DIR}/shader_object_rq.comp.spv)
 add_custom_command(OUTPUT ${VKRT_SHADER_OBJECT_RQ_SPV}
    COMMAND ${VKRT_GLSLC} -fshader-stage=compute --target-env=vulkan1.2
@@ -507,7 +504,12 @@ if(BUILD_TESTING)
    add_test(NAME vkrt.no_native_rt_guard.controls COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/no_native_rt_guard_checks.py"
       --executable "$<TARGET_FILE:test_no_native_rt_guard>" --output "${CMAKE_CURRENT_BINARY_DIR}/no-native-rt-guard/controls")
    add_test(NAME vkrt.cts_guard_evidence COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/../../scripts/test_rt_cts_guard_evidence.py")
-   set_tests_properties(vkrt.no_native_rt_guard vkrt.no_native_rt_guard.controls vkrt.cts_guard_evidence PROPERTIES LABELS "offline;no_native_rt")
+   add_test(NAME vkrt.no_native_rt_guard.zero_timestamps COMMAND "${Python3_EXECUTABLE}"
+      "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_no_native_rt_guard_audit.py"
+      --executable "$<TARGET_FILE:test_no_native_rt_guard>"
+      --output "${CMAKE_CURRENT_BINARY_DIR}/no-native-rt-guard/zero-timestamps")
+   set_tests_properties(vkrt.no_native_rt_guard vkrt.no_native_rt_guard.controls vkrt.no_native_rt_guard.zero_timestamps
+      vkrt.cts_guard_evidence PROPERTIES LABELS "offline;no_native_rt")
    set(VKRT_RTP_API_SPV)
    foreach(stage rgen rmiss rchit comp)
       set(output ${CMAKE_CURRENT_BINARY_DIR}/rtp_api.${stage}.spv)
@@ -675,6 +677,43 @@ if(BUILD_TESTING)
    set_tests_properties(vkrt.query_acquire.native PROPERTIES
       ENVIRONMENT "VK_INSTANCE_LAYERS=;VK_LOADER_LAYERS_DISABLE=~implicit~"
       LABELS "gpu;native_rt" SKIP_RETURN_CODE 77 TIMEOUT 180)
+   add_executable(test_query_events tests/test_query_events.c)
+   target_include_directories(test_query_events PRIVATE src tests ${Vulkan_INCLUDE_DIRS})
+   target_link_libraries(test_query_events PRIVATE ${Vulkan_LIBRARIES} Threads::Threads)
+   set_target_properties(test_query_events PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED ON)
+   add_test(NAME vkrt.query_events.software COMMAND test_query_events)
+   set_tests_properties(vkrt.query_events.software PROPERTIES
+      ENVIRONMENT "VK_LAYER_PATH=${CMAKE_BINARY_DIR}/layers;VK_INSTANCE_LAYERS=VK_LAYER_VKRT_SOFTWARE_RAY_QUERY;ENABLE_VKRT_SOFTWARE_RAY_QUERY=1;VK_LOADER_LAYERS_DISABLE=~implicit~"
+      LABELS "gpu;query_publication;no_native_rt" TIMEOUT 180)
+   add_test(NAME vkrt.query_events.native COMMAND test_query_events)
+   set_tests_properties(vkrt.query_events.native PROPERTIES
+      ENVIRONMENT "VK_INSTANCE_LAYERS=;VK_LOADER_LAYERS_DISABLE=~implicit~"
+      LABELS "gpu;query_publication;native_rt" TIMEOUT 180)
+   if(WIN32)
+      set(VKRT_EVENT_ENV_SEPARATOR ";")
+   else()
+      set(VKRT_EVENT_ENV_SEPARATOR ":")
+   endif()
+   set(VKRT_EVENT_LAYER_PATH "${CMAKE_BINARY_DIR}/layers${VKRT_EVENT_ENV_SEPARATOR}${CMAKE_CURRENT_BINARY_DIR}/no-native-rt-guard")
+   foreach(mode software native)
+      set(VKRT_EVENT_LAYERS VK_LAYER_VKRT_NO_NATIVE_RT_GUARD)
+      set(VKRT_EVENT_MASK 0)
+      if(mode STREQUAL "software")
+         set(VKRT_EVENT_LAYERS "VK_LAYER_VKRT_SOFTWARE_RAY_QUERY${VKRT_EVENT_ENV_SEPARATOR}VK_LAYER_VKRT_NO_NATIVE_RT_GUARD")
+         set(VKRT_EVENT_MASK 1)
+      endif()
+      add_test(NAME vkrt.query_events.zero_timestamps.${mode} COMMAND "${CMAKE_COMMAND}" -E env
+         "VK_LAYER_PATH=${VKRT_EVENT_LAYER_PATH}"
+         "VK_INSTANCE_LAYERS=${VKRT_EVENT_LAYERS}"
+         "VK_LOADER_LAYERS_DISABLE=~implicit~"
+         "ENABLE_VKRT_SOFTWARE_RAY_QUERY=1"
+         "VKRT_NO_RT_GUARD_ZERO_TIMESTAMPS=1"
+         "VKRT_NO_RT_GUARD_MASK_DISCOVERY=${VKRT_EVENT_MASK}"
+         "VKRT_NO_RT_GUARD_LOG=${CMAKE_CURRENT_BINARY_DIR}/no-native-rt-guard/query-events-${mode}.jsonl"
+         "$<TARGET_FILE:test_query_events>" --require-zero-timestamps)
+      set_tests_properties(vkrt.query_events.zero_timestamps.${mode} PROPERTIES
+         LABELS "gpu;query_publication;injected_zero_timestamps" TIMEOUT 180)
+   endforeach()
    add_executable(test_query_signal_order tests/test_query_signal_order.c)
    target_include_directories(test_query_signal_order PRIVATE src tests ${Vulkan_INCLUDE_DIRS})
    target_link_libraries(test_query_signal_order PRIVATE ${Vulkan_LIBRARIES} Threads::Threads)
@@ -731,18 +770,6 @@ if(BUILD_TESTING)
    add_test(NAME vkrt.shader_object_rq.spirv16.native COMMAND test_shader_object_rq ${VKRT_SHADER_OBJECT_RQ_SPV} --spirv16)
    set_tests_properties(vkrt.shader_object_rq.spirv16.native PROPERTIES
       ENVIRONMENT "VK_INSTANCE_LAYERS=" LABELS "gpu;native_rt" SKIP_RETURN_CODE 77 TIMEOUT 120)
-   add_test(NAME vkrt.query_pool_gpu.cross_queue.software COMMAND test_query_pool_gpu --cross-queue)
-   set_tests_properties(vkrt.query_pool_gpu.cross_queue.software PROPERTIES
-      ENVIRONMENT "VK_LAYER_PATH=${CMAKE_BINARY_DIR}/layers;VK_INSTANCE_LAYERS=VK_LAYER_VKRT_SOFTWARE_RAY_QUERY"
-      LABELS "gpu;query_publication" TIMEOUT 600 SKIP_RETURN_CODE 77)
-   add_test(NAME vkrt.query_pool_gpu.cross_queue.native COMMAND test_query_pool_gpu --cross-queue)
-   set_tests_properties(vkrt.query_pool_gpu.cross_queue.native PROPERTIES
-      ENVIRONMENT "VK_LAYER_PATH=${CMAKE_BINARY_DIR}/layers;VK_INSTANCE_LAYERS="
-      LABELS "gpu;native_rt;query_publication" TIMEOUT 600 SKIP_RETURN_CODE 77)
-   add_test(NAME vkrt.query_pool_gpu COMMAND test_query_pool_gpu)
-   set_tests_properties(vkrt.query_pool_gpu PROPERTIES
-      ENVIRONMENT "VK_LAYER_PATH=${CMAKE_BINARY_DIR}/layers;VK_INSTANCE_LAYERS=VK_LAYER_VKRT_SOFTWARE_RAY_QUERY"
-      LABELS "gpu;no_native_rt" TIMEOUT 120)
    add_test(NAME vkrt.shader_object_rq.software COMMAND test_shader_object_rq ${VKRT_SHADER_OBJECT_RQ_SPV})
    set_tests_properties(vkrt.shader_object_rq.software PROPERTIES
       ENVIRONMENT "VK_LAYER_PATH=${CMAKE_BINARY_DIR}/layers;VK_INSTANCE_LAYERS=VK_LAYER_VKRT_SOFTWARE_RAY_QUERY"

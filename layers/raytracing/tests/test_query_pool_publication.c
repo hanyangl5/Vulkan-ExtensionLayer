@@ -34,6 +34,9 @@ struct fixture_pool {
 };
 static struct vkrt_device_data *pool_device;
 static const struct fixture_pool *recorded_pool;
+static bool marker_storage_active;
+static VkResult marker_storage_allocate(struct vkrt_device_data *, VkDeviceSize, bool, struct vkrt_private_slice *);
+static void marker_storage_release(struct vkrt_device_data *, struct vkrt_private_slice *);
 bool vkrt_execution_command_pool_info(struct vkrt_device_data *dev, VkCommandPool pool, uint32_t *family,
                                       VkCommandPoolCreateFlags *flags) {
     if (dev != pool_device || !recorded_pool || recorded_pool->pool != pool) return false;
@@ -55,6 +58,7 @@ static struct {
 } copy_scope;
 static VkResult test_storage_allocate(struct vkrt_device_data *dev, VkDeviceSize size, bool descriptor,
                                       struct vkrt_private_slice *slice) {
+    if (marker_storage_active) return marker_storage_allocate(dev, size, descriptor, slice);
     CHECK(copy_scope.active && dev == copy_scope.device && size == 40 && descriptor);
     if (!copy_scope.active) return VK_ERROR_OUT_OF_DEVICE_MEMORY;
     copy_scope.slice = (struct vkrt_private_slice){.buffer = HANDLE(VkBuffer, 301),
@@ -68,6 +72,10 @@ static VkResult test_storage_allocate(struct vkrt_device_data *dev, VkDeviceSize
     return VK_SUCCESS;
 }
 static void test_storage_release(struct vkrt_device_data *dev, struct vkrt_private_slice *slice) {
+    if (marker_storage_active) {
+        marker_storage_release(dev, slice);
+        return;
+    }
     CHECK(copy_scope.active && dev == copy_scope.device && copy_scope.phase == COPY_FINISHED);
     CHECK(slice->buffer == copy_scope.slice.buffer && slice->offset == copy_scope.slice.offset &&
           slice->size == copy_scope.slice.size && slice->address == copy_scope.slice.address &&
@@ -137,12 +145,12 @@ static VKAPI_ATTR void VKAPI_CALL copy_scope_transfer(VkCommandBuffer command, V
 }
 static void native_wait_to_formatter_scope(void) {
     memset(&copy_scope, 0, sizeof(copy_scope));
-    VkQueueFamilyProperties family = {.queueFlags = VK_QUEUE_COMPUTE_BIT, .timestampValidBits = 64};
+    VkQueueFamilyProperties family = {.queueFlags = VK_QUEUE_COMPUTE_BIT, .timestampValidBits = 0};
     struct fixture_pool recording_pool = {.pool = HANDLE(VkCommandPool, 305), .family = 0};
     struct vkrt_query_device queries = {
         .families = &family, .family_count = 1, .layout = HANDLE(VkPipelineLayout, 303), .format = HANDLE(VkPipeline, 302)};
     vkrt_mutex_init(&queries.lock);
-    struct vkrt_device_data dev = {.queries = &queries, .max_build_dispatch_x = 1};
+    struct vkrt_device_data dev = {.queries = &queries, .max_build_dispatch_x = 1, .query_marker_uses_events = true};
     pool_device = &dev;
     recorded_pool = &recording_pool;
     dev.vtable.CmdPipelineBarrier = copy_scope_barrier;
@@ -180,7 +188,7 @@ static void native_wait_to_formatter_scope(void) {
 static struct {
     VkCommandBuffer copy, publication;
     struct publish_args args;
-    unsigned barriers, dispatches, timestamps;
+    unsigned barriers, dispatches, timestamps, events;
     bool reset, native_copy_pending;
 } publication_scope;
 static VKAPI_ATTR void VKAPI_CALL scope_copy(VkCommandBuffer command, VkBuffer source, VkBuffer destination, uint32_t count,
@@ -213,7 +221,9 @@ static VKAPI_ATTR void VKAPI_CALL scope_barrier(VkCommandBuffer command, VkPipel
             publication_scope.native_copy_pending = false;
     } else {
         CHECK(source == VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT &&
-              destination == (VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_HOST_BIT));
+              destination == (VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_HOST_BIT) &&
+              memory->srcAccessMask == VK_ACCESS_SHADER_WRITE_BIT &&
+              memory->dstAccessMask == (VK_ACCESS_HOST_READ_BIT | VK_ACCESS_SHADER_READ_BIT));
     }
     ++publication_scope.barriers;
 }
@@ -242,21 +252,30 @@ static VKAPI_ATTR void VKAPI_CALL scope_timestamp(VkCommandBuffer command, VkPip
     CHECK(publication_scope.barriers == 2 && publication_scope.dispatches == 2);
     ++publication_scope.timestamps;
 }
+static VKAPI_ATTR void VKAPI_CALL scope_event(VkCommandBuffer command, VkEvent event, VkPipelineStageFlags stage) {
+    CHECK(command == publication_scope.publication && event && stage == VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT);
+    CHECK(publication_scope.barriers == 2 && publication_scope.dispatches == 2 && !publication_scope.args.count);
+    ++publication_scope.events;
+}
 static void reset_native_copy_order(void) {
     struct vkrt_query_device queries = {.layout = HANDLE(VkPipelineLayout, 101), .publish = HANDLE(VkPipeline, 102)};
-    struct vkrt_device_data dev = {.queries = &queries, .max_build_dispatch_x = 1};
+    struct vkrt_device_data dev = {.queries = &queries, .max_build_dispatch_x = 1, .query_marker_uses_events = false};
     dev.vtable.CmdCopyBuffer = scope_copy;
     dev.vtable.CmdPipelineBarrier = scope_barrier;
     dev.vtable.CmdBindPipeline = scope_bind;
     dev.vtable.CmdPushConstants = scope_push;
     dev.vtable.CmdDispatch = scope_dispatch;
     dev.vtable.CmdWriteTimestamp = scope_timestamp;
+    dev.vtable.CmdSetEvent = scope_event;
     struct vkrt_cmd_buffer_data cb = {.cmd = HANDLE(VkCommandBuffer, 104), .device_data = &dev};
     struct query_pool pool = {.count = 1, .storage = {.address = 4096}};
     struct query_operation operation = {
         .pool = &pool, .count = 1, .marker = HANDLE(VkQueryPool, 105), .payload = {.address = 8192}};
     const VkBufferCopy region = {.size = 8};
-    for (unsigned reset = 0; reset < 2; ++reset) {
+    for (unsigned mode = 0; mode < 4; ++mode) {
+        unsigned reset = mode & 1;
+        dev.query_marker_uses_events = mode >= 2;
+        operation.event = dev.query_marker_uses_events ? HANDLE(VkEvent, 108) : VK_NULL_HANDLE;
         memset(&publication_scope, 0, sizeof(publication_scope));
         publication_scope.copy = HANDLE(VkCommandBuffer, 103);
         publication_scope.publication = cb.cmd;
@@ -264,7 +283,9 @@ static void reset_native_copy_order(void) {
         dev.vtable.CmdCopyBuffer(publication_scope.copy, HANDLE(VkBuffer, 106), HANDLE(VkBuffer, 107), 1, &region);
         CHECK(publication_scope.native_copy_pending);
         publish_operation(&cb, &operation, reset != 0);
-        CHECK(publication_scope.barriers == 2 && publication_scope.dispatches == 2 && publication_scope.timestamps == 1);
+        CHECK(publication_scope.barriers == 2 && publication_scope.dispatches == 2 &&
+              publication_scope.timestamps == !dev.query_marker_uses_events &&
+              publication_scope.events == dev.query_marker_uses_events);
         CHECK(publication_scope.native_copy_pending != (reset != 0));
     }
 }
@@ -613,12 +634,279 @@ static void debug_query_lifetime(void) {
     vkrt_unmap_object(VKRT_HKEY(dev.device));
     copy_scope.active = false;
 }
+struct marker_event_record {
+    VkEvent event;
+    VkResult status;
+    bool submitted, fence_complete, destroyed;
+};
+static struct {
+    struct vkrt_device_data *dev;
+    struct marker_event_record events[16];
+    uint8_t payloads[16][27];
+    bool released[16], fail_storage;
+    unsigned allocated, released_count, created, destroyed, polls;
+    VkResult create_result;
+} event_fixture;
+static struct marker_event_record *event_record(VkEvent event) {
+    for (unsigned i = 0; i < event_fixture.created; ++i)
+        if (event_fixture.events[i].event == event) return &event_fixture.events[i];
+    CHECK(false);
+    return NULL;
+}
+static VkResult marker_storage_allocate(struct vkrt_device_data *dev, VkDeviceSize size, bool descriptor,
+                                        struct vkrt_private_slice *slice) {
+    CHECK(dev == event_fixture.dev && size == 24 && !descriptor);
+    if (event_fixture.fail_storage) return VK_ERROR_OUT_OF_DEVICE_MEMORY;
+    CHECK(event_fixture.allocated < VKRT_ARRAY_SIZE(event_fixture.payloads));
+    unsigned index = event_fixture.allocated++;
+    memset(event_fixture.payloads[index], 0xa5, sizeof(event_fixture.payloads[index]));
+    *slice = (struct vkrt_private_slice){.buffer = HANDLE(VkBuffer, 1000 + index),
+                                         .offset = 8,
+                                         .size = size,
+                                         .address = UINT64_C(0x100000000) + 32 * index,
+                                         .mapping = event_fixture.payloads[index] + 1,
+                                         .allocation = (struct vkrt_private_allocation *)(uintptr_t)(index + 1)};
+    return VK_SUCCESS;
+}
+static void marker_storage_release(struct vkrt_device_data *dev, struct vkrt_private_slice *slice) {
+    if (!slice->allocation) return;
+    CHECK(dev == event_fixture.dev);
+    size_t index = (uintptr_t)slice->allocation - 1;
+    CHECK(index < event_fixture.allocated && !event_fixture.released[index]);
+    CHECK(event_fixture.payloads[index][0] == 0xa5 && event_fixture.payloads[index][25] == 0xa5 &&
+          event_fixture.payloads[index][26] == 0xa5);
+    event_fixture.released[index] = true;
+    ++event_fixture.released_count;
+    *slice = (struct vkrt_private_slice){0};
+}
+static VKAPI_ATTR VkResult VKAPI_CALL marker_create_event(VkDevice device, const VkEventCreateInfo *info,
+                                                          const VkAllocationCallbacks *allocator, VkEvent *event) {
+    CHECK(device == event_fixture.dev->device && info->sType == VK_STRUCTURE_TYPE_EVENT_CREATE_INFO && !info->pNext &&
+          !info->flags && !allocator);
+    if (event_fixture.create_result != VK_SUCCESS) return event_fixture.create_result;
+    CHECK(event_fixture.created < VKRT_ARRAY_SIZE(event_fixture.events));
+    unsigned index = event_fixture.created++;
+    struct marker_event_record *record = &event_fixture.events[index];
+    record->event = HANDLE(VkEvent, 2000 + index);
+    record->status = VK_EVENT_RESET;
+    *event = record->event;
+    return VK_SUCCESS;
+}
+static VKAPI_ATTR void VKAPI_CALL marker_destroy_event(VkDevice device, VkEvent event, const VkAllocationCallbacks *allocator) {
+    CHECK(device == event_fixture.dev->device && !allocator);
+    struct marker_event_record *record = event_record(event);
+    CHECK(record && !record->destroyed && (!record->submitted || record->fence_complete));
+    if (record) record->destroyed = true;
+    ++event_fixture.destroyed;
+}
+static VKAPI_ATTR VkResult VKAPI_CALL marker_get_event(VkDevice device, VkEvent event) {
+    CHECK(device == event_fixture.dev->device);
+    struct marker_event_record *record = event_record(event);
+    CHECK(record && !record->destroyed);
+    ++event_fixture.polls;
+    return record ? record->status : VK_ERROR_UNKNOWN;
+}
+static VKAPI_ATTR void VKAPI_CALL marker_families(VkPhysicalDevice physical, uint32_t *count, VkQueueFamilyProperties *families) {
+    CHECK(physical == HANDLE(VkPhysicalDevice, 800));
+    if (families) *families = (VkQueueFamilyProperties){.queueFlags = VK_QUEUE_COMPUTE_BIT, .timestampValidBits = 0};
+    *count = 1;
+}
+static VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL marker_instance_proc(VkInstance instance, const char *name) {
+    CHECK(instance == HANDLE(VkInstance, 801) && !strcmp(name, "vkGetPhysicalDeviceQueueFamilyProperties"));
+    return (PFN_vkVoidFunction)marker_families;
+}
+static void event_backend_admission(void) {
+    struct vkrt_instance_data instance = {.instance = HANDLE(VkInstance, 801)};
+    instance.vtable.GetInstanceProcAddr = marker_instance_proc;
+    struct vkrt_device_data dev = {.physical_device = HANDLE(VkPhysicalDevice, 800),
+                                   .instance_data = &instance,
+                                   .virtual_rt = true,
+                                   .query_marker_uses_events = true};
+    CHECK(vkrt_query_device_init(&dev) == VK_ERROR_FEATURE_NOT_PRESENT && !dev.queries);
+    dev.virtual_rt = false;
+    CHECK(vkrt_query_device_init(&dev) == VK_SUCCESS && !dev.queries);
+    dev.query_backend_enabled = true;
+    CHECK(vkrt_query_device_init(&dev) == VK_ERROR_FEATURE_NOT_PRESENT && !dev.queries);
+    dev.vtable.CmdCopyBuffer = scope_copy;
+    dev.vtable.CreateEvent = marker_create_event;
+    dev.vtable.DestroyEvent = marker_destroy_event;
+    dev.vtable.GetEventStatus = marker_get_event;
+    dev.vtable.CmdSetEvent = scope_event;
+    const struct vkrt_device_dispatch full = dev.vtable;
+    for (unsigned missing = 0; missing < 4; ++missing) {
+        dev.vtable = full;
+        if (missing == 0) dev.vtable.CreateEvent = NULL;
+        if (missing == 1) dev.vtable.DestroyEvent = NULL;
+        if (missing == 2) dev.vtable.GetEventStatus = NULL;
+        if (missing == 3) dev.vtable.CmdSetEvent = NULL;
+        CHECK(vkrt_query_device_init(&dev) == VK_ERROR_FEATURE_NOT_PRESENT && !dev.queries);
+    }
+    dev.vtable = full;
+    CHECK(!dev.vtable.ResetQueryPool && !dev.vtable.GetQueryPoolResults && !dev.vtable.CmdWriteTimestamp);
+    CHECK(vkrt_query_device_init(&dev) == VK_SUCCESS && dev.queries && !dev.queries->families[0].timestampValidBits);
+    vkrt_query_device_finish(&dev);
+    dev.query_marker_uses_events = false;
+    CHECK(vkrt_query_device_init(&dev) == VK_ERROR_FEATURE_NOT_PRESENT && !dev.queries);
+    dev.query_marker_uses_events = true;
+    instance.vtable.GetInstanceProcAddr = NULL;
+    CHECK(vkrt_query_device_init(&dev) == VK_ERROR_INITIALIZATION_FAILED && !dev.queries);
+}
+static void event_occurrences(void) {
+    memset(&event_fixture, 0, sizeof(event_fixture));
+    VkQueueFamilyProperties family = {.queueFlags = VK_QUEUE_COMPUTE_BIT, .timestampValidBits = 0};
+    struct fixture_pool recording_pool = {.pool = HANDLE(VkCommandPool, 810), .family = 0};
+    struct vkrt_query_device state = {.families = &family, .family_count = 1};
+    vkrt_mutex_init(&state.lock);
+    struct vkrt_device_data dev = {.device = HANDLE(VkDevice, 811), .queries = &state, .query_marker_uses_events = true};
+    dev.vtable.CreateEvent = marker_create_event;
+    dev.vtable.DestroyEvent = marker_destroy_event;
+    dev.vtable.GetEventStatus = marker_get_event;
+    struct query_host_slot slot = {0};
+    uint8_t storage[24] = {0};
+    struct query_pool pool = {.magic = QUERY_POOL_MAGIC,
+                              .dev = &dev,
+                              .type = VK_QUERY_TYPE_ACCELERATION_STRUCTURE_COMPACTED_SIZE_KHR,
+                              .count = 1,
+                              .slots = &slot,
+                              .storage = {.mapped = storage}};
+    VkQueryPool handle = (VkQueryPool)(uintptr_t)&pool;
+    struct vkrt_cmd_buffer_data cb[3] = {0};
+    for (unsigned i = 0; i < 3; ++i) {
+        cb[i] = (struct vkrt_cmd_buffer_data){
+            .cmd = HANDLE(VkCommandBuffer, 812 + i), .device_data = &dev, .pool = recording_pool.pool, .replaying = true};
+        vkrt_map_object(VKRT_HKEY(cb[i].cmd), &cb[i]);
+    }
+    vkrt_map_object(VKRT_HKEY(dev.device), &dev);
+    vkrt_map_object(VKRT_HKEY(handle), &pool);
+    pool_device = &dev;
+    recorded_pool = &recording_pool;
+    event_fixture.dev = &dev;
+    marker_storage_active = true;
+    const bool accepted = record_allowed(&cb[0]);
+    CHECK(accepted);
+    if (!accepted) goto done;
+    struct vkrt_cmd_buffer_data source = {.cmd = HANDLE(VkCommandBuffer, 816),
+                                          .device_data = &dev,
+                                          .pool = recording_pool.pool,
+                                          .usage_flags = VK_COMMAND_BUFFER_USAGE_SIMULTANEOUS_USE_BIT};
+    source.replay.journal = (struct vkrt_replay_journal *)(uintptr_t)1;
+    dev.executions = (struct vkrt_execution_device *)(uintptr_t)1;
+    vkrt_map_object(VKRT_HKEY(source.cmd), &source);
+    const VkAccelerationStructureKHR as = HANDLE(VkAccelerationStructureKHR, 817);
+    CmdResetQueryPool(source.cmd, handle, 0, 1);
+    CmdWriteAccelerationStructuresPropertiesKHR(source.cmd, 1, &as, pool.type, handle, 0);
+    CmdCopyQueryPoolResults(source.cmd, handle, 0, 1, HANDLE(VkBuffer, 818), 0, 16,
+                            VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WITH_AVAILABILITY_BIT);
+    CHECK(source.has_virtual_queries && !source.queries && source.record_result == VK_SUCCESS && !event_fixture.allocated &&
+          !event_fixture.created && !state.commands);
+    vkrt_unmap_object(VKRT_HKEY(source.cmd));
+    dev.executions = NULL;
+    dev.query_marker_uses_events = false;
+    CHECK(!record_allowed(&cb[0]) && cb[0].record_result == VK_ERROR_FEATURE_NOT_PRESENT);
+    cb[0].record_result = VK_SUCCESS;
+    dev.query_marker_uses_events = true;
+    event_fixture.fail_storage = true;
+    CHECK(!new_operation(&cb[0], &pool, 0, 1) && cb[0].record_result == VK_ERROR_OUT_OF_DEVICE_MEMORY);
+    CHECK(!event_fixture.allocated && !event_fixture.created && !cb[0].queries->head);
+    event_fixture.fail_storage = false;
+    cb[0].record_result = VK_SUCCESS;
+    event_fixture.create_result = VK_ERROR_OUT_OF_HOST_MEMORY;
+    CHECK(!new_operation(&cb[0], &pool, 0, 1) && cb[0].record_result == VK_ERROR_OUT_OF_HOST_MEMORY);
+    CHECK(event_fixture.allocated == 1 && event_fixture.released_count == 1 && !event_fixture.created && !cb[0].queries->head);
+    /* An earlier source error prevents any further marker/slice allocation. */
+    CHECK(!new_operation(&cb[0], &pool, 0, 1) && event_fixture.allocated == 1);
+    cb[0].record_result = VK_SUCCESS;
+    event_fixture.create_result = VK_SUCCESS;
+    struct query_operation *ops[3];
+    for (unsigned i = 0; i < 3; ++i) {
+        ops[i] = new_operation(&cb[i], &pool, 0, 1);
+        CHECK(ops[i] && ops[i]->event && !ops[i]->marker && !ops[i]->submitted);
+        const struct vkrt_as_query_value value = {UINT64_C(0x1234567800000000) + i, 1, 0};
+        const uint64_t serial = i + 1;
+        memcpy(ops[i]->payload.mapped, &value, sizeof(value));
+        memcpy((uint8_t *)ops[i]->payload.mapped + 16, &serial, sizeof(serial));
+    }
+    CHECK(ops[0]->event != ops[1]->event && ops[1]->event != ops[2]->event && ops[0]->payload.address != ops[1]->payload.address &&
+          !event_fixture.destroyed);
+    struct vkrt_query_submission transactions[3] = {0};
+    for (unsigned i = 0; i < 3; ++i) {
+        CHECK(vkrt_query_submit_prepare(&dev, &transactions[i], 1, &cb[i].cmd) == VK_SUCCESS);
+        event_record(ops[i]->event)->submitted = true;
+        vkrt_query_submit_result(&dev, &transactions[i], VK_SUCCESS);
+    }
+    uint64_t output[4] = {11, 13, 17, 19};
+    CHECK(GetQueryPoolResults(dev.device, handle, 0, 1, sizeof(output), output, 32,
+                              VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WITH_AVAILABILITY_BIT) == VK_NOT_READY);
+    CHECK(output[0] == 11 && output[1] == 0 && output[2] == 17 && output[3] == 19 && !slot.initialized);
+    const VkResult errors[] = {VK_ERROR_OUT_OF_HOST_MEMORY, VK_ERROR_OUT_OF_DEVICE_MEMORY, VK_ERROR_DEVICE_LOST, VK_ERROR_UNKNOWN};
+    for (unsigned i = 0; i < VKRT_ARRAY_SIZE(errors); ++i) {
+        event_record(ops[0]->event)->status = errors[i];
+        CHECK(GetQueryPoolResults(dev.device, handle, 0, 1, sizeof(output), output, 32, VK_QUERY_RESULT_64_BIT) == errors[i]);
+        CHECK(!ops[0]->harvested && !slot.initialized && !event_fixture.destroyed);
+    }
+    event_record(ops[0]->event)->status = VK_SUCCESS; /* Not a legal event status. Never treat it as SET. */
+    CHECK(GetQueryPoolResults(dev.device, handle, 0, 1, sizeof(output), output, 32, VK_QUERY_RESULT_64_BIT) == VK_ERROR_UNKNOWN);
+    event_record(ops[0]->event)->status = VK_ERROR_UNKNOWN;
+    ResetQueryPool(dev.device, handle, 0, 1);
+    CHECK(state.error == VK_ERROR_UNKNOWN && !slot.initialized);
+    state.error = VK_SUCCESS;
+    event_record(ops[0]->event)->status = VK_EVENT_RESET;
+    event_record(ops[1]->event)->status = VK_EVENT_SET;
+    CHECK(GetQueryPoolResults(dev.device, handle, 0, 1, sizeof(output), output, 32,
+                              VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WITH_AVAILABILITY_BIT) == VK_SUCCESS);
+    CHECK(output[0] == UINT64_C(0x1234567800000001) && output[1] == 1 && slot.serial == 2 && !ops[0]->harvested);
+    CHECK(!event_fixture.destroyed && event_fixture.released_count == 1); /* SET is not batch-fence retirement. */
+    event_record(ops[0]->event)->status = VK_EVENT_SET;
+    CHECK(GetQueryPoolResults(dev.device, handle, 0, 1, sizeof(output), output, 32, VK_QUERY_RESULT_64_BIT) == VK_SUCCESS);
+    CHECK(slot.serial == 2 && output[0] == UINT64_C(0x1234567800000001)); /* Older event observation cannot overwrite. */
+    CHECK(vkrt_query_submit_prepare(&dev, &transactions[0], 1, &cb[0].cmd) == VK_ERROR_FEATURE_NOT_PRESENT);
+    /* Unknown submission ownership is quarantined by execution replay, never
+     * retired merely because its event is SET. Keep it until a modeled idle. */
+    ops[2]->prepared = &transactions[2];
+    vkrt_query_submit_result(&dev, &transactions[2], VK_ERROR_UNKNOWN);
+    CHECK(!ops[2]->submitted && !event_fixture.destroyed && event_fixture.released_count == 1);
+    for (unsigned i = 0; i < 3; ++i) {
+        event_record(ops[i]->event)->fence_complete = true;
+        CHECK(vkrt_query_command_reset(&cb[i]) == VK_SUCCESS && !cb[i].queries);
+        vkrt_unmap_object(VKRT_HKEY(cb[i].cmd));
+    }
+    struct vkrt_cmd_buffer_data error_cb = {
+        .cmd = HANDLE(VkCommandBuffer, 815), .device_data = &dev, .pool = recording_pool.pool, .replaying = true};
+    const VkResult completed_statuses[] = {VK_EVENT_RESET, VK_ERROR_DEVICE_LOST};
+    for (unsigned i = 0; i < VKRT_ARRAY_SIZE(completed_statuses); ++i) {
+        state.error = VK_SUCCESS;
+        struct query_operation *error_op = new_operation(&error_cb, &pool, 0, 1);
+        CHECK(error_op && error_op->event);
+        error_op->submitted = true;
+        struct marker_event_record *error_event = event_record(error_op->event);
+        error_event->submitted = error_event->fence_complete = true;
+        error_event->status = completed_statuses[i];
+        const VkResult expected = i == 0 ? VK_ERROR_UNKNOWN : VK_ERROR_DEVICE_LOST;
+        /* Only this modeled completion fence permits retirement. RESET while
+         * merely polling above stayed pending; complete+RESET must fail. */
+        CHECK(vkrt_query_command_reset(&error_cb) == expected && state.error == expected);
+        CHECK(GetQueryPoolResults(dev.device, handle, 0, 1, sizeof(output), output, 32, VK_QUERY_RESULT_64_BIT) == expected);
+        CHECK(slot.serial == 2 && slot.value == UINT64_C(0x1234567800000001));
+    }
+    CHECK(!state.commands && event_fixture.created == 5 && event_fixture.destroyed == 5 &&
+          event_fixture.allocated == event_fixture.released_count);
+done:
+    marker_storage_active = false;
+    for (unsigned i = 0; i < 3; ++i) vkrt_unmap_object(VKRT_HKEY(cb[i].cmd));
+    vkrt_unmap_object(VKRT_HKEY(handle));
+    vkrt_unmap_object(VKRT_HKEY(dev.device));
+#ifndef _WIN32
+    pthread_mutex_destroy(&state.lock);
+#endif
+}
 int main(void) {
+    event_backend_admission();
+    event_occurrences();
     native_wait_to_formatter_scope();
     reset_native_copy_order();
     struct vkrt_query_device state = {0};
     vkrt_mutex_init(&state.lock);
-    struct vkrt_device_data dev = {.device = HANDLE(VkDevice, 1), .queries = &state};
+    struct vkrt_device_data dev = {.device = HANDLE(VkDevice, 1), .queries = &state, .query_marker_uses_events = false};
     dev.vtable.GetQueryPoolResults = native_get;
     dev.vtable.CreateQueryPool = native_create;
     dev.vtable.ResetQueryPool = native_reset;
@@ -811,7 +1099,8 @@ int main(void) {
     vkrt_map_destroy(&vkrt_global.objects);
     if (!failures)
         printf(
-            "Query publication epochs: PASS (acquire/cache/reset/rollback, pipeline retry/admission ordering, "
+            "Query publication epochs: PASS (timestamp-zero events, fresh occurrence/status/OOM/retirement, "
+            "timestamp fallback, acquire/cache/reset/rollback, pipeline retry/admission ordering, "
             "native COPY-to-RESET and wait-to-formatter scopes)\n");
     return failures ? 1 : 0;
 }

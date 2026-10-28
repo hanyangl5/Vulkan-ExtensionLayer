@@ -59,6 +59,7 @@ static void test_init(void) {
     struct vkrt_software_rt_profile p;
     memset(&p, 0xa5, sizeof(p));
     vkrt_software_rt_profile_init(&r, &p);
+    CHECK(p.query_marker_uses_events);
     CHECK(!memcmp(&r, &saved, sizeof(r)));
     CHECK(p.resources.limits.maxPerStageDescriptorStorageBuffers == 73 && p.resources.core_resource_bound == 211 &&
           p.resources.all_resource_bound == 223);

@@ -6,6 +6,8 @@
 
 static unsigned failures, native_instances, native_devices, native_modules, native_buffers, native_barriers, native_submits;
 static unsigned native_dispatches, native_base_dispatches, native_indirect_dispatches;
+static unsigned native_timestamps, native_event_signals, native_event_status, native_traces;
+static int native_khr_queue_only;
 #define REQUIRE(x)                                          \
     do {                                                    \
         if (!(x)) {                                         \
@@ -48,7 +50,7 @@ static VKAPI_ATTR VkResult VKAPI_CALL driver_CreateDevice(VkPhysicalDevice physi
                                                           const VkAllocationCallbacks *allocator, VkDevice *device) {
     (void)allocator;
     REQUIRE(physical == (VkPhysicalDevice)&native_physical);
-    REQUIRE(!guard_feature_chain(info->pNext));
+    REQUIRE(!guard_rt_boundary_enforced() || !guard_feature_chain(info->pNext));
     ++native_devices;
     *device = (VkDevice)&native_device;
     return VK_SUCCESS;
@@ -98,6 +100,8 @@ static VKAPI_ATTR void VKAPI_CALL driver_Features2(VkPhysicalDevice physical, Vk
 static VKAPI_ATTR void VKAPI_CALL driver_Properties2(VkPhysicalDevice physical, VkPhysicalDeviceProperties2 *properties) {
     REQUIRE(physical == (VkPhysicalDevice)&native_physical);
     properties->properties.vendorID = 123;
+    properties->properties.limits.timestampComputeAndGraphics = VK_TRUE;
+    properties->properties.limits.timestampPeriod = 3.5f;
     properties->properties.limits.maxComputeWorkGroupCount[0] = 17;
     properties->properties.limits.maxComputeWorkGroupCount[1] = 5;
     properties->properties.limits.maxComputeWorkGroupCount[2] = 11;
@@ -109,6 +113,69 @@ static VKAPI_ATTR void VKAPI_CALL driver_Properties(VkPhysicalDevice physical, V
     VkPhysicalDeviceProperties2 local = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2};
     driver_Properties2(physical, &local);
     *properties = local.properties;
+}
+static VkQueueFamilyProperties native_family(uint32_t index) {
+    return (VkQueueFamilyProperties){.queueFlags = index == 1 ? VK_QUEUE_GRAPHICS_BIT : VK_QUEUE_COMPUTE_BIT,
+                                     .queueCount = 7 + index,
+                                     .timestampValidBits = index == 0   ? 64
+                                                           : index == 1 ? 32
+                                                                        : 0,
+                                     .minImageTransferGranularity = {index + 1, index + 2, index + 3}};
+}
+static VKAPI_ATTR void VKAPI_CALL driver_QueueFamilyProperties(VkPhysicalDevice physical, uint32_t *count,
+                                                               VkQueueFamilyProperties *properties) {
+    REQUIRE(physical == (VkPhysicalDevice)&native_physical);
+    if (!properties) {
+        *count = 3;
+        return;
+    }
+    if (*count > 3) *count = 3;
+    for (uint32_t i = 0; i < *count; ++i) properties[i] = native_family(i);
+}
+static VKAPI_ATTR void VKAPI_CALL driver_QueueFamilyProperties2(VkPhysicalDevice physical, uint32_t *count,
+                                                                VkQueueFamilyProperties2 *properties) {
+    REQUIRE(physical == (VkPhysicalDevice)&native_physical);
+    if (!properties) {
+        *count = 3;
+        return;
+    }
+    if (*count > 3) *count = 3;
+    for (uint32_t i = 0; i < *count; ++i) properties[i].queueFamilyProperties = native_family(i);
+}
+static VKAPI_ATTR void VKAPI_CALL driver_CmdWriteTimestamp(VkCommandBuffer command, VkPipelineStageFlagBits stage, VkQueryPool pool,
+                                                           uint32_t query) {
+    REQUIRE(command == (VkCommandBuffer)&native_command && stage == VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT &&
+            pool == (VkQueryPool)(uintptr_t)45 && query == 2);
+    ++native_timestamps;
+}
+static VKAPI_ATTR void VKAPI_CALL driver_CmdWriteTimestamp2(VkCommandBuffer command, VkPipelineStageFlags2 stage, VkQueryPool pool,
+                                                            uint32_t query) {
+    REQUIRE(command == (VkCommandBuffer)&native_command && stage == VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT &&
+            pool == (VkQueryPool)(uintptr_t)45 && query == 2);
+    ++native_timestamps;
+}
+static VKAPI_ATTR void VKAPI_CALL driver_CmdSetEvent(VkCommandBuffer command, VkEvent event, VkPipelineStageFlags stage) {
+    REQUIRE(command == (VkCommandBuffer)&native_command && event == (VkEvent)(uintptr_t)46 &&
+            stage == VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT);
+    ++native_event_signals;
+}
+static VKAPI_ATTR void VKAPI_CALL driver_CmdSetEvent2(VkCommandBuffer command, VkEvent event, const VkDependencyInfo *info) {
+    REQUIRE(command == (VkCommandBuffer)&native_command && event == (VkEvent)(uintptr_t)46 &&
+            info->sType == VK_STRUCTURE_TYPE_DEPENDENCY_INFO);
+    ++native_event_signals;
+}
+static VKAPI_ATTR VkResult VKAPI_CALL driver_GetEventStatus(VkDevice device, VkEvent event) {
+    REQUIRE(device == (VkDevice)&native_device && event == (VkEvent)(uintptr_t)46);
+    ++native_event_status;
+    return VK_EVENT_SET;
+}
+static VKAPI_ATTR void VKAPI_CALL driver_CmdTraceRaysKHR(VkCommandBuffer command, const VkStridedDeviceAddressRegionKHR *rgen,
+                                                         const VkStridedDeviceAddressRegionKHR *miss,
+                                                         const VkStridedDeviceAddressRegionKHR *hit,
+                                                         const VkStridedDeviceAddressRegionKHR *call, uint32_t x, uint32_t y,
+                                                         uint32_t z) {
+    REQUIRE(command == (VkCommandBuffer)&native_command && !rgen && !miss && !hit && !call && x == 1 && y == 1 && z == 1);
+    ++native_traces;
 }
 static VKAPI_ATTR void VKAPI_CALL driver_FormatProperties(VkPhysicalDevice physical, VkFormat format, VkFormatProperties *out) {
     REQUIRE(physical == (VkPhysicalDevice)&native_physical && format == VK_FORMAT_R32G32B32_SFLOAT);
@@ -168,6 +235,12 @@ static VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL driver_GDPA(VkDevice device, con
     MOCK(CmdDispatch);
     MOCK(CmdDispatchBase);
     MOCK(CmdDispatchIndirect);
+    MOCK(CmdWriteTimestamp);
+    MOCK(CmdWriteTimestamp2);
+    MOCK(CmdSetEvent);
+    MOCK(CmdSetEvent2);
+    MOCK(GetEventStatus);
+    MOCK(CmdTraceRaysKHR);
 #undef MOCK
     return (PFN_vkVoidFunction)driver_unknown;
 }
@@ -182,6 +255,10 @@ static VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL driver_GIPA(VkInstance instance,
     if (!strcmp(name, "vkGetPhysicalDeviceFeatures2")) return (PFN_vkVoidFunction)driver_Features2;
     if (!strcmp(name, "vkGetPhysicalDeviceProperties2")) return (PFN_vkVoidFunction)driver_Properties2;
     if (!strcmp(name, "vkGetPhysicalDeviceProperties")) return (PFN_vkVoidFunction)driver_Properties;
+    if (!strcmp(name, "vkGetPhysicalDeviceQueueFamilyProperties")) return (PFN_vkVoidFunction)driver_QueueFamilyProperties;
+    if (!strcmp(name, "vkGetPhysicalDeviceQueueFamilyProperties2"))
+        return native_khr_queue_only ? NULL : (PFN_vkVoidFunction)driver_QueueFamilyProperties2;
+    if (!strcmp(name, "vkGetPhysicalDeviceQueueFamilyProperties2KHR")) return (PFN_vkVoidFunction)driver_QueueFamilyProperties2;
     if (!strcmp(name, "vkGetPhysicalDeviceFormatProperties")) return (PFN_vkVoidFunction)driver_FormatProperties;
     if (!strcmp(name, "vkGetPhysicalDeviceFormatProperties2") || !strcmp(name, "vkGetPhysicalDeviceFormatProperties2KHR"))
         return (PFN_vkVoidFunction)driver_FormatProperties2;
@@ -247,6 +324,78 @@ static void policy_controls(void) {
     REQUIRE(core.pNext == &rq && rq.pNext == &rt);
 }
 
+static void timestamp_properties_controls(VkNegotiateLayerInterface *negotiation, VkInstance instance, int zero, int queues) {
+    VkPhysicalDevice physical = (VkPhysicalDevice)&native_physical;
+    VkPhysicalDeviceProperties legacy;
+    ((PFN_vkGetPhysicalDeviceProperties)negotiation->pfnGetInstanceProcAddr(instance, "vkGetPhysicalDeviceProperties"))(physical,
+                                                                                                                        &legacy);
+    REQUIRE(legacy.limits.timestampComputeAndGraphics == (zero ? VK_FALSE : VK_TRUE) && legacy.limits.timestampPeriod == 3.5f &&
+            legacy.vendorID == 123);
+    const char *property_names[] = {"vkGetPhysicalDeviceProperties2", "vkGetPhysicalDeviceProperties2KHR"};
+    for (unsigned api = 0; api < 2; ++api) {
+        VkBaseOutStructure untouched = {.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO};
+        VkPhysicalDeviceProperties2 properties = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2, .pNext = &untouched};
+        ((PFN_vkGetPhysicalDeviceProperties2)negotiation->pfnGetInstanceProcAddr(instance, property_names[api]))(physical,
+                                                                                                                 &properties);
+        REQUIRE(properties.sType == VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2 && properties.pNext == &untouched &&
+                untouched.sType == VK_STRUCTURE_TYPE_APPLICATION_INFO && !untouched.pNext);
+        REQUIRE(!memcmp(&legacy, &properties.properties, sizeof(legacy)));
+    }
+    if (!queues) return;
+    PFN_vkGetPhysicalDeviceQueueFamilyProperties query =
+        (PFN_vkGetPhysicalDeviceQueueFamilyProperties)negotiation->pfnGetInstanceProcAddr(
+            instance, "vkGetPhysicalDeviceQueueFamilyProperties");
+    uint32_t count = 0;
+    query(physical, &count, NULL);
+    REQUIRE(count == 3);
+    VkQueueFamilyProperties families[4];
+    memset(families, 0xa5, sizeof(families));
+    count = 1;
+    query(physical, &count, families);
+    REQUIRE(count == 1 && families[1].timestampValidBits == UINT32_C(0xa5a5a5a5));
+    count = 4;
+    query(physical, &count, families);
+    REQUIRE(count == 3 && families[3].timestampValidBits == UINT32_C(0xa5a5a5a5));
+    for (uint32_t i = 0; i < count; ++i) {
+        VkQueueFamilyProperties expected = native_family(i);
+        if (zero) expected.timestampValidBits = 0;
+        REQUIRE(!memcmp(&expected, &families[i], sizeof(expected)));
+    }
+    const char *queue_names[] = {"vkGetPhysicalDeviceQueueFamilyProperties2", "vkGetPhysicalDeviceQueueFamilyProperties2KHR"};
+    for (unsigned alias_only = 0; alias_only < 2; ++alias_only) {
+        native_khr_queue_only = (int)alias_only;
+        for (unsigned api = 0; api < 2; ++api) {
+            PFN_vkVoidFunction proc = negotiation->pfnGetInstanceProcAddr(instance, queue_names[api]);
+            REQUIRE(proc == negotiation->pfnGetPhysicalDeviceProcAddr(instance, queue_names[api]));
+            PFN_vkGetPhysicalDeviceQueueFamilyProperties2 query2 = (PFN_vkGetPhysicalDeviceQueueFamilyProperties2)proc;
+            count = 0;
+            query2(physical, &count, NULL);
+            REQUIRE(count == 3);
+            VkBaseOutStructure untouched[4];
+            VkQueueFamilyProperties2 properties[4];
+            memset(properties, 0xa5, sizeof(properties));
+            for (uint32_t i = 0; i < 4; ++i) {
+                untouched[i] = (VkBaseOutStructure){.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO};
+                properties[i].sType = VK_STRUCTURE_TYPE_QUEUE_FAMILY_PROPERTIES_2;
+                properties[i].pNext = &untouched[i];
+            }
+            count = 1;
+            query2(physical, &count, properties);
+            REQUIRE(count == 1 && properties[1].queueFamilyProperties.timestampValidBits == UINT32_C(0xa5a5a5a5));
+            count = 4;
+            query2(physical, &count, properties);
+            REQUIRE(count == 3 && properties[3].queueFamilyProperties.timestampValidBits == UINT32_C(0xa5a5a5a5));
+            for (uint32_t i = 0; i < count; ++i) {
+                REQUIRE(!memcmp(&properties[i].queueFamilyProperties, &families[i], sizeof(families[i])));
+                REQUIRE(properties[i].sType == VK_STRUCTURE_TYPE_QUEUE_FAMILY_PROPERTIES_2 &&
+                        properties[i].pNext == &untouched[i] && untouched[i].sType == VK_STRUCTURE_TYPE_APPLICATION_INFO &&
+                        !untouched[i].pNext);
+            }
+        }
+    }
+    native_khr_queue_only = 0;
+}
+
 int main(int argc, char **argv) {
     if (argc < 2) {
         fprintf(stderr, "usage: test_no_native_rt_guard LOG_PATH [CONTROL_MODE]\n");
@@ -255,12 +404,16 @@ int main(int argc, char **argv) {
     remove(argv[1]);
     const char *mode = argc > 2 ? argv[2] : "";
     const int forced = !strncmp(mode, "--forced-", 9);
-    const int invalid_config = !strcmp(mode, "--invalid-dispatch-config-control") || !strcmp(mode, "--forced-mask-config-control");
+    const int zero = !strncmp(mode, "--zero-timestamps", 17) || !strcmp(mode, "--forced-zero-config-control");
+    const int masked_zero = zero && strstr(mode, "masked") != NULL;
+    const int invalid_config = !strcmp(mode, "--invalid-dispatch-config-control") ||
+                               !strcmp(mode, "--forced-mask-config-control") || !strcmp(mode, "--forced-zero-config-control");
     environment("VKRT_NO_RT_GUARD_LOG", argv[1]);
     environment("VKRT_NO_RT_GUARD_DISPATCH_LIMITS", !strcmp(mode, "--invalid-dispatch-config-control") ? "2,0,2"
                                                     : forced                                           ? "9,7,3"
                                                                                                        : "");
-    environment("VKRT_NO_RT_GUARD_MASK_DISCOVERY", !strcmp(mode, "--forced-mask-config-control") ? "1" : "");
+    environment("VKRT_NO_RT_GUARD_MASK_DISCOVERY", !strcmp(mode, "--forced-mask-config-control") || masked_zero ? "1" : "");
+    environment("VKRT_NO_RT_GUARD_ZERO_TIMESTAMPS", zero ? "1" : "");
     policy_controls();
     VkNegotiateLayerInterface negotiation = {.sType = LAYER_NEGOTIATE_INTERFACE_STRUCT, .loaderLayerInterfaceVersion = 2};
     REQUIRE(vkNegotiateLoaderLayerInterfaceVersion(&negotiation) == VK_SUCCESS);
@@ -281,10 +434,57 @@ int main(int argc, char **argv) {
     VkLayerDeviceCreateInfo dc = {
         .sType = VK_STRUCTURE_TYPE_LOADER_DEVICE_CREATE_INFO, .function = VK_LAYER_LINK_INFO, .u.pLayerInfo = &dl};
     VkDeviceCreateInfo di = {.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO, .pNext = &dc};
+    VkPhysicalDeviceAccelerationStructureFeaturesKHR native_as = {
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_FEATURES_KHR,
+        .pNext = &dc,
+        .accelerationStructure = VK_TRUE};
+    const char *native_extension = "VK_KHR_acceleration_structure";
+    if (zero && !masked_zero) {
+        di.pNext = &native_as;
+        di.enabledExtensionCount = 1;
+        di.ppEnabledExtensionNames = &native_extension;
+    }
     VkDevice device;
     PFN_vkCreateDevice create_device = (PFN_vkCreateDevice)negotiation.pfnGetInstanceProcAddr(instance, "vkCreateDevice");
     REQUIRE(create_device((VkPhysicalDevice)&native_physical, &di, NULL, &device) == VK_SUCCESS && native_devices == 1 &&
             !dc.u.pLayerInfo);
+
+    if (zero) {
+        timestamp_properties_controls(&negotiation, instance, 1, !strstr(mode, "no-queues"));
+        VkPhysicalDeviceRayQueryFeaturesKHR rq = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_QUERY_FEATURES_KHR};
+        VkPhysicalDeviceFeatures2 features = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2, .pNext = &rq};
+        ((PFN_vkGetPhysicalDeviceFeatures2)negotiation.pfnGetInstanceProcAddr(instance, "vkGetPhysicalDeviceFeatures2"))(
+            (VkPhysicalDevice)&native_physical, &features);
+        REQUIRE(rq.rayQuery == (masked_zero ? VK_FALSE : VK_TRUE) && features.features.shaderInt64);
+        PFN_vkCmdTraceRaysKHR trace = (PFN_vkCmdTraceRaysKHR)negotiation.pfnGetDeviceProcAddr(device, "vkCmdTraceRaysKHR");
+        REQUIRE(masked_zero ? !trace : trace == driver_CmdTraceRaysKHR);
+        if (trace) trace((VkCommandBuffer)&native_command, NULL, NULL, NULL, NULL, 1, 1, 1);
+        REQUIRE(native_traces == (masked_zero ? 0u : 1u));
+        const char *timestamp_names[] = {"vkCmdWriteTimestamp", "vkCmdWriteTimestamp2", "vkCmdWriteTimestamp2KHR"};
+        if (strstr(mode, "fatal")) {
+            unsigned api = strstr(mode, "2-khr") ? 2 : strstr(mode, "timestamps2") ? 1 : 0;
+            PFN_vkVoidFunction proc = negotiation.pfnGetDeviceProcAddr(device, timestamp_names[api]);
+            REQUIRE(proc == negotiation.pfnGetInstanceProcAddr(instance, timestamp_names[api]));
+            if (!api)
+                ((PFN_vkCmdWriteTimestamp)proc)((VkCommandBuffer)&native_command, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                                                (VkQueryPool)(uintptr_t)45, 2);
+            else
+                ((PFN_vkCmdWriteTimestamp2)proc)((VkCommandBuffer)&native_command, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+                                                 (VkQueryPool)(uintptr_t)45, 2);
+            return 3;
+        }
+        ((PFN_vkCmdSetEvent)negotiation.pfnGetDeviceProcAddr(device, "vkCmdSetEvent"))(
+            (VkCommandBuffer)&native_command, (VkEvent)(uintptr_t)46, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT);
+        VkDependencyInfo dependency = {.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO};
+        ((PFN_vkCmdSetEvent2)negotiation.pfnGetDeviceProcAddr(device, "vkCmdSetEvent2"))((VkCommandBuffer)&native_command,
+                                                                                         (VkEvent)(uintptr_t)46, &dependency);
+        ((PFN_vkCmdSetEvent2)negotiation.pfnGetDeviceProcAddr(device, "vkCmdSetEvent2KHR"))((VkCommandBuffer)&native_command,
+                                                                                            (VkEvent)(uintptr_t)46, &dependency);
+        REQUIRE(((PFN_vkGetEventStatus)negotiation.pfnGetDeviceProcAddr(device, "vkGetEventStatus"))(
+                    device, (VkEvent)(uintptr_t)46) == VK_EVENT_SET);
+        REQUIRE(native_event_signals == 3 && native_event_status == 1 && guard_event_signals == 3 &&
+                guard_event_status_queries == 1 && !native_timestamps && !guard_timestamp_write_attempts);
+    }
 
     if (!strcmp(mode, "--fatal-control")) {
         PFN_vkCmdTraceRaysKHR trace = (PFN_vkCmdTraceRaysKHR)negotiation.pfnGetDeviceProcAddr(device, "vkCmdTraceRaysKHR");
@@ -339,8 +539,19 @@ int main(int argc, char **argv) {
         }
     }
 
-    if (!strcmp(mode, "--positive-control") || forced) {
+    if (!strcmp(mode, "--positive-control") || forced || zero) {
+        if (!zero && !forced) {
+            timestamp_properties_controls(&negotiation, instance, 0, 1);
+            ((PFN_vkCmdWriteTimestamp)negotiation.pfnGetDeviceProcAddr(device, "vkCmdWriteTimestamp"))(
+                (VkCommandBuffer)&native_command, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, (VkQueryPool)(uintptr_t)45, 2);
+            ((PFN_vkCmdWriteTimestamp2)negotiation.pfnGetDeviceProcAddr(device, "vkCmdWriteTimestamp2"))(
+                (VkCommandBuffer)&native_command, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, (VkQueryPool)(uintptr_t)45, 2);
+            ((PFN_vkCmdWriteTimestamp2)negotiation.pfnGetDeviceProcAddr(device, "vkCmdWriteTimestamp2KHR"))(
+                (VkCommandBuffer)&native_command, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, (VkQueryPool)(uintptr_t)45, 2);
+            REQUIRE(native_timestamps == 3 && !guard_queue_family_queries && !guard_timestamp_write_attempts);
+        }
         uint32_t plain[] = {0x07230203, 0x00010600, 0, 5, 0, (2u << 16) | 17, 1};
+        if (zero && !masked_zero) plain[6] = 4479; /* Native control must accept a real RT capability. */
         VkShaderModuleCreateInfo plain_info = {
             .sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO, .codeSize = sizeof(plain), .pCode = plain};
         VkShaderModule plain_module;

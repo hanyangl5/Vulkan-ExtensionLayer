@@ -26,15 +26,24 @@ def dispatch_limits(value):
     return tuple(value)
 
 
-def audit_records(records, require_shaders=True, expected_dispatch_limits=None, expected_discovery_mask=False):
+def audit_records(records, require_shaders=True, expected_dispatch_limits=None, expected_discovery_mask=False,
+                  expected_zero_timestamps=False):
+    if type(expected_discovery_mask) is not bool or type(expected_zero_timestamps) is not bool:
+        raise ValueError("expected discovery/zero-timestamp profiles must be explicit booleans")
     if not records or not isinstance(records[0], dict) or records[0].get("event") != "start":
         raise ValueError("guard configuration/start record is missing")
     counter_keys = ("checked", "rejected", "devices", "shader_definitions")
     forced = expected_dispatch_limits is not None
     expected = dispatch_limits(expected_dispatch_limits) if forced else None
-    if forced and expected_discovery_mask:
-        raise ValueError("masked discovery and artificial dispatch are distinct profiles")
+    if forced and (expected_discovery_mask or expected_zero_timestamps):
+        raise ValueError("discovery/zero-timestamp and artificial dispatch are distinct profiles")
     mode = "forced-dispatch-limits" if forced else "mask-discovery" if expected_discovery_mask else "execution-only"
+    if expected_zero_timestamps:
+        mode = "mask-discovery+zero-timestamps" if expected_discovery_mask else "zero-timestamps"
+    zero_counters = ("queue_family_queries", "zero_timestamp_families", "timestamp_write_attempts",
+                     "timestamp_properties_queries", "event_signals", "event_status_queries")
+    if expected_zero_timestamps:
+        counter_keys += zero_counters
     if forced:
         counter_keys += ("dispatches", "multidimensional_dispatches")
     process = records[0].get("pid")
@@ -52,7 +61,7 @@ def audit_records(records, require_shaders=True, expected_dispatch_limits=None, 
         segments.append(dict(current))
 
     for record in records:
-        if not isinstance(record, dict) or record.get("schema_version") != 2:
+        if not isinstance(record, dict) or type(record.get("schema_version")) is not int or record["schema_version"] != 2:
             raise ValueError("guard record schema/identity is missing or unsupported")
         if record.get("pid") != process or type(record.get("pid")) is not int:
             raise ValueError("guard log mixes different process identities")
@@ -61,6 +70,15 @@ def audit_records(records, require_shaders=True, expected_dispatch_limits=None, 
         if expected_discovery_mask and (type(record.get("discovery_mask_version")) is not int or
                                         record["discovery_mask_version"] != 1):
             raise ValueError("masked discovery lacks complete feature/property/extension/format/proc masking")
+        if not expected_discovery_mask and "discovery_mask_version" in record:
+            raise ValueError("masked-discovery fields require an explicit masked profile")
+        if expected_zero_timestamps:
+            if type(record.get("zero_timestamp_version")) is not int or record["zero_timestamp_version"] != 1:
+                raise ValueError("zero-timestamp injection lacks a supported typed profile version")
+            if type(record.get("rt_boundary_enforced")) is not bool or record["rt_boundary_enforced"] != expected_discovery_mask:
+                raise ValueError("zero-timestamp native/RT rejection boundary differs from the explicitly expected profile")
+        elif any(key in record for key in ("zero_timestamp_version", "rt_boundary_enforced", *zero_counters)):
+            raise ValueError("zero-timestamp injection needs an explicit dedicated audit")
         if forced:
             if dispatch_limits(record.get("dispatch_limits")) != expected:
                 raise ValueError("guard dispatch limits differ from the explicitly expected test profile")
@@ -82,7 +100,7 @@ def audit_records(records, require_shaders=True, expected_dispatch_limits=None, 
             if forced:
                 current["dispatch_max"] = [0, 0, 0]
             active_instances = 0
-            if any(record.get(key) != 0 for key in counter_keys):
+            if any(type(record.get(key)) is not int or record[key] != 0 for key in counter_keys):
                 raise ValueError("guard load start counters are not zero")
         elif current is None or load != current["load_id"]:
             raise ValueError("guard event has no matching active load start")
@@ -106,6 +124,8 @@ def audit_records(records, require_shaders=True, expected_dispatch_limits=None, 
             current["dispatch_max"] = list(maximum)
         if event == "reject" or record["rejected"]:
             raise ValueError(f"native boundary rejected {record.get('kind')}: {record.get('detail')}")
+        if expected_zero_timestamps and record["timestamp_write_attempts"]:
+            raise ValueError("zero-timestamp execution attempted a forbidden timestamp write")
         if event == "instance":
             current["instances"] += 1
             active_instances += 1
@@ -124,6 +144,11 @@ def audit_records(records, require_shaders=True, expected_dispatch_limits=None, 
         raise ValueError("no executing load segment has an inspected shader definition")
     if forced and not any(segment["dispatches"] for segment in executing):
         raise ValueError("no executing load segment checked a direct dispatch against the artificial limits")
+    if expected_zero_timestamps and not any(segment["queue_family_queries"] and segment["zero_timestamp_families"]
+                                           for segment in executing):
+        raise ValueError("no executing load segment observed zero-timestamp queue-family properties")
+    if expected_zero_timestamps and not any(segment["timestamp_properties_queries"] for segment in executing):
+        raise ValueError("no executing load segment observed zero-timestamp device properties")
     totals = {key: sum(segment[key] for segment in segments) for key in ("instances", *counter_keys)}
     result = {"mode": mode, "pid": process, "loads": len(segments), "segments": segments, **totals}
     if forced:
@@ -133,13 +158,19 @@ def audit_records(records, require_shaders=True, expected_dispatch_limits=None, 
     if expected_discovery_mask:
         result["discovery_mask_version"] = 1
         result["qualification"] = "masked discovery; not physical no-RT or complete mandatory qualification"
+    if expected_zero_timestamps:
+        result["zero_timestamp_version"] = 1
+        result["rt_boundary_enforced"] = expected_discovery_mask
+        result["qualification"] = ("zero timestamps with masked RT boundary; not physical no-RT or complete mandatory qualification"
+                                   if expected_discovery_mask else
+                                   "zero-timestamp native control; native RT is permitted, not a no-native-RT boundary proof")
     return result
 
 
-def audit(path, require_shaders=True, expected_dispatch_limits=None, expected_discovery_mask=False):
+def audit(path, require_shaders=True, expected_dispatch_limits=None, expected_discovery_mask=False, expected_zero_timestamps=False):
     records = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
     return audit_records(records, require_shaders=require_shaders, expected_dispatch_limits=expected_dispatch_limits,
-                         expected_discovery_mask=expected_discovery_mask)
+                         expected_discovery_mask=expected_discovery_mask, expected_zero_timestamps=expected_zero_timestamps)
 
 
 if __name__ == "__main__":
@@ -148,10 +179,12 @@ if __name__ == "__main__":
     parser.add_argument("--allow-no-shaders", action="store_true", help="device-only controls; does not establish shader execution")
     parser.add_argument("--expected-dispatch-limits", help="explicit artificial X,Y,Z test profile; never ordinary conformance proof")
     parser.add_argument("--expected-discovery-mask", action="store_true", help="explicit masked feature/property/format/proc profile")
+    parser.add_argument("--expected-zero-timestamps", action="store_true",
+                        help="explicit zero-timestamp injection; alone permits native RT, may combine with discovery mask")
     args = parser.parse_args()
     try:
         result = audit(args.log, require_shaders=not args.allow_no_shaders, expected_dispatch_limits=args.expected_dispatch_limits,
-                       expected_discovery_mask=args.expected_discovery_mask)
+                       expected_discovery_mask=args.expected_discovery_mask, expected_zero_timestamps=args.expected_zero_timestamps)
     except (OSError, ValueError, KeyError, TypeError) as error:
         parser.exit(1, f"Guard evidence FAIL: {error}\n")
     print(json.dumps(result, sort_keys=True))

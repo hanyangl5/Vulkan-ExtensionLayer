@@ -8,6 +8,7 @@
 void vkrt_software_rt_profile_init(const struct vkrt_resource_profile *resources, struct vkrt_software_rt_profile *output) {
     if (!resources || !output) return;
     struct vkrt_software_rt_profile p = {0};
+    p.query_marker_uses_events = true;
     p.resources = *resources;
     p.resources.indexing.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_INDEXING_PROPERTIES;
     p.resources.inline_uniform.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_INLINE_UNIFORM_BLOCK_PROPERTIES;

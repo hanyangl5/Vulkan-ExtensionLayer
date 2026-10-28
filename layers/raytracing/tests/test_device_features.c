@@ -5,6 +5,8 @@
 #include "vkrt_resource_profile.h"
 #include "vkrt_software_profile.h"
 #include <stddef.h>
+#include <vulkan/vulkan_beta.h>
+#define PORTABILITY_FEATURES ((VkStructureType)1000163000)
 
 #define HANDLE(type, value) ((type)(uintptr_t)(value))
 #define REQUIRE(x)                                               \
@@ -30,6 +32,33 @@ static bool expect_private_dynamic_indexing;
 static unsigned query_capabilities;
 static const char *missing_alias;
 static bool native_pipeline_library;
+static bool native_portability, native_portability_events;
+static VkQueueFamilyProperties native_families[4];
+static uint32_t native_family_count;
+static unsigned family_queries, family_proc_queries;
+static bool missing_family_getter, oversized_family_fill, empty_family_fill, short_family_fill;
+static VKAPI_ATTR void VKAPI_CALL mock_families(VkPhysicalDevice p, uint32_t *count, VkQueueFamilyProperties *families) {
+    REQUIRE(p == physical);
+    ++family_queries;
+    if (!families) {
+        *count = native_family_count;
+        return;
+    }
+    uint32_t capacity = *count;
+    if (oversized_family_fill) {
+        *count = capacity + 1;
+        return;
+    }
+    *count = empty_family_fill ? 0 : capacity < native_family_count ? capacity : native_family_count;
+    if (short_family_fill && *count > 1) --*count;
+    memcpy(families, native_families, *count * sizeof(*families));
+}
+static VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL mock_instance_proc(VkInstance instance, const char *name) {
+    (void)instance;
+    REQUIRE(!strcmp(name, "vkGetPhysicalDeviceQueueFamilyProperties"));
+    ++family_proc_queries;
+    return missing_family_getter ? NULL : (PFN_vkVoidFunction)mock_families;
+}
 static const char *private_aliases[] = {VK_KHR_16BIT_STORAGE_EXTENSION_NAME,       VK_KHR_8BIT_STORAGE_EXTENSION_NAME,
                                         VK_KHR_SHADER_FLOAT16_INT8_EXTENSION_NAME, VK_EXT_SCALAR_BLOCK_LAYOUT_EXTENSION_NAME,
                                         VK_KHR_VULKAN_MEMORY_MODEL_EXTENSION_NAME, VK_KHR_BUFFER_DEVICE_ADDRESS_EXTENSION_NAME,
@@ -39,7 +68,7 @@ static const char *private_aliases[] = {VK_KHR_16BIT_STORAGE_EXTENSION_NAME,    
 static VKAPI_ATTR VkResult VKAPI_CALL mock_extensions(VkPhysicalDevice p, const char *layer, uint32_t *count,
                                                       VkExtensionProperties *properties) {
     REQUIRE(p == physical && !layer);
-    uint32_t total = native_pipeline_library ? 1 : 0;
+    uint32_t total = (native_pipeline_library ? 1 : 0) + (native_portability ? 1 : 0);
     for (unsigned i = 0; i < VKRT_ARRAY_SIZE(private_aliases); ++i)
         total += !missing_alias || (strcmp(missing_alias, "*") && strcmp(private_aliases[i], missing_alias));
     if (!properties) {
@@ -59,6 +88,10 @@ static VKAPI_ATTR VkResult VKAPI_CALL mock_extensions(VkPhysicalDevice p, const 
         }
         ++written;
     }
+    if (native_portability) {
+        if (written < capacity) properties[written] = (VkExtensionProperties){VK_KHR_PORTABILITY_SUBSET_EXTENSION_NAME, 1};
+        ++written;
+    }
     *count = written < capacity ? written : capacity;
     return capacity < total ? VK_INCOMPLETE : VK_SUCCESS;
 }
@@ -74,6 +107,15 @@ static const VkBaseInStructure *find_original(VkStructureType type) {
 static VKAPI_ATTR void VKAPI_CALL mock_features(VkPhysicalDevice p, VkPhysicalDeviceFeatures2 *features) {
     REQUIRE(p == physical);
     ++queries;
+    if (features->pNext && ((VkBaseOutStructure *)features->pNext)->sType == PORTABILITY_FEATURES) {
+        VkPhysicalDevicePortabilitySubsetFeaturesKHR *p = features->pNext;
+        REQUIRE(native_portability && !p->pNext);
+        VkBool32 bits[15];
+        for (unsigned i = 0; i < VKRT_ARRAY_SIZE(bits); ++i) bits[i] = VK_TRUE;
+        memcpy(&p->constantAlphaColorBlendFactors, bits, sizeof(bits));
+        p->events = native_portability_events;
+        return;
+    }
     if (features->pNext &&
         ((VkBaseOutStructure *)features->pNext)->sType == VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES) {
         ++resource_queries;
@@ -98,7 +140,7 @@ static VKAPI_ATTR void VKAPI_CALL mock_features(VkPhysicalDevice p, VkPhysicalDe
     features->features.robustBufferAccess = VK_TRUE;
     unsigned seen = 0;
     for (VkBaseOutStructure *next = features->pNext; next; next = next->pNext) {
-        switch (next->sType) {
+        switch ((uint32_t)next->sType) {
             case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_HOST_QUERY_RESET_FEATURES:
                 ((VkPhysicalDeviceHostQueryResetFeatures *)next)->hostQueryReset = (query_capabilities & 1) != 0;
                 break;
@@ -279,7 +321,7 @@ static size_t bool_payload_size(VkStructureType type) {
 #define PAYLOAD(stype, ctype, last) \
     case stype:                     \
         return offsetof(ctype, last) + sizeof(VkBool32) - sizeof(VkBaseInStructure)
-    switch (type) {
+    switch ((uint32_t)type) {
         PAYLOAD(VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_FEATURES, VkPhysicalDeviceVulkan11Features, shaderDrawParameters);
         PAYLOAD(VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES, VkPhysicalDeviceVulkan12Features,
                 subgroupBroadcastDynamicId);
@@ -310,6 +352,7 @@ static size_t bool_payload_size(VkStructureType type) {
                 VkPhysicalDeviceGraphicsPipelineLibraryFeaturesEXT, graphicsPipelineLibrary);
         PAYLOAD(VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PER_STAGE_DESCRIPTOR_SET_FEATURES_NV,
                 VkPhysicalDevicePerStageDescriptorSetFeaturesNV, dynamicPipelineLayout);
+        PAYLOAD(PORTABILITY_FEATURES, VkPhysicalDevicePortabilitySubsetFeaturesKHR, vertexAttributeAccessBeyondStride);
         PAYLOAD(VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_MODULE_IDENTIFIER_FEATURES_EXT,
                 VkPhysicalDeviceShaderModuleIdentifierFeaturesEXT, shaderModuleIdentifier);
         PAYLOAD(VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PIPELINE_EXECUTABLE_PROPERTIES_FEATURES_KHR,
@@ -360,7 +403,7 @@ static VKAPI_ATTR VkResult VKAPI_CALL mock_create(VkPhysicalDevice p, const VkDe
     unsigned pointers = 0;
     unsigned host_reset = 0, atomic64 = 0;
     for (const VkBaseInStructure *next = info->pNext; next; next = next->pNext) {
-        switch (next->sType) {
+        switch ((uint32_t)next->sType) {
             case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2: {
                 const VkPhysicalDeviceFeatures2 *f = (const void *)next;
                 const VkPhysicalDeviceFeatures2 *source = (const void *)find_original(next->sType);
@@ -380,8 +423,10 @@ static VKAPI_ATTR VkResult VKAPI_CALL mock_create(VkPhysicalDevice p, const VkDe
                     VkPhysicalDeviceVulkan12Features, next,
                     expected.storageBuffer8BitAccess = expected.shaderInt8 = expected.scalarBlockLayout = VK_TRUE;
                     expected.vulkanMemoryModel = expected.vulkanMemoryModelDeviceScope = expected.bufferDeviceAddress = VK_TRUE;
-                    if (query_capabilities == 3 && vkrt_device_uses_virtual_rt(original)) expected.hostQueryReset =
-                        expected.shaderBufferInt64Atomics = VK_TRUE;
+                    if (vkrt_device_uses_virtual_rt(original) && native_portability && !native_portability_events)
+                        expected.hostQueryReset = VK_TRUE;
+                    if ((query_capabilities & 2) && vkrt_device_uses_virtual_rt(original)) expected.shaderBufferInt64Atomics =
+                        VK_TRUE;
                     if (expect_private_dynamic_indexing) expected.shaderStorageBufferArrayNonUniformIndexing = VK_TRUE);
                 ++storage8;
                 ++int8;
@@ -403,14 +448,14 @@ static VKAPI_ATTR VkResult VKAPI_CALL mock_create(VkPhysicalDevice p, const VkDe
                 ++pointers;
                 break;
             case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_HOST_QUERY_RESET_FEATURES:
-                EXPECT_NODE(
-                    VkPhysicalDeviceHostQueryResetFeatures, next,
-                    if (query_capabilities == 3 && vkrt_device_uses_virtual_rt(original)) expected.hostQueryReset = VK_TRUE);
+                EXPECT_NODE(VkPhysicalDeviceHostQueryResetFeatures, next,
+                            if (vkrt_device_uses_virtual_rt(original) && native_portability && !native_portability_events)
+                                expected.hostQueryReset = VK_TRUE);
                 ++host_reset;
                 break;
             case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_ATOMIC_INT64_FEATURES:
                 EXPECT_NODE(VkPhysicalDeviceShaderAtomicInt64Features, next,
-                            if (query_capabilities == 3 && vkrt_device_uses_virtual_rt(original))
+                            if ((query_capabilities & 2) && vkrt_device_uses_virtual_rt(original))
                                 expected.shaderBufferInt64Atomics = VK_TRUE);
                 ++atomic64;
                 break;
@@ -451,6 +496,15 @@ static VKAPI_ATTR VkResult VKAPI_CALL mock_create(VkPhysicalDevice p, const VkDe
             case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PER_STAGE_DESCRIPTOR_SET_FEATURES_NV:
                 EXPECT_NODE(VkPhysicalDevicePerStageDescriptorSetFeaturesNV, next, (void)0);
                 break;
+            case PORTABILITY_FEATURES:
+                EXPECT_NODE(VkPhysicalDevicePortabilitySubsetFeaturesKHR, next,
+                            if (native_portability_events) expected.events = VK_TRUE);
+                break;
+            case VK_STRUCTURE_TYPE_DEVICE_GROUP_DEVICE_CREATE_INFO: {
+                const VkDeviceGroupDeviceCreateInfo *a = (const void *)next, *e = (const void *)find_original(next->sType);
+                REQUIRE(e && a->physicalDeviceCount == e->physicalDeviceCount && a->pPhysicalDevices == e->pPhysicalDevices);
+                break;
+            }
             case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_MODULE_IDENTIFIER_FEATURES_EXT:
                 EXPECT_NODE(VkPhysicalDeviceShaderModuleIdentifierFeaturesEXT, next, (void)0);
                 break;
@@ -488,7 +542,10 @@ static VKAPI_ATTR VkResult VKAPI_CALL mock_create(VkPhysicalDevice p, const VkDe
     REQUIRE(descriptor <= 1 && (!expect_private_dynamic_indexing || descriptor == 1));
     REQUIRE(pointers <= 1 && (!expect_private_dynamic_indexing || pointers == 1));
     REQUIRE(host_reset <= 1 && atomic64 <= 1);
-    if (vkrt_device_uses_virtual_rt(original)) REQUIRE(host_reset == 1 && atomic64 == 1);
+    if (vkrt_device_uses_virtual_rt(original)) {
+        REQUIRE(atomic64 == 1);
+        if (native_portability && !native_portability_events) REQUIRE(host_reset == 1);
+    }
     if (downstream_result == VK_SUCCESS) *device = created_device;
     return downstream_result;
 }
@@ -525,6 +582,9 @@ static VKAPI_ATTR VkResult VKAPI_CALL mock_non_rt_create(VkPhysicalDevice p, con
             REQUIRE(a->function == e->function && a->u.pLayerInfo == e->u.pLayerInfo);
         } else if (actual->sType == VK_STRUCTURE_TYPE_MAX_ENUM) {
             REQUIRE(actual == expected && actual == opaque_suffix);
+        } else if (actual->sType == VK_STRUCTURE_TYPE_DEVICE_GROUP_DEVICE_CREATE_INFO) {
+            const VkDeviceGroupDeviceCreateInfo *a = (const void *)actual, *e = (const void *)expected;
+            REQUIRE(a->physicalDeviceCount == e->physicalDeviceCount && a->pPhysicalDevices == e->pPhysicalDevices);
         } else {
             REQUIRE(!memcmp((const char *)actual + sizeof(VkBaseInStructure), (const char *)expected + sizeof(VkBaseInStructure),
                             bool_payload_size(actual->sType)));
@@ -568,6 +628,7 @@ static void defaults(void) {
     instance.vtable.GetPhysicalDeviceProperties = mock_properties;
     instance.vtable.GetPhysicalDeviceProperties2 = mock_properties2;
     instance.vtable.EnumerateDeviceExtensionProperties = mock_extensions;
+    instance.vtable.GetInstanceProcAddr = mock_instance_proc;
     driver_api = VK_API_VERSION_1_2;
     basic = (VkDeviceCreateInfo){.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO};
     expected_extension_count = 0;
@@ -579,6 +640,13 @@ static void defaults(void) {
     query_capabilities = 3;
     missing_alias = NULL;
     native_pipeline_library = true;
+    native_portability = false;
+    native_portability_events = true;
+    native_family_count = 1;
+    memset(native_families, 0, sizeof(native_families));
+    native_families[0] = (VkQueueFamilyProperties){.queueFlags = VK_QUEUE_COMPUTE_BIT, .queueCount = 1, .timestampValidBits = 64};
+    missing_family_getter = oversized_family_fill = empty_family_fill = short_family_fill = false;
+    family_queries = family_proc_queries = 0;
 }
 
 static void non_rt_boundary(void) {
@@ -843,7 +911,7 @@ static void versions_and_opaque_chains(void) {
             driver_api = VK_MAKE_VERSION(1, device_api, 0);
             expected_extension_count = 0;
             for (uint32_t i = 0; i < VKRT_ARRAY_SIZE(required); ++i)
-                if (instance_api < (i == 0 || i == 6 ? 1u : 2u) || device_api < (i == 0 || i == 6 ? 1u : 2u))
+                if (i != 8 && (instance_api < (i == 0 || i == 6 ? 1u : 2u) || device_api < (i == 0 || i == 6 ? 1u : 2u)))
                     expected_extensions[expected_extension_count++] = required[i];
             unsigned before = creates;
             VkDeviceCreateInfo saved = basic;
@@ -865,7 +933,7 @@ static void versions_and_opaque_chains(void) {
     expected_extensions[1] = extensions[1];
     expected_extension_count = 2;
     for (uint32_t i = 0; i < VKRT_ARRAY_SIZE(required); ++i)
-        if (i != 0 && i != 5 && i != 6) expected_extensions[expected_extension_count++] = required[i];
+        if (i != 0 && i != 5 && i != 6 && i != 8) expected_extensions[expected_extension_count++] = required[i];
     REQUIRE(call(&basic) == VK_SUCCESS);
 
     defaults();
@@ -970,7 +1038,7 @@ static void descriptor_array_feature(void) {
             driver_api = VK_MAKE_VERSION(1, device_version, 0);
             expected_extension_count = 0;
             for (unsigned i = 0; i < VKRT_ARRAY_SIZE(required); ++i)
-                if (application_version < (i == 0 || i == 6 ? 1u : 2u) || device_version < (i == 0 || i == 6 ? 1u : 2u))
+                if (i != 8 && (application_version < (i == 0 || i == 6 ? 1u : 2u) || device_version < (i == 0 || i == 6 ? 1u : 2u)))
                     expected_extensions[expected_extension_count++] = required[i];
             unsigned before = creates;
             VkResult result = call(&basic);
@@ -989,7 +1057,7 @@ static void descriptor_array_feature(void) {
     expected_extensions[0] = descriptor_alias;
     expected_extension_count = 1;
     for (unsigned i = 1; i < VKRT_ARRAY_SIZE(required); ++i)
-        if (i != 6 && i != 7) expected_extensions[expected_extension_count++] = required[i];
+        if (i != 6 && i != 7 && i != 8) expected_extensions[expected_extension_count++] = required[i];
     REQUIRE(call(&basic) == VK_SUCCESS);
 
     instance.api_version = VK_API_VERSION_1_1;
@@ -998,7 +1066,7 @@ static void descriptor_array_feature(void) {
     expected_extensions[0] = pointers_alias;
     expected_extension_count = 1;
     for (unsigned i = 0; i < VKRT_ARRAY_SIZE(required); ++i)
-        if (i != 0 && i != 6) expected_extensions[expected_extension_count++] = required[i];
+        if (i != 0 && i != 6 && i != 8) expected_extensions[expected_extension_count++] = required[i];
     REQUIRE(call(&basic) == VK_SUCCESS);
 }
 
@@ -1257,13 +1325,13 @@ static void query_backend_boundary(void) {
         defaults();
         query_capabilities = capabilities;
         expect_private_dynamic_indexing = true;
-        const VkResult expected = capabilities == 3 ? VK_SUCCESS : VK_ERROR_FEATURE_NOT_PRESENT;
+        const VkResult expected = (capabilities & 2) != 0 ? VK_SUCCESS : VK_ERROR_FEATURE_NOT_PRESENT;
         struct vkrt_resource_profile profile, saved_profile;
         memset(&profile, 0xa5, sizeof(profile));
         saved_profile = profile;
         REQUIRE(vkrt_native_backend_eligible(&instance, physical));
-        REQUIRE(vkrt_virtual_rt_resource_profile(&instance, physical, &profile) == (capabilities == 3));
-        if (capabilities != 3) REQUIRE(!memcmp(&profile, &saved_profile, sizeof(profile)));
+        REQUIRE(vkrt_virtual_rt_resource_profile(&instance, physical, &profile) == ((capabilities & 2) != 0));
+        if ((capabilities & 2) == 0) REQUIRE(!memcmp(&profile, &saved_profile, sizeof(profile)));
 
         basic.enabledExtensionCount = 1;
         VkPhysicalDeviceVulkan12Features aggregate = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES};
@@ -1272,11 +1340,11 @@ static void query_backend_boundary(void) {
             basic.pNext = NULL; /* Private query features need no application request. */
             unsigned before = creates;
             REQUIRE(call(&basic) == expected);
-            REQUIRE(creates == before + (capabilities == 3));
+            REQUIRE(creates == before + ((capabilities & 2) != 0));
             basic.pNext = &aggregate;
             before = creates;
             REQUIRE(call(&basic) == expected);
-            REQUIRE(creates == before + (capabilities == 3));
+            REQUIRE(creates == before + ((capabilities & 2) != 0));
         }
         REQUIRE(!aggregate.hostQueryReset && !aggregate.shaderBufferInt64Atomics);
 
@@ -1288,7 +1356,7 @@ static void query_backend_boundary(void) {
         basic.ppEnabledExtensionNames = NULL;
         unsigned before = creates;
         REQUIRE(call(&basic) == expected);
-        REQUIRE(creates == before + (capabilities == 3));
+        REQUIRE(creates == before + ((capabilities & 2) != 0));
         REQUIRE(rq.rayQuery && rq.pNext == &aggregate && !aggregate.hostQueryReset && !aggregate.shaderBufferInt64Atomics);
 
         /* Missing query support must not change ordinary source-binary
@@ -1364,11 +1432,11 @@ static void library_and_alias_availability(void) {
         missing_alias = private_aliases[i];
         expected_extension_count = 0;
         for (unsigned j = 0; j < VKRT_ARRAY_SIZE(private_aliases); ++j)
-            if (j != 0 && j != 6) expected_extensions[expected_extension_count++] = private_aliases[j];
+            if (j != 0 && j != 6 && j != 8) expected_extensions[expected_extension_count++] = private_aliases[j];
         struct vkrt_software_rt_profile profile;
         memset(&profile, 0xa5, sizeof(profile));
         struct vkrt_software_rt_profile saved_profile = profile;
-        const bool required = i != 0 && i != 6; /* Already core in application 1.1. */
+        const bool required = i != 0 && i != 6 && i != 8; /* Already core in application 1.1. */
         REQUIRE(vkrt_virtual_rt_profile(&instance, physical, &profile) == !required);
         if (required) REQUIRE(!memcmp(&profile, &saved_profile, sizeof(profile)));
         before = creates;
@@ -1386,6 +1454,192 @@ static void library_and_alias_availability(void) {
     REQUIRE(!vkrt_virtual_rt_profile(&instance, physical, &profile));
     before = creates;
     REQUIRE(call(&basic) == VK_ERROR_FEATURE_NOT_PRESENT && creates == before);
+}
+
+static void query_marker_selection(void) {
+    defaults();
+    expect_private_dynamic_indexing = true;
+    query_capabilities = 2; /* No native hostQueryReset: ordinary core events suffice. */
+    missing_alias = VK_EXT_HOST_QUERY_RESET_EXTENSION_NAME;
+    instance.api_version = VK_API_VERSION_1_1;
+    const char *as_name = VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME;
+    basic.ppEnabledExtensionNames = &as_name;
+    basic.enabledExtensionCount = 1;
+    for (unsigned i = 0; i < VKRT_ARRAY_SIZE(private_aliases); ++i)
+        if (i != 0 && i != 6 && i != 8) expected_extensions[expected_extension_count++] = private_aliases[i];
+    struct vkrt_software_rt_profile profile;
+    REQUIRE(vkrt_virtual_rt_profile(&instance, physical, &profile) && profile.query_marker_uses_events);
+    REQUIRE(call(&basic) == VK_SUCCESS);
+
+    defaults();
+    expect_private_dynamic_indexing = true;
+    native_portability = true;
+    query_capabilities = 2;
+    const char *extensions[] = {as_name, VK_KHR_PORTABILITY_SUBSET_EXTENSION_NAME};
+    basic.ppEnabledExtensionNames = extensions;
+    basic.enabledExtensionCount = VKRT_ARRAY_SIZE(extensions);
+    expected_extensions[0] = extensions[1];
+    expected_extension_count = 1;
+    VkPhysicalDeviceAccelerationStructureFeaturesKHR as = {
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_FEATURES_KHR, .accelerationStructure = VK_TRUE};
+    VkPhysicalDevicePortabilitySubsetFeaturesKHR subset = {.sType = PORTABILITY_FEATURES,
+                                                           .pNext = &as,
+                                                           .constantAlphaColorBlendFactors = VK_TRUE,
+                                                           .vertexAttributeAccessBeyondStride = VK_TRUE};
+    const VkPhysicalDevicePortabilitySubsetFeaturesKHR saved = subset;
+    basic.pNext = &subset;
+    REQUIRE(vkrt_virtual_rt_profile(&instance, physical, &profile) && profile.query_marker_uses_events);
+    REQUIRE(call(&basic) == VK_SUCCESS && !memcmp(&subset, &saved, sizeof(subset)));
+    /* An omitted feature node receives only the private events bit. */
+    basic.pNext = &as;
+    REQUIRE(call(&basic) == VK_SUCCESS);
+    /* Only physically unavailable events select the timestamp fallback. */
+    native_portability_events = false;
+    query_capabilities = 3;
+    basic.pNext = &subset;
+    REQUIRE(vkrt_virtual_rt_profile(&instance, physical, &profile) && !profile.query_marker_uses_events);
+    REQUIRE(call(&basic) == VK_SUCCESS && !memcmp(&subset, &saved, sizeof(subset)));
+    query_capabilities = 2;
+    unsigned before = creates;
+    REQUIRE(!vkrt_virtual_rt_profile(&instance, physical, &profile));
+    REQUIRE(call(&basic) == VK_ERROR_FEATURE_NOT_PRESENT && creates == before);
+    query_capabilities = 3;
+    instance.api_version = VK_API_VERSION_1_1;
+    missing_alias = VK_EXT_HOST_QUERY_RESET_EXTENSION_NAME;
+    REQUIRE(!vkrt_virtual_rt_profile(&instance, physical, &profile));
+    REQUIRE(call(&basic) == VK_ERROR_FEATURE_NOT_PRESENT && creates == before);
+    missing_alias = NULL;
+    expected_extension_count = 1;
+    for (unsigned i = 0; i < VKRT_ARRAY_SIZE(private_aliases); ++i)
+        if (i != 0 && i != 6) expected_extensions[expected_extension_count++] = private_aliases[i];
+    REQUIRE(vkrt_virtual_rt_profile(&instance, physical, &profile) && !profile.query_marker_uses_events);
+    REQUIRE(call(&basic) == VK_SUCCESS); /* Fallback privately enables the real app1.1 host-reset alias. */
+    /* A native-only portability request is untouched and never qualifies RT. */
+    subset.pNext = NULL;
+    basic.pNext = &subset;
+    basic.ppEnabledExtensionNames = &extensions[1];
+    basic.enabledExtensionCount = 1;
+    expected_extension_count = 1;
+    REQUIRE(call_non_rt(&basic) == VK_SUCCESS && !subset.events);
+}
+
+static void expect_fallback_substrate(bool events, bool expected) {
+    native_portability = true;
+    native_portability_events = events;
+    expect_private_dynamic_indexing = true;
+    const char *extensions[] = {VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME, VK_KHR_PORTABILITY_SUBSET_EXTENSION_NAME};
+    VkPhysicalDeviceAccelerationStructureFeaturesKHR as = {
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_FEATURES_KHR, .accelerationStructure = VK_TRUE};
+    basic.pNext = &as;
+    basic.ppEnabledExtensionNames = extensions;
+    basic.enabledExtensionCount = VKRT_ARRAY_SIZE(extensions);
+    expected_extensions[0] = extensions[1];
+    expected_extension_count = 1;
+    struct vkrt_software_rt_profile profile;
+    memset(&profile, 0xa5, sizeof(profile));
+    const struct vkrt_software_rt_profile saved_profile = profile;
+    const VkDeviceCreateInfo saved_ci = basic;
+    REQUIRE(vkrt_virtual_rt_profile(&instance, physical, &profile) == expected);
+    if (expected)
+        REQUIRE(profile.query_marker_uses_events == events);
+    else
+        REQUIRE(!memcmp(&profile, &saved_profile, sizeof(profile)));
+    unsigned before = creates;
+    REQUIRE(call(&basic) == (expected ? VK_SUCCESS : VK_ERROR_FEATURE_NOT_PRESENT));
+    REQUIRE(creates == before + expected);
+    REQUIRE(!memcmp(&basic, &saved_ci, sizeof(basic)) && as.accelerationStructure && !as.pNext);
+    if (events) REQUIRE(!family_queries && !family_proc_queries);
+}
+
+static void timestamp_fallback_physical_substrate(void) {
+    /* 1. EVENT never needs queue timestamps or even a queue-family getter. */
+    for (unsigned missing_getter = 0; missing_getter < 2; ++missing_getter) {
+        defaults();
+        native_families[0].timestampValidBits = 0;
+        if (missing_getter) instance.vtable.GetInstanceProcAddr = NULL;
+        query_capabilities = 2; /* Its event backend also needs no host reset. */
+        expect_fallback_substrate(true, true);
+    }
+    /* 2. Every usable compute family supports the selected timestamp marker. */
+    defaults();
+    native_family_count = 2;
+    native_families[0].queueFlags |= VK_QUEUE_GRAPHICS_BIT;
+    native_families[1] = (VkQueueFamilyProperties){.queueFlags = VK_QUEUE_COMPUTE_BIT, .queueCount = 2, .timestampValidBits = 8};
+    expect_fallback_substrate(false, true);
+    REQUIRE(family_queries && family_proc_queries);
+    /* 3. All compute timestamps absent: no false software candidate. */
+    defaults();
+    native_families[0].timestampValidBits = 0;
+    expect_fallback_substrate(false, false);
+    /* 4. One usable family is not sufficient when another compute family is bad. */
+    defaults();
+    native_family_count = 2;
+    native_families[1] = (VkQueueFamilyProperties){.queueFlags = VK_QUEUE_COMPUTE_BIT, .queueCount = 1};
+    expect_fallback_substrate(false, false);
+    /* 5. Noncompute or unusable rows cannot impose extra timestamp requirements. */
+    defaults();
+    native_family_count = 4;
+    native_families[0] = (VkQueueFamilyProperties){.queueFlags = VK_QUEUE_GRAPHICS_BIT, .queueCount = 1};
+    native_families[1] = (VkQueueFamilyProperties){.queueFlags = VK_QUEUE_TRANSFER_BIT, .queueCount = 1};
+    native_families[2] = (VkQueueFamilyProperties){.queueFlags = VK_QUEUE_COMPUTE_BIT, .queueCount = 0};
+    native_families[3] = (VkQueueFamilyProperties){.queueFlags = VK_QUEUE_COMPUTE_BIT, .queueCount = 1, .timestampValidBits = 64};
+    expect_fallback_substrate(false, true);
+    /* 6. Missing native queries, empty/unusable families and invalid fill counts fail closed. */
+    for (unsigned bad = 0; bad < 7; ++bad) {
+        defaults();
+        if (bad == 0) instance.vtable.GetInstanceProcAddr = NULL;
+        if (bad == 1) missing_family_getter = true;
+        if (bad == 2) native_family_count = 0;
+        if (bad == 3) native_families[0].queueFlags = VK_QUEUE_GRAPHICS_BIT;
+        if (bad == 4) oversized_family_fill = true;
+        if (bad == 5) empty_family_fill = true;
+        if (bad == 6) {
+            native_family_count = 2;
+            native_families[1] = native_families[0];
+            short_family_fill = true;
+        }
+        expect_fallback_substrate(false, false);
+    }
+    /* 7. An ordinary native portability device neither queries nor acquires this RT substrate gate. */
+    defaults();
+    native_portability = true;
+    native_portability_events = false;
+    query_capabilities = 0;
+    missing_capability = 1;
+    native_families[0].timestampValidBits = 0;
+    instance.vtable.GetInstanceProcAddr = NULL;
+    VkPhysicalDevicePortabilitySubsetFeaturesKHR subset = {.sType = PORTABILITY_FEATURES,
+                                                           .constantAlphaColorBlendFactors = VK_TRUE};
+    const VkPhysicalDevicePortabilitySubsetFeaturesKHR saved = subset;
+    const char *extension = VK_KHR_PORTABILITY_SUBSET_EXTENSION_NAME;
+    basic.pNext = &subset;
+    basic.ppEnabledExtensionNames = &extension;
+    basic.enabledExtensionCount = 1;
+    expected_extensions[0] = extension;
+    expected_extension_count = 1;
+    REQUIRE(call_non_rt(&basic) == VK_SUCCESS && !memcmp(&subset, &saved, sizeof(subset)));
+    REQUIRE(!family_queries && !family_proc_queries);
+}
+
+static void device_group_query_boundary(void) {
+    defaults();
+    VkPhysicalDevice members[] = {physical, HANDLE(VkPhysicalDevice, 9)};
+    VkPhysicalDeviceAccelerationStructureFeaturesKHR as = {
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_FEATURES_KHR, .accelerationStructure = VK_TRUE};
+    VkDeviceGroupDeviceCreateInfo group = {.sType = VK_STRUCTURE_TYPE_DEVICE_GROUP_DEVICE_CREATE_INFO,
+                                           .pNext = &as,
+                                           .physicalDeviceCount = 2,
+                                           .pPhysicalDevices = members};
+    basic.pNext = &group;
+    unsigned before = creates, before_queries = queries;
+    REQUIRE(call(&basic) == VK_ERROR_FEATURE_NOT_PRESENT && creates == before && queries == before_queries);
+    REQUIRE(group.physicalDeviceCount == 2 && group.pPhysicalDevices == members && group.pNext == &as);
+    group.pNext = NULL;
+    REQUIRE(call_non_rt(&basic) == VK_SUCCESS);
+    group.physicalDeviceCount = 1;
+    group.pNext = &as;
+    expect_private_dynamic_indexing = true;
+    REQUIRE(call(&basic) == VK_SUCCESS);
 }
 
 static void legacy_native_address_boundary(void) {
@@ -1522,6 +1776,9 @@ int main(void) {
     library_and_alias_availability();
     optional_virtual_object_consumers();
     legacy_native_address_boundary();
+    query_marker_selection();
+    timestamp_fallback_physical_substrate();
+    device_group_query_boundary();
     printf("No-native-RT device creation boundary: %s (%u failures, %u creates, %u capability queries)\n",
            failures ? "FAIL" : "PASS", failures, creates, queries);
     return failures ? 1 : 0;

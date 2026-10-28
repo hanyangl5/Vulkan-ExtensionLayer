@@ -24,6 +24,7 @@
 #include "vkrt_descriptor_layout.h"
 #include "vkrt_memory_queries.h"
 #include "vkrt_rt_capabilities.h"
+#include "vkrt_software_profile.h"
 
 struct vkrt_global vkrt_global = VKRT_GLOBAL_INITIALIZER;
 
@@ -261,18 +262,14 @@ vkrt_CreateDevice(VkPhysicalDevice physicalDevice,
        if (result == VK_SUCCESS) result = vkrt_as_serialization_init(data, pAllocator);
        if (result == VK_SUCCESS) result = vkrt_rtp_init(data, pAllocator);
        if (result == VK_SUCCESS) {
-           VkPhysicalDeviceHostQueryResetFeatures host_reset = {.sType =
-                                                                    VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_HOST_QUERY_RESET_FEATURES};
-           VkPhysicalDeviceShaderAtomicInt64Features atomic64 = {
-               .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_ATOMIC_INT64_FEATURES, .pNext = &host_reset};
-           VkPhysicalDeviceFeatures2 supported = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2, .pNext = &atomic64};
-           inst_data->vtable.GetPhysicalDeviceFeatures2(physicalDevice, &supported);
-           data->query_backend_enabled = host_reset.hostQueryReset && atomic64.shaderBufferInt64Atomics;
-           for (const VkBaseInStructure *p = pCreateInfo->pNext; p; p = p->pNext)
-               if (p->sType == VK_STRUCTURE_TYPE_DEVICE_GROUP_DEVICE_CREATE_INFO &&
-                   ((const VkDeviceGroupDeviceCreateInfo *)p)->physicalDeviceCount > 1)
-                   data->query_backend_enabled = false;
-           result = vkrt_query_device_init(data);
+           struct vkrt_software_rt_profile profile;
+           if (!vkrt_virtual_rt_profile(inst_data, physicalDevice, &profile)) {
+               result = VK_ERROR_FEATURE_NOT_PRESENT;
+           } else {
+               data->query_backend_enabled = true;
+               data->query_marker_uses_events = profile.query_marker_uses_events;
+               result = vkrt_query_device_init(data);
+           }
            if (result == VK_SUCCESS) result = vkrt_execution_device_init(data, pAllocator);
        }
    }

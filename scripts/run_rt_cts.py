@@ -145,9 +145,11 @@ def snapshot_layer(source_dir, output_dir, mode, expected=None, directory="layer
     }
 
 
-def run_environment(mode, snapshot, validation_dir=None, guard_dir=None, mask_native_rt_discovery=False):
+def run_environment(mode, snapshot, validation_dir=None, guard_dir=None, mask_native_rt_discovery=False, zero_timestamps=False):
     if mask_native_rt_discovery and (mode == "native" or guard_dir is None):
         raise ValueError("masked native RT discovery requires a fallback and its rejection guard")
+    if zero_timestamps and (mode == "native" or guard_dir is None):
+        raise ValueError("injected zero timestamps require a fallback and its explicit guard profile")
     env = os.environ.copy()
     removed = {key: env.pop(key) for key in LAYER_ENV if key in env}
     overrides = {"VK_LOADER_LAYERS_DISABLE": "~implicit~"}
@@ -162,7 +164,10 @@ def run_environment(mode, snapshot, validation_dir=None, guard_dir=None, mask_na
             [str(path) for path in (snapshot, guard_dir, validation_dir) if path is not None])
     if mask_native_rt_discovery:
         overrides["VKRT_NO_RT_GUARD_MASK_DISCOVERY"] = "1"
-    for key in ("VKRT_NO_RT_GUARD_LOG", "VKRT_NO_RT_GUARD_MASK_DISCOVERY", "VKRT_NO_RT_GUARD_DISPATCH_LIMITS"):
+    if zero_timestamps:
+        overrides["VKRT_NO_RT_GUARD_ZERO_TIMESTAMPS"] = "1"
+    for key in ("VKRT_NO_RT_GUARD_LOG", "VKRT_NO_RT_GUARD_MASK_DISCOVERY", "VKRT_NO_RT_GUARD_DISPATCH_LIMITS",
+                "VKRT_NO_RT_GUARD_ZERO_TIMESTAMPS"):
         if key in env:
             removed[key] = env.pop(key)
     env.update(overrides)
@@ -225,7 +230,7 @@ def write_summary(path, summary):
     temporary.replace(path)
 
 
-def guard_evidence(path, auditor=None, expected_discovery_mask=False):
+def guard_evidence(path, auditor=None, expected_discovery_mask=False, expected_zero_timestamps=False):
     evidence = {"log": str(path), "verified": False}
     if not path.is_file():
         return evidence, "guard log missing; downstream boundary was not proved active"
@@ -236,6 +241,8 @@ def guard_evidence(path, auditor=None, expected_discovery_mask=False):
         evidence["reject_records"] = sum(r["event"] == "reject" for r in records)
         auditor = auditor or Path(__file__).resolve().parents[1] / "layers/raytracing/tests/no_native_rt_guard_audit.py"
         options = {"expected_discovery_mask": True} if expected_discovery_mask else {}
+        if expected_zero_timestamps:
+            options["expected_zero_timestamps"] = True
         evidence["audit"] = runpy.run_path(str(auditor))["audit_records"](records, **options)
         evidence["verified"] = True
         return evidence, None
@@ -278,7 +285,8 @@ def execute(args):
         validation = {"manifest": str(manifest_path), "manifest_sha256": sha256(manifest_path),
                       "library": str(library.resolve(strict=True)), "library_sha256": sha256(library),
                       "scope": "original SDK installation, hashed but not copied"}
-    env, env_record = run_environment(args.mode, snapshot, validation_dir, guard_dir, args.mask_native_rt_discovery)
+    env, env_record = run_environment(args.mode, snapshot, validation_dir, guard_dir, args.mask_native_rt_discovery,
+                                      args.zero_timestamps)
     device_info = None
     if args.device_info_file:
         device_source = args.device_info_file.resolve(strict=True)
@@ -305,6 +313,7 @@ def execute(args):
         "validation": validation,
         "no_native_rt_guard": guard_layer,
         "native_rt_discovery_masked": args.mask_native_rt_discovery,
+        "zero_timestamps_injected": args.zero_timestamps,
         "layer_revision_declared": args.layer_revision,
         "device_info": device_info,
         "environment": env_record,
@@ -358,7 +367,8 @@ def execute(args):
                  "elapsed_seconds": round(time.monotonic() - start, 6), "command": command, "cwd": str(output),
                  "stdout": str(stdout), "qpa": str(qpa), "session_info": session}
         if guard_dir:
-            entry["no_native_rt_guard"], guard_error = guard_evidence(guard_log, guard_auditor, args.mask_native_rt_discovery)
+            entry["no_native_rt_guard"], guard_error = guard_evidence(guard_log, guard_auditor, args.mask_native_rt_discovery,
+                                                                    args.zero_timestamps)
             if guard_error and status == "pass":
                 status = entry["status"] = "fail"
                 reason = entry["reason"] = f"CTS passed, but downstream proof failed: {guard_error}"
@@ -391,6 +401,8 @@ def main():
                         help="place the test-only RT rejection layer below the fallback; require its completed zero-rejection log")
     parser.add_argument("--mask-native-rt-discovery", action="store_true",
                         help="explicitly mask native RT extensions/features/properties/formats/symbols; separate qualification profile")
+    parser.add_argument("--zero-timestamps", action="store_true",
+                        help="inject timestamp-free queue capabilities and reject timestamp writes; separate explicit guard profile")
     args = parser.parse_args()
     if not math.isfinite(args.timeout) or args.timeout <= 0:
         parser.error("--timeout must be positive and finite")
@@ -402,6 +414,8 @@ def main():
         parser.error("native control cannot use the downstream RT rejection guard")
     if args.mask_native_rt_discovery and (args.mode == "native" or args.no_native_rt_guard_dir is None):
         parser.error("--mask-native-rt-discovery requires a fallback and --no-native-rt-guard-dir")
+    if args.zero_timestamps and (args.mode == "native" or args.no_native_rt_guard_dir is None):
+        parser.error("--zero-timestamps requires a fallback and --no-native-rt-guard-dir")
     try:
         return execute(args)
     except (OSError, ValueError, KeyError) as error:
