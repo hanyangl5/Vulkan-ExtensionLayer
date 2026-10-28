@@ -556,7 +556,27 @@ macro failures and every intermediate failure are recorded in the checkpoint.
 
 ## Next work
 
-Run M0 proof work in parallel with shared-backend construction:
+The next integrated slice is per-execution query replay. The existing journal
+and logical-stage planner are foundations, not completed submission semantics.
+Work should proceed in the following dependency order, with the compiler and
+no-RT capability audits continuing in parallel. These are planned exit checks;
+none is a claim that the corresponding missing feature is implemented.
+
+| Priority | Deliverable | Evidence needed before closing it |
+| --- | --- | --- |
+| 1 | Fresh primary/secondary query execution resources, loader dispatch setup, completion retirement and atomic submission failure handling | Public GPU cases with repeated occurrences, overlapping pending submissions, GPU-changing inputs, independent archived results, prefix availability before a blocked tail, failure injection and external CTS regression |
+| 2 | Native execution of logical-stage dependencies | Actual GPU feedback/progress cases across future submissions; exact wait/signal scopes, state restoration and binary/external acquire behavior; no broad compute wait or queue-idle substitute |
+| 3 | Complete no-RT discovery and resource contract | Masked-discovery boundary, unmodified application device creation, shared AS/RQ/RTP execution without native RT exposure, full application resource layouts and allocation budgets, followed by physical no-RT qualification |
+| Parallel | Remaining typed compiler memory/resource semantics | Source-valid stride-changing pointer views, copy/volatile memory semantics, multi-root/NonUniform cases, large values and execution-mode handling, with independent oracles and actual relevant frame-transport execution |
+| Final qualification | Complete mandatory behavior and platform matrix | Requirement-to-evidence mapping, broader AS/RQ/RTP CTS, targeted original failures, builder/count/numerical cases, cross-vendor physical no-RT and POSIX runs |
+
+The principal architectural uncertainty is logical-stage execution: software
+AS/RTP/native compute operations share a physical stage, but source semaphore
+scopes do not. Query replay alone cannot solve that problem. Likewise, passing
+the execution-only native-RT guard does not close no-RT discovery, because that
+test mode retains native discovery for CTS selection.
+
+Detailed remaining work, grouped by subsystem rather than priority:
 
 1. Complete application resource budgets for the now-shared AS resolver and
    RQ/RTP object/address model. Aligned suballocation values and GENERIC
