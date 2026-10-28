@@ -1,0 +1,30 @@
+// Copyright 2026 The Khronos Group Inc.
+// SPDX-License-Identifier: Apache-2.0
+#version 460
+#extension GL_EXT_ray_tracing : require
+#extension GL_EXT_buffer_reference2 : require
+#extension GL_EXT_shader_explicit_arithmetic_types_int64 : require
+#extension GL_GOOGLE_include_directive : require
+#include "rtp_physical_source_common.glsl"
+layout(location = 0) callableDataInEXT uvec4 incomingData;
+layout(location = 1) callableDataEXT uvec4 outgoingData;
+void main() {
+    uint id = incomingData.x;
+    SourceRecords records = SourceRecords(sourcePush.records);
+    SourceRecord saved = records.rec[id];
+    SourceData chosen = (id & 1u) == 0u ? saved.a : saved.b;
+    uint nested = 0u;
+    if (incomingData.y == 0u) {
+        outgoingData = uvec4(id, 1u, incomingData.z, 0u);
+        executeCallableEXT(0, 1);
+        nested = outgoingData.w;
+        chosen.v[saved.index] += 100u;
+    } else {
+        records.rec[id].a = saved.b;
+        records.rec[id].b = saved.a;
+        saved.a.v[saved.index] += 10u;
+        saved.b.v[saved.index] += 20u;
+    }
+    saved.a.v[saved.index + 1u] += incomingData.y == 0u ? 30u : 40u;
+    incomingData.w = (saved.a.v[saved.index] ^ saved.b.v[saved.index]) + nested;
+}

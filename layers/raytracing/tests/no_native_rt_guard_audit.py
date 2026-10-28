@@ -27,7 +27,9 @@ def dispatch_limits(value):
 
 
 def audit_records(records, require_shaders=True, expected_dispatch_limits=None, expected_discovery_mask=False,
-                  expected_zero_timestamps=False):
+                  expected_zero_timestamps=False, expected_memory_count=False):
+    if type(expected_memory_count) is not bool:
+        raise ValueError("expected memory-count profile must be an explicit boolean")
     if type(expected_discovery_mask) is not bool or type(expected_zero_timestamps) is not bool:
         raise ValueError("expected discovery/zero-timestamp profiles must be explicit booleans")
     if not records or not isinstance(records[0], dict) or records[0].get("event") != "start":
@@ -35,7 +37,7 @@ def audit_records(records, require_shaders=True, expected_dispatch_limits=None, 
     counter_keys = ("checked", "rejected", "devices", "shader_definitions")
     forced = expected_dispatch_limits is not None
     expected = dispatch_limits(expected_dispatch_limits) if forced else None
-    if forced and (expected_discovery_mask or expected_zero_timestamps):
+    if forced and (expected_discovery_mask or expected_zero_timestamps or expected_memory_count):
         raise ValueError("discovery/zero-timestamp and artificial dispatch are distinct profiles")
     mode = "forced-dispatch-limits" if forced else "mask-discovery" if expected_discovery_mask else "execution-only"
     if expected_zero_timestamps:
@@ -44,6 +46,9 @@ def audit_records(records, require_shaders=True, expected_dispatch_limits=None, 
                      "timestamp_properties_queries", "event_signals", "event_status_queries")
     if expected_zero_timestamps:
         counter_keys += zero_counters
+    memory_counters = ("memory_properties", "memory_attempts", "memory_allocations", "memory_frees", "memory_peak")
+    if expected_memory_count:
+        counter_keys += memory_counters
     if forced:
         counter_keys += ("dispatches", "multidimensional_dispatches")
     process = records[0].get("pid")
@@ -79,6 +84,22 @@ def audit_records(records, require_shaders=True, expected_dispatch_limits=None, 
                 raise ValueError("zero-timestamp native/RT rejection boundary differs from the explicitly expected profile")
         elif any(key in record for key in ("zero_timestamp_version", "rt_boundary_enforced", *zero_counters)):
             raise ValueError("zero-timestamp injection needs an explicit dedicated audit")
+        if expected_memory_count:
+            if (type(record.get("memory_count_version")) is not int or record["memory_count_version"] != 1 or
+                    type(record.get("memory_count_limit")) is not int or record["memory_count_limit"] != 4096):
+                raise ValueError("memory-count injection lacks the explicit 4096-allocation profile")
+            live = record.get("memory_live")
+            allocations, frees = record.get("memory_allocations"), record.get("memory_frees")
+            peak = record.get("memory_peak")
+            attempts = record.get("memory_attempts")
+            if (any(type(value) is not int or value < 0 for value in (live, allocations, frees, peak, attempts)) or
+                    frees > allocations or allocations > attempts or allocations - frees != live or peak > 4096 or
+                    (allocations and not peak)):
+                raise ValueError("memory-count allocation/free accounting is inconsistent")
+            if record.get("event") == "summary" and active_instances == 1 and live:
+                raise ValueError("memory-count instance completed with live native allocations")
+        elif any(key in record for key in ("memory_count_version", "memory_count_limit", "memory_live", *memory_counters)):
+            raise ValueError("memory-count injection needs an explicit dedicated audit")
         if forced:
             if dispatch_limits(record.get("dispatch_limits")) != expected:
                 raise ValueError("guard dispatch limits differ from the explicitly expected test profile")
@@ -102,6 +123,8 @@ def audit_records(records, require_shaders=True, expected_dispatch_limits=None, 
             active_instances = 0
             if any(type(record.get(key)) is not int or record[key] != 0 for key in counter_keys):
                 raise ValueError("guard load start counters are not zero")
+            if expected_memory_count and record["memory_live"]:
+                raise ValueError("guard memory-count start is not empty")
         elif current is None or load != current["load_id"]:
             raise ValueError("guard event has no matching active load start")
         for key in counter_keys:
@@ -149,6 +172,9 @@ def audit_records(records, require_shaders=True, expected_dispatch_limits=None, 
         raise ValueError("no executing load segment observed zero-timestamp queue-family properties")
     if expected_zero_timestamps and not any(segment["timestamp_properties_queries"] for segment in executing):
         raise ValueError("no executing load segment observed zero-timestamp device properties")
+    if expected_memory_count and not any(segment["memory_properties"] and segment["memory_allocations"]
+                                         for segment in executing):
+        raise ValueError("no executing load segment observed memory-count properties and allocations")
     totals = {key: sum(segment[key] for segment in segments) for key in ("instances", *counter_keys)}
     result = {"mode": mode, "pid": process, "loads": len(segments), "segments": segments, **totals}
     if forced:
@@ -164,13 +190,20 @@ def audit_records(records, require_shaders=True, expected_dispatch_limits=None, 
         result["qualification"] = ("zero timestamps with masked RT boundary; not physical no-RT or complete mandatory qualification"
                                    if expected_discovery_mask else
                                    "zero-timestamp native control; native RT is permitted, not a no-native-RT boundary proof")
+    if expected_memory_count:
+        result["memory_count_version"] = 1
+        result["memory_count_limit"] = 4096
+        result["memory_peak"] = max(segment["memory_peak"] for segment in segments)
+        result["memory_qualification"] = "injected native allocation-count boundary; not complete public memory delivery"
     return result
 
 
-def audit(path, require_shaders=True, expected_dispatch_limits=None, expected_discovery_mask=False, expected_zero_timestamps=False):
+def audit(path, require_shaders=True, expected_dispatch_limits=None, expected_discovery_mask=False, expected_zero_timestamps=False,
+          expected_memory_count=False):
     records = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
     return audit_records(records, require_shaders=require_shaders, expected_dispatch_limits=expected_dispatch_limits,
-                         expected_discovery_mask=expected_discovery_mask, expected_zero_timestamps=expected_zero_timestamps)
+                         expected_discovery_mask=expected_discovery_mask, expected_zero_timestamps=expected_zero_timestamps,
+                         expected_memory_count=expected_memory_count)
 
 
 if __name__ == "__main__":
@@ -181,10 +214,12 @@ if __name__ == "__main__":
     parser.add_argument("--expected-discovery-mask", action="store_true", help="explicit masked feature/property/format/proc profile")
     parser.add_argument("--expected-zero-timestamps", action="store_true",
                         help="explicit zero-timestamp injection; alone permits native RT, may combine with discovery mask")
+    parser.add_argument("--expected-memory-count", action="store_true", help="explicit native allocation-count limit of 4096")
     args = parser.parse_args()
     try:
         result = audit(args.log, require_shaders=not args.allow_no_shaders, expected_dispatch_limits=args.expected_dispatch_limits,
-                       expected_discovery_mask=args.expected_discovery_mask, expected_zero_timestamps=args.expected_zero_timestamps)
+                       expected_discovery_mask=args.expected_discovery_mask, expected_zero_timestamps=args.expected_zero_timestamps,
+                       expected_memory_count=args.expected_memory_count)
     except (OSError, ValueError, KeyError, TypeError) as error:
         parser.exit(1, f"Guard evidence FAIL: {error}\n")
     print(json.dumps(result, sort_keys=True))

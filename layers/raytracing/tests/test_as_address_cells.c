@@ -1,6 +1,7 @@
 /* SPDX-License-Identifier: MIT */
 #include "vkrt_layer.h"
 #include "vkrt_as_registry.h"
+#include "vkrt_memory_allocations.h"
 
 /* Exercise the real VirtualAS and descriptor translation with an ICD boundary
  * that supports only ordinary buffers/memory and exposes no native AS path. */
@@ -238,7 +239,13 @@ static VKAPI_ATTR void VKAPI_CALL native_destroy(VkDevice d, VkAccelerationStruc
                                                  const VkAllocationCallbacks *allocator) {
     ++native_calls;
 }
-static struct vkrt_instance_data instance_data = {.vtable.GetPhysicalDeviceMemoryProperties = memory_properties};
+static VKAPI_ATTR void VKAPI_CALL physical_properties(VkPhysicalDevice physical, VkPhysicalDeviceProperties *properties) {
+    CHECK(physical == HANDLE(VkPhysicalDevice, 3));
+    *properties =
+        (VkPhysicalDeviceProperties){.limits = {.maxMemoryAllocationCount = 4096, .minStorageBufferOffsetAlignment = 256}};
+}
+static struct vkrt_instance_data instance_data = {.vtable.GetPhysicalDeviceMemoryProperties = memory_properties,
+                                                  .vtable.GetPhysicalDeviceProperties = physical_properties};
 static struct vkrt_device_data device_data = {.device = HANDLE(VkDevice, 1),
                                               .virtual_rt = true,
                                               .physical_device = HANDLE(VkPhysicalDevice, 3),
@@ -610,6 +617,7 @@ static void queue_family_sharing(void) {
 }
 int main(void) {
     vkrt_map_object(VKRT_HKEY(device), &device_data);
+    CHECK(vkrt_memory_allocations_init(&device_data, NULL) == VK_SUCCESS);
     lifecycle();
     failure_paths();
     independent_objects();
@@ -620,6 +628,7 @@ int main(void) {
     vkrt_as_registry_finish(&device_data);
     vkrt_private_pool_finish(&device_data);
     check_no_live_cells();
+    vkrt_memory_allocations_finish(&device_data);
     vkrt_unmap_object(VKRT_HKEY(device));
     vkrt_map_destroy(&vkrt_global.objects);
     printf("AS address-cell checks: %u failures\n", failures);

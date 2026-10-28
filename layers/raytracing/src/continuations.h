@@ -104,6 +104,14 @@ struct ContinuationFrameOptions {
     // the component's default rejection of pointer-valued memory. The record
     // contains provenance tags/selectors, never native pointer bytes.
     uint32_t logical_pointer_words = 0;
+    // PhysicalStorageBuffer pointers have Vulkan-defined uint64 addresses.
+    // The owning compiler converts only these pointer values at native memory
+    // boundaries; logical pointers continue to use provenance records.
+    bool physical_pointer_addresses = false;
+    // Some physical pointers (matrix/row/element access chains) may only be
+    // consumed by Load/Store. Their backend-owned recipes snapshot the root
+    // address and selectors instead of converting the restricted pointer.
+    std::vector<uint32_t> physical_pointer_recipes;
 };
 struct ContinuationFrames {
     ContinuationAnalysis analysis;

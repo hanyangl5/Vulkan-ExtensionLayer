@@ -3,7 +3,7 @@
 
 # Software RT Fallback: Implementation Status
 
-Checkpoint: 2026-10-28 (Asia/Hong_Kong). The [implementation goal](ray_tracing_fallback_goal.md)
+Checkpoint: 2026-10-29 (Asia/Hong_Kong). The [implementation goal](ray_tracing_fallback_goal.md)
 is in progress. **The complete AS/RQ/RTP fallback is not implemented.**
 The [review](ray_tracing_fallback_review.md) records the pre-change `f18c40d3`
 baseline; goal alignment was committed as `82251ec3`.
@@ -18,7 +18,9 @@ work prioritizes the mandatory AS/RQ/RTP baseline; known newer-feature exclusion
 must be explicit. CTS/regression outcomes remain categorized evidence, with no
 requirement to make unrelated optional suites all pass. See the goal's
 [compatibility and test scope](ray_tracing_fallback_goal.md#compatibility-and-test-scope).
-The latest slice is the [Event-based AS query checkpoint](rt_query_events_2026-10-28.md).
+The latest slice is the [Mesa pipeline comparison and mandatory boundary checkpoint](rt_mesa_pipeline_2026-10-29.md).
+The preceding [Event-based AS query checkpoint](rt_query_events_2026-10-28.md)
+remains the query-publication baseline.
 
 Source is consolidated under `layers/raytracing`: production C/C++ and ABI
 headers in `src`, all production GPU code in `shaders`, fixtures/oracles in
@@ -75,6 +77,9 @@ the final layout, passing build/local checks and the 16-case external CTS rechec
 - [x] Retire obsolete destination PrivateArray code, retain source Private semantics, and compile the private backend as genuine SPIR-V 1.4.
 - [x] Unify software discovery/device/resource planning and verify masked public selection/execution with bounded optional compatibility gates.
 - [x] Publish execution-owned AS queries without native timestamps on the Event-backed singleton compute path, with explicit fallback qualification and injected-capability/public/CTS evidence.
+- [x] Preserve GLSL450 source physical pointer identities and pointer-bearing Function/Private aggregates across typed continuations, with nested public Callable mutation oracles.
+- [x] Account for public/private native memory allocations in one transaction ledger, with real 4096-allocation boundary controls and free/retry evidence.
+- [x] Allow independent AS query operations inside known compute-insensitive native query scopes, preserving conservative compute-statistic admission.
 - [ ] M0: complete all capability, no-native-RT, resource ABI, and continuation proofs.
 - [ ] M1: integrate Mesa builders, GPU BVH4 encoding/refit, and shared AS objects.
 - [ ] M2: complete Ray Query lowering and state semantics.
@@ -89,7 +94,7 @@ Component checkmarks do not complete M0/M1/M2 or the full goal.
 | Component | Implemented and tested | Remaining boundary |
 | --- | --- | --- |
 | [Portable BVH4 components](../layers/raytracing/docs/BVH4.md) | Checked reference/CPU adapter; generic BDA hierarchy encoder; direct default Mesa GPU IR adaptation/record emission with compact active leaves, full flags and explicit TLAS relocation; actual LBVH build-to-encode and two-to-four-child GPU collapse, followed by topology-preserving UPDATE/refit | Broader builder variants/large construction IDs, numerical qualification and full object/resource qualification |
-| Typed continuation frames | Typed CFG/continuations; execution-owned BDA backing; builtin/push/record state; specialization, linked six-stage scheduler/shared traversal; traditional descriptor-backed opaque provenance; logical StorageBuffer pointer snapshots, supported PtrAccessChain loops and typed Function/Private pointer memory | Remaining pointer arithmetic/memory variants, multi-root/NonUniform execution qualification, actual large aggregate values, conflicting per-stage FP modes and complete resource qualification |
+| Typed continuation frames | Typed CFG/continuations; execution-owned BDA backing; builtin/push/record state; specialization, linked six-stage scheduler/shared traversal; traditional descriptor-backed opaque provenance; logical StorageBuffer pointer snapshots, supported PtrAccessChain loops, typed Function/Private pointer memory and GLSL450 source physical address identities/aggregate bridges | Physical pointers in cross-stage payload/callable type metadata, VulkanMemoryModel, remaining pointer/memory variants, multi-root/NonUniform execution qualification, large aggregates, conflicting per-stage FP modes and complete resource qualification |
 | RQ host translation | Consume AS/RQ device requirements; translate resource/synchronization masks and explicit RT buffer queries; lifetime-owned AS address cells with allocator/flush/failure handling and enabled-queue-family sharing; private SSBO indexing/variable-pointer prerequisites | Complete emulation capability/limit reporting on no-RT ICDs, future unknown buffer chains, full-layout descriptor transport and private allocation budgets |
 | AS operations and host dependency | GPU CLONE/COMPACT, serialization/UUID/BLAS relocation, topology-preserving UPDATE/refit; public property pools with per-execution primary/secondary replay, payload/native completion acquisition and reuse/reset/free publication; synchronous deferred operations; owned command-capture and logical-stage planning components | Native logical-stage executor, remaining replay schemas and native-query interaction, true shrinking compaction, refit performance and full resource budgets |
 | RQ compiler compatibility | Actual per-query AS roots from scalar/array descriptors and integer conversions; helper/value/Phi flow; direct/grouped NonUniform propagation; preserve application workgroup/specialization metadata and remove native RT declarations | Full resource-limit transparency, complete opcode/stage coverage and full shared traversal qualification |
@@ -765,6 +770,23 @@ growth and old rejection assumptions, missing transfer dependency and unsafe
 host-gate structure remain documented with raw evidence rather than retained
 as current regressions. Full M0-M5 remain open.
 
+## Mesa pipeline and mandatory boundaries: October 29
+
+The [implementation and evidence record](rt_mesa_pipeline_2026-10-29.md) pins
+the Mesa RTP comparison and records source physical pointers, typed aggregate
+bridges and matrix access ancestry, unified public/private allocation-count
+admission, and independent compute-insensitive native-query scopes.
+The final standalone/parent RT builds, 49 offline checks, 9 public GPU
+observations and 24 external AS/RQ/RTP CTS cases pass. The CTS run uses masked
+native RT discovery and timestamp-zero injection, with 32,875 checked calls,
+zero native-RT rejections, timestamp writes or validation markers. Native and
+previous-DLL controls remain separately bound to their original binaries.
+
+These are component results. Physical-pointer-bearing cross-stage interfaces,
+source VulkanMemoryModel, full resource delivery, compute-statistic/native-stage
+semantics, group/protected support and complete qualification remain open.
+No M0-M5 exit is newly claimed and the development branch is not merged.
+
 ## Next work
 
 Execution-owned BDA RTP arenas, generic replay and the software discovery
@@ -792,6 +814,16 @@ closes its specific narrow-wait gap. Passing the execution-only native-RT guard
 does not establish no-RT discovery, because that mode retains native discovery
 for CTS selection. The new mask-version-1 mode separately proves masked
 selection/execution on this GPU; it still does not qualify physical no-RT GPUs.
+
+The October 29 checkpoint adds actual GLSL450 source BDA pointer identities
+and aggregate bridges, a unified public/private native allocation ledger, and
+compute-insensitive native-query classification. These close their demonstrated
+counterexamples without reducing public memory limits or permitting compute
+statistics to count hidden query dispatches. They do not close complete resource
+delivery or native-query virtualization. The next concrete compiler step is
+physical-pointer-bearing cross-stage payload/callable metadata, followed by
+remaining source memory-model and execution-mode semantics. Matrix access paths
+require their dedicated structural proof in addition to SDK SPIR-V validation.
 
 The [no-RT qualification audit](rt_no_rt_qualification_gates_2026-10-28.md)
 identifies discovery/property gaps and qualification gates at its audited

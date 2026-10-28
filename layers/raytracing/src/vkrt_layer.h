@@ -56,6 +56,7 @@ struct vkrt_device_data {
    struct vkrt_shader_interface_state *shader_interfaces;
    struct vkrt_as_registry *as_registry;
    struct vkrt_private_pool *private_pool;
+   struct vkrt_memory_allocations *memory_allocations;
    struct vkrt_deferred_state *deferred;
    struct vkrt_serialization_state *serialization;
    struct vkrt_query_device *queries;
@@ -97,6 +98,7 @@ struct vkrt_cmd_buffer_data {
     struct vkrt_query_command *queries;
     VkCommandBufferUsageFlags usage_flags;
     uint32_t native_active_queries;
+    uint32_t native_compute_sensitive_queries;
     bool has_virtual_queries;
     bool has_rtp_execution;
     struct vkrt_rtp_command *rtp;
@@ -184,6 +186,7 @@ VKAPI_ATTR void VKAPI_CALL vkrt_UpdateDescriptorSets(VkDevice device,
    uint32_t copyCount, const VkCopyDescriptorSet *copies);
 VKAPI_ATTR VkResult VKAPI_CALL vkrt_AllocateMemory(VkDevice device,
    const VkMemoryAllocateInfo *info, const VkAllocationCallbacks *allocator, VkDeviceMemory *memory);
+VKAPI_ATTR void VKAPI_CALL vkrt_FreeMemory(VkDevice device, VkDeviceMemory memory, const VkAllocationCallbacks *allocator);
 
 /* vkrt_spirv.c */
 VkResult vkrt_rewrite_shader_module(struct vkrt_device_data *dev,

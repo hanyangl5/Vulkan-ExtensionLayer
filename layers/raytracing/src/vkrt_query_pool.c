@@ -38,6 +38,17 @@ struct query_pool {
     bool has_allocator;
     VkAllocationCallbacks allocator;
 };
+/* Native queries remain native objects. Only their immutable type/counter
+ * selection is retained so hidden compute work cannot contaminate a query
+ * that observes compute invocations. Unknown query types remain conservative. */
+struct native_query_pool {
+    struct native_query_pool *next;
+    VkQueryPool handle;
+    VkQueryType type;
+    VkQueryPipelineStatisticFlags statistics;
+    bool has_allocator;
+    VkAllocationCallbacks allocator;
+};
 struct query_operation {
     struct query_operation *next;
     struct query_pool *pool;
@@ -74,6 +85,7 @@ struct query_queue {
 struct vkrt_query_device {
     vkrt_mutex_t lock;
     struct query_pool *pools;
+    struct native_query_pool *native_pools;
     struct vkrt_query_command *commands;
     struct query_queue *queues;
     VkQueueFamilyProperties *families;
@@ -280,8 +292,8 @@ static bool record_allowed(struct vkrt_cmd_buffer_data *cb) {
     if (!cb || cb->record_result != VK_SUCCESS) return false;
     const bool execution_owned = cb->replaying || (cb->replay.journal && cb->device_data->executions);
     if (!cb->device_data->queries || (!execution_owned && (cb->usage_flags & VK_COMMAND_BUFFER_USAGE_SIMULTANEOUS_USE_BIT)) ||
-        cb->native_active_queries) {
-        VKRT_LOG_ERR("AS queries require isolated execution storage and no active native query");
+        cb->native_compute_sensitive_queries) {
+        VKRT_LOG_ERR("AS queries require isolated execution storage and no compute-sensitive native query");
         cb->record_result = VK_ERROR_FEATURE_NOT_PRESENT;
         return false;
     }
@@ -405,11 +417,43 @@ static void publish_operation(struct vkrt_cmd_buffer_data *cb, struct query_oper
     vkrt_replay_push_constants(cb);
 }
 
+static void free_native_pool(struct native_query_pool *pool) {
+    if (pool->has_allocator)
+        pool->allocator.pfnFree(pool->allocator.pUserData, pool);
+    else
+        free(pool);
+}
+static VkResult create_native_pool(struct vkrt_device_data *dev, const VkQueryPoolCreateInfo *info,
+                                   const VkAllocationCallbacks *allocator, VkQueryPool *handle) {
+    if (!dev->queries) return dev->vtable.CreateQueryPool(dev->device, info, allocator, handle);
+    *handle = VK_NULL_HANDLE;
+    struct native_query_pool *pool =
+        allocator ? allocator->pfnAllocation(allocator->pUserData, sizeof(*pool), _Alignof(struct native_query_pool),
+                                             VK_SYSTEM_ALLOCATION_SCOPE_OBJECT)
+                  : malloc(sizeof(*pool));
+    if (!pool) return VK_ERROR_OUT_OF_HOST_MEMORY;
+    *pool = (struct native_query_pool){.type = info->queryType, .statistics = info->pipelineStatistics};
+    if (allocator) {
+        pool->has_allocator = true;
+        pool->allocator = *allocator;
+    }
+    VkResult result = dev->vtable.CreateQueryPool(dev->device, info, allocator, &pool->handle);
+    if (result != VK_SUCCESS) {
+        free_native_pool(pool);
+        return result;
+    }
+    vkrt_mutex_lock(&dev->queries->lock);
+    pool->next = dev->queries->native_pools;
+    dev->queries->native_pools = pool;
+    vkrt_mutex_unlock(&dev->queries->lock);
+    *handle = pool->handle;
+    return VK_SUCCESS;
+}
 static VKAPI_ATTR VkResult VKAPI_CALL CreateQueryPool(VkDevice device, const VkQueryPoolCreateInfo *info,
                                                       const VkAllocationCallbacks *allocator, VkQueryPool *handle) {
     struct vkrt_device_data *dev = VKRT_FIND(struct vkrt_device_data, device);
     if (!dev) return VK_ERROR_INITIALIZATION_FAILED;
-    if (!as_type(info->queryType)) return dev->vtable.CreateQueryPool(device, info, allocator, handle);
+    if (!as_type(info->queryType)) return create_native_pool(dev, info, allocator, handle);
     *handle = VK_NULL_HANDLE;
     if (!dev->queries || info->pNext || info->flags) return VK_ERROR_FEATURE_NOT_PRESENT;
     struct query_pool *pool = allocator ? allocator->pfnAllocation(allocator->pUserData, sizeof(*pool), _Alignof(struct query_pool),
@@ -467,7 +511,23 @@ static VKAPI_ATTR void VKAPI_CALL DestroyQueryPool(VkDevice device, VkQueryPool 
     struct vkrt_device_data *dev = VKRT_FIND(struct vkrt_device_data, device);
     struct query_pool *pool = find_pool(handle);
     if (!pool) {
-        if (dev) dev->vtable.DestroyQueryPool(device, handle, allocator);
+        if (dev) {
+            struct native_query_pool *native = NULL;
+            if (dev->queries) {
+                vkrt_mutex_lock(&dev->queries->lock);
+                struct native_query_pool **link = &dev->queries->native_pools;
+                while (*link && (*link)->handle != handle) link = &(*link)->next;
+                if (*link) {
+                    native = *link;
+                    *link = native->next;
+                }
+                vkrt_mutex_unlock(&dev->queries->lock);
+            }
+            /* Forget before native destruction permits a concurrent Create
+             * to publish a new generation with the same numeric handle. */
+            if (native) free_native_pool(native);
+            dev->vtable.DestroyQueryPool(device, handle, allocator);
+        }
         return;
     }
     vkrt_mutex_lock(&dev->queries->lock);
@@ -813,6 +873,11 @@ void vkrt_query_device_finish(struct vkrt_device_data *dev) {
      * an annotation lookup takes debug-lock then q->lock. Never nest them in
      * the opposite order while draining the device's externally synced list. */
     while (q->pools) DestroyQueryPool(dev->device, (VkQueryPool)(uintptr_t)q->pools, pool_allocator(q->pools));
+    while (q->native_pools) {
+        struct native_query_pool *next = q->native_pools->next;
+        free_native_pool(q->native_pools);
+        q->native_pools = next;
+    }
     while (q->queues) {
         struct query_queue *next = q->queues->next;
         query_queue_destroy(q->queues);
@@ -836,7 +901,7 @@ bool vkrt_query_record_children(struct vkrt_cmd_buffer_data *cb, uint32_t count,
             if (!child || (!child->queries && !child->has_virtual_queries)) continue;
             const bool execution_owned = cb->replaying || (cb->replay.journal && cb->device_data->executions);
             if ((!execution_owned && (cb->usage_flags & VK_COMMAND_BUFFER_USAGE_SIMULTANEOUS_USE_BIT)) ||
-                cb->native_active_queries) {
+                cb->native_compute_sensitive_queries) {
                 cb->record_result = VK_ERROR_FEATURE_NOT_PRESENT;
                 return false;
             }
@@ -855,26 +920,57 @@ bool vkrt_query_record_children(struct vkrt_cmd_buffer_data *cb, uint32_t count,
     }
     return true;
 }
+static bool native_query_compute_sensitive(struct vkrt_device_data *dev, VkQueryPool handle) {
+    if (!dev->queries) return true;
+    const VkQueryPipelineStatisticFlags graphics_statistics =
+        VK_QUERY_PIPELINE_STATISTIC_INPUT_ASSEMBLY_VERTICES_BIT | VK_QUERY_PIPELINE_STATISTIC_INPUT_ASSEMBLY_PRIMITIVES_BIT |
+        VK_QUERY_PIPELINE_STATISTIC_VERTEX_SHADER_INVOCATIONS_BIT | VK_QUERY_PIPELINE_STATISTIC_GEOMETRY_SHADER_INVOCATIONS_BIT |
+        VK_QUERY_PIPELINE_STATISTIC_GEOMETRY_SHADER_PRIMITIVES_BIT | VK_QUERY_PIPELINE_STATISTIC_CLIPPING_INVOCATIONS_BIT |
+        VK_QUERY_PIPELINE_STATISTIC_CLIPPING_PRIMITIVES_BIT | VK_QUERY_PIPELINE_STATISTIC_FRAGMENT_SHADER_INVOCATIONS_BIT |
+        VK_QUERY_PIPELINE_STATISTIC_TESSELLATION_CONTROL_SHADER_PATCHES_BIT |
+        VK_QUERY_PIPELINE_STATISTIC_TESSELLATION_EVALUATION_SHADER_INVOCATIONS_BIT |
+        VK_QUERY_PIPELINE_STATISTIC_TASK_SHADER_INVOCATIONS_BIT_EXT | VK_QUERY_PIPELINE_STATISTIC_MESH_SHADER_INVOCATIONS_BIT_EXT |
+        VK_QUERY_PIPELINE_STATISTIC_CLUSTER_CULLING_SHADER_INVOCATIONS_BIT_HUAWEI;
+    bool sensitive = true;
+    vkrt_mutex_lock(&dev->queries->lock);
+    for (const struct native_query_pool *pool = dev->queries->native_pools; pool; pool = pool->next)
+        if (pool->handle == handle) {
+            sensitive = pool->type != VK_QUERY_TYPE_OCCLUSION && !(pool->type == VK_QUERY_TYPE_PIPELINE_STATISTICS &&
+                                                                   pool->statistics && !(pool->statistics & ~graphics_statistics));
+            break;
+        }
+    vkrt_mutex_unlock(&dev->queries->lock);
+    return sensitive;
+}
+static void native_query_begin(struct vkrt_cmd_buffer_data *cb, VkQueryPool pool) {
+    ++cb->native_active_queries;
+    if (native_query_compute_sensitive(cb->device_data, pool)) ++cb->native_compute_sensitive_queries;
+}
+static void native_query_end(struct vkrt_cmd_buffer_data *cb, VkQueryPool pool) {
+    if (cb->native_active_queries) --cb->native_active_queries;
+    if (native_query_compute_sensitive(cb->device_data, pool) && cb->native_compute_sensitive_queries)
+        --cb->native_compute_sensitive_queries;
+}
 static VKAPI_ATTR void VKAPI_CALL CmdBeginQuery(VkCommandBuffer command, VkQueryPool pool, uint32_t query,
                                                 VkQueryControlFlags flags) {
     struct vkrt_cmd_buffer_data *cb = VKRT_FIND(struct vkrt_cmd_buffer_data, command);
-    ++cb->native_active_queries;
+    native_query_begin(cb, pool);
     cb->device_data->vtable.CmdBeginQuery(command, pool, query, flags);
 }
 static VKAPI_ATTR void VKAPI_CALL CmdEndQuery(VkCommandBuffer command, VkQueryPool pool, uint32_t query) {
     struct vkrt_cmd_buffer_data *cb = VKRT_FIND(struct vkrt_cmd_buffer_data, command);
-    if (cb->native_active_queries) --cb->native_active_queries;
+    native_query_end(cb, pool);
     cb->device_data->vtable.CmdEndQuery(command, pool, query);
 }
 static VKAPI_ATTR void VKAPI_CALL CmdBeginQueryIndexedEXT(VkCommandBuffer command, VkQueryPool pool, uint32_t query,
                                                           VkQueryControlFlags flags, uint32_t index) {
     struct vkrt_cmd_buffer_data *cb = VKRT_FIND(struct vkrt_cmd_buffer_data, command);
-    ++cb->native_active_queries;
+    native_query_begin(cb, pool);
     cb->device_data->vtable.CmdBeginQueryIndexedEXT(command, pool, query, flags, index);
 }
 static VKAPI_ATTR void VKAPI_CALL CmdEndQueryIndexedEXT(VkCommandBuffer command, VkQueryPool pool, uint32_t query, uint32_t index) {
     struct vkrt_cmd_buffer_data *cb = VKRT_FIND(struct vkrt_cmd_buffer_data, command);
-    if (cb->native_active_queries) --cb->native_active_queries;
+    native_query_end(cb, pool);
     cb->device_data->vtable.CmdEndQueryIndexedEXT(command, pool, query, index);
 }
 PFN_vkVoidFunction vkrt_query_pool_proc(const char *name) {

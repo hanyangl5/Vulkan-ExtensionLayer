@@ -138,6 +138,7 @@ Evidence records retain the tested revision, device, commands, failures, and
 scope:
 
 - [AS query publication without native timestamps](../../docs/rt_query_events_2026-10-28.md).
+- [Mesa pipeline comparison, source BDA pointers, allocation counts and native query scopes](../../docs/rt_mesa_pipeline_2026-10-29.md).
 - [Software discovery, SPIR-V 1.4 and compatibility gates](../../docs/rt_software_discovery_2026-10-28.md).
 - [Execution-owned RTP arenas](../../docs/rtp_execution_arenas_2026-10-28.md).
 - [Shared typed runtime and initial external CTS](../../docs/rt_cts_typed_runtime_2026-10-26.md).

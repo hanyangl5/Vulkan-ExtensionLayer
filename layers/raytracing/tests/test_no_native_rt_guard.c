@@ -414,6 +414,7 @@ int main(int argc, char **argv) {
                                                                                                        : "");
     environment("VKRT_NO_RT_GUARD_MASK_DISCOVERY", !strcmp(mode, "--forced-mask-config-control") || masked_zero ? "1" : "");
     environment("VKRT_NO_RT_GUARD_ZERO_TIMESTAMPS", zero ? "1" : "");
+    environment("VKRT_NO_RT_GUARD_MEMORY_COUNT", "");
     policy_controls();
     VkNegotiateLayerInterface negotiation = {.sType = LAYER_NEGOTIATE_INTERFACE_STRUCT, .loaderLayerInterfaceVersion = 2};
     REQUIRE(vkNegotiateLoaderLayerInterfaceVersion(&negotiation) == VK_SUCCESS);

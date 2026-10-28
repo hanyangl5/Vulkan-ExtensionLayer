@@ -107,3 +107,25 @@ is an explicit SDK update, followed by repository clang-format on the generated
 header/include. This boundary's coverage is the pinned registry and named
 intercepts; future/unknown extension interfaces and physical no-RT qualification
 require their own audit and execution evidence.
+
+## Explicit native memory-count boundary
+
+`VKRT_NO_RT_GUARD_MEMORY_COUNT=4096` sets the native allocation-count limit to
+Vulkan's mandatory minimum. Legacy/core/KHR property queries report 4096;
+other values and combination with artificial dispatch limits are rejected.
+Each downstream device counts successful and in-flight `AllocateMemory` calls,
+including private layer storage. An attempted overflow terminates with exit 86
+before reaching the driver. Failed allocations roll back; a free returns its
+slot only after the native call finishes. Device destruction checks for leaks.
+
+The versioned fields include allocations, frees, live/peak count and property
+observations. Audit this profile with `--expected-memory-count`, in addition to
+any discovery or zero-timestamp expectations. Ordinary audits reject these
+fields. `test_memory_count_guard_audit.py` checks a full 4096-object native
+control, failure rollback, free/retry, overflow rejection and corrupt evidence.
+The CTS runner clears an inherited memory-count profile by default.
+
+This proves native count admission under an injected capability. It does not
+establish complete public memory delivery, heap-budget virtualization, or
+physical hardware qualification. Native RT remains governed by the explicitly
+selected execution/discovery/zero-timestamp profile.

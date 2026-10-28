@@ -3,6 +3,7 @@
  */
 #include "vkrt_layer.h"
 #include "vkrt_private_pool.h"
+#include "vkrt_memory_allocations.h"
 
 struct vkrt_private_allocation {
     struct vkrt_private_allocation *next;
@@ -103,7 +104,7 @@ static void chunk_destroy(struct vkrt_private_pool *pool, struct vkrt_private_ch
     struct vkrt_device_data *dev = pool->dev;
     if (chunk->mapping) dev->vtable.UnmapMemory(dev->device, chunk->memory);
     if (chunk->buffer) dev->vtable.DestroyBuffer(dev->device, chunk->buffer, callbacks(pool));
-    if (chunk->memory) dev->vtable.FreeMemory(dev->device, chunk->memory, callbacks(pool));
+    if (chunk->memory) vkrt_memory_free_native(dev, chunk->memory, callbacks(pool));
     release(pool, chunk);
 }
 static VkResult chunk_create(struct vkrt_private_pool *pool, VkDeviceSize size, enum vkrt_private_memory_class memory_class,
@@ -173,7 +174,7 @@ static VkResult chunk_create(struct vkrt_private_pool *pool, VkDeviceSize size, 
     VkDeviceMemory memory = VK_NULL_HANDLE;
     for (uint32_t i = 0; i < type_count; ++i) {
         allocation.memoryTypeIndex = types[i];
-        result = dev->vtable.AllocateMemory(dev->device, &allocation, callbacks(pool), &memory);
+        result = vkrt_memory_allocate_native(dev, &allocation, callbacks(pool), &memory);
         if (result != VK_ERROR_OUT_OF_DEVICE_MEMORY || memory_class == VKRT_PRIVATE_HOST_COHERENT) break;
     }
     if (result != VK_SUCCESS) goto fail;

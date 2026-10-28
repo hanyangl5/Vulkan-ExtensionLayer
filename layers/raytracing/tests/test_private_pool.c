@@ -3,6 +3,7 @@
  */
 #include "vkrt_layer.h"
 #include "vkrt_private_pool.h"
+#include "vkrt_memory_allocations.h"
 #include <stdatomic.h>
 
 /* The native boundary exposes independently chosen BDA/offset alignments and
@@ -43,6 +44,7 @@ static VkResult extension_count_result, extension_fill_result;
 static unsigned extension_incomplete, extension_calls, properties2_calls, queries3, queries4;
 static VkDeviceAddress address_low;
 static unsigned buffer_calls, buffer_success, buffer_destroys, memory_calls, memory_success, memory_frees, maps, unmaps;
+static uint32_t allocation_limit = 4096;
 static unsigned chosen_types[64], chosen_count, next_id;
 struct native_chunk {
     struct native_chunk *next;
@@ -139,6 +141,7 @@ static VKAPI_ATTR void VKAPI_CALL properties(VkPhysicalDevice p, VkPhysicalDevic
     memset(out, 0, sizeof(*out));
     out->apiVersion = native_api_version;
     out->limits.minStorageBufferOffsetAlignment = descriptor_alignment;
+    out->limits.maxMemoryAllocationCount = allocation_limit;
 }
 static VKAPI_ATTR void VKAPI_CALL properties2(VkPhysicalDevice p, VkPhysicalDeviceProperties2 *out) {
     CHECK(p == physical && out->sType == VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2);
@@ -191,6 +194,7 @@ static VKAPI_ATTR VkResult VKAPI_CALL allocate_memory(VkDevice d, const VkMemory
         CHECK(info->allocationSize <= max_allocation_size);
     CHECK(info->memoryTypeIndex < 4 && (type_bits & (1u << info->memoryTypeIndex)));
     ++memory_calls;
+    CHECK(memory_success - memory_frees < allocation_limit);
     if (chosen_count < VKRT_ARRAY_SIZE(chosen_types)) chosen_types[chosen_count++] = info->memoryTypeIndex;
     *memory = H(VkDeviceMemory, 0xbad);
     if (fail_stage == MEMORY_HOST) return VK_ERROR_OUT_OF_HOST_MEMORY;
@@ -300,6 +304,7 @@ static void setup(void) {
 }
 static void finish(void) {
     vkrt_private_pool_finish(&dev);
+    vkrt_memory_allocations_finish(&dev);
     CHECK(!dev.private_pool && atomic_load(&owner.live) == 0);
     CHECK(atomic_load(&owner.allocations) == atomic_load(&owner.frees));
     CHECK(buffer_success == buffer_destroys && memory_success == memory_frees);
@@ -307,6 +312,63 @@ static void finish(void) {
         CHECK(!p->buffer_live && !p->memory_live && !p->mapped && !p->bytes);
 }
 static void initialize(void) { CHECK(vkrt_private_pool_init(&dev, &allocator) == VK_SUCCESS); }
+static void shared_count_limit(void) {
+    setup();
+    allocation_limit = 1; /* Unit-injected native cap, not a reported Vulkan profile. */
+    dev.virtual_rt = true;
+    CHECK(vkrt_memory_allocations_init(&dev, &allocator) == VK_SUCCESS);
+    initialize();
+    struct vkrt_private_slice a, b, c;
+    CHECK(vkrt_private_pool_allocate(&dev, 32, false, &a) == VK_SUCCESS);
+    unsigned calls = memory_calls;
+    CHECK(vkrt_private_pool_allocate(&dev, 64, false, &b) == VK_SUCCESS);
+    CHECK(a.buffer == b.buffer && memory_calls == calls);
+    CHECK(vkrt_private_pool_allocate_ex(&dev, 32, VKRT_PRIVATE_DEVICE_LOCAL_PREFERRED, 16, 1, &c) == VK_ERROR_OUT_OF_DEVICE_MEMORY);
+    CHECK(memory_calls == calls && memory_success == 1 && memory_frees == 0);
+    vkrt_private_pool_release(&dev, &a);
+    CHECK(vkrt_private_pool_allocate(&dev, 16, false, &c) == VK_SUCCESS);
+    CHECK(c.buffer == b.buffer && memory_calls == calls);
+    vkrt_private_pool_release(&dev, &b);
+    vkrt_private_pool_release(&dev, &c);
+    CHECK(memory_frees == 1);
+    CHECK(vkrt_private_pool_allocate_ex(&dev, 32, VKRT_PRIVATE_DEVICE_LOCAL_PREFERRED, 16, 1, &c) == VK_SUCCESS);
+    vkrt_private_pool_release(&dev, &c);
+    finish();
+    allocation_limit = 4096;
+}
+static void shared_count_cleanup(void) {
+    static const struct {
+        enum failure_stage stage;
+        VkResult result;
+    } cases[] = {{MEMORY_DEVICE, VK_ERROR_OUT_OF_DEVICE_MEMORY},
+                 {MEMORY_HOST, VK_ERROR_OUT_OF_HOST_MEMORY},
+                 {BIND, VK_ERROR_OUT_OF_DEVICE_MEMORY},
+                 {MAP, VK_ERROR_MEMORY_MAP_FAILED},
+                 {MAP_NULL, VK_ERROR_INITIALIZATION_FAILED},
+                 {ADDRESS_ZERO, VK_ERROR_INITIALIZATION_FAILED},
+                 {ADDRESS_OVERFLOW, VK_ERROR_INITIALIZATION_FAILED},
+                 {NONE, VK_ERROR_OUT_OF_HOST_MEMORY}};
+    allocation_limit = 1;
+    for (unsigned i = 0; i < VKRT_ARRAY_SIZE(cases); ++i) {
+        setup();
+        dev.virtual_rt = true;
+        CHECK(vkrt_memory_allocations_init(&dev, &allocator) == VK_SUCCESS);
+        initialize();
+        fail_stage = cases[i].stage;
+        if (fail_stage == NONE) owner.fail_on = atomic_load(&owner.calls) + 3; /* Ledger record after slice/chunk. */
+        struct vkrt_private_slice a;
+        CHECK(vkrt_private_pool_allocate(&dev, 32, false, &a) == cases[i].result);
+        CHECK(empty_slice(&a) && memory_success == memory_frees);
+        owner.fail_on = 0;
+        fail_stage = NONE;
+        /* A failed native allocation or post-allocation setup must leave the
+         * sole actual slot available to a subsequent successful chunk. */
+        CHECK(vkrt_private_pool_allocate(&dev, 32, false, &a) == VK_SUCCESS);
+        vkrt_private_pool_release(&dev, &a);
+        finish();
+    }
+    allocation_limit = 4096;
+}
 static void native_size_limits(void) {
     for (unsigned class_index = 0; class_index < 2; ++class_index) {
         enum vkrt_private_memory_class memory_class =
@@ -698,6 +760,8 @@ static void concurrency_and_finish(void) {
     finish(); /* Exclusive device teardown also cleans all outstanding leases. */
 }
 int main(void) {
+    shared_count_limit();
+    shared_count_cleanup();
     native_size_limits();
     native_limit_queries();
     alignment_and_classes();

@@ -65,6 +65,7 @@ static void reset_state(struct vkrt_cmd_buffer_data *cb)
    cb->compute_shader_object = false;
    cb->record_result = query_result;
    cb->native_active_queries = 0;
+   cb->native_compute_sensitive_queries = 0;
    cb->usage_flags = 0;
    cb->has_virtual_queries = false;
    cb->has_rtp_execution = false;

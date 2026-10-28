@@ -899,7 +899,165 @@ done:
     pthread_mutex_destroy(&state.lock);
 #endif
 }
+static struct {
+    struct vkrt_device_data *device;
+    VkQueryPool handle;
+    VkQueryPoolCreateInfo replacement;
+    VkAllocationCallbacks allocator;
+    VkResult result;
+    unsigned allocations, frees, creates, destroys, begins, ends, indexed_begins, indexed_ends;
+    bool fail_allocation, reuse_on_destroy;
+} native_scope;
+static void *VKAPI_CALL scope_allocate(void *user, size_t size, size_t alignment, VkSystemAllocationScope scope) {
+    CHECK(user == &native_scope && alignment == _Alignof(struct native_query_pool) && scope == VK_SYSTEM_ALLOCATION_SCOPE_OBJECT);
+    if (native_scope.fail_allocation) return NULL;
+    ++native_scope.allocations;
+    return malloc(size);
+}
+static void VKAPI_CALL scope_free(void *user, void *allocation) {
+    CHECK(user == &native_scope && allocation);
+    ++native_scope.frees;
+    free(allocation);
+}
+static VKAPI_ATTR VkResult VKAPI_CALL scope_create(VkDevice device, const VkQueryPoolCreateInfo *info,
+                                                   const VkAllocationCallbacks *allocator, VkQueryPool *out) {
+    CHECK(device == native_scope.device->device && info && allocator == &native_scope.allocator);
+    ++native_scope.creates;
+    if (native_scope.result == VK_SUCCESS) *out = native_scope.handle;
+    return native_scope.result;
+}
+static VKAPI_ATTR void VKAPI_CALL scope_destroy(VkDevice device, VkQueryPool pool, const VkAllocationCallbacks *allocator) {
+    CHECK(device == native_scope.device->device && pool == native_scope.handle && allocator == &native_scope.allocator);
+    ++native_scope.destroys;
+    if (native_scope.reuse_on_destroy) {
+        native_scope.reuse_on_destroy = false;
+        VkQueryPool replacement = VK_NULL_HANDLE;
+        CHECK(CreateQueryPool(device, &native_scope.replacement, allocator, &replacement) == VK_SUCCESS && replacement == pool);
+    }
+}
+static VKAPI_ATTR void VKAPI_CALL scope_begin(VkCommandBuffer command, VkQueryPool pool, uint32_t query,
+                                              VkQueryControlFlags flags) {
+    CHECK(command == HANDLE(VkCommandBuffer, 0x7002) && pool && query == 0 && !flags);
+    ++native_scope.begins;
+}
+static VKAPI_ATTR void VKAPI_CALL scope_end(VkCommandBuffer command, VkQueryPool pool, uint32_t query) {
+    CHECK(command == HANDLE(VkCommandBuffer, 0x7002) && pool && query == 0);
+    ++native_scope.ends;
+}
+static VKAPI_ATTR void VKAPI_CALL scope_begin_indexed(VkCommandBuffer command, VkQueryPool pool, uint32_t query,
+                                                      VkQueryControlFlags flags, uint32_t index) {
+    CHECK(index == 0);
+    scope_begin(command, pool, query, flags);
+    ++native_scope.indexed_begins;
+}
+static VKAPI_ATTR void VKAPI_CALL scope_end_indexed(VkCommandBuffer command, VkQueryPool pool, uint32_t query, uint32_t index) {
+    CHECK(index == 0);
+    scope_end(command, pool, query);
+    ++native_scope.indexed_ends;
+}
+static void native_query_scopes(void) {
+    VkQueueFamilyProperties family = {.queueFlags = VK_QUEUE_GRAPHICS_BIT | VK_QUEUE_COMPUTE_BIT};
+    struct vkrt_query_device state = {.families = &family, .family_count = 1};
+    vkrt_mutex_init(&state.lock);
+    struct vkrt_device_data dev = {.device = HANDLE(VkDevice, 0x7001), .queries = &state, .query_marker_uses_events = true};
+    struct vkrt_cmd_buffer_data cb = {.cmd = HANDLE(VkCommandBuffer, 0x7002), .device_data = &dev};
+    struct fixture_pool command_pool = {.pool = HANDLE(VkCommandPool, 0x7003), .family = 0};
+    cb.pool = command_pool.pool;
+    pool_device = &dev;
+    recorded_pool = &command_pool;
+    dev.vtable.CreateQueryPool = scope_create;
+    dev.vtable.DestroyQueryPool = scope_destroy;
+    dev.vtable.CmdBeginQuery = scope_begin;
+    dev.vtable.CmdEndQuery = scope_end;
+    dev.vtable.CmdBeginQueryIndexedEXT = scope_begin_indexed;
+    dev.vtable.CmdEndQueryIndexedEXT = scope_end_indexed;
+    vkrt_map_object(VKRT_HKEY(dev.device), &dev);
+    vkrt_map_object(VKRT_HKEY(cb.cmd), &cb);
+    native_scope.device = &dev;
+    native_scope.allocator =
+        (VkAllocationCallbacks){.pUserData = &native_scope, .pfnAllocation = scope_allocate, .pfnFree = scope_free};
+    const VkQueryType types[] = {VK_QUERY_TYPE_OCCLUSION, VK_QUERY_TYPE_PIPELINE_STATISTICS, VK_QUERY_TYPE_PIPELINE_STATISTICS,
+                                 VK_QUERY_TYPE_PERFORMANCE_QUERY_KHR, VK_QUERY_TYPE_PIPELINE_STATISTICS};
+    const VkQueryPipelineStatisticFlags statistics[] = {0, VK_QUERY_PIPELINE_STATISTIC_VERTEX_SHADER_INVOCATIONS_BIT,
+                                                        VK_QUERY_PIPELINE_STATISTIC_COMPUTE_SHADER_INVOCATIONS_BIT, 0,
+                                                        UINT32_C(0x80000000)};
+    VkQueryPool pools[5];
+    for (unsigned i = 0; i < 5; ++i) {
+        native_scope.handle = HANDLE(VkQueryPool, UINT64_C(0x123400007010) + i);
+        VkQueryPoolCreateInfo info = {.sType = VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO,
+                                      .queryType = types[i],
+                                      .queryCount = 1,
+                                      .pipelineStatistics = statistics[i]};
+        CHECK(CreateQueryPool(dev.device, &info, &native_scope.allocator, &pools[i]) == VK_SUCCESS);
+        /* The public info may die immediately; classification owns its fields. */
+        info.queryType = VK_QUERY_TYPE_TIMESTAMP;
+        info.pipelineStatistics = UINT32_MAX;
+        CHECK(native_query_compute_sensitive(&dev, pools[i]) == (i >= 2));
+    }
+    CHECK(native_query_compute_sensitive(&dev, HANDLE(VkQueryPool, UINT64_C(0x987600007010))));
+    for (unsigned replay = 0; replay < 2; ++replay) {
+        cb.replaying = replay != 0;
+        CmdBeginQuery(cb.cmd, pools[0], 0, 0);
+        CHECK(cb.native_active_queries == 1 && !cb.native_compute_sensitive_queries && record_allowed(&cb));
+        CmdBeginQuery(cb.cmd, pools[1], 0, 0);
+        CHECK(cb.native_active_queries == 2 && !cb.native_compute_sensitive_queries && record_allowed(&cb));
+        CmdEndQuery(cb.cmd, pools[1], 0);
+        CmdBeginQuery(cb.cmd, pools[2], 0, 0);
+        CHECK(cb.native_active_queries == 2 && cb.native_compute_sensitive_queries == 1 && !record_allowed(&cb));
+        CHECK(cb.record_result == VK_ERROR_FEATURE_NOT_PRESENT);
+        cb.record_result = VK_SUCCESS;
+        CmdEndQuery(cb.cmd, pools[0], 0);
+        CHECK(cb.native_active_queries == 1 && cb.native_compute_sensitive_queries == 1 && !record_allowed(&cb));
+        cb.record_result = VK_SUCCESS;
+        CmdEndQuery(cb.cmd, pools[2], 0);
+        CHECK(!cb.native_active_queries && !cb.native_compute_sensitive_queries && record_allowed(&cb));
+        CmdBeginQueryIndexedEXT(cb.cmd, pools[0], 0, 0, 0);
+        CHECK(cb.native_active_queries == 1 && !cb.native_compute_sensitive_queries && record_allowed(&cb));
+        CmdEndQueryIndexedEXT(cb.cmd, pools[0], 0, 0);
+        CmdBeginQueryIndexedEXT(cb.cmd, pools[3], 0, 0, 0);
+        CHECK(cb.native_active_queries == 1 && cb.native_compute_sensitive_queries == 1 && !record_allowed(&cb));
+        cb.record_result = VK_SUCCESS;
+        CmdEndQueryIndexedEXT(cb.cmd, pools[3], 0, 0);
+        CHECK(!cb.native_active_queries && !cb.native_compute_sensitive_queries);
+    }
+    CHECK(native_scope.begins == 10 && native_scope.ends == 10 && native_scope.indexed_begins == 4 &&
+          native_scope.indexed_ends == 4);
+    /* Metadata OOM is transactional and never calls native Create; native
+     * errors release the preallocated row without publishing a fake scope. */
+    native_scope.fail_allocation = true;
+    VkQueryPool failed = HANDLE(VkQueryPool, 99);
+    unsigned creates = native_scope.creates;
+    VkQueryPoolCreateInfo info = {
+        .sType = VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO, .queryType = VK_QUERY_TYPE_OCCLUSION, .queryCount = 1};
+    CHECK(CreateQueryPool(dev.device, &info, &native_scope.allocator, &failed) == VK_ERROR_OUT_OF_HOST_MEMORY && !failed &&
+          native_scope.creates == creates);
+    native_scope.fail_allocation = false;
+    native_scope.result = VK_ERROR_OUT_OF_DEVICE_MEMORY;
+    CHECK(CreateQueryPool(dev.device, &info, &native_scope.allocator, &failed) == VK_ERROR_OUT_OF_DEVICE_MEMORY && !failed);
+    native_scope.result = VK_SUCCESS;
+    /* A native destructor may allow another Create to reuse the numeric
+     * handle before it returns. The new compute-sensitive generation wins. */
+    native_scope.handle = pools[0];
+    native_scope.replacement = info;
+    native_scope.replacement.queryType = VK_QUERY_TYPE_PIPELINE_STATISTICS;
+    native_scope.replacement.pipelineStatistics = VK_QUERY_PIPELINE_STATISTIC_COMPUTE_SHADER_INVOCATIONS_BIT;
+    native_scope.reuse_on_destroy = true;
+    DestroyQueryPool(dev.device, pools[0], &native_scope.allocator);
+    CHECK(native_query_compute_sensitive(&dev, pools[0]));
+    for (unsigned i = 0; i < 5; ++i) {
+        native_scope.handle = pools[i];
+        DestroyQueryPool(dev.device, pools[i], &native_scope.allocator);
+        CHECK(native_query_compute_sensitive(&dev, pools[i]));
+    }
+    CHECK(!state.native_pools && native_scope.allocations == native_scope.frees && native_scope.destroys == 6);
+    vkrt_unmap_object(VKRT_HKEY(cb.cmd));
+    vkrt_unmap_object(VKRT_HKEY(dev.device));
+#ifndef _WIN32
+    pthread_mutex_destroy(&state.lock);
+#endif
+}
 int main(void) {
+    native_query_scopes();
     event_backend_admission();
     event_occurrences();
     native_wait_to_formatter_scope();
@@ -957,7 +1115,9 @@ int main(void) {
     native_create_allocator = &native_allocator;
     VkQueryPool native_pool = VK_NULL_HANDLE;
     PFN_vkCreateQueryPool create_pool = (void *)vkrt_query_pool_proc("vkCreateQueryPool");
+    dev.queries = NULL;
     CHECK(create_pool && create_pool(dev.device, &native_info, &native_allocator, &native_pool) == VK_SUCCESS);
+    dev.queries = &state;
     CHECK(native_pool == HANDLE(VkQueryPool, 9) && native_creates == 1 && !find_pool(native_pool));
     CHECK(native_info.pNext == &native_suffix);
     uint64_t out[4] = {11, 13, 17, 19};
@@ -1074,9 +1234,11 @@ int main(void) {
     cb.record_result = VK_SUCCESS;
     recording_pool.flags = 0;
     cb.native_active_queries = 1;
+    cb.native_compute_sensitive_queries = 1;
     CHECK(!record_allowed(&cb) && cb.record_result == VK_ERROR_FEATURE_NOT_PRESENT);
     cb.record_result = VK_SUCCESS;
     cb.native_active_queries = 0;
+    cb.native_compute_sensitive_queries = 0;
     cb.usage_flags = VK_COMMAND_BUFFER_USAGE_SIMULTANEOUS_USE_BIT;
     CHECK(!record_allowed(&cb) && cb.record_result == VK_ERROR_FEATURE_NOT_PRESENT);
     cb.record_result = VK_SUCCESS;
@@ -1086,14 +1248,21 @@ int main(void) {
     cb.has_virtual_queries = true;
     cb.replaying = true;
     CHECK(record_allowed(&cb));
-    struct vkrt_cmd_buffer_data rtp_parent = {
-        .device_data = &dev, .native_active_queries = 1, .usage_flags = VK_COMMAND_BUFFER_USAGE_SIMULTANEOUS_USE_BIT};
+    struct vkrt_cmd_buffer_data rtp_parent = {.device_data = &dev,
+                                              .native_active_queries = 1,
+                                              .native_compute_sensitive_queries = 1,
+                                              .usage_flags = VK_COMMAND_BUFFER_USAGE_SIMULTANEOUS_USE_BIT};
     struct vkrt_cmd_buffer_data rtp_child = {.cmd = HANDLE(VkCommandBuffer, 99), .device_data = &dev, .has_rtp_execution = true};
     vkrt_map_object(VKRT_HKEY(rtp_child.cmd), &rtp_child);
     CHECK(vkrt_query_record_children(&rtp_parent, 1, &rtp_child.cmd) && !rtp_parent.has_virtual_queries &&
           rtp_parent.record_result == VK_SUCCESS && !rtp_parent.queries);
     rtp_child.has_virtual_queries = true;
     CHECK(!vkrt_query_record_children(&rtp_parent, 1, &rtp_child.cmd) && rtp_parent.record_result == VK_ERROR_FEATURE_NOT_PRESENT);
+    rtp_parent.record_result = VK_SUCCESS;
+    rtp_parent.native_compute_sensitive_queries = 0; /* A surrounding occlusion query is safe for the child too. */
+    rtp_parent.replay.journal = (struct vkrt_replay_journal *)(uintptr_t)1;
+    CHECK(vkrt_query_record_children(&rtp_parent, 1, &rtp_child.cmd) && rtp_parent.has_virtual_queries &&
+          rtp_parent.record_result == VK_SUCCESS && !rtp_parent.queries);
     vkrt_unmap_object(VKRT_HKEY(rtp_child.cmd));
     debug_query_lifetime();
     vkrt_map_destroy(&vkrt_global.objects);

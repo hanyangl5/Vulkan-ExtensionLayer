@@ -26,7 +26,7 @@ class Emitter {
             throw std::runtime_error("Invalid continuation frame emitter ID prefix");
         for (size_t p = 5; p < input.size(); p += input[p] >> 16) {
             auto op = static_cast<spv::Op>(input[p] & 0xffff);
-            if ((op >= spv::OpTypeVoid && op <= spv::OpTypeForwardPointer) || op == spv::OpTypeAccelerationStructureKHR ||
+            if ((op >= spv::OpTypeVoid && op < spv::OpTypeForwardPointer) || op == spv::OpTypeAccelerationStructureKHR ||
                 op == spv::OpConstant) {
                 uint32_t id = op == spv::OpConstant ? input.at(p + 2) : input.at(p + 1);
                 definitions.emplace(id, Definition{op, {input.begin() + p, input.begin() + p + (input[p] >> 16)}});
@@ -155,8 +155,11 @@ class Emitter {
         if (known != type_symbols.end()) return known->second;
         const auto &d = definitions.at(id);
         std::string name = ID("t" + std::to_string(id));
-        if (d.op == spv::OpTypePointer && d.words.at(2) == spv::StorageClassStorageBuffer &&
-            output.plan.options.logical_pointer_words) {
+        if (d.op == spv::OpTypePointer && d.words.at(2) == spv::StorageClassPhysicalStorageBuffer &&
+            output.plan.options.physical_pointer_addresses) {
+            name = Unsigned(64);
+        } else if (d.op == spv::OpTypePointer && d.words.at(2) == spv::StorageClassStorageBuffer &&
+                   output.plan.options.logical_pointer_words) {
             Type(PointerWordType());
             if (pointer_identity_type.empty()) {
                 pointer_identity_type = ID("pointer_identity");
@@ -208,7 +211,8 @@ class Emitter {
             for (const auto &member : members) types << " " << member;
             types << "\n";
         } else {
-            throw std::runtime_error("Unsupported continuation frame codec type");
+            throw std::runtime_error("Unsupported continuation frame codec type " + std::to_string(id) + " opcode " +
+                                     std::to_string(d.op));
         }
         type_symbols[id] = name;
         order.push_back(id);
@@ -315,6 +319,13 @@ class Emitter {
         std::string result;
         if (op == spv::OpTypeArray) {
             result = EmitArrayCodec(type, base, offset);
+        } else if (op == spv::OpTypePointer && output.plan.options.physical_pointer_addresses &&
+                   definitions.at(type).words.at(2) == spv::StorageClassPhysicalStorageBuffer) {
+            auto word = Op("OpLoad " + ID("u32") + " " + Pointer(base, offset) + Alignment());
+            auto next = Op("OpIAdd " + ID("u32") + " " + offset + " " + Constant(4));
+            auto hi = Op("OpLoad " + ID("u32") + " " + Pointer(base, next) + Alignment());
+            auto pair = Op("OpCompositeConstruct " + ID("pair") + " " + word + " " + hi);
+            result = Op("OpBitcast " + Type(type) + " " + pair);
         } else if (op == spv::OpTypeBool || op == spv::OpTypeInt || op == spv::OpTypeFloat ||
                    op == spv::OpTypeAccelerationStructureKHR) {
             auto ptr = Pointer(base, offset);
@@ -357,6 +368,16 @@ class Emitter {
         auto op = definitions.at(type).op;
         if (op == spv::OpTypeArray) {
             EmitArrayCodec(type, base, offset, value);
+        } else if (op == spv::OpTypePointer && output.plan.options.physical_pointer_addresses &&
+                   definitions.at(type).words.at(2) == spv::StorageClassPhysicalStorageBuffer) {
+            auto pair = Op("OpBitcast " + ID("pair") + " " + value);
+            auto lo = Op("OpCompositeExtract " + ID("u32") + " " + pair + " 0");
+            auto hi = Op("OpCompositeExtract " + ID("u32") + " " + pair + " 1");
+            auto pointer = Pointer(base, offset);
+            functions << "OpStore " << pointer << " " << lo << Alignment() << "\n";
+            auto next = Op("OpIAdd " + ID("u32") + " " + offset + " " + Constant(4));
+            auto next_pointer = Pointer(base, next);
+            functions << "OpStore " << next_pointer << " " << hi << Alignment() << "\n";
         } else if (op == spv::OpTypeBool || op == spv::OpTypeInt || op == spv::OpTypeFloat ||
                    op == spv::OpTypeAccelerationStructureKHR) {
             auto ptr = Pointer(base, offset);

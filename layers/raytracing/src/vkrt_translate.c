@@ -3,6 +3,7 @@
 #include "vkrt_chain.h"
 #include "vkrt_as_registry.h"
 #include "vkrt_buffer_usage.h"
+#include "vkrt_memory_allocations.h"
 
 static VkResult track_as_buffer(struct vkrt_device_data *dev, VkResult result, VkBuffer buffer, VkDeviceSize size,
                                 VkBufferUsageFlags2KHR usage, const VkAllocationCallbacks *allocator, VkBuffer *out) {
@@ -125,8 +126,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkrt_AllocateMemory(VkDevice device,
    VkMemoryAllocateFlagsInfo flags = {.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_FLAGS_INFO};
    if (existing) {
       flags = *(const VkMemoryAllocateFlagsInfo *)existing;
-      if (flags.flags & VK_MEMORY_ALLOCATE_DEVICE_ADDRESS_BIT)
-         return dev->vtable.AllocateMemory(device, info, allocator, memory);
+      if (flags.flags & VK_MEMORY_ALLOCATE_DEVICE_ADDRESS_BIT) return vkrt_memory_allocate_native(dev, info, allocator, memory);
    } else flags.pNext = info->pNext;
    flags.flags |= VK_MEMORY_ALLOCATE_DEVICE_ADDRESS_BIT;
 
@@ -150,7 +150,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkrt_AllocateMemory(VkDevice device,
    *tail = (VkBaseOutStructure *)&flags;
    VkMemoryAllocateInfo local = *info;
    local.pNext = head;
-   result = dev->vtable.AllocateMemory(device, &local, allocator, memory);
+   result = vkrt_memory_allocate_native(dev, &local, allocator, memory);
 done:
    while (head && head != (VkBaseOutStructure *)&flags) {
       VkBaseOutStructure *next = head->pNext;
@@ -158,4 +158,10 @@ done:
       head = next;
    }
    return result;
+}
+
+VKAPI_ATTR void VKAPI_CALL vkrt_FreeMemory(VkDevice device, VkDeviceMemory memory, const VkAllocationCallbacks *allocator) {
+    struct vkrt_device_data *dev = VKRT_FIND(struct vkrt_device_data, device);
+    if (!dev) return;
+    vkrt_memory_free_native(dev, memory, allocator);
 }

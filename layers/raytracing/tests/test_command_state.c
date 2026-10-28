@@ -368,7 +368,10 @@ int main(void) {
     CHECK(begin_command(command, &unsupported_begin) == VK_SUCCESS);
     cb.has_rtp_execution = true;
     CHECK(!cb.has_virtual_queries && end_command(command) == VK_ERROR_FEATURE_NOT_PRESENT);
-    CHECK(reset(command, 0) == VK_SUCCESS && !cb.has_rtp_execution);
+    cb.native_active_queries = 2;
+    cb.native_compute_sensitive_queries = 1;
+    CHECK(reset(command, 0) == VK_SUCCESS && !cb.has_rtp_execution && !cb.native_active_queries &&
+          !cb.native_compute_sensitive_queries);
     CHECK(begin_command(command, &begin) == VK_SUCCESS);
     struct vkrt_cmd_buffer_data child = {
         .cmd = H(VkCommandBuffer, 20), .device_data = &dev, .level = VK_COMMAND_BUFFER_LEVEL_SECONDARY, .has_rtp_execution = true};

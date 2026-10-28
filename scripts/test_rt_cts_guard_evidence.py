@@ -114,11 +114,13 @@ class GuardEvidenceTests(unittest.TestCase):
         self.assertNotIn("VKRT_NO_RT_GUARD_MASK_DISCOVERY", env)
 
     def test_forced_dispatch_profile_does_not_leak_into_cts(self):
-        with patch.dict("os.environ", {"VKRT_NO_RT_GUARD_DISPATCH_LIMITS": "2,2,64"}):
+        with patch.dict("os.environ", {"VKRT_NO_RT_GUARD_DISPATCH_LIMITS": "2,2,64", "VKRT_NO_RT_GUARD_MEMORY_COUNT": "4096"}):
             for mode in ("native", "software-rt"):
                 env, meta = run_environment(mode, None if mode == "native" else Path("fallback"))
                 self.assertNotIn("VKRT_NO_RT_GUARD_DISPATCH_LIMITS", env)
                 self.assertEqual(meta["unset_inherited"]["VKRT_NO_RT_GUARD_DISPATCH_LIMITS"], "2,2,64")
+                self.assertNotIn("VKRT_NO_RT_GUARD_MEMORY_COUNT", env)
+                self.assertEqual(meta["unset_inherited"]["VKRT_NO_RT_GUARD_MEMORY_COUNT"], "4096")
 
 
 if __name__ == "__main__":

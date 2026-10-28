@@ -1,5 +1,6 @@
 /* SPDX-License-Identifier: MIT */
 #include "vkrt_layer.h"
+#include "vkrt_memory_allocations.h"
 #include "vkrt_as_registry.h"
 #include "vkrt_query_pool.h"
 #include "vkrt_execution_replay.h"
@@ -1096,6 +1097,14 @@ static const VkMemoryOpaqueCaptureAddressAllocateInfo *suffix;
 static VkMemoryAllocateFlags expected_flags;
 static uint32_t expected_mask;
 static VkResult allocation_result;
+static VKAPI_ATTR void VKAPI_CALL allocation_properties(VkPhysicalDevice physical, VkPhysicalDeviceProperties *out) {
+    (void)physical;
+    memset(out, 0, sizeof(*out));
+    out->limits.maxMemoryAllocationCount = 4096;
+}
+static VKAPI_ATTR void VKAPI_CALL mock_free_memory(VkDevice d, VkDeviceMemory memory, const VkAllocationCallbacks *allocator) {
+    REQUIRE(d == device && memory == HANDLE(VkDeviceMemory, 123) && allocator == NULL);
+}
 static VKAPI_ATTR VkResult VKAPI_CALL mock_allocate(VkDevice d, const VkMemoryAllocateInfo *info,
                                                     const VkAllocationCallbacks *allocator, VkDeviceMemory *memory) {
     ++allocations;
@@ -1211,10 +1220,12 @@ static void memory_flags(void) {
     VkDeviceMemory memory;
     REQUIRE(vkrt_AllocateMemory(device, &info, NULL, &memory) == VK_SUCCESS);
     REQUIRE(info.pNext == NULL && memory == HANDLE(VkDeviceMemory, 123));
+    vkrt_FreeMemory(device, memory, NULL);
     VkMemoryAllocateFlagsInfo flags = {.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_FLAGS_INFO};
     info.pNext = &flags;
     REQUIRE(vkrt_AllocateMemory(device, &info, NULL, &memory) == VK_SUCCESS);
     REQUIRE(flags.flags == 0 && flags.pNext == NULL);
+    vkrt_FreeMemory(device, memory, NULL);
 
     VkMemoryOpaqueCaptureAddressAllocateInfo tail = {.sType = VK_STRUCTURE_TYPE_MEMORY_OPAQUE_CAPTURE_ADDRESS_ALLOCATE_INFO,
                                                      .opaqueCaptureAddress = 0x123456789abcdef0ULL};
@@ -1231,6 +1242,7 @@ static void memory_flags(void) {
     VkMemoryAllocateFlagsInfo saved = flags;
     REQUIRE(vkrt_AllocateMemory(device, &info, NULL, &memory) == VK_SUCCESS);
     REQUIRE(!memcmp(&saved, &flags, sizeof(flags)) && prefix.pNext == &flags && info.pNext == &prefix);
+    vkrt_FreeMemory(device, memory, NULL);
     allocation_result = VK_ERROR_OUT_OF_DEVICE_MEMORY;
     REQUIRE(vkrt_AllocateMemory(device, &info, NULL, &memory) == VK_ERROR_OUT_OF_DEVICE_MEMORY);
     REQUIRE(!memcmp(&saved, &flags, sizeof(flags)));
@@ -1238,6 +1250,7 @@ static void memory_flags(void) {
     flags.flags |= VK_MEMORY_ALLOCATE_DEVICE_ADDRESS_BIT;
     REQUIRE(vkrt_AllocateMemory(device, &info, NULL, &memory) == VK_SUCCESS);
     REQUIRE(allocations == 5);
+    vkrt_FreeMemory(device, memory, NULL);
 
     /* An unrecognized prefix cannot be copied safely: reject without changing
      * the caller's chain or forwarding a partially cloned allocation. */
@@ -1251,11 +1264,15 @@ static void memory_flags(void) {
 
 int main(void) {
     struct vkrt_device_data dev = {.device = device, .virtual_rt = true, .as_registry = (struct vkrt_as_registry *)(uintptr_t)1};
+    struct vkrt_instance_data instance = {.vtable.GetPhysicalDeviceProperties = allocation_properties};
+    dev.instance_data = &instance;
     dev.vtable.UpdateDescriptorSets = mock_update;
     dev.vtable.AllocateMemory = mock_allocate;
+    dev.vtable.FreeMemory = mock_free_memory;
     dev.vtable.CreateBuffer = mock_buffer;
     dev.vtable.DestroyBuffer = mock_buffer_destroy;
     vkrt_map_object(VKRT_HKEY(device), &dev);
+    REQUIRE(vkrt_memory_allocations_init(&dev, NULL) == VK_SUCCESS);
     descriptors();
     memory_flags();
     buffer_usages();
@@ -1264,6 +1281,7 @@ int main(void) {
     events_and_timestamps(&dev);
     render_pass_dependencies(&dev);
     sync_alias_loading();
+    vkrt_memory_allocations_finish(&dev);
     printf("Host translation: %s (%u failures)\n", failures ? "FAIL" : "PASS", failures);
     return failures ? 1 : 0;
 }

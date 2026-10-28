@@ -1,0 +1,901 @@
+{
+  "schema_version": 1,
+  "source_base": "fe6ea2ab88280b12c4f42329c1c497d83c1a7356",
+  "goal_status": "active; full M0-M5 remain incomplete",
+  "scope": "GLSL450 physical source pointer identities/typed aggregate bridges, native allocation-count admission, compute-insensitive independent native query scopes; representative CTS and injected profiles, not complete mandatory or physical no-RT qualification.",
+  "source_scope": "Working-tree bytes before Git normalization; this manifest excludes itself. Earlier component freezes and public binaries retain their original separate scope.",
+  "sources": [
+    {
+      "path": "docs/ray_tracing_fallback_status.md",
+      "sha256": "cb53703da6931fdff115f3332b90a38d18aa5b465cddcaa95b0b4223bb913c76",
+      "bytes": 64976
+    },
+    {
+      "path": "docs/rt_mesa_pipeline_2026-10-29.md",
+      "sha256": "6aa6620f95ccdb9dbdb33f11909cb4a7792226ffb05b6572607649a7ba9eed1f",
+      "bytes": 11054
+    },
+    {
+      "path": "layers/raytracing/CMakeLists.txt",
+      "sha256": "8a46904c25340a1259e058feb8a4e5d199a8b7e05144bc35be849b9896cb05f1",
+      "bytes": 77600
+    },
+    {
+      "path": "layers/raytracing/README.md",
+      "sha256": "66afd6032d3b51e6ef0fb9c57d92b68dc77141e1e9398724b0c931aa1055d2cd",
+      "bytes": 10193
+    },
+    {
+      "path": "layers/raytracing/src/continuations.cpp",
+      "sha256": "aecc065d20e992c919771d84091780e5ce28220d62ffaed0b9a0b7a57952cdf9",
+      "bytes": 24663
+    },
+    {
+      "path": "layers/raytracing/src/continuations.h",
+      "sha256": "6edc40bb663e84a11cf6591c7b21ac70402d590a759db55e5b9ecdf4d5790651",
+      "bytes": 6932
+    },
+    {
+      "path": "layers/raytracing/src/frame_emitter.cpp",
+      "sha256": "4d36db2102aa1b349f4027dd44fa2052d3a93b3ae5d644c92a007f1266b37c86",
+      "bytes": 28524
+    },
+    {
+      "path": "layers/raytracing/src/state_compiler.cpp",
+      "sha256": "a0509ef129cff22634c9c8bc54a2e17ba3721750578dc69be3c464bd19cc818c",
+      "bytes": 149226
+    },
+    {
+      "path": "layers/raytracing/src/vkrt_commands.c",
+      "sha256": "94014b751fbeb67fa6dd60a9441135bdeff88ad2730510232858052ec31c0121",
+      "bytes": 19448
+    },
+    {
+      "path": "layers/raytracing/src/vkrt_layer.c",
+      "sha256": "4d8c2ff6ff6048759b1278806bbe6cfd2ae9309851c8a46b62768ea0aa1a3fe6",
+      "bytes": 37464
+    },
+    {
+      "path": "layers/raytracing/src/vkrt_layer.h",
+      "sha256": "65b6c8f5ec999605f1fabe5595c855ffdb701d186e9b9997f2bd1362b8eba3eb",
+      "bytes": 11820
+    },
+    {
+      "path": "layers/raytracing/src/vkrt_memory_allocations.c",
+      "sha256": "ae940811eeb56913756e42243a8f6830456c7661fed15ac8dc827b53d5b30ce9",
+      "bytes": 6087
+    },
+    {
+      "path": "layers/raytracing/src/vkrt_memory_allocations.h",
+      "sha256": "298bdffd47685cb198b8b23446c4065f066a5431d526b24d5d61c3d9397347cc",
+      "bytes": 816
+    },
+    {
+      "path": "layers/raytracing/src/vkrt_private_pool.c",
+      "sha256": "4b7237ea7d731839fe3f3de9f8114f0c19df38e5c8c8b587e91e69a5da858597",
+      "bytes": 20313
+    },
+    {
+      "path": "layers/raytracing/src/vkrt_query_pool.c",
+      "sha256": "853e67fda80341ea753cde7d86d772a6459a39182087f71ce5c3e6dd9d48720b",
+      "bytes": 50594
+    },
+    {
+      "path": "layers/raytracing/src/vkrt_translate.c",
+      "sha256": "efbeb063339e4259edabb2a5fca3e869cf6f12663393b6cd417275a917768fb4",
+      "bytes": 8096
+    },
+    {
+      "path": "layers/raytracing/tests/command_replay_host.c",
+      "sha256": "0a10427544cf0ff98a96f4dba6b481391b0a82b2c45651f21260b52eb937aea9",
+      "bytes": 69410
+    },
+    {
+      "path": "layers/raytracing/tests/no_native_rt_guard_README.md",
+      "sha256": "11d8cb713e9d6ffd002cf28f89abaad2314754dac293b2e9b7fb4f5fc6c298e2",
+      "bytes": 7770
+    },
+    {
+      "path": "layers/raytracing/tests/no_native_rt_guard_audit.py",
+      "sha256": "c793a8e3226ab5403d5615c7f327e93d84e068670162481042359afcfd3a5d2b",
+      "bytes": 15409
+    },
+    {
+      "path": "layers/raytracing/tests/no_native_rt_guard_layer.c",
+      "sha256": "fdc38261acdc53c88817da808ae48f4fd50b620312b01e439c2e91c0eb212993",
+      "bytes": 64141
+    },
+    {
+      "path": "layers/raytracing/tests/no_native_rt_guard_memory.inc",
+      "sha256": "03d199ab06aab21f98b346aa72672bcd8adf2804811f0d300debf018ea088006",
+      "bytes": 3832
+    },
+    {
+      "path": "layers/raytracing/tests/rtp_physical_source.rcall",
+      "sha256": "c5bac0178606b3b5df1d1fc5a2d417a5ae088bce6f621c204f4d7340e0748521",
+      "bytes": 1205
+    },
+    {
+      "path": "layers/raytracing/tests/rtp_physical_source.rgen",
+      "sha256": "100b80498488bfa1569e85cefcdd9ed49ea77332e271ee3dd5b31bf21e83bfd5",
+      "bytes": 2341
+    },
+    {
+      "path": "layers/raytracing/tests/rtp_physical_source_common.glsl",
+      "sha256": "c057d520784751a9587c81ab63776bfed68a113480c6c70146f71e53025eaf10",
+      "bytes": 841
+    },
+    {
+      "path": "layers/raytracing/tests/rtp_physical_source_fixture.h",
+      "sha256": "fe831c7f9e14d07caa75756bf45df218c834d82698ffb6474656a539ea7432bd",
+      "bytes": 14154
+    },
+    {
+      "path": "layers/raytracing/tests/state_compiler_tests.cpp",
+      "sha256": "02481599578337354ea698b63a570a41a9428b0cf35636950814661362652e40",
+      "bytes": 107301
+    },
+    {
+      "path": "layers/raytracing/tests/state_physical_pointer_tests.h",
+      "sha256": "fc430f4ee396090333d0513f890a7f5a5d073744b0882a165af719b08a166409",
+      "bytes": 21684
+    },
+    {
+      "path": "layers/raytracing/tests/test_as_address_cells.c",
+      "sha256": "76e81f7947383f705b0ae1c02ad546049a7e3b4126620678394b587791d51a13",
+      "bytes": 35467
+    },
+    {
+      "path": "layers/raytracing/tests/test_command_state.c",
+      "sha256": "bd2728c5f37799f08b38e5d9f31c2079bf182cd3df33c215e96d1f2ab6ca6afa",
+      "bytes": 24181
+    },
+    {
+      "path": "layers/raytracing/tests/test_host_translation.c",
+      "sha256": "302a23424358cceddf11bd17717712f10a7d8e0226af850a9491b1bafcd7c190",
+      "bytes": 81593
+    },
+    {
+      "path": "layers/raytracing/tests/test_memory_allocations.c",
+      "sha256": "171b9da0a3c328e56eb7119f71df8d73427de33dc12e6c060d8a941026c01f16",
+      "bytes": 17015
+    },
+    {
+      "path": "layers/raytracing/tests/test_memory_count_gpu.c",
+      "sha256": "5cd5374225b094de8a4ba604cd20c270e58f67edb695d7648a0072672b5f288a",
+      "bytes": 3459
+    },
+    {
+      "path": "layers/raytracing/tests/test_memory_count_guard_audit.py",
+      "sha256": "6e3f81103a94221570e49c9a937e9a495c7ea4135c90d4ebc54ed4910df5b2a1",
+      "bytes": 3389
+    },
+    {
+      "path": "layers/raytracing/tests/test_no_native_rt_guard.c",
+      "sha256": "4bb16828180cf888106ceb4e47777b9e5bcce54494b7b515a86e02187ded02fb",
+      "bytes": 47008
+    },
+    {
+      "path": "layers/raytracing/tests/test_no_native_rt_guard_memory.c",
+      "sha256": "d2883c7c59a4b05392339f161312ceeea556c715cceda8d1b4cdcce104b9a51f",
+      "bytes": 5413
+    },
+    {
+      "path": "layers/raytracing/tests/test_private_pool.c",
+      "sha256": "145ccb5d0f3c9c8b352b0d7a3ba186872eb467cdc715e1d3e124f5da66e7dc85",
+      "bytes": 37591
+    },
+    {
+      "path": "layers/raytracing/tests/test_query_pool_publication.c",
+      "sha256": "2874acf15d9c3646da5616fa077b5ecbedd4c170f4d08974c86ac4a1426e3e7c",
+      "bytes": 73791
+    },
+    {
+      "path": "layers/raytracing/tests/test_query_scope.c",
+      "sha256": "a58d04ce0a7da5bd186b44dead2296724ffec6f1f4bc004c6d16529e50b6a5aa",
+      "bytes": 16056
+    },
+    {
+      "path": "layers/raytracing/tests/test_rtp_api.c",
+      "sha256": "a1a2bb03c1f3c006a386e60f8be6e67ee9a8f330fc5c13592cdc5afa4a3578b7",
+      "bytes": 75149
+    },
+    {
+      "path": "scripts/run_rt_cts.py",
+      "sha256": "ea59e15b271a996a323004090a1984669d55f62db4dcc69835d5027452a11e6e",
+      "bytes": 22625
+    },
+    {
+      "path": "scripts/test_rt_cts_guard_evidence.py",
+      "sha256": "6e4981cb242764275f7b096ca6256dea0e124a69b32a58cff4e5e09e59e8518a",
+      "bytes": 8420
+    }
+  ],
+  "mesa_reference": {
+    "project": "Mesa",
+    "commit": "837ab0e30740abb9ebb60bcd40a5114c68c673d9",
+    "mirror": "chaotic-cx/mesa-mirror",
+    "files": [
+      {
+        "path": "src/compiler/nir/nir_lower_shader_calls.c",
+        "url": "https://raw.githubusercontent.com/chaotic-cx/mesa-mirror/837ab0e30740abb9ebb60bcd40a5114c68c673d9/src/compiler/nir/nir_lower_shader_calls.c",
+        "bytes": 73308,
+        "sha256": "89a8beec720b6070a4ff9aded4372a52d282250dd714b2415d56fd8f7029d218"
+      },
+      {
+        "path": "src/amd/vulkan/radv_pipeline_rt.c",
+        "url": "https://raw.githubusercontent.com/chaotic-cx/mesa-mirror/837ab0e30740abb9ebb60bcd40a5114c68c673d9/src/amd/vulkan/radv_pipeline_rt.c",
+        "bytes": 68859,
+        "sha256": "cf0c44921261a54157041730da935df69941fd9604b8fade1ddaa0c51c1bc11c"
+      },
+      {
+        "path": "src/amd/vulkan/nir/radv_nir_rt_stage_common.c",
+        "url": "https://raw.githubusercontent.com/chaotic-cx/mesa-mirror/837ab0e30740abb9ebb60bcd40a5114c68c673d9/src/amd/vulkan/nir/radv_nir_rt_stage_common.c",
+        "bytes": 21404,
+        "sha256": "015fb7dedd2cc4d79a0c754b1307eb7767ec40474ee73a36c9b810259039f13e"
+      },
+      {
+        "path": "src/amd/vulkan/nir/radv_nir_rt_stage_cps.c",
+        "url": "https://raw.githubusercontent.com/chaotic-cx/mesa-mirror/837ab0e30740abb9ebb60bcd40a5114c68c673d9/src/amd/vulkan/nir/radv_nir_rt_stage_cps.c",
+        "bytes": 30129,
+        "sha256": "d11c17a37172916d6e91ae8be3e5a69aa96b97fc9a971536ab7fc5f668f242d2"
+      },
+      {
+        "path": "src/amd/vulkan/nir/radv_nir_rt_stage_functions.c",
+        "url": "https://raw.githubusercontent.com/chaotic-cx/mesa-mirror/837ab0e30740abb9ebb60bcd40a5114c68c673d9/src/amd/vulkan/nir/radv_nir_rt_stage_functions.c",
+        "bytes": 46143,
+        "sha256": "2d6b06e3a0effcfb83de7af50cae3060f45ad6c080c0458f4220c7e78dc65937"
+      },
+      {
+        "path": "src/amd/vulkan/nir/radv_nir_rt_stage_monolithic.c",
+        "url": "https://raw.githubusercontent.com/chaotic-cx/mesa-mirror/837ab0e30740abb9ebb60bcd40a5114c68c673d9/src/amd/vulkan/nir/radv_nir_rt_stage_monolithic.c",
+        "bytes": 21022,
+        "sha256": "c95b91a8abccf2c434f91245fef4ba64699ca76b5cb3a7b955d7c9f48891c0b9"
+      },
+      {
+        "path": "src/amd/vulkan/nir/radv_nir_rt_common.c",
+        "url": "https://raw.githubusercontent.com/chaotic-cx/mesa-mirror/837ab0e30740abb9ebb60bcd40a5114c68c673d9/src/amd/vulkan/nir/radv_nir_rt_common.c",
+        "bytes": 72964,
+        "sha256": "88f64517d5aa79ad07fba90a1e929c8f4141a92fc2518f78cc5d82fd33019854"
+      }
+    ]
+  },
+  "components": [
+    {
+      "path": "build-source-layout/memory-allocation-ledger/verification.json",
+      "sha256": "31aac0ccd4afd7499114a77dc60b4a8309afb8e27f49b84989bdbc5b365181c3",
+      "bytes": 8026
+    },
+    {
+      "path": "build-source-layout/memory-allocation-ledger/mutants.json",
+      "sha256": "afa87cb12b0d9f423bf48eab0395076147b2eb5307861e6a7b34676707a87592",
+      "bytes": 3591
+    },
+    {
+      "path": "build-source-layout/query-native-scope/verification.json",
+      "sha256": "2bcbef6e2e248a73b69f6ee9c0e805f18b155920cacc60778972589d98198c68",
+      "bytes": 5907
+    },
+    {
+      "path": "build-query-events-2026-10-28/physical-source/manifest.json",
+      "sha256": "b399e97813a5f20efadc9a5d90f01024af73f5707ecd2e1c610a4b7c642102b9",
+      "bytes": 9390
+    },
+    {
+      "path": "build-query-events-2026-10-28/physical-source-review/manifest.json",
+      "sha256": "f8d97252fdf18560150bdeefc9b1a7d066a56d08ff53fd734bed9c226af879b9",
+      "bytes": 30061
+    },
+    {
+      "path": "build-source-layout/physical-independent-review/manifest.json",
+      "sha256": "c284d146e135ce623c57270f4ba9cab27f9fdda445dad3ed842b8acd9886612a",
+      "bytes": 3955
+    }
+  ],
+  "builds": [
+    {
+      "path": "build-mesa-rtp-2026-10-28/final-qualified-build.log",
+      "sha256": "0b342f83af9d878f529f92c39dfe7e14c4a686d6b68a19c74803b6731dbf9f11",
+      "bytes": 3014
+    },
+    {
+      "path": "build-mesa-rtp-2026-10-28/parent-qualified-build.log",
+      "sha256": "dffdb9e89ab1b754276f23cd75ec3966dcd9090d442ae941eeffd9aab2f74fcb",
+      "bytes": 1050
+    }
+  ],
+  "offline": {
+    "passed": 49,
+    "failed": 0,
+    "log": {
+      "path": "build-mesa-rtp-2026-10-28/offline-qualified.log",
+      "sha256": "5c2e2265343970b38eef627ffa23719700ef055257425168ee1b8f96cfe52688",
+      "bytes": 6716
+    }
+  },
+  "gpu": {
+    "path": "build-mesa-rtp-2026-10-28/gpu-qualified/summary.json",
+    "sha256": "48199843a303d12a006cf2fdbd8fb1564515c36bfb1eb345f992491543d3795e",
+    "bytes": 22105,
+    "observations_verified": 9,
+    "dll_sha256": "e00127c5efc03924497ea70c666a1dd01afbddd87fe5f08f08f4033828a6af78",
+    "cases": [
+      {
+        "name": "memory-below",
+        "command": [
+          "D:\\Codes\\Vulkan-ExtensionLayer\\build-raytracing-unified\\test_memory_count_gpu.exe"
+        ],
+        "expected_exit": 0,
+        "exit_code": 0,
+        "validation_markers": 0,
+        "verified": true
+      },
+      {
+        "name": "memory-above",
+        "command": [
+          "D:\\Codes\\Vulkan-ExtensionLayer\\build-raytracing-unified\\test_memory_count_gpu.exe"
+        ],
+        "expected_exit": 0,
+        "exit_code": 0,
+        "validation_markers": 0,
+        "verified": true
+      },
+      {
+        "name": "physical-native",
+        "command": [
+          "D:\\Codes\\Vulkan-ExtensionLayer\\build-raytracing-unified\\test_rtp_api.exe",
+          "D:\\Codes\\Vulkan-ExtensionLayer\\build-raytracing-unified\\rtp_physical_source.rgen.spv",
+          "D:\\Codes\\Vulkan-ExtensionLayer\\build-raytracing-unified\\rtp_physical_source.rcall.spv",
+          "--physical-source"
+        ],
+        "expected_exit": 0,
+        "exit_code": 0,
+        "validation_markers": 0,
+        "verified": true
+      },
+      {
+        "name": "physical-below",
+        "command": [
+          "D:\\Codes\\Vulkan-ExtensionLayer\\build-raytracing-unified\\test_rtp_api.exe",
+          "D:\\Codes\\Vulkan-ExtensionLayer\\build-raytracing-unified\\rtp_physical_source.rgen.spv",
+          "D:\\Codes\\Vulkan-ExtensionLayer\\build-raytracing-unified\\rtp_physical_source.rcall.spv",
+          "--physical-source"
+        ],
+        "expected_exit": 0,
+        "exit_code": 0,
+        "validation_markers": 0,
+        "verified": true
+      },
+      {
+        "name": "physical-above",
+        "command": [
+          "D:\\Codes\\Vulkan-ExtensionLayer\\build-raytracing-unified\\test_rtp_api.exe",
+          "D:\\Codes\\Vulkan-ExtensionLayer\\build-raytracing-unified\\rtp_physical_source.rgen.spv",
+          "D:\\Codes\\Vulkan-ExtensionLayer\\build-raytracing-unified\\rtp_physical_source.rcall.spv",
+          "--physical-source"
+        ],
+        "expected_exit": 0,
+        "exit_code": 0,
+        "validation_markers": 0,
+        "verified": true
+      },
+      {
+        "name": "scope-below",
+        "command": [
+          "D:\\Codes\\Vulkan-ExtensionLayer\\build-raytracing-unified\\test_query_scope.exe"
+        ],
+        "expected_exit": 0,
+        "exit_code": 0,
+        "validation_markers": 0,
+        "verified": true
+      },
+      {
+        "name": "scope-above",
+        "command": [
+          "D:\\Codes\\Vulkan-ExtensionLayer\\build-raytracing-unified\\test_query_scope.exe"
+        ],
+        "expected_exit": 0,
+        "exit_code": 0,
+        "validation_markers": 0,
+        "verified": true
+      },
+      {
+        "name": "query-events-below",
+        "command": [
+          "D:\\Codes\\Vulkan-ExtensionLayer\\build-raytracing-unified\\test_query_events.exe",
+          "--require-zero-timestamps"
+        ],
+        "expected_exit": 0,
+        "exit_code": 0,
+        "validation_markers": 0,
+        "verified": true
+      },
+      {
+        "name": "query-events-above",
+        "command": [
+          "D:\\Codes\\Vulkan-ExtensionLayer\\build-raytracing-unified\\test_query_events.exe",
+          "--require-zero-timestamps"
+        ],
+        "expected_exit": 0,
+        "exit_code": 0,
+        "validation_markers": 0,
+        "verified": true
+      }
+    ],
+    "raw_outputs": [
+      {
+        "path": "build-mesa-rtp-2026-10-28/gpu-qualified/memory-below.log",
+        "sha256": "f77b9ee4e0c509f1858e342a02f330800e1de280b0280aa8ef4c2e2107614c24",
+        "bytes": 564
+      },
+      {
+        "path": "build-mesa-rtp-2026-10-28/gpu-qualified/memory-above.log",
+        "sha256": "e68730eff2abdc32eaf5a0c920205c3bd61cbe6c528fdf61af3a3cac19eb75a5",
+        "bytes": 564
+      },
+      {
+        "path": "build-mesa-rtp-2026-10-28/gpu-qualified/physical-native.log",
+        "sha256": "c36a0c30fb7f16aba102be1aa25e2338596bd243aad25a83cf6439d0d4fd2ec3",
+        "bytes": 1477
+      },
+      {
+        "path": "build-mesa-rtp-2026-10-28/gpu-qualified/physical-below.log",
+        "sha256": "f532d3096f22cd687b0742511e851de41e0e7d19fa3cf0587d669d77538000d7",
+        "bytes": 2203
+      },
+      {
+        "path": "build-mesa-rtp-2026-10-28/gpu-qualified/physical-above.log",
+        "sha256": "ac79575a8168263d259177d86a923728f8d53f4c10480a83161cd1680ed6164b",
+        "bytes": 2203
+      },
+      {
+        "path": "build-mesa-rtp-2026-10-28/gpu-qualified/scope-below.log",
+        "sha256": "63521fe1f592d2e7d0ad42d87910f3b7962d68b12a1b04c93c75e3c007dd29aa",
+        "bytes": 2047
+      },
+      {
+        "path": "build-mesa-rtp-2026-10-28/gpu-qualified/scope-above.log",
+        "sha256": "cc31ac6f0da7329da5806c9b3ee91e29c689ee689a3a7c1a7f92f264fa9d32b0",
+        "bytes": 2047
+      },
+      {
+        "path": "build-mesa-rtp-2026-10-28/gpu-qualified/query-events-below.log",
+        "sha256": "cd1781991649628f87708d21a3f0a168716b5fc3ab3d3882f5a978b66dc323cb",
+        "bytes": 1594
+      },
+      {
+        "path": "build-mesa-rtp-2026-10-28/gpu-qualified/query-events-above.log",
+        "sha256": "0d9f53e142f0b44782575511059962f3ecb4b105f85f234dcd2965b8fbf17e26",
+        "bytes": 1594
+      }
+    ]
+  },
+  "cts": {
+    "path": "build-rt-cts-evidence/mesa-rtp-qualified-2026-10-29/summary.json",
+    "sha256": "48e2b6a5a959138e81de5a9b5b0762c29320a41add5d433117c13a856c044d81",
+    "bytes": 123543,
+    "counts": {
+      "pass": 24,
+      "fail": 0,
+      "notSupported": 0,
+      "crash": 0,
+      "timeout": 0,
+      "noresult": 0
+    },
+    "dll_sha256": "e00127c5efc03924497ea70c666a1dd01afbddd87fe5f08f08f4033828a6af78",
+    "cts_sha256": "8cf824c598181ef43ccd74d67acce89c9cc6fc47029a164440f0b0ea74af0380",
+    "cts_revision": "d18e4c68543103371715845cd914c71e5859963e",
+    "native_rt_discovery_masked": true,
+    "zero_timestamps_injected": true,
+    "guard_counters": {
+      "checked": 32875,
+      "rejected": 0,
+      "timestamp_write_attempts": 0,
+      "event_signals": 20,
+      "event_status_queries": 20
+    },
+    "validation_markers": 0,
+    "raw_outputs": [
+      {
+        "path": "build-rt-cts-evidence/mesa-rtp-qualified-2026-10-29/0001-rotation_0-1c2ed78318.stdout.txt",
+        "sha256": "de9c3f153af3980cf748ba23f0a69215ca9aeb7635f3954d3ec87e910a4380a9",
+        "bytes": 1000
+      },
+      {
+        "path": "build-rt-cts-evidence/mesa-rtp-qualified-2026-10-29/0001-rotation_0-1c2ed78318.qpa",
+        "sha256": "955a048fbd2ad8c1082ab2578c34ec8fd63610c799843eabaa772119e2a37263",
+        "bytes": 10577
+      },
+      {
+        "path": "build-rt-cts-evidence/mesa-rtp-qualified-2026-10-29/0001-rotation_0-1c2ed78318.guard.jsonl",
+        "sha256": "2d9dec16815aafa71ead706055736cfead81c59b007aaf5b50ea9f0d45f4407a",
+        "bytes": 3458
+      },
+      {
+        "path": "build-rt-cts-evidence/mesa-rtp-qualified-2026-10-29/0002-rotation_0-f51b78b4be.stdout.txt",
+        "sha256": "4acac946ce519cb72c6dbb3a42fac9a0ac357bab8e64ef33aeb4317c47113bf9",
+        "bytes": 1000
+      },
+      {
+        "path": "build-rt-cts-evidence/mesa-rtp-qualified-2026-10-29/0002-rotation_0-f51b78b4be.qpa",
+        "sha256": "8d6572a7a49d6ca19c3a02d242a3c040034c4fffbefd48f9931077216b3be68f",
+        "bytes": 11993
+      },
+      {
+        "path": "build-rt-cts-evidence/mesa-rtp-qualified-2026-10-29/0002-rotation_0-f51b78b4be.guard.jsonl",
+        "sha256": "673f9f484b40ada0113d2e5621930429fccdfcc1c1aaf847701fb4b825fc6616",
+        "bytes": 3458
+      },
+      {
+        "path": "build-rt-cts-evidence/mesa-rtp-qualified-2026-10-29/0003-rotation_0-3e7e2c58ac.stdout.txt",
+        "sha256": "1aef1e89d75a39a1bd534fab0e0adc28e3b2a6fb69d4bd628fb19d8f8b539404",
+        "bytes": 1000
+      },
+      {
+        "path": "build-rt-cts-evidence/mesa-rtp-qualified-2026-10-29/0003-rotation_0-3e7e2c58ac.qpa",
+        "sha256": "26fa3c1ca2a2da06c99060720239907d802be1bcd25cccc0a50b380570164f1b",
+        "bytes": 12013
+      },
+      {
+        "path": "build-rt-cts-evidence/mesa-rtp-qualified-2026-10-29/0003-rotation_0-3e7e2c58ac.guard.jsonl",
+        "sha256": "6d1a98748bac3c18fcc7a28e777978fc578cd52b2604d0162756628bb643c2d3",
+        "bytes": 3458
+      },
+      {
+        "path": "build-rt-cts-evidence/mesa-rtp-qualified-2026-10-29/0004-rotation_4-967a13ed2e.stdout.txt",
+        "sha256": "448f2efae57a8450f4ef88e438acb7a9b0d0eeaab4109652c2ad22552042ce19",
+        "bytes": 995
+      },
+      {
+        "path": "build-rt-cts-evidence/mesa-rtp-qualified-2026-10-29/0004-rotation_4-967a13ed2e.qpa",
+        "sha256": "b2fcfb42028fe354fc1bbdaf5637c58c1acfddf9ebef41b071c73725c9e0de87",
+        "bytes": 10562
+      },
+      {
+        "path": "build-rt-cts-evidence/mesa-rtp-qualified-2026-10-29/0004-rotation_4-967a13ed2e.guard.jsonl",
+        "sha256": "7e4c7e838079056ad1c4826e0c576b51af4b816f2fbc3670a531c77058ae2acc",
+        "bytes": 3458
+      },
+      {
+        "path": "build-rt-cts-evidence/mesa-rtp-qualified-2026-10-29/0005-rotation_4-f04bc36aa2.stdout.txt",
+        "sha256": "fc49628aae4fd76f3c4ad3f535e220c27029eaa211c9aa817a04523be4913859",
+        "bytes": 995
+      },
+      {
+        "path": "build-rt-cts-evidence/mesa-rtp-qualified-2026-10-29/0005-rotation_4-f04bc36aa2.qpa",
+        "sha256": "c67b625cb30faa23b12ca9f9387e3343a6833fde79f9189db8f8f8ef73aaf5d2",
+        "bytes": 11978
+      },
+      {
+        "path": "build-rt-cts-evidence/mesa-rtp-qualified-2026-10-29/0005-rotation_4-f04bc36aa2.guard.jsonl",
+        "sha256": "d4d34b22913b607183050d5a4a9255b5f3dd7a47a4a3f92082f4f2d7912939d2",
+        "bytes": 3458
+      },
+      {
+        "path": "build-rt-cts-evidence/mesa-rtp-qualified-2026-10-29/0006-rotation_4-d4fd7cf924.stdout.txt",
+        "sha256": "0e93b537c8822b25325d13fba9b6927871e618aac409b40ed90ee6cfcaf01a78",
+        "bytes": 995
+      },
+      {
+        "path": "build-rt-cts-evidence/mesa-rtp-qualified-2026-10-29/0006-rotation_4-d4fd7cf924.qpa",
+        "sha256": "7db12adf1f96c15cb2033209b7aeb94849e5be4d1d21adcb788674a148ce6b43",
+        "bytes": 11998
+      },
+      {
+        "path": "build-rt-cts-evidence/mesa-rtp-qualified-2026-10-29/0006-rotation_4-d4fd7cf924.guard.jsonl",
+        "sha256": "265b2e4f7fa24b5c6c5f5c3b6ac54a4ea00bdd5f60ffc3bde750a5e75a2f8ab7",
+        "bytes": 3458
+      },
+      {
+        "path": "build-rt-cts-evidence/mesa-rtp-qualified-2026-10-29/0007-object_behind_bounding_boxes-482a7a0efd.stdout.txt",
+        "sha256": "e59740c40e70632c6241339690b02cf3a31ff45b13b0aecb2867b5f1f10048a1",
+        "bytes": 1275
+      },
+      {
+        "path": "build-rt-cts-evidence/mesa-rtp-qualified-2026-10-29/0007-object_behind_bounding_boxes-482a7a0efd.qpa",
+        "sha256": "19a9a2424536308ec2d2ebb8fbc9cd941158c3249275781b34814678d8a43d6f",
+        "bytes": 15689
+      },
+      {
+        "path": "build-rt-cts-evidence/mesa-rtp-qualified-2026-10-29/0007-object_behind_bounding_boxes-482a7a0efd.guard.jsonl",
+        "sha256": "bbd8e6b670ccd57894f85800c3cbb182bcd3526fde7aea35dccf7c5dbebbc2ea",
+        "bytes": 3963
+      },
+      {
+        "path": "build-rt-cts-evidence/mesa-rtp-qualified-2026-10-29/0008-triangle_in_between-db707ab9d6.stdout.txt",
+        "sha256": "b0d1c09b3585f632c4165c27c2936315e3abb8ccb62f9478533764aed721328c",
+        "bytes": 1257
+      },
+      {
+        "path": "build-rt-cts-evidence/mesa-rtp-qualified-2026-10-29/0008-triangle_in_between-db707ab9d6.qpa",
+        "sha256": "c5ec8bfd850eb70827133e39084a56317ba1be48eef670264808865bf3d96908",
+        "bytes": 16941
+      },
+      {
+        "path": "build-rt-cts-evidence/mesa-rtp-qualified-2026-10-29/0008-triangle_in_between-db707ab9d6.guard.jsonl",
+        "sha256": "4b7d987f5ef2ba26d9df4f4f8001948c1080d678b577579609dd0594ca0f435f",
+        "bytes": 3963
+      },
+      {
+        "path": "build-rt-cts-evidence/mesa-rtp-qualified-2026-10-29/0009-aabbs-d9d08a9863.stdout.txt",
+        "sha256": "bad6c0d7f4fb866c7fc4f1a62e243b422332cf1db0fcd9cabb696d8fcadd30eb",
+        "bytes": 1048
+      },
+      {
+        "path": "build-rt-cts-evidence/mesa-rtp-qualified-2026-10-29/0009-aabbs-d9d08a9863.qpa",
+        "sha256": "00fc81cfd6dbfbfa2be022cba440da998d01ff3b3b4f204e29ffa020bba29a8b",
+        "bytes": 19602
+      },
+      {
+        "path": "build-rt-cts-evidence/mesa-rtp-qualified-2026-10-29/0009-aabbs-d9d08a9863.guard.jsonl",
+        "sha256": "d98099b67134c1f8364acf4de2531806835d930c239e7bf4958fe5b16b44d57e",
+        "bytes": 3460
+      },
+      {
+        "path": "build-rt-cts-evidence/mesa-rtp-qualified-2026-10-29/0010-triangles-1e760a1f60.stdout.txt",
+        "sha256": "2db52b7ef9ef310bb7f84ffa1711c7687d2e84fd7d05d7c29a84570f5f235065",
+        "bytes": 1056
+      },
+      {
+        "path": "build-rt-cts-evidence/mesa-rtp-qualified-2026-10-29/0010-triangles-1e760a1f60.qpa",
+        "sha256": "468f0caf13c1d28e108de8b672bb7b641f316a03dfeac7c80c33c1b95e34c0f5",
+        "bytes": 19624
+      },
+      {
+        "path": "build-rt-cts-evidence/mesa-rtp-qualified-2026-10-29/0010-triangles-1e760a1f60.guard.jsonl",
+        "sha256": "ba517527f64fc071bd9e847160c2207e7bd747cfee61806c4f80a5dc40e15778",
+        "bytes": 3460
+      },
+      {
+        "path": "build-rt-cts-evidence/mesa-rtp-qualified-2026-10-29/0011-aabbs-06b51add77.stdout.txt",
+        "sha256": "183528939c7a61c51631dd9bca22f672aca24d4cba5e643c16f6da181307f32a",
+        "bytes": 1045
+      },
+      {
+        "path": "build-rt-cts-evidence/mesa-rtp-qualified-2026-10-29/0011-aabbs-06b51add77.qpa",
+        "sha256": "b1c04f91ee793f51a75d6238ecde5e5de18a08f9f18b3aac3fc163a73eb46c74",
+        "bytes": 19593
+      },
+      {
+        "path": "build-rt-cts-evidence/mesa-rtp-qualified-2026-10-29/0011-aabbs-06b51add77.guard.jsonl",
+        "sha256": "aca2668ddc6793be6d32cd86c6778955a8fd5878aaa994d23831b076b1986c8c",
+        "bytes": 3459
+      },
+      {
+        "path": "build-rt-cts-evidence/mesa-rtp-qualified-2026-10-29/0012-triangles-ad875b86ae.stdout.txt",
+        "sha256": "26dfd3602fdb07dffa7cb3441eae83f96c7f0a3ad41358db420fe23af2a6c683",
+        "bytes": 1053
+      },
+      {
+        "path": "build-rt-cts-evidence/mesa-rtp-qualified-2026-10-29/0012-triangles-ad875b86ae.qpa",
+        "sha256": "63f86c936b9b415f2aba791f7a22740c6fed4d65ccd1cc51ac080e0119c4c72f",
+        "bytes": 19615
+      },
+      {
+        "path": "build-rt-cts-evidence/mesa-rtp-qualified-2026-10-29/0012-triangles-ad875b86ae.guard.jsonl",
+        "sha256": "6857a6c2f849785360a53004703298d0e96c0b74b8386601f8572d0ec8108ac6",
+        "bytes": 3459
+      },
+      {
+        "path": "build-rt-cts-evidence/mesa-rtp-qualified-2026-10-29/0013-aabbs-6798d94352.stdout.txt",
+        "sha256": "979a6b4f90479694d2a8af533c1c8066e212f5111590dfbabfe6ad4546d7d259",
+        "bytes": 1051
+      },
+      {
+        "path": "build-rt-cts-evidence/mesa-rtp-qualified-2026-10-29/0013-aabbs-6798d94352.qpa",
+        "sha256": "4564a524e27947fbb23363d3fe21e2f8c7f1e5dfb526c722762866de05f94d01",
+        "bytes": 19611
+      },
+      {
+        "path": "build-rt-cts-evidence/mesa-rtp-qualified-2026-10-29/0013-aabbs-6798d94352.guard.jsonl",
+        "sha256": "3b7e518f63f85fcbe96f5f09ab1723e5063756156035328ae184ff54432ac51e",
+        "bytes": 3460
+      },
+      {
+        "path": "build-rt-cts-evidence/mesa-rtp-qualified-2026-10-29/0014-triangles-c4083afddb.stdout.txt",
+        "sha256": "9acd817d82091361a9435ca59ee12039c1dc4aa2325a2bbc41492d628fa471cd",
+        "bytes": 1059
+      },
+      {
+        "path": "build-rt-cts-evidence/mesa-rtp-qualified-2026-10-29/0014-triangles-c4083afddb.qpa",
+        "sha256": "907324d3c4cebc4c2c794c78e97c056be21570e78965d81c0e79d97c801eb7a3",
+        "bytes": 19633
+      },
+      {
+        "path": "build-rt-cts-evidence/mesa-rtp-qualified-2026-10-29/0014-triangles-c4083afddb.guard.jsonl",
+        "sha256": "0ef0c58b7a1caba2cadce7533288430018aeba590b8c0f313335648a767ba375",
+        "bytes": 3460
+      },
+      {
+        "path": "build-rt-cts-evidence/mesa-rtp-qualified-2026-10-29/0015-aabbs-fea7963476.stdout.txt",
+        "sha256": "19200f1293b167e6fb8e00fe805618cb5fb8bfa1c99ed5428e9b7f8c011877a5",
+        "bytes": 1048
+      },
+      {
+        "path": "build-rt-cts-evidence/mesa-rtp-qualified-2026-10-29/0015-aabbs-fea7963476.qpa",
+        "sha256": "28a8efadbb3706382991bdacbf02a8f2d910e9e24067003bb5e15782c40a0d02",
+        "bytes": 19602
+      },
+      {
+        "path": "build-rt-cts-evidence/mesa-rtp-qualified-2026-10-29/0015-aabbs-fea7963476.guard.jsonl",
+        "sha256": "61fa95706a063d58c67f3509dc4fced7c11a677c7e4c314f7d01cdf52c3eab50",
+        "bytes": 3459
+      },
+      {
+        "path": "build-rt-cts-evidence/mesa-rtp-qualified-2026-10-29/0016-triangles-18d9439aab.stdout.txt",
+        "sha256": "bc591b141e57d1dbebe15b19452c243cd4e848415dd5f34fbfda8a6a35155430",
+        "bytes": 1056
+      },
+      {
+        "path": "build-rt-cts-evidence/mesa-rtp-qualified-2026-10-29/0016-triangles-18d9439aab.qpa",
+        "sha256": "bd8733f4a417cab1ba30f6e0d2477122cfb8ba53b01cfe2456857a4a032fe88f",
+        "bytes": 19624
+      },
+      {
+        "path": "build-rt-cts-evidence/mesa-rtp-qualified-2026-10-29/0016-triangles-18d9439aab.guard.jsonl",
+        "sha256": "fdc9a57a5b95b760eb5bf4b9af7de6b1eccf116ab2d3af924d20fd1e536a304d",
+        "bytes": 3459
+      },
+      {
+        "path": "build-rt-cts-evidence/mesa-rtp-qualified-2026-10-29/0017-triangles-d475649773.stdout.txt",
+        "sha256": "d96851f92dc3ddf085d84a632ccf2f51cb7da1d42d0deb4715bcfb3e95dff82a",
+        "bytes": 1026
+      },
+      {
+        "path": "build-rt-cts-evidence/mesa-rtp-qualified-2026-10-29/0017-triangles-d475649773.qpa",
+        "sha256": "62e306596c52cfd06729748370c6c246b87966cb867468943796b02a5ad8d010",
+        "bytes": 9804
+      },
+      {
+        "path": "build-rt-cts-evidence/mesa-rtp-qualified-2026-10-29/0017-triangles-d475649773.guard.jsonl",
+        "sha256": "42801ac885cb292db74431a720b83a750ac11f359fac7d62fe46b07fea27a313",
+        "bytes": 3458
+      },
+      {
+        "path": "build-rt-cts-evidence/mesa-rtp-qualified-2026-10-29/0018-triangles-b8a612fc4d.stdout.txt",
+        "sha256": "e9701f63a40889a5f3092c8aa5fb44c70c30022009a27a9d2575e30dae493fe7",
+        "bytes": 1029
+      },
+      {
+        "path": "build-rt-cts-evidence/mesa-rtp-qualified-2026-10-29/0018-triangles-b8a612fc4d.qpa",
+        "sha256": "ebb7239070b41fac4e7bbb05afce8879bf3ba4a0d3043cd4c4646c53f1ada41f",
+        "bytes": 9813
+      },
+      {
+        "path": "build-rt-cts-evidence/mesa-rtp-qualified-2026-10-29/0018-triangles-b8a612fc4d.guard.jsonl",
+        "sha256": "a9ca53dfa61a8ec1e0fee7acb112f1163785b56c7767c1bd45f3a461364c8ccf",
+        "bytes": 3458
+      },
+      {
+        "path": "build-rt-cts-evidence/mesa-rtp-qualified-2026-10-29/0019-s0_l1-7e48286da4.stdout.txt",
+        "sha256": "e97c3f8ea2c2b00408a785f82e78909afb4f986e0a92e520171c1e13227561ec",
+        "bytes": 998
+      },
+      {
+        "path": "build-rt-cts-evidence/mesa-rtp-qualified-2026-10-29/0019-s0_l1-7e48286da4.qpa",
+        "sha256": "c0933ca885686d1ba8326bc4f82653008c293de7c0b2308716ae231ced8ced53",
+        "bytes": 31646
+      },
+      {
+        "path": "build-rt-cts-evidence/mesa-rtp-qualified-2026-10-29/0019-s0_l1-7e48286da4.guard.jsonl",
+        "sha256": "bc182173d6974a602efac28c876933ca4f4e068e6bec5fb0f10251fa83207811",
+        "bytes": 3459
+      },
+      {
+        "path": "build-rt-cts-evidence/mesa-rtp-qualified-2026-10-29/0020-geometry_transform-b16d215aca.stdout.txt",
+        "sha256": "19befd520285e6d7b3f47c302329a92b2154e91a84091f647accaf62211abc95",
+        "bytes": 1030
+      },
+      {
+        "path": "build-rt-cts-evidence/mesa-rtp-qualified-2026-10-29/0020-geometry_transform-b16d215aca.qpa",
+        "sha256": "f5b243cd33ea83fc679a4f3b3906fcd78490cb1af4f1794b1ae604dfcc88806b",
+        "bytes": 19510
+      },
+      {
+        "path": "build-rt-cts-evidence/mesa-rtp-qualified-2026-10-29/0020-geometry_transform-b16d215aca.guard.jsonl",
+        "sha256": "8023bc645b4757c8943fb245e4721da04890601dda923547b14f2452368d9441",
+        "bytes": 3459
+      },
+      {
+        "path": "build-rt-cts-evidence/mesa-rtp-qualified-2026-10-29/0021-v3uint64-8dd4a670a2.stdout.txt",
+        "sha256": "3d91368b93459b5a0b421bc8ddd9ef1f5737d7e9cf15ad2e1726a7f1644a84a2",
+        "bytes": 964
+      },
+      {
+        "path": "build-rt-cts-evidence/mesa-rtp-qualified-2026-10-29/0021-v3uint64-8dd4a670a2.qpa",
+        "sha256": "522f001c649993e60a2833ab31c4307d765eb09cdccdfc2becf8f23bd5d4699e",
+        "bytes": 12914
+      },
+      {
+        "path": "build-rt-cts-evidence/mesa-rtp-qualified-2026-10-29/0021-v3uint64-8dd4a670a2.guard.jsonl",
+        "sha256": "bb065024b67e4ef70ccc0bd8215bdf35f06527556cb189eff2249fd7826dd8fb",
+        "bytes": 3458
+      },
+      {
+        "path": "build-rt-cts-evidence/mesa-rtp-qualified-2026-10-29/0022-v3uint64-881d824867.stdout.txt",
+        "sha256": "35d251a8daed4707d64b6de7f4fd72d64064abf77be4d489316aeef1eb0c7a93",
+        "bytes": 971
+      },
+      {
+        "path": "build-rt-cts-evidence/mesa-rtp-qualified-2026-10-29/0022-v3uint64-881d824867.qpa",
+        "sha256": "a517673dc0b1fa14cf5fc0d2b969632a8c46b170d0070ffe60aaf7ad59ea5838",
+        "bytes": 12649
+      },
+      {
+        "path": "build-rt-cts-evidence/mesa-rtp-qualified-2026-10-29/0022-v3uint64-881d824867.guard.jsonl",
+        "sha256": "d1ca31941a28bd557c8ca9b2ca4c7d3ae7c955786617cbb61a6145942bde21a1",
+        "bytes": 3458
+      },
+      {
+        "path": "build-rt-cts-evidence/mesa-rtp-qualified-2026-10-29/0023-a5float64-4c9b402c2a.stdout.txt",
+        "sha256": "b20fb19196427a54256ea3d1412b64b92a52e96f8d87bfcc9bf90d3dbc3edf1f",
+        "bytes": 976
+      },
+      {
+        "path": "build-rt-cts-evidence/mesa-rtp-qualified-2026-10-29/0023-a5float64-4c9b402c2a.qpa",
+        "sha256": "110064feb76817ecd44e2dcece4b01a4d541c2842721e3ad5c339e93f79db41b",
+        "bytes": 16776
+      },
+      {
+        "path": "build-rt-cts-evidence/mesa-rtp-qualified-2026-10-29/0023-a5float64-4c9b402c2a.guard.jsonl",
+        "sha256": "f777eebe5e1abc8dc14d611b55ed4b7353fc4e9c65a8b2e335fb564c2290fd63",
+        "bytes": 3458
+      },
+      {
+        "path": "build-rt-cts-evidence/mesa-rtp-qualified-2026-10-29/0024-sampler-2987447cfc.stdout.txt",
+        "sha256": "b9f94dc5d9e11978cb40746663fd0d50ba52fe7c9b01a4432d5d1f04569cbc09",
+        "bytes": 962
+      },
+      {
+        "path": "build-rt-cts-evidence/mesa-rtp-qualified-2026-10-29/0024-sampler-2987447cfc.qpa",
+        "sha256": "df6fd08b816fac660180e70eff086162bec6b701a0c4672677e06d98a174bdda",
+        "bytes": 15801
+      },
+      {
+        "path": "build-rt-cts-evidence/mesa-rtp-qualified-2026-10-29/0024-sampler-2987447cfc.guard.jsonl",
+        "sha256": "d3095c907ebf7699bad6780d6474fb4887f0b63ed1ffdb5177e6215a56e09a66",
+        "bytes": 3458
+      }
+    ]
+  },
+  "retained_observations": [
+    {
+      "path": "build-mesa-rtp-2026-10-28/gpu-before/summary.json",
+      "sha256": "21ea641dc39342f8d5fa5adb8deaeb35200be69873f4585630730495840cdf95",
+      "bytes": 11487
+    },
+    {
+      "path": "build-mesa-rtp-2026-10-28/gpu-integrated/summary.json",
+      "sha256": "f972253e2027c264f78e4812965131087dde6e66d29f8a484f3366d346e9e58d",
+      "bytes": 20508
+    },
+    {
+      "path": "build-mesa-rtp-2026-10-28/gpu-final/summary.json",
+      "sha256": "45baa6829ee985728466ee690a1e48132b5b3d3875d4835895defcd18a621ecd",
+      "bytes": 20423
+    },
+    {
+      "path": "build-rt-cts-evidence/mesa-rtp-diagnostic-before-2026-10-28/summary.json",
+      "sha256": "ce972173bd7439fb69fd1b17227f02ad8d43c9db237bd81eface51cf199411f8",
+      "bytes": 40300
+    },
+    {
+      "path": "build-rt-cts-evidence/mesa-rtp-final-2026-10-28/summary.json",
+      "sha256": "521cbb14c830032b5bc4f34c278852e135621003c7f9150338e6926d525b2e9b",
+      "bytes": 122917
+    }
+  ],
+  "final_library": {
+    "path": "build-raytracing-unified/layers/VkLayer_VKRT_SOFTWARE_RAY_QUERY.dll",
+    "sha256": "e00127c5efc03924497ea70c666a1dd01afbddd87fe5f08f08f4033828a6af78",
+    "bytes": 7372800
+  },
+  "remaining": [
+    "Physical pointer-bearing cross-stage payload/callable metadata and source VulkanMemoryModel",
+    "Full native query-statistic/logical-stage synchronization semantics",
+    "Protected/device-group qualification",
+    "Complete public/private resource delivery, heaps and limits",
+    "Builder variants/count/numerical qualification",
+    "Physical no-RT, cross-vendor and POSIX qualification"
+  ]
+}

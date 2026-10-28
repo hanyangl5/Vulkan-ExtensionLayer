@@ -14,7 +14,7 @@ static unsigned library_mode;
 /* 1: push writes, 2: update templates, 3: descriptor-buffer offsets. */
 static unsigned descriptor_mode;
 static bool separate_compute, descriptor_core;
-static bool debug_names_mode, vulkan11_mode;
+static bool debug_names_mode, vulkan11_mode, physical_source_mode;
 static bool private_data_mode, private_core, private_extension;
 #include <vulkan/vulkan.h>
 #if VK_USE_64_BIT_PTR_DEFINES
@@ -245,6 +245,12 @@ static VkResult create_device(VkPhysicalDevice physical, const VkDeviceCreateInf
         queue_info.queueCount = 2;
         queue_info.pQueuePriorities = priorities;
         local.pQueueCreateInfos = &queue_info;
+    }
+    VkPhysicalDeviceFeatures enabled_core = info->pEnabledFeatures ? *info->pEnabledFeatures : (VkPhysicalDeviceFeatures){0};
+    if (physical_source_mode) {
+        if (!features.features.shaderInt64) exit(77);
+        enabled_core.shaderInt64 = VK_TRUE;
+        local.pEnabledFeatures = &enabled_core;
     }
     VkResult result = vkCreateDevice(physical, &local, a, out);
     if (result == VK_SUCCESS && two_queues) vkGetDeviceQueue(*out, queue_info.queueFamilyIndex, 1, &second_queue);
@@ -496,7 +502,12 @@ static void bind_compute_descriptors(VkCommandBuffer command, VkPipelineLayout l
     }
 }
 #include "rtp_nested_fixture.h"
+#include "rtp_physical_source_fixture.h"
 int main(int argc, char **argv) {
+    if (argc == 4 && !strcmp(argv[3], "--physical-source")) {
+        physical_source_mode = vulkan11_mode = true;
+        return run_physical_source_fixture(argv[1], argv[2]);
+    }
     if (argc == 5 && !strcmp(argv[4], "--nested-trace")) {
         vulkan11_mode = true;
         return run_nested_trace_fixture(argv[1], argv[2], argv[3]);

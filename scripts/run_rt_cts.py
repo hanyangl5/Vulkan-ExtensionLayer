@@ -167,7 +167,7 @@ def run_environment(mode, snapshot, validation_dir=None, guard_dir=None, mask_na
     if zero_timestamps:
         overrides["VKRT_NO_RT_GUARD_ZERO_TIMESTAMPS"] = "1"
     for key in ("VKRT_NO_RT_GUARD_LOG", "VKRT_NO_RT_GUARD_MASK_DISCOVERY", "VKRT_NO_RT_GUARD_DISPATCH_LIMITS",
-                "VKRT_NO_RT_GUARD_ZERO_TIMESTAMPS"):
+                "VKRT_NO_RT_GUARD_ZERO_TIMESTAMPS", "VKRT_NO_RT_GUARD_MEMORY_COUNT"):
         if key in env:
             removed[key] = env.pop(key)
     env.update(overrides)

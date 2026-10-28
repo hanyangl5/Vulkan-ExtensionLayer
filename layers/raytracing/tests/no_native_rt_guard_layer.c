@@ -42,6 +42,7 @@ struct guard_dispatch {
     PFN_GetPhysicalDeviceProcAddr gpdpa;
     PFN_vkGetDeviceProcAddr gdpa;
     uint32_t dispatch_limits[3];
+    struct guard_memory_device *memory;
     struct guard_dispatch *next;
 };
 static struct guard_dispatch *guard_instances, *guard_devices;
@@ -55,6 +56,10 @@ static int guard_mask_discovery;
 static int guard_zero_timestamps;
 static uint64_t guard_queue_family_queries, guard_zero_timestamp_families, guard_timestamp_write_attempts;
 static uint64_t guard_timestamp_properties_queries, guard_event_signals, guard_event_status_queries;
+/* Explicit test profile at Vulkan's mandatory minimum, never a private quota. */
+static int guard_memory_count;
+static uint64_t guard_memory_properties, guard_memory_attempts, guard_memory_allocations, guard_memory_frees;
+static uint64_t guard_memory_peak, guard_memory_live;
 static int guard_configured;
 static const char *guard_log_path;
 static uint64_t guard_pid;
@@ -147,6 +152,13 @@ static int guard_record(const char *event, const char *kind, const char *detail)
                                           : "execution-only",
             guard_checked_calls, guard_rejected_calls, guard_device_creates, guard_shader_definitions);
     if (guard_mask_discovery) fprintf(file, ",\"discovery_mask_version\":1");
+    if (guard_memory_count)
+        fprintf(file,
+                ",\"memory_count_version\":1,\"memory_count_limit\":4096,\"memory_properties\":%" PRIu64
+                ",\"memory_attempts\":%" PRIu64 ",\"memory_allocations\":%" PRIu64 ",\"memory_frees\":%" PRIu64
+                ",\"memory_peak\":%" PRIu64 ",\"memory_live\":%" PRIu64,
+                guard_memory_properties, guard_memory_attempts, guard_memory_allocations, guard_memory_frees, guard_memory_peak,
+                guard_memory_live);
     if (guard_zero_timestamps)
         fprintf(file,
                 ",\"zero_timestamp_version\":1,\"rt_boundary_enforced\":%s,\"queue_family_queries\":%" PRIu64
@@ -180,9 +192,17 @@ static int guard_configure(void) {
         guard_mask_discovery = mask && !strcmp(mask, "1");
         const char *zero = getenv("VKRT_NO_RT_GUARD_ZERO_TIMESTAMPS");
         guard_zero_timestamps = zero && !strcmp(zero, "1");
+        const char *memory = getenv("VKRT_NO_RT_GUARD_MEMORY_COUNT");
+        guard_memory_count = memory && !strcmp(memory, "4096");
+        if (memory && *memory && !guard_memory_count) {
+            guard_unlock();
+            fprintf(stderr, "VKRT guard memory count profile requires exactly 4096\n");
+            return 0;
+        }
         const char *dispatch = getenv("VKRT_NO_RT_GUARD_DISPATCH_LIMITS");
         if (dispatch && *dispatch) {
-            if (guard_mask_discovery || guard_zero_timestamps || !guard_parse_dispatch_limits(dispatch, guard_dispatch_limits)) {
+            if (guard_mask_discovery || guard_zero_timestamps || guard_memory_count ||
+                !guard_parse_dispatch_limits(dispatch, guard_dispatch_limits)) {
                 guard_unlock();
                 fprintf(stderr,
                         "VKRT guard dispatch limits require three positive decimal uint32 values and no discovery/zero-timestamp "
@@ -320,6 +340,8 @@ static VKAPI_ATTR void VKAPI_CALL guard_DestroyInstance(VkInstance instance, con
     if (!ok) _Exit(87);
 }
 
+#include "no_native_rt_guard_memory.inc"
+
 static VKAPI_ATTR VkResult VKAPI_CALL guard_CreateDevice(VkPhysicalDevice physical, const VkDeviceCreateInfo *info,
                                                          const VkAllocationCallbacks *allocator, VkDevice *device) {
     for (uint32_t i = 0; i < info->enabledExtensionCount; ++i)
@@ -340,11 +362,17 @@ static VKAPI_ATTR VkResult VKAPI_CALL guard_CreateDevice(VkPhysicalDevice physic
     if (!create) return VK_ERROR_INITIALIZATION_FAILED;
     struct guard_dispatch *data = calloc(1, sizeof(*data));
     if (!data) return VK_ERROR_OUT_OF_HOST_MEMORY;
+    struct guard_memory_device *memory = guard_memory_count ? calloc(1, sizeof(*memory)) : NULL;
+    if (guard_memory_count && !memory) {
+        free(data);
+        return VK_ERROR_OUT_OF_HOST_MEMORY;
+    }
     uint32_t dispatch_limits[3] = {0};
     if (guard_force_dispatch_limits) {
         PFN_vkGetPhysicalDeviceProperties properties_proc =
             parent.gipa ? (PFN_vkGetPhysicalDeviceProperties)parent.gipa(parent.instance, "vkGetPhysicalDeviceProperties") : NULL;
         if (!properties_proc) {
+            free(memory);
             free(data);
             return VK_ERROR_INITIALIZATION_FAILED;
         }
@@ -354,6 +382,7 @@ static VKAPI_ATTR VkResult VKAPI_CALL guard_CreateDevice(VkPhysicalDevice physic
         for (uint32_t axis = 0; axis < 3; ++axis) {
             dispatch_limits[axis] = properties.limits.maxComputeWorkGroupCount[axis];
             if (!dispatch_limits[axis]) {
+                free(memory);
                 free(data);
                 return VK_ERROR_INITIALIZATION_FAILED;
             }
@@ -362,12 +391,14 @@ static VKAPI_ATTR VkResult VKAPI_CALL guard_CreateDevice(VkPhysicalDevice physic
     link->u.pLayerInfo = link->u.pLayerInfo->pNext;
     VkResult result = create(physical, info, allocator, device);
     if (result != VK_SUCCESS) {
+        free(memory);
         free(data);
         return result;
     }
     *data = (struct guard_dispatch){.key = guard_key(*device),
                                     .device = *device,
                                     .gdpa = gdpa,
+                                    .memory = memory,
                                     .dispatch_limits = {dispatch_limits[0], dispatch_limits[1], dispatch_limits[2]}};
     guard_insert(data, 1);
     guard_lock();
@@ -380,6 +411,7 @@ static VKAPI_ATTR VkResult VKAPI_CALL guard_CreateDevice(VkPhysicalDevice physic
 }
 
 static VKAPI_ATTR void VKAPI_CALL guard_DestroyDevice(VkDevice device, const VkAllocationCallbacks *allocator) {
+    guard_memory_device_finish(device);
     PFN_vkDestroyDevice destroy = GUARD_NEXT(DestroyDevice, device, "DestroyDevice");
     if (destroy) destroy(device, allocator);
     guard_remove(device, 1);
@@ -412,6 +444,7 @@ static VKAPI_ATTR void VKAPI_CALL guard_GetPhysicalDeviceProperties2(VkPhysicalD
     if (next) next(physical, properties);
     guard_clamp_dispatch_limits(&properties->properties);
     guard_zero_timestamp_properties(&properties->properties);
+    guard_memory_properties_profile(&properties->properties);
     if (guard_mask_discovery) guard_mask_properties(properties->pNext);
 }
 
@@ -423,6 +456,7 @@ static VKAPI_ATTR void VKAPI_CALL guard_GetPhysicalDeviceProperties(VkPhysicalDe
     if (next) next(physical, properties);
     guard_clamp_dispatch_limits(properties);
     guard_zero_timestamp_properties(properties);
+    guard_memory_properties_profile(properties);
 }
 
 static void guard_note_zero_queue_families(uint32_t families) {
@@ -996,6 +1030,10 @@ static PFN_vkVoidFunction guard_proc(const char *name) {
     ENTRY(CmdSetEvent);
     ENTRY(CmdSetEvent2);
     ENTRY(GetEventStatus);
+    if (guard_memory_count) {
+        ENTRY(AllocateMemory);
+        ENTRY(FreeMemory);
+    }
     if (!strcmp(name, "vkGetPhysicalDeviceProperties2KHR")) return (PFN_vkVoidFunction)guard_GetPhysicalDeviceProperties2;
     if (!strcmp(name, "vkGetPhysicalDeviceQueueFamilyProperties2KHR"))
         return (PFN_vkVoidFunction)guard_GetPhysicalDeviceQueueFamilyProperties2;

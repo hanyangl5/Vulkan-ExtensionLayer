@@ -255,8 +255,13 @@ class FramePlanner {
                 if (!visiting.insert(value).second) throw std::runtime_error("Cyclic continuation rematerialization");
                 const auto &i = Definition(value);
                 const auto &type = Definition(i.type);
-                if (!IsReference(type.op) ||
-                    (options.acceleration_structure_addresses && type.op == spv::OpTypeAccelerationStructureKHR)) {
+                if (std::find(options.physical_pointer_recipes.begin(), options.physical_pointer_recipes.end(), value) !=
+                    options.physical_pointer_recipes.end()) {
+                    suspension.rematerializations.push_back({value, i.type, i.offset, {}});
+                } else if (!IsReference(type.op) ||
+                           (options.physical_pointer_addresses && type.op == spv::OpTypePointer &&
+                            type.words.at(2) == spv::StorageClassPhysicalStorageBuffer) ||
+                           (options.acceleration_structure_addresses && type.op == spv::OpTypeAccelerationStructureKHR)) {
                     AddSlot(frame, value, i.type, false);
                     suspension.saved_values.push_back(value);
                 } else if (i.op == spv::OpVariable) {
@@ -376,7 +381,11 @@ class FramePlanner {
         if (!laying_out.insert(id).second) throw std::runtime_error("Recursive continuation frame type");
         const auto &type = Definition(id);
         ContinuationTypeLayout result{id, 0, 1, 0, {}};
-        if (type.op == spv::OpTypePointer && type.words.at(2) == spv::StorageClassStorageBuffer && options.logical_pointer_words) {
+        if (type.op == spv::OpTypePointer && type.words.at(2) == spv::StorageClassPhysicalStorageBuffer &&
+            options.physical_pointer_addresses) {
+            result.size = result.alignment = 8;
+        } else if (type.op == spv::OpTypePointer && type.words.at(2) == spv::StorageClassStorageBuffer &&
+                   options.logical_pointer_words) {
             result.size = CheckedMultiply(options.logical_pointer_words, 4);
             result.alignment = 4;
         } else if (type.op == spv::OpTypeAccelerationStructureKHR && options.acceleration_structure_addresses) {

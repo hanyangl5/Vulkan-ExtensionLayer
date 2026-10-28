@@ -1,0 +1,48 @@
+// Copyright 2026 The Khronos Group Inc.
+// SPDX-License-Identifier: Apache-2.0
+#version 460
+#extension GL_EXT_ray_tracing : require
+#extension GL_EXT_buffer_reference2 : require
+#extension GL_EXT_shader_explicit_arithmetic_types_int64 : require
+#extension GL_GOOGLE_include_directive : require
+#include "rtp_physical_source_common.glsl"
+layout(location = 0) callableDataEXT uvec4 callData;
+SourceRecord privateRecords[3];
+void main() {
+    uint id = gl_LaunchIDEXT.x + gl_LaunchSizeEXT.x * (gl_LaunchIDEXT.y + gl_LaunchSizeEXT.y * gl_LaunchIDEXT.z);
+    SourceRecords records = SourceRecords(sourcePush.records);
+    SourceRecord saved = records.rec[id];
+    SourcePointerPair pointers = SourcePointerPair(sourcePush.records + uint64_t(id) * 24ul);
+    SourceWideData savedPointers[2] = pointers.pair;
+    SourceRecord locals[3];
+    uint slot = id % 3u;
+    locals[slot] = saved;
+    privateRecords[(slot + 1u) % 3u] = saved;
+    SourceData chosen = (id & 1u) == 0u ? saved.a : saved.b;
+    callData = uvec4(id, 0u, sourcePush.seed, 0u);
+    executeCallableEXT(0, 0);
+    SourceData(uint64_t(savedPointers[0])).v[saved.index + 3u] += 5u;
+    SourceData(uint64_t(savedPointers[1])).v[saved.index + 3u] += 7u;
+    SourceWideData freshPointers[2] = pointers.pair;
+    pointers.pair = freshPointers;
+    chosen.v[saved.index + 2u] += 1000u;
+    SourceRecord fresh = records.rec[id];
+    uint base = id * 16u;
+    SourceOutput outputData = SourceOutput(sourcePush.outputAddress);
+    outputData.v[base + 0u] = saved.a.v[saved.index];
+    outputData.v[base + 1u] = saved.b.v[saved.index];
+    outputData.v[base + 2u] = saved.a.v[saved.index + 1u];
+    outputData.v[base + 3u] = saved.b.v[saved.index + 1u];
+    outputData.v[base + 4u] = saved.a.v[saved.index + 2u];
+    outputData.v[base + 5u] = saved.b.v[saved.index + 2u];
+    outputData.v[base + 6u] = fresh.a.v[saved.index];
+    outputData.v[base + 7u] = fresh.b.v[saved.index];
+    outputData.v[base + 8u] = chosen.v[saved.index];
+    outputData.v[base + 9u] = locals[slot].a.v[saved.index];
+    outputData.v[base + 10u] = privateRecords[(slot + 1u) % 3u].b.v[saved.index];
+    outputData.v[base + 11u] = callData.w;
+    outputData.v[base + 12u] = id;
+    outputData.v[base + 13u] = sourcePush.seed;
+    outputData.v[base + 14u] = saved.index;
+    outputData.v[base + 15u] = 0x42504441u;
+}

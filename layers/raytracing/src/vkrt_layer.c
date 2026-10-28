@@ -10,6 +10,7 @@
  */
 
 #include "vkrt_layer.h"
+#include "vkrt_memory_allocations.h"
 #include "vkrt_descriptor_template.h"
 #include "vkrt_debug_objects.h"
 #include "vkrt_execution_replay.h"
@@ -255,6 +256,7 @@ vkrt_CreateDevice(VkPhysicalDevice physicalDevice,
    }
    result = vkrt_deferred_init(data, pAllocator);
    if (result == VK_SUCCESS) result = vkrt_debug_objects_init(data, pAllocator, debug_object_owns);
+   if (result == VK_SUCCESS) result = vkrt_memory_allocations_init(data, pAllocator);
    if (result == VK_SUCCESS && data->virtual_rt) {
        result = vkrt_as_registry_init(data, pAllocator);
        if (result == VK_SUCCESS) result = vkrt_build_init(data);
@@ -288,6 +290,7 @@ vkrt_CreateDevice(VkPhysicalDevice physicalDevice,
       vkrt_shader_interface_finish(data);
       vkrt_as_registry_finish(data);
       vkrt_private_pool_finish(data);
+      vkrt_memory_allocations_finish(data);
       vkrt_debug_objects_finish(data);
       data->vtable.DestroyDevice(*pDevice, pAllocator);
       *pDevice = VK_NULL_HANDLE;
@@ -334,6 +337,7 @@ vkrt_DestroyDevice(VkDevice device, const VkAllocationCallbacks *pAllocator)
    vkrt_shader_interface_finish(data);
    vkrt_as_registry_finish(data);
    vkrt_private_pool_finish(data);
+   vkrt_memory_allocations_finish(data);
    vkrt_debug_objects_finish(data);
    data->vtable.DestroyDevice(device, pAllocator);
    /* Remove device and queue aliases before releasing their shared owner. */
@@ -722,6 +726,7 @@ vkrt_find_device_fn(const char *name)
         {"vkCreateDescriptorPool", (void *)vkrt_CreateDescriptorPool},
         {"vkUpdateDescriptorSets", (void *)vkrt_UpdateDescriptorSets},
         {"vkAllocateMemory", (void *)vkrt_AllocateMemory},
+        {"vkFreeMemory", (void *)vkrt_FreeMemory},
         {"vkCreateAccelerationStructureKHR", (void *)vkrt_CreateAccelerationStructureKHR},
         {"vkDestroyAccelerationStructureKHR", (void *)vkrt_DestroyAccelerationStructureKHR},
         {"vkGetAccelerationStructureBuildSizesKHR", (void *)vkrt_GetAccelerationStructureBuildSizesKHR},

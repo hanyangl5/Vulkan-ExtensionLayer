@@ -26,6 +26,8 @@ static bool replaying;
 static const char *last_resolved;
 struct VkCudaLaunchInfoNV;
 static const void *expected_opaque_pointer;
+static bool strict_query_route;
+static unsigned query_route_step;
 
 struct vkrt_replay_context *vkrt_replay_lookup_context(VkCommandBuffer command) {
     ++lookups;
@@ -179,9 +181,37 @@ static VKAPI_ATTR void VKAPI_CALL unavailable_graph(VkCommandBuffer command, VkD
     assert(scratch == UINT64_C(0x123456789abcdef0) && scratch_size == UINT64_C(0x100000002) &&
            count_info == UINT64_C(0x777788889999aaaa));
 }
+static void query_route(VkCommandBuffer command, VkQueryPool pool, uint32_t query, unsigned step) {
+    called(command);
+    if (strict_query_route) {
+        assert(pool == HANDLE(VkQueryPool, 95) && query == 7 && query_route_step == step);
+        ++query_route_step;
+    }
+}
+static VKAPI_ATTR void VKAPI_CALL begin_query(VkCommandBuffer command, VkQueryPool pool, uint32_t query,
+                                              VkQueryControlFlags flags) {
+    if (strict_query_route) assert(!flags);
+    query_route(command, pool, query, 0);
+}
+static VKAPI_ATTR void VKAPI_CALL end_query(VkCommandBuffer command, VkQueryPool pool, uint32_t query) {
+    query_route(command, pool, query, 1);
+}
+static VKAPI_ATTR void VKAPI_CALL begin_query_indexed(VkCommandBuffer command, VkQueryPool pool, uint32_t query,
+                                                      VkQueryControlFlags flags, uint32_t index) {
+    if (strict_query_route) assert(!flags && index == 0);
+    query_route(command, pool, query, 2);
+}
+static VKAPI_ATTR void VKAPI_CALL end_query_indexed(VkCommandBuffer command, VkQueryPool pool, uint32_t query, uint32_t index) {
+    if (strict_query_route) assert(index == 0);
+    query_route(command, pool, query, 3);
+}
 static PFN_vkVoidFunction resolve(void *user, const char *name) {
     (void)user;
     last_resolved = name;
+    if (!strcmp(name, "vkCmdBeginQuery")) return (PFN_vkVoidFunction)begin_query;
+    if (!strcmp(name, "vkCmdEndQuery")) return (PFN_vkVoidFunction)end_query;
+    if (!strcmp(name, "vkCmdBeginQueryIndexedEXT")) return (PFN_vkVoidFunction)begin_query_indexed;
+    if (!strcmp(name, "vkCmdEndQueryIndexedEXT")) return (PFN_vkVoidFunction)end_query_indexed;
     if (!strcmp(name, "vkCmdPipelineBarrier2KHR")) return (PFN_vkVoidFunction)barrier;
     if (!strcmp(name, "vkCmdPipelineBarrier2")) return (PFN_vkVoidFunction)ignore_barrier;
     if (!strcmp(name, "vkCmdBuildAccelerationStructuresKHR")) return (PFN_vkVoidFunction)build;
@@ -512,6 +542,28 @@ static void test_stride_and_selector(void) {
     replay(NULL);
 }
 
+static void test_query_scope_routes(void) {
+    reset();
+    strict_query_route = true;
+    query_route_step = 0;
+    const VkQueryPool pool = HANDLE(VkQueryPool, 95);
+    ((PFN_vkCmdBeginQuery)vkrt_replay_proc("vkCmdBeginQuery"))(source_command, pool, 7, 0);
+    ((PFN_vkCmdEndQuery)vkrt_replay_proc("vkCmdEndQuery"))(source_command, pool, 7);
+    ((PFN_vkCmdBeginQueryIndexedEXT)vkrt_replay_proc("vkCmdBeginQueryIndexedEXT"))(source_command, pool, 7, 0, 0);
+    ((PFN_vkCmdEndQueryIndexedEXT)vkrt_replay_proc("vkCmdEndQueryIndexedEXT"))(source_command, pool, 7, 0);
+    assert(query_route_step == 4 && record_calls == 4 && vkrt_replay_journal_count(source_context.journal) == 4);
+    for (unsigned i = 0; i < 4; ++i) {
+        const struct vkrt_replay_metadata metadata = metadata_at(i);
+        assert(metadata.kind == (i % 2 ? VKRT_REPLAY_QUERY_END : VKRT_REPLAY_QUERY_BEGIN) && metadata.data.query.pool == pool &&
+               metadata.data.query.first == 7 && metadata.data.query.index == 0);
+    }
+    for (unsigned occurrence = 0; occurrence < 2; ++occurrence) {
+        query_route_step = 0;
+        replay(NULL);
+        assert(query_route_step == 4 && emit_calls == (occurrence + 1) * 4);
+    }
+    strict_query_route = false;
+}
 static void test_query_metadata(void) {
     reset();
     const VkQueryPool pool = HANDLE(VkQueryPool, 91);
@@ -1021,6 +1073,7 @@ int main(void) {
     test_children();
     test_stride_and_selector();
     test_query_metadata();
+    test_query_scope_routes();
     test_virtual_work_metadata();
     test_sync_metadata();
     test_state_work_and_scope_metadata();

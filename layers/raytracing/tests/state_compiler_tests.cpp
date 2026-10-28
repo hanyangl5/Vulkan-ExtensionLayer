@@ -2,6 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 #include "state_compiler.h"
 #include "typed_pipeline.h"
+#include "typed_runtime.h"
+#include "glsl_compiler.h"
 #include "cts_raytmax_intersection_fixture.h"
 #include <spirv-tools/libspirv.hpp>
 #include <spirv/unified1/spirv.hpp>
@@ -1601,6 +1603,7 @@ void VerifyPayload(const uint32_t *value, const uint32_t *array, uint32_t result
     Require(std::equal(array, array + 3, value + 3), "Aggregate/local alias state mismatch");
     Require(value[6] == 1 && value[7] == result, "Aggregate bool/result mismatch");
 }
+#include "state_physical_pointer_tests.h"
 }  // namespace
 
 int main(int argc, char **argv) {
@@ -1626,6 +1629,7 @@ int main(int argc, char **argv) {
             return 0;
         }
         BoundariesAndSourcePreservation();
+        PhysicalSourceSemantics();
         LargeDescriptorResourceTypes();
         ResourceValueTypes();
         SourcePrivateFrameBounds();
