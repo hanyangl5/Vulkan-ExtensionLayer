@@ -55,6 +55,10 @@ struct ContinuationFrameCodecs {
 // source CFG, pointer recipes, calls, RT operations, or suspension return ABI.
 // Each planned suspension also gets a spill(base_word, saved SSA values...)
 // and restore(base_word)->typed struct function; empty restore sets return void.
+// With logical_pointer_words, StorageBuffer pointer values use the owning
+// compiler's numeric identity record, including within Function/Private
+// aggregates. Its size is unrelated to native logical pointer size or bits.
+// Array codecs use dynamic loops rather than an element-count unroll limit.
 // It is an executable backend component, not a complete RT shader compiler.
 ContinuationFrameCodecs EmitContinuationFrameCodecs(const std::vector<uint32_t> &spirv, const std::string &entry,
                                                     uint32_t execution_model, uint32_t descriptor_set, uint32_t binding,

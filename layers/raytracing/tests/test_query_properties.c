@@ -200,22 +200,63 @@ static struct vkrt_query_format_args format_args(unsigned variant, const struct 
     return args;
 }
 
-static void verify(const struct built *blas, const struct built *tlas, unsigned execution, const struct gpu_buf *slots,
-                   const struct gpu_buf *formatted, const struct gpu_buf *destination) {
+static void verify(const struct built *blas, const struct built *tlas, const VkAccelerationStructureInstanceKHR input[3],
+                   unsigned execution, const struct gpu_buf *slots, const struct gpu_buf *formatted,
+                   const struct gpu_buf *destination) {
     VelRtBvh4Header b, t;
     memcpy(&b, (uint8_t *)blas->output.mapped + 256, sizeof(b));
     memcpy(&t, (uint8_t *)tlas->output.mapped + 256, sizeof(t));
+    /* Mask-zero instances remain active, degenerate leaves. Only null BLAS
+     * references are inactive; the runtime retains the others so UPDATE can
+     * change their mask without changing the original topology/ID mapping.
+     * Derive the property oracle from the fixture inputs, not GPU headers. */
+    uint32_t expected_instances = 0, unmasked_instances = 0;
+    REQUIRE(tlas->range.primitiveCount == 3);
+    for (unsigned i = 0; i < 3; ++i) {
+        expected_instances += input[i].accelerationStructureReference != 0;
+        unmasked_instances += input[i].accelerationStructureReference != 0 && input[i].mask != 0;
+    }
+    REQUIRE(expected_instances == 3 && unmasked_instances == 2 - execution);
+    printf(
+        "BVH4 headers resubmit%u: BLAS magic=%08x version=%u type=%u flags=%08x size=%llu required=%llu capacity=%llu "
+        "triangles=%u; TLAS magic=%08x version=%u type=%u flags=%08x size=%llu required=%llu capacity=%llu "
+        "root=%08x nodes=%u instances=%u expected=%u unmasked=%u\n",
+        execution, b.magic, b.version, b.type, b.flags, (unsigned long long)b.total_size, (unsigned long long)blas->required,
+        (unsigned long long)blas->capacity, b.triangle_count, t.magic, t.version, t.type, t.flags, (unsigned long long)t.total_size,
+        (unsigned long long)tlas->required, (unsigned long long)tlas->capacity, t.root_id, t.node_count, t.instance_count,
+        expected_instances, unmasked_instances);
     REQUIRE(b.magic == VEL_RT_BVH4_MAGIC && b.version == VEL_RT_BVH4_ABI_VERSION && b.flags == 0);
     REQUIRE(t.magic == VEL_RT_BVH4_MAGIC && t.version == VEL_RT_BVH4_ABI_VERSION && t.flags == 0);
+    REQUIRE(b.type == VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR && t.type == VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR);
     REQUIRE(b.total_size == blas->required && b.total_size < blas->capacity && b.triangle_count == 2);
-    REQUIRE(t.total_size == tlas->required && t.total_size < tlas->capacity && t.instance_count == 2 - execution);
-    uint64_t values[9] = {b.total_size,
-                          vkrt_as_serialization_size(b.total_size, 0),
-                          b.total_size,
-                          t.total_size,
-                          vkrt_as_serialization_size(t.total_size, t.instance_count),
-                          t.instance_count,
-                          t.total_size,
+    REQUIRE(t.total_size == tlas->required && t.total_size < tlas->capacity && t.instance_count == expected_instances);
+    bool records_fit = t.instance_offset >= sizeof(t) && t.instance_offset <= tlas->required &&
+                       (uint64_t)expected_instances * sizeof(VelRtBvh4Instance) <= tlas->required - t.instance_offset;
+    REQUIRE(records_fit);
+    if (records_fit && t.instance_count == expected_instances) {
+        bool seen[3] = {false};
+        for (uint32_t i = 0; i < expected_instances; ++i) {
+            VelRtBvh4Instance record;
+            memcpy(&record, (const uint8_t *)tlas->output.mapped + 256 + t.instance_offset + i * sizeof(record), sizeof(record));
+            REQUIRE(record.instance_id < 3);
+            if (record.instance_id >= 3) continue;
+            const uint32_t id = record.instance_id;
+            REQUIRE(!seen[id] && input[id].accelerationStructureReference != 0);
+            seen[id] = true;
+            REQUIRE(record.custom_index_mask == (input[id].instanceCustomIndex | ((uint32_t)input[id].mask << 24)));
+            REQUIRE(record.sbt_offset_flags ==
+                    (input[id].instanceShaderBindingTableRecordOffset | ((uint32_t)input[id].flags << 24)));
+            REQUIRE(record.blas_public_address == input[id].accelerationStructureReference);
+        }
+        for (unsigned i = 0; i < 3; ++i) REQUIRE(seen[i] == (input[i].accelerationStructureReference != 0));
+    }
+    uint64_t values[9] = {blas->required,
+                          vkrt_as_serialization_size(blas->required, 0),
+                          blas->required,
+                          tlas->required,
+                          vkrt_as_serialization_size(tlas->required, expected_instances),
+                          expected_instances,
+                          tlas->required,
                           0,
                           high_value};
     const struct vkrt_as_query_value *gpu_values = slots->mapped;
@@ -376,7 +417,7 @@ int main(int argc, char **argv) {
         VkSubmitInfo submit = {.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO, .commandBufferCount = 1, .pCommandBuffers = &command};
         CHECK(vkQueueSubmit(g_queue, 1, &submit, VK_NULL_HANDLE));
         CHECK(vkQueueWaitIdle(g_queue));
-        verify(&blas, &tlas, execution, &slots, &formatted, &destination);
+        verify(&blas, &tlas, instance, execution, &slots, &formatted, &destination);
     }
     vkFreeCommandBuffers(g_dev, g_pool, 1, &command);
     vkDestroyPipeline(g_dev, property, NULL);

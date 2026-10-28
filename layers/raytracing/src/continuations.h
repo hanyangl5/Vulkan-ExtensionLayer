@@ -102,6 +102,11 @@ struct ContinuationFrameOptions {
     // StorageBuffer pointer SSA. These are provenance, never native pointer
     // bytes. The component planner must not recursively replay Phi cycles.
     bool logical_pointer_snapshots = false;
+    // A compiler-computed numeric identity record for logical StorageBuffer
+    // pointer values in Function/Private variables and composites. Zero keeps
+    // the component's default rejection of pointer-valued memory. The record
+    // contains provenance tags/selectors, never native pointer bytes.
+    uint32_t logical_pointer_words = 0;
 };
 struct ContinuationFrames {
     ContinuationAnalysis analysis;
@@ -112,7 +117,8 @@ struct ContinuationFrames {
 // Plan only; does not emit or execute continuations. Logical pointers and opaque
 // values are never byte-spilled. Preserve their provenance through supported
 // access/copy/load/sample operations and save dynamic index operands. Reject
-// unsupported provenance (including pointer parameters/phi, specialized array
+// unsupported provenance (including pointer parameters/phi without an owning
+// state backend's logical-pointer snapshot policy, specialized array
 // lengths, and reachable mutable module-Private storage without explicit caller
 // backing) explicitly. Shader
 // invocation/control/argument/return backing is a separate unimplemented ABI;

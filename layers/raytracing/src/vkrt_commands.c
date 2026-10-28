@@ -4,8 +4,45 @@
 #include "vkrt_rt_capabilities.h"
 #include "vkrt_query_pool.h"
 
+static PFN_vkVoidFunction replay_resolve(void *user, const char *name) {
+    struct vkrt_cmd_buffer_data *cb = user;
+    return vkrt_device_direct_proc(cb->device_data, name);
+}
+static VkResult replay_capture_layout(void *user, VkPipelineLayout source, VkPipelineLayout *stable) {
+    struct vkrt_cmd_buffer_data *cb = user;
+    if (!source) {
+        *stable = VK_NULL_HANDLE;
+        return VK_SUCCESS;
+    }
+    return vkrt_rtp_replay_layout_capture(cb, source, stable);
+}
+static VkResult replay_emit_layout(void *user, const char *name, VkPipelineLayout identity, VkPipelineLayout *forward) {
+    struct vkrt_cmd_buffer_data *cb = user;
+    *forward = identity;
+    if (!identity) return VK_SUCCESS;
+    /* The translating hooks require the immutable original definition. Native
+     * consumers require a genuine retained ICD layout. Aliases keep their name. */
+    if (!strcmp(name, "vkCmdBindDescriptorSets") || !strcmp(name, "vkCmdBindDescriptorSets2") ||
+        !strcmp(name, "vkCmdBindDescriptorSets2KHR") || !strcmp(name, "vkCmdPushConstants") ||
+        !strcmp(name, "vkCmdPushConstants2") || !strcmp(name, "vkCmdPushConstants2KHR"))
+        return VK_SUCCESS;
+    return vkrt_rtp_replay_layout_native(cb, identity, forward);
+}
+struct vkrt_replay_context *vkrt_replay_lookup_context(VkCommandBuffer command) {
+    struct vkrt_cmd_buffer_data *cb = VKRT_FIND(struct vkrt_cmd_buffer_data, command);
+    if (!cb) return NULL;
+    /* Host adapters may construct command state directly. Production initializes
+     * the same callbacks at allocation; never obtain a recorder recursively. */
+    cb->replay.resolve = replay_resolve;
+    cb->replay.user = cb;
+    cb->replay.normalize_pipeline_layout = replay_capture_layout;
+    cb->replay.emit_pipeline_layout = replay_emit_layout;
+    return &cb->replay;
+}
+
 static void reset_state(struct vkrt_cmd_buffer_data *cb)
 {
+    vkrt_replay_journal_reset(cb->replay.journal);
     VkResult query_result = vkrt_query_command_reset(cb);
     vkrt_rtp_reset_command(cb);
     struct vkrt_saved_push *p = cb->push_head;
@@ -33,6 +70,7 @@ static void remove_cb(struct vkrt_device_data *dev, VkCommandBuffer cmd)
    *link = cb->next;
    vkrt_unmap_object(VKRT_HKEY(cmd));
    reset_state(cb);
+   vkrt_replay_journal_destroy(cb->replay.journal);
    free(cb);
 }
 
@@ -55,8 +93,19 @@ static VKAPI_ATTR VkResult VKAPI_CALL AllocateCommandBuffers(VkDevice device,
       struct vkrt_cmd_buffer_data *cb = calloc(1, sizeof(*cb));
       if (!cb) break;
       cb->cmd = commands[i]; cb->device_data = dev; cb->pool = info->commandPool;
+      cb->level = info->level;
+      if (dev->virtual_rt && dev->query_backend_enabled) {
+          const VkAllocationCallbacks *allocator = dev->queue_families_have_allocator ? &dev->queue_families_allocator : NULL;
+          if (!allocator && dev->instance_data && dev->instance_data->has_allocator) allocator = &dev->instance_data->allocator;
+          cb->replay.journal = vkrt_replay_journal_create(allocator, VK_SYSTEM_ALLOCATION_SCOPE_DEVICE);
+          if (!cb->replay.journal) {
+              free(cb);
+              break;
+          }
+      }
       cb->next = dev->command_buffers; dev->command_buffers = cb;
       vkrt_map_object(VKRT_HKEY(cb->cmd), cb);
+      vkrt_replay_lookup_context(cb->cmd);
    }
    if (i != info->commandBufferCount) {
       for (uint32_t j = 0; j < i; ++j) remove_cb(dev, commands[j]);
@@ -115,6 +164,15 @@ static VKAPI_ATTR VkResult VKAPI_CALL BeginCommandBuffer(VkCommandBuffer cmd, co
    if (r == VK_SUCCESS) {
        reset_state(cb);
        cb->usage_flags = info->flags;
+       /* A future replay submit must inspect this status. Ordinary recording
+        * keeps the native API result when a schema cannot yet be captured. */
+       if (cb->replay.journal) {
+           VkCommandBufferBeginInfo captured = *info;
+           /* This pointer is ignored for primaries and need not identify valid
+            * memory. Only the native call receives the original ignored bits. */
+           if (cb->level == VK_COMMAND_BUFFER_LEVEL_PRIMARY) captured.pInheritanceInfo = NULL;
+           vkrt_replay_journal_begin(cb->replay.journal, &captured);
+       }
    }
    return r;
 }
@@ -178,7 +236,8 @@ static VKAPI_ATTR void VKAPI_CALL CmdPushConstants(VkCommandBuffer cmd, VkPipeli
    }
    stages = vkrt_rtp_push(cb, layout, stages, offset, size, values);
    if (!stages || cb->record_result != VK_SUCCESS) return;
-   layout = vkrt_rtp_native_layout(cb->device_data, layout);
+   layout = vkrt_rtp_command_native_layout(cb, layout);
+   if (cb->record_result != VK_SUCCESS) return;
    /* Replay all affected pushes in order: a layout range may cover both
     * graphics and compute, and restoring such a push must not overwrite
     * a later graphics-only update with stale bytes. */
@@ -240,6 +299,7 @@ static VKAPI_ATTR void VKAPI_CALL CmdPushConstants2(VkCommandBuffer cmd, const V
     }
 
     VkPipelineLayout layout = info->layout;
+    VkPipelineLayout temporary_layout = VK_NULL_HANDLE;
     PFN_vkDestroyPipelineLayout destroy = NULL;
     if (!layout) {
         if (!inline_layout) {
@@ -259,6 +319,15 @@ static VKAPI_ATTR void VKAPI_CALL CmdPushConstants2(VkCommandBuffer cmd, const V
             cb->record_result = result;
             return;
         }
+        temporary_layout = layout;
+        if (cb->replaying) {
+            result = vkrt_rtp_replay_layout_capture(cb, temporary_layout, &layout);
+            if (result != VK_SUCCESS) {
+                destroy(dev->device, temporary_layout, NULL);
+                cb->record_result = result;
+                return;
+            }
+        }
     }
 
     if (!bank) {
@@ -267,7 +336,7 @@ static VKAPI_ATTR void VKAPI_CALL CmdPushConstants2(VkCommandBuffer cmd, const V
         /* Retain the compatible private layout even when the application used
          * an inline layout. Its public temporary is never recorded downstream. */
         vkrt_rtp_push(cb, layout, 0, 0, 0, NULL);
-        VkPipelineLayout native = vkrt_rtp_native_layout(dev, layout);
+        VkPipelineLayout native = vkrt_rtp_command_native_layout(cb, layout);
         struct vkrt_saved_push *saved = malloc(sizeof(*saved) + info->size);
         if (!saved)
             cb->record_result = VK_ERROR_OUT_OF_HOST_MEMORY;
@@ -296,7 +365,7 @@ static VKAPI_ATTR void VKAPI_CALL CmdPushConstants2(VkCommandBuffer cmd, const V
 #endif
         }
     }
-    if (destroy) destroy(dev->device, layout, NULL);
+    if (destroy) destroy(dev->device, temporary_layout, NULL);
 }
 
 PFN_vkVoidFunction vkrt_command_proc(const char *name)

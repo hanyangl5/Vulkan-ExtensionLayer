@@ -115,6 +115,7 @@ std::mutex retirement_lock;
 std::condition_variable retirement_changed;
 bool gate_retirement = false, retirement_entered = false, release_retirement = false, creation_entered = false;
 VkShaderStageFlags expected_stages = 0;
+uint32_t expected_push_bytes = 256;
 const VkBindDescriptorSetsInfo *passthrough = nullptr;
 VkBindDescriptorSetsInfo observed{};
 std::vector<VkDescriptorSet> observed_sets;
@@ -225,10 +226,24 @@ VKAPI_ATTR void VKAPI_CALL Bind2(VkCommandBuffer c, const VkBindDescriptorSetsIn
     CHECK(info->stageFlags == expected_stages);
     const auto &layout = layouts.at(info->layout);
     CHECK(layout.pushes.size() == 1 && layout.pushes[0].stageFlags == VK_SHADER_STAGE_COMPUTE_BIT && layout.pushes[0].offset == 0 &&
-          layout.pushes[0].size == 256);
+          layout.pushes[0].size == expected_push_bytes);
     observed = *info;
     observed_sets.assign(info->pDescriptorSets, info->pDescriptorSets + info->descriptorSetCount);
     observed_offsets.assign(info->pDynamicOffsets, info->pDynamicOffsets + info->dynamicOffsetCount);
+}
+VKAPI_ATTR void VKAPI_CALL BindLegacy(VkCommandBuffer c, VkPipelineBindPoint point, VkPipelineLayout layout, uint32_t first,
+                                      uint32_t count, const VkDescriptorSet *sets, uint32_t dynamic_count,
+                                      const uint32_t *offsets) {
+    CHECK(point == VK_PIPELINE_BIND_POINT_COMPUTE);
+    VkBindDescriptorSetsInfo info{VK_STRUCTURE_TYPE_BIND_DESCRIPTOR_SETS_INFO};
+    info.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+    info.layout = layout;
+    info.firstSet = first;
+    info.descriptorSetCount = count;
+    info.pDescriptorSets = sets;
+    info.dynamicOffsetCount = dynamic_count;
+    info.pDynamicOffsets = offsets;
+    Bind2(c, &info);
 }
 void Reset() {
     vkrt_rtp_reset_command(&cb);
@@ -511,6 +526,87 @@ void DescriptorDefinitions() {
     vkrt_rtp_forget_descriptor_layout(&dev, b);
     CHECK(layouts.empty());
 }
+void ReplayLayoutLifetimes() {
+    auto make = (PFN_vkCreatePipelineLayout)vkrt_rtp_proc("vkCreatePipelineLayout");
+    auto destroy = (PFN_vkDestroyPipelineLayout)vkrt_rtp_proc("vkDestroyPipelineLayout");
+    const auto set = Handle<VkDescriptorSetLayout>(99000);
+    VkDescriptorSetLayoutCreateInfo definition{VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO};
+    CHECK(vkrt_rtp_track_descriptor_layout(&dev, set, &definition) == VK_SUCCESS);
+    VkPushConstantRange pushes[] = {{VK_SHADER_STAGE_COMPUTE_BIT, 0, 8}, {VK_SHADER_STAGE_RAYGEN_BIT_KHR, 16, 4}};
+    VkPipelineLayoutCreateInfo ci{VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO};
+    ci.setLayoutCount = 1;
+    ci.pSetLayouts = &set;
+    ci.pushConstantRangeCount = 2;
+    ci.pPushConstantRanges = pushes;
+    // Native stripping makes both original RT definitions identical to the
+    // ICD. Every public/private create intentionally aliases one handle.
+    alias_handle = Handle<VkPipelineLayout>(99001);
+    alias_private = true;
+    VkPipelineLayout public_layout{}, first{}, second{}, repeated{};
+    CHECK(make(device, &ci, nullptr, &public_layout) == VK_SUCCESS);
+    CHECK(vkrt_rtp_replay_layout_capture(&cb, public_layout, &first) == VK_SUCCESS && first);
+    CHECK(vkrt_rtp_replay_layout_capture(&cb, public_layout, &repeated) == VK_SUCCESS && repeated == first);
+    pushes[1].offset = 32;
+    VkPipelineLayout ambiguous = Handle<VkPipelineLayout>(9);
+    CHECK(make(device, &ci, nullptr, &ambiguous) == VK_ERROR_FEATURE_NOT_PRESENT && !ambiguous);
+    CHECK(layouts.at(alias_handle).references == 3);
+    destroy(device, public_layout, nullptr);
+    CHECK(make(device, &ci, nullptr, &public_layout) == VK_SUCCESS && public_layout == alias_handle);
+    CHECK(vkrt_rtp_replay_layout_capture(&cb, public_layout, &second) == VK_SUCCESS && second && second != first);
+    destroy(device, public_layout, nullptr);
+    vkrt_rtp_forget_descriptor_layout(&dev, set);
+    CHECK(layouts.size() == 1 && layouts.at(alias_handle).references == 4);
+    vkrt_cmd_buffer_data execution{};
+    execution.device_data = &dev;
+    execution.cmd = command;
+    execution.replaying = true;
+    CHECK(vkrt_rtp_replay_layouts_inherit(&execution, &cb) == VK_SUCCESS);
+    vkrt_rtp_reset_command(&cb);
+    CHECK(layouts.at(alias_handle).references == 4);
+    VkPipelineLayout native{};
+    CHECK(vkrt_rtp_replay_layout_native(&execution, first, &native) == VK_SUCCESS && native == alias_handle);
+    CHECK(vkrt_rtp_replay_layout_native(&execution, second, &native) == VK_SUCCESS && native == alias_handle);
+    vkrt_map_object(VKRT_HKEY(command), &execution);
+    auto bind = (PFN_vkCmdBindDescriptorSets)vkrt_rtp_proc("vkCmdBindDescriptorSets");
+    auto bind2 = (PFN_vkCmdBindDescriptorSets2)vkrt_rtp_proc("vkCmdBindDescriptorSets2");
+    const VkDescriptorSet descriptor = Handle<VkDescriptorSet>(99002);
+    const uint32_t dynamic_offset = 0;
+    VkBindDescriptorSetsInfo binding{VK_STRUCTURE_TYPE_BIND_DESCRIPTOR_SETS_INFO};
+    binding.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+    binding.layout = first;
+    binding.descriptorSetCount = 1;
+    binding.pDescriptorSets = &descriptor;
+    binding.dynamicOffsetCount = 1;
+    binding.pDynamicOffsets = &dynamic_offset;
+    expected_push_bytes = 8;
+    expected_stages = VK_SHADER_STAGE_COMPUTE_BIT;
+    unsigned before = forwarded;
+    bind2(command, &binding);
+    bind(command, VK_PIPELINE_BIND_POINT_COMPUTE, second, 0, 1, &descriptor, 1, &dynamic_offset);
+    CHECK(execution.record_result == VK_SUCCESS && forwarded == before + 2 && observed.layout == alias_handle);
+    bind(command, VK_PIPELINE_BIND_POINT_COMPUTE, Handle<VkPipelineLayout>(9), 0, 1, &descriptor, 1, &dynamic_offset);
+    CHECK(execution.record_result == VK_ERROR_FEATURE_NOT_PRESENT && forwarded == before + 2);
+    execution.record_result = VK_SUCCESS;
+    expected_push_bytes = 256;
+    vkrt_map_object(VKRT_HKEY(command), &cb);
+    const uint32_t value = 0x12345678;
+    CHECK(!vkrt_rtp_push(&execution, first, VK_SHADER_STAGE_RAYGEN_BIT_KHR, 16, sizeof(value), &value));
+    CHECK(execution.record_result == VK_SUCCESS);
+    CHECK(!vkrt_rtp_push(&execution, second, VK_SHADER_STAGE_RAYGEN_BIT_KHR, 32, sizeof(value), &value));
+    CHECK(execution.record_result == VK_SUCCESS);
+    // This range fits the second definition only. A table keyed by the aliased
+    // real native handle would incorrectly accept it for the first identity.
+    CHECK(!vkrt_rtp_push(&execution, first, VK_SHADER_STAGE_RAYGEN_BIT_KHR, 32, sizeof(value), &value));
+    CHECK(execution.record_result == VK_ERROR_FEATURE_NOT_PRESENT);
+    vkrt_rtp_reset_command(&execution);
+    CHECK(layouts.empty());
+    CHECK(vkrt_rtp_replay_layout_native(&execution, first, &native) == VK_ERROR_FEATURE_NOT_PRESENT && !native);
+    CHECK(!execution.rtp);
+    CHECK(vkrt_rtp_replay_layout_capture(&cb, public_layout, &repeated) == VK_ERROR_FEATURE_NOT_PRESENT && !repeated);
+    CHECK(!cb.rtp);
+    alias_handle = VK_NULL_HANDLE;
+    alias_private = false;
+}
 unsigned NativeReferences() {
     std::lock_guard<std::mutex> lock(native_layout_lock);
     unsigned result = 0;
@@ -680,6 +776,7 @@ int main() {
     dev.vtable.CreatePipelineLayout = CreateLayout;
     dev.vtable.DestroyPipelineLayout = DestroyLayout;
     dev.vtable.CmdBindDescriptorSets2 = Bind2;
+    dev.vtable.CmdBindDescriptorSets = BindLegacy;
     dev.vtable.CreateShaderModule = CreateNativeShader;
     dev.vtable.DestroyShaderModule = DestroyNativeShader;
     dev.vtable.CreateComputePipelinesInternal = CreateNativePipeline;
@@ -807,9 +904,11 @@ OpFunctionEnd
     CHECK(!std::memcmp(&unknown, saved_unknown.data(), sizeof(unknown)));
     Reset();
 
+    ReplayLayoutLifetimes();
     vkrt_rtp_finish(&dev);
     PipelineLayoutAliases();
     passthrough = &info;
+    before = forwarded;
     core(command, &info);
     CHECK(cb.record_result == VK_SUCCESS && forwarded == before + 1 && !cb.rtp && layouts.empty());
     CHECK(!std::memcmp(&unknown, saved_unknown.data(), sizeof(unknown)));

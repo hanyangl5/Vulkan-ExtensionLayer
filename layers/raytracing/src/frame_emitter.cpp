@@ -124,6 +124,8 @@ class Emitter {
     std::map<uint32_t, std::string> load_signatures, store_signatures;
     std::map<std::string, std::string> signatures;
     std::map<std::string, std::string> scalars;
+    std::map<std::string, std::string> function_pointers;
+    std::string pointer_identity_type;
     std::set<uint32_t> constant_values;
     std::set<std::string> caps;
     std::vector<uint32_t> order;
@@ -165,7 +167,17 @@ class Emitter {
         if (known != type_symbols.end()) return known->second;
         const auto &d = definitions.at(id);
         std::string name = ID("t" + std::to_string(id));
-        if (d.op == spv::OpTypeAccelerationStructureKHR && output.plan.options.acceleration_structure_addresses) {
+        if (d.op == spv::OpTypePointer && d.words.at(2) == spv::StorageClassStorageBuffer &&
+            output.plan.options.logical_pointer_words) {
+            Type(PointerWordType());
+            if (pointer_identity_type.empty()) {
+                pointer_identity_type = ID("pointer_identity");
+                types << pointer_identity_type << " = OpTypeStruct";
+                for (uint32_t n = 0; n < output.plan.options.logical_pointer_words; ++n) types << " " << ID("u32");
+                types << "\n";
+            }
+            name = pointer_identity_type;
+        } else if (d.op == spv::OpTypeAccelerationStructureKHR && output.plan.options.acceleration_structure_addresses) {
             name = Unsigned(64);
         } else if (d.op == spv::OpTypeBool) {
             name = ID("bool");
@@ -191,9 +203,6 @@ class Emitter {
         } else if (d.op == spv::OpTypeVector || d.op == spv::OpTypeMatrix || d.op == spv::OpTypeArray) {
             auto element = Type(d.words.at(2));
             uint32_t count = Count(id);
-            // Reject code-size explosions explicitly; the final state compiler
-            // can add dynamically indexed array codecs without changing ABI.
-            if (count > 4096) throw std::runtime_error("Continuation aggregate codec exceeds 4096 elements");
             if (d.op == spv::OpTypeVector && element == ID("u32") && count == 2) {
                 name = ID("pair");
             } else {
@@ -227,11 +236,18 @@ class Emitter {
             throw std::runtime_error("Continuation array codec length exceeds uint32");
         return static_cast<uint32_t>(value);
     }
+    uint32_t PointerWordType() const {
+        for (const auto &[id, d] : definitions)
+            if (d.op == spv::OpTypeInt && d.words.at(2) == 32 && d.words.at(3) == 0) return id;
+        throw std::runtime_error("Logical pointer codec requires a uint32 source type");
+    }
     std::vector<std::pair<uint32_t, uint32_t>> Elements(uint32_t type) const {
         const auto &d = definitions.at(type);
         const auto &layout = layouts.at(type);
         std::vector<std::pair<uint32_t, uint32_t>> result;
-        if (d.op == spv::OpTypeStruct) {
+        if (d.op == spv::OpTypePointer) {
+            for (uint32_t n = 0; n < output.plan.options.logical_pointer_words; ++n) result.push_back({PointerWordType(), n * 4});
+        } else if (d.op == spv::OpTypeStruct) {
             for (size_t n = 2; n < d.words.size(); ++n)
                 result.push_back({d.words[n], static_cast<uint32_t>(layout.member_offsets[n - 2])});
         } else {
@@ -270,6 +286,47 @@ class Emitter {
         auto byte = Op("OpBitwiseAnd " + ID("u32") + " " + offset + " " + Constant(3));
         return Op("OpIMul " + ID("u32") + " " + byte + " " + Constant(8));
     }
+    std::string FunctionPointer(const std::string &pointee) {
+        auto found = function_pointers.find(pointee);
+        if (found != function_pointers.end()) return found->second;
+        auto result = Fresh();
+        types << result << " = OpTypePointer Function " << pointee << "\n";
+        function_pointers.emplace(pointee, result);
+        return result;
+    }
+    std::string EmitArrayCodec(uint32_t type, const std::string &base, const std::string &offset, const std::string &value = {}) {
+        // Dynamic indexing keeps emitted code independent of array length.
+        // Native Function storage is only a typed assembly temporary; source
+        // invocation storage remains in the persistent frame.
+        const auto element = definitions.at(type).words.at(2);
+        const auto temporary = Fresh(), counter = Fresh();
+        functions << temporary << " = OpVariable " << FunctionPointer(Type(type)) << " Function\n"
+                  << counter << " = OpVariable " << FunctionPointer(ID("u32")) << " Function\n";
+        functions << "OpStore " << counter << " " << Constant(0) << "\n";
+        if (!value.empty()) functions << "OpStore " << temporary << " " << value << "\n";
+        const auto header = Fresh(), body = Fresh(), next = Fresh(), done = Fresh();
+        functions << "OpBranch " << header << "\n" << header << " = OpLabel\n";
+        const auto index = Op("OpLoad " + ID("u32") + " " + counter);
+        const auto condition = Op("OpULessThan " + ID("bool") + " " + index + " " + Constant(Count(type)));
+        functions << "OpLoopMerge " << done << " " << next << " None\nOpBranchConditional " << condition << " " << body << " "
+                  << done << "\n"
+                  << body << " = OpLabel\n";
+        const auto delta =
+            Op("OpIMul " + ID("u32") + " " + index + " " + Constant(static_cast<uint32_t>(layouts.at(type).element_stride)));
+        const auto address = Op("OpIAdd " + ID("u32") + " " + offset + " " + delta);
+        const auto pointer = Op("OpAccessChain " + FunctionPointer(Type(element)) + " " + temporary + " " + index);
+        if (value.empty()) {
+            const auto child = Op("OpFunctionCall " + Type(element) + " " + Load(element) + " " + base + " " + address);
+            functions << "OpStore " << pointer << " " << child << "\n";
+        } else {
+            const auto child = Op("OpLoad " + Type(element) + " " + pointer);
+            Op("OpFunctionCall " + ID("void") + " " + Store(element) + " " + base + " " + address + " " + child);
+        }
+        functions << "OpBranch " << next << "\n" << next << " = OpLabel\n";
+        const auto incremented = Op("OpIAdd " + ID("u32") + " " + index + " " + Constant(1));
+        functions << "OpStore " << counter << " " << incremented << "\nOpBranch " << header << "\n" << done << " = OpLabel\n";
+        return value.empty() ? Op("OpLoad " + Type(type) + " " + temporary) : std::string();
+    }
     void EmitLoad(uint32_t type) {
         functions << Load(type) << " = OpFunction " << Type(type) << " None " << LoadSignature(type) << "\n";
         auto base = Op("OpFunctionParameter " + output.base_type);
@@ -277,7 +334,10 @@ class Emitter {
         Op("OpLabel");
         auto op = definitions.at(type).op;
         std::string result;
-        if (op == spv::OpTypeBool || op == spv::OpTypeInt || op == spv::OpTypeFloat || op == spv::OpTypeAccelerationStructureKHR) {
+        if (op == spv::OpTypeArray) {
+            result = EmitArrayCodec(type, base, offset);
+        } else if (op == spv::OpTypeBool || op == spv::OpTypeInt || op == spv::OpTypeFloat ||
+                   op == spv::OpTypeAccelerationStructureKHR) {
             auto ptr = Pointer(base, offset);
             auto word = Op("OpLoad " + ID("u32") + " " + ptr + Alignment());
             uint32_t width = op == spv::OpTypeBool                       ? 32
@@ -316,7 +376,10 @@ class Emitter {
         auto value = Op("OpFunctionParameter " + Type(type));
         Op("OpLabel");
         auto op = definitions.at(type).op;
-        if (op == spv::OpTypeBool || op == spv::OpTypeInt || op == spv::OpTypeFloat || op == spv::OpTypeAccelerationStructureKHR) {
+        if (op == spv::OpTypeArray) {
+            EmitArrayCodec(type, base, offset, value);
+        } else if (op == spv::OpTypeBool || op == spv::OpTypeInt || op == spv::OpTypeFloat ||
+                   op == spv::OpTypeAccelerationStructureKHR) {
             auto ptr = Pointer(base, offset);
             uint32_t width = op == spv::OpTypeBool                       ? 32
                              : op == spv::OpTypeAccelerationStructureKHR ? 64

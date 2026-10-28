@@ -603,14 +603,14 @@ void BoundariesAndSourcePreservation() {
     Replace(pointer_copy, "%seed_ptr = OpAccessChain %out_word %output %c0 %id",
             "%seed_base = OpAccessChain %out_word %output %c0 %id\n%seed_ptr = OpCopyObject %out_word %seed_base");
     auto copied = CompileTypedContinuationSteps(Source(pointer_copy), "main", spv::ExecutionModelIntersectionKHR);
-    std::set<uint32_t> decorated, pointer_copies;
+    std::set<uint32_t> decorated, loaded_pointers;
     for (size_t p = 5; p < copied.spirv.size(); p += copied.spirv[p] >> 16) {
         auto opcode = copied.spirv[p] & 0xffff;
         if (opcode == spv::OpDecorate && copied.spirv[p + 2] == spv::DecorationNonUniform) decorated.insert(copied.spirv[p + 1]);
-        if (opcode == spv::OpCopyObject) pointer_copies.insert(copied.spirv[p + 2]);
+        if (opcode == spv::OpLoad) loaded_pointers.insert(copied.spirv[p + 3]);
     }
-    Require(std::any_of(pointer_copies.begin(), pointer_copies.end(), [&](uint32_t id) { return decorated.count(id) != 0; }),
-            "Copied resource pointer lost its sole NonUniform decoration");
+    Require(std::any_of(loaded_pointers.begin(), loaded_pointers.end(), [&](uint32_t id) { return decorated.count(id) != 0; }),
+            "Load through a copied resource pointer lost its sole NonUniform decoration");
 
     std::string modes(kSource);
     Replace(modes, "OpCapability RayTracingKHR", "OpCapability RayTracingKHR\nOpCapability SignedZeroInfNanPreserve");
@@ -864,6 +864,155 @@ bool LogicalPointerSnapshots(bool execute, bool array_pointers = false) {
                  "inlined pointer helper, independent root/index snapshots and repeated suspend/resume\n";
     return true;
 }
+std::string MutablePointerSource(bool module_private) {
+    std::string source(kPointerSource);
+    Replace(source, "OpDecorate %array ArrayStride 4", "OpDecorate %word_ptr ArrayStride 4\nOpDecorate %array ArrayStride 4");
+    Replace(source, "OpMemberDecorate %block 1 Offset 128", "OpMemberDecorate %block 1 Offset 512");
+    Replace(source, "%count = OpConstant %uint 32", "%count = OpConstant %uint 128");
+    Replace(source, "%seven = OpConstant",
+            "%four = OpConstant %uint 4\n%negative_one = OpConstant %uint 4294967295\n"
+            "%memory_count = OpConstant %uint 8193\n%memory_base = OpConstant %uint 8170\n%seven = OpConstant");
+    Replace(source, "%entry_type = OpTypeFunction",
+            "%pointer_array = OpTypeArray %word_ptr %memory_count\n"
+            "%table_type = OpTypePointer Function %pointer_array\n%slot_type = OpTypePointer Function %word_ptr\n"
+            "%round_slot_type = OpTypePointer Function %uint\n%record_type = OpTypeStruct %word_ptr %uint\n"
+            "%record_pointer = OpTypePointer Function %record_type\n"
+            "%entry_type = OpTypeFunction");
+    Replace(source, "%entry = OpLabel",
+            "%entry = OpLabel\n%table = OpVariable %table_type Function\n"
+            "%other = OpVariable %slot_type Function %null\n"
+            "%record = OpVariable %record_pointer Function");
+    Replace(source, "%a = OpAccessChain %word_ptr %output %zero %id",
+            "%base_index = OpIMul %uint %id %four\n%a = OpAccessChain %word_ptr %output %zero %base_index");
+    Replace(source, "%b = OpAccessChain %word_ptr %output %one %id",
+            "%b = OpAccessChain %word_ptr %output %one %base_index\n"
+            "%slot_index = OpIAdd %uint %memory_base %id\n%alias = OpAccessChain %slot_type %table %slot_index\n"
+            "%alias_copy = OpCopyObject %slot_type %alias");
+    Replace(source, "%pa = OpPhi %word_ptr %nonnull %entry %pb %continue",
+            "%pa = OpPhi %word_ptr %nonnull %entry %advance_a %continue");
+    Replace(source, "%pb = OpPhi %word_ptr %b %entry %pa %continue", "%pb = OpPhi %word_ptr %b %entry %advance_b %continue");
+    Replace(source, "%round_float = OpConvertUToF",
+            "OpSelectionMerge %stored None\nOpBranchConditional %even %store_yes %store_no\n"
+            "%store_yes = OpLabel\nOpStore %alias_copy %selected\n%yes_pointer = OpLoad %word_ptr %alias\nOpBranch %stored\n"
+            "%store_no = OpLabel\nOpStore %other %selected\n%no_pointer = OpLoad %word_ptr %other\nOpBranch %stored\n"
+            "%stored = OpLabel\n%loaded = OpPhi %word_ptr %yes_pointer %store_yes %no_pointer %store_no\n"
+            "%record_slot = OpAccessChain %slot_type %record %zero\n%round_slot = OpAccessChain %round_slot_type %record %one\n"
+            "OpStore %record_slot %loaded\nOpStore %round_slot %round\n"
+            "%record_copy = OpLoad %record_type %record\n%from_record = OpLoad %word_ptr %record_slot\n"
+            "%round_float = OpConvertUToF");
+    Replace(source, "%helper %selected %delta", "%helper %from_record %delta");
+    Replace(source, "OpBranch %continue\n%continue = OpLabel",
+            "%saved_round = OpCompositeExtract %uint %record_copy 1\n"
+            "%same_round = OpIEqual %bool %saved_round %round\n"
+            "OpStore %record %record_copy\n%late_pointer = OpLoad %word_ptr %record_slot\n"
+            "%same_pointer = OpPtrEqual %bool %late_pointer %loaded\n%correct = OpLogicalAnd %bool %same_round %same_pointer\n"
+            "OpSelectionMerge %checked None\nOpBranchConditional %correct %checked %wrong\n"
+            "%wrong = OpLabel\nOpStore %late_pointer %memory_count\nOpBranch %checked\n%checked = OpLabel\n"
+            "OpBranch %continue\n%continue = OpLabel\n"
+            "%forward_a = OpPtrAccessChain %word_ptr %pa %one\n"
+            "%back_a = OpPtrAccessChain %word_ptr %forward_a %negative_one\n"
+            "%advance_a = OpPtrAccessChain %word_ptr %back_a %one\n"
+            "%advance_b = OpPtrAccessChain %word_ptr %pb %one\n");
+    if (module_private) {
+        Replace(source, "%launch %output", "%launch %output %table %other %record");
+        Replace(source, "%table_type = OpTypePointer Function", "%table_type = OpTypePointer Private");
+        Replace(source, "%slot_type = OpTypePointer Function", "%slot_type = OpTypePointer Private");
+        Replace(source, "%round_slot_type = OpTypePointer Function", "%round_slot_type = OpTypePointer Private");
+        Replace(source, "%record_pointer = OpTypePointer Function", "%record_pointer = OpTypePointer Private");
+        Replace(source, "%table = OpVariable %table_type Function\n", "");
+        Replace(source, "%other = OpVariable %slot_type Function %null\n", "");
+        Replace(source, "%record = OpVariable %record_pointer Function\n", "");
+        Replace(source, "%entry_type = OpTypeFunction",
+                "%table = OpVariable %table_type Private\n%other = OpVariable %slot_type Private %null\n"
+                "%record = OpVariable %record_pointer Private\n%entry_type = OpTypeFunction");
+    }
+    return source;
+}
+bool MutablePointerMemory(bool execute, bool module_private) {
+    // Zero-advance stride views are accepted by the source validator and can
+    // participate in a loop without changing any address. Until byte-offset
+    // normalization handles these views, reject before route fixed-point
+    // analysis rather than append alternating stride segments indefinitely.
+    std::string stride_cycle(kPointerSource);
+    Replace(stride_cycle, "OpDecorate %array ArrayStride 4",
+            "OpDecorate %word_ptr ArrayStride 4\nOpDecorate %stride_view_type ArrayStride 8\nOpDecorate %array ArrayStride 4");
+    Replace(stride_cycle, "%word_ptr = OpTypePointer StorageBuffer %uint",
+            "%word_ptr = OpTypePointer StorageBuffer %uint\n%stride_view_type = OpTypePointer StorageBuffer %uint");
+    Replace(stride_cycle, "%pa = OpPhi %word_ptr %nonnull %entry %pb %continue",
+            "%pa = OpPhi %word_ptr %nonnull %entry %stride_back %continue");
+    Replace(stride_cycle, "%continue = OpLabel",
+            "%continue = OpLabel\n%stride_view = OpPtrAccessChain %stride_view_type %pa %zero\n"
+            "%stride_back = OpPtrAccessChain %word_ptr %stride_view %zero");
+    bool stride_rejected = false;
+    try {
+        CompileTypedContinuationSteps(Source(stride_cycle), "main", spv::ExecutionModelIntersectionKHR);
+    } catch (const std::exception &error) {
+        Require(std::string(error.what()).find("ArrayStride changes require byte-offset") != std::string::npos,
+                "Stride-changing pointer view rejected for an unrelated reason: " + std::string(error.what()));
+        stride_rejected = true;
+    }
+    Require(stride_rejected, "Stride-changing pointer cycle entered unbounded route planning");
+    const auto words = Source(MutablePointerSource(module_private));
+    const auto program = CompileTypedContinuationSteps(words, "main", spv::ExecutionModelIntersectionKHR);
+    Require(program.frames.options.logical_pointer_words >= 4 && program.frame_stride_bytes > 8193 * 16,
+            "Pointer memory/arithmetic lacks checked selector identity backing");
+    const auto physical =
+        CompileTypedPipelineStage(words, "main", VK_SHADER_STAGE_INTERSECTION_BIT_KHR, nullptr, "mutable_pointer_bda");
+    TypedContinuationCompileOptions options;
+    options.transport = TypedFrameTransport::PrivateArray;
+    options.private_frame_words = physical.frame_stride_words;
+    const auto private_array =
+        CompileTypedPipelineStage(words, "main", VK_SHADER_STAGE_INTERSECTION_BIT_KHR, nullptr, "mutable_pointer_private", options);
+    Require(physical.frame_stride_bytes == private_array.frame_stride_bytes &&
+                physical.pointer_snapshot_bytes == private_array.pointer_snapshot_bytes,
+            "Mutable pointer memory has inconsistent transport layout");
+    if (!execute) return true;
+    constexpr uint32_t count = 16, array_size = 128;
+    const auto frame_bytes = program.frame_stride_words * count * 4;
+    const auto output_offset = (frame_bytes + 255u) & ~255u;
+    GPU gpu;
+    std::cout << "Creating mutable logical " << (module_private ? "Private" : "Function")
+              << " pointer GPU pipeline: " << program.spirv.size() << " words, frame " << program.frame_stride_bytes << " bytes\n"
+              << std::flush;
+    if (!gpu.Init(program.spirv, output_offset + array_size * 8, output_offset, true, frame_bytes, VK_WHOLE_SIZE, true)) {
+        std::cout << "Mutable-pointer GPU fixture skipped: required scalar/variable-pointer features unavailable\n";
+        return false;
+    }
+    for (uint32_t activation = 0; activation < 2; ++activation) {
+        for (uint32_t id = 0; id < count; ++id)
+            std::fill_n(gpu.mapped + id * program.frame_stride_words + program.control_word, 7, 0);
+        for (uint32_t n = 0; n < array_size * 2; ++n) gpu.mapped[output_offset / 4 + n] = 1000 + n;
+        for (uint32_t round = 0; round < 4; ++round) {
+            gpu.Dispatch(0, 0, count);
+            for (uint32_t id = 0; id < count; ++id) {
+                auto *control = gpu.mapped + id * program.frame_stride_words + program.control_word;
+                if (round == 3) {
+                    Require(control[0] == UINT32_MAX, "Mutable pointer loop did not terminate");
+                    continue;
+                }
+                float distance;
+                std::memcpy(&distance, control + 4, 4);
+                Require(control[1] == 2 && control[2] == 0 && distance == float(round) + 0.5f && control[5] == id + round,
+                        "Mutable pointer helper lost report order/arguments");
+                control[3] = (id + round) % 3 != 0;
+                control[2] = 1;
+            }
+        }
+        std::vector<uint32_t> expected(array_size * 2);
+        for (uint32_t n = 0; n < expected.size(); ++n) expected[n] = 1000 + n;
+        for (uint32_t id = 0; id < count; ++id)
+            for (uint32_t round = 0; round < 3; ++round) {
+                const auto index = (id & 1) * array_size + id * 4 + round;
+                expected[index] += round + 1 + ((id + round) % 3 != 0 ? 7 : 11);
+            }
+        Require(std::equal(expected.begin(), expected.end(), gpu.mapped + output_offset / 4),
+                "Pointer memory alias/aggregate or signed PtrAccessChain changed independent expected writes");
+    }
+    std::cout << "Mutable pointer " << (module_private ? "Private" : "Function")
+              << " storage executed: 8193-cell array, dynamic indices above4096, aliases/branch stores, "
+                 "typed pointer aggregate across suspension, signed loop-carried PtrAccessChain\n";
+    return true;
+}
 struct Event {
     float distance;
     uint32_t kind;
@@ -906,6 +1055,8 @@ int main(int argc, char **argv) {
         if (pointer_only) {
             for (bool array_pointers : {false, true})
                 if (!LogicalPointerSnapshots(true, array_pointers)) return 77;
+            for (bool module_private : {false, true})
+                if (!MutablePointerMemory(true, module_private)) return 77;
             return 0;
         }
         BoundariesAndSourcePreservation();
@@ -916,6 +1067,8 @@ int main(int argc, char **argv) {
         ExactCtsImageAtomicStage();
         for (bool array_pointers : {false, true})
             if (!LogicalPointerSnapshots(!compile_only, array_pointers)) return 77;
+        for (bool module_private : {false, true})
+            if (!MutablePointerMemory(!compile_only, module_private)) return 77;
         if (compile_only) {
             std::cout << "Typed source and logical pointer compile/validation checks passed; GPU execution not requested\n";
             return 0;

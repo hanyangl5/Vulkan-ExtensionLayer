@@ -83,6 +83,15 @@ static VKAPI_ATTR VkResult VKAPI_CALL reset_native(VkCommandBuffer cmd, VkComman
     CHECK(cmd == command && !flags);
     return VK_SUCCESS;
 }
+static VKAPI_ATTR VkResult VKAPI_CALL begin_native(VkCommandBuffer cmd, const VkCommandBufferBeginInfo *info) {
+    CHECK(cmd == command && info->flags == VK_COMMAND_BUFFER_USAGE_SIMULTANEOUS_USE_BIT);
+    CHECK(info->pInheritanceInfo == H(const VkCommandBufferInheritanceInfo *, 1));
+    return VK_SUCCESS;
+}
+static VKAPI_ATTR VkResult VKAPI_CALL end_native(VkCommandBuffer cmd) {
+    CHECK(cmd == command);
+    return VK_SUCCESS;
+}
 void vkrt_rtp_reset_command(struct vkrt_cmd_buffer_data *data) { CHECK(data == &cb); }
 bool vkrt_rtp_bind_pipeline(struct vkrt_cmd_buffer_data *data, VkPipelineBindPoint point, VkPipeline pipeline) {
     (void)data;
@@ -103,6 +112,24 @@ VkPipelineLayout vkrt_rtp_native_layout(struct vkrt_device_data *data, VkPipelin
     CHECK(data == &dev && layout == public_layout);
     return native_layout;
 }
+VkPipelineLayout vkrt_rtp_command_native_layout(struct vkrt_cmd_buffer_data *data, VkPipelineLayout layout) {
+    CHECK(data == &cb);
+    return vkrt_rtp_native_layout(data->device_data, layout);
+}
+VkResult vkrt_rtp_replay_layout_capture(struct vkrt_cmd_buffer_data *data, VkPipelineLayout layout, VkPipelineLayout *identity) {
+    CHECK(data == &cb && layout == public_layout);
+    *identity = public_layout;
+    return VK_SUCCESS;
+}
+VkResult vkrt_rtp_replay_layout_native(struct vkrt_cmd_buffer_data *data, VkPipelineLayout identity, VkPipelineLayout *native) {
+    CHECK(data == &cb && identity == public_layout);
+    *native = native_layout;
+    return VK_SUCCESS;
+}
+PFN_vkVoidFunction vkrt_device_direct_proc(struct vkrt_device_data *data, const char *name) {
+    CHECK(data == &dev);
+    return vkrt_command_proc(name);
+}
 PFN_vkVoidFunction vkrt_rtp_proc(const char *name) {
     if (!strcmp(name, "vkCreatePipelineLayout")) return (PFN_vkVoidFunction)make_layout;
     if (!strcmp(name, "vkDestroyPipelineLayout")) return (PFN_vkVoidFunction)destroy_layout;
@@ -117,6 +144,8 @@ int main(void) {
     dev.vtable.CmdBindPipeline = bind_pipeline;
     dev.vtable.CmdBindShadersEXT = bind_shader;
     dev.vtable.ResetCommandBuffer = reset_native;
+    dev.vtable.BeginCommandBuffer = begin_native;
+    dev.vtable.EndCommandBuffer = end_native;
     cb.cmd = command;
     cb.device_data = &dev;
     cb.record_result = VK_SUCCESS;
@@ -186,6 +215,38 @@ int main(void) {
     unsigned previous_captures = captures;
     command2(command, &info);
     CHECK(calls == 1 && captures == previous_captures && !cb.push_head && cb.record_result == VK_SUCCESS);
+    // Exercise the production lookup/context/lifecycle integration, including
+    // immutable input capture before the translating push hook is invoked.
+    passthrough = NULL;
+    dev.rtp = (struct vkrt_rtp_state *)(uintptr_t)1;
+    cb.replay.journal = vkrt_replay_journal_create(NULL, VK_SYSTEM_ALLOCATION_SCOPE_COMMAND);
+    CHECK(cb.replay.journal);
+    const VkCommandBufferBeginInfo begin = {.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
+                                            .flags = VK_COMMAND_BUFFER_USAGE_SIMULTANEOUS_USE_BIT,
+                                            .pInheritanceInfo = H(const VkCommandBufferInheritanceInfo *, 1)};
+    PFN_vkBeginCommandBuffer begin_command = (PFN_vkBeginCommandBuffer)vkrt_command_proc("vkBeginCommandBuffer");
+    PFN_vkEndCommandBuffer end_command = (PFN_vkEndCommandBuffer)vkrt_command_proc("vkEndCommandBuffer");
+    CHECK(begin_command(command, &begin) == VK_SUCCESS);
+    CHECK(!vkrt_replay_journal_begin_info(cb.replay.journal)->pInheritanceInfo);
+    value = 123;
+    calls = 0;
+    ((PFN_vkCmdPushConstants)vkrt_replay_proc("vkCmdPushConstants"))(command, public_layout, VK_SHADER_STAGE_COMPUTE_BIT, 4,
+                                                                     sizeof(value), &value);
+    CHECK(end_command(command) == VK_SUCCESS && calls == 1 && observed[0].value == 123);
+    CHECK(vkrt_replay_journal_status(cb.replay.journal) == VK_SUCCESS && vkrt_replay_journal_count(cb.replay.journal) == 1);
+    value = 999;
+    struct vkrt_replay_journal *recording = cb.replay.journal;
+    cb.replay.journal = NULL;
+    cb.replaying = true;
+    struct vkrt_replay_context *context = vkrt_replay_lookup_context(command);
+    CHECK(vkrt_replay_emit(recording, command, context->resolve, context->user, NULL) == VK_SUCCESS);
+    CHECK(cb.record_result == VK_SUCCESS && calls == 2 && observed[1].value == 123);
+    CHECK(vkrt_replay_journal_count(recording) == 1);
+    cb.replaying = false;
+    cb.replay.journal = recording;
+    CHECK(reset(command, 0) == VK_SUCCESS && !vkrt_replay_journal_count(recording) && !cb.push_head);
+    vkrt_replay_journal_destroy(recording);
+    cb.replay.journal = NULL;
     vkrt_unmap_object(VKRT_HKEY(command));
     printf("Maintenance6 push snapshots/inline layouts/bank replay/ordinary passthrough %s\n", failures ? "FAIL" : "PASS");
     return failures != 0;

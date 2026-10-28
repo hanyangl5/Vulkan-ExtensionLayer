@@ -84,7 +84,11 @@ OpFunctionEnd
         throw std::runtime_error("Frame emitter accepted unsupported input");
     };
     rejected(small, "bad prefix", "ID prefix");
-    rejected(array_fixture(4097), "probe_", "4096 elements");
+    const auto large =
+        EmitContinuationFrameCodecs(array_fixture(65537), "main", spv::ExecutionModelIntersectionKHR, 2, 7, "probe_");
+    ValidateComponent(large);
+    Require(large.functions.size() < code.functions.size() * 4,
+            "Array codec expanded per element instead of retaining bounded dynamic-loop code");
     rejected(array_fixture(1073741825ULL), "probe_", "smaller than 4 GiB");
 }
 
@@ -374,8 +378,10 @@ void VerifyAggregate(const Proof &proof, const unsigned char *bytes, bool modifi
 }
 }  // namespace
 
-int main() {
+int main(int argc, char **argv) {
     try {
+        const bool compile_only = argc == 2 && std::string(argv[1]) == "--compile-only";
+        Require(argc == 1 || compile_only, "Usage: vel_rt_frame_emitter_tests [--compile-only]");
         RejectionsAndEmptySpills();
         Proof proof;
         auto binary = Assemble(proof.Program());
@@ -383,6 +389,10 @@ int main() {
         Require(proof.code.functions.find("OpBitFieldInsert") != std::string::npos, "Packed scalar store emission missing");
         constexpr uint32_t count = 64;
         constexpr uint32_t limit = 257;  // Runtime push value, no static unroll.
+        if (compile_only) {
+            std::cout << "Typed frame codec compilation/validation passed, including dynamic large arrays\n";
+            return 0;
+        }
         GPU gpu;
         if (!gpu.Init(binary, proof.words * count * 4)) {
             std::cout << "Typed codec SPIR-V validated; compute execution skipped: required Vulkan scalar features unavailable\n";

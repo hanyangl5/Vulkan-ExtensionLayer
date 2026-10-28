@@ -29,6 +29,10 @@ foreach(pair
     set_tests_properties(ray_tracing_fallback_${test} PROPERTIES
         LABELS "gpu;compiler;no_native_rt" SKIP_RETURN_CODE 77 TIMEOUT 600)
 endforeach()
+foreach(component frame_emitter state_compiler)
+    add_test(NAME ray_tracing_fallback_${component}_compile COMMAND vel_rt_${component}_tests --compile-only)
+    set_tests_properties(ray_tracing_fallback_${component}_compile PROPERTIES LABELS "offline;compiler" TIMEOUT 120)
+endforeach()
 add_test(NAME ray_tracing_fallback_pinned_sources
     COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/docs/upstream/verify.py")
 set_tests_properties(ray_tracing_fallback_pinned_sources PROPERTIES LABELS "offline;compiler")

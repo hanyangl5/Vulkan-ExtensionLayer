@@ -22,6 +22,12 @@ VkResult vkrt_rtp_create_shader(struct vkrt_device_data *dev, const VkShaderModu
 bool vkrt_rtp_destroy_shader(struct vkrt_device_data *dev, VkShaderModule module);
 void vkrt_rtp_reset_command(struct vkrt_cmd_buffer_data *cb);
 VkPipelineLayout vkrt_rtp_native_layout(struct vkrt_device_data *dev, VkPipelineLayout layout);
+VkPipelineLayout vkrt_rtp_command_native_layout(struct vkrt_cmd_buffer_data *cb, VkPipelineLayout layout);
+/* Record immutable semantic identities before public layout destruction or
+ * handle reuse. They are private to a recording and must not reach the ICD. */
+VkResult vkrt_rtp_replay_layout_capture(struct vkrt_cmd_buffer_data *cb, VkPipelineLayout layout, VkPipelineLayout *identity);
+VkResult vkrt_rtp_replay_layouts_inherit(struct vkrt_cmd_buffer_data *target, const struct vkrt_cmd_buffer_data *source);
+VkResult vkrt_rtp_replay_layout_native(struct vkrt_cmd_buffer_data *cb, VkPipelineLayout identity, VkPipelineLayout *native_layout);
 bool vkrt_rtp_bind_pipeline(struct vkrt_cmd_buffer_data *cb, VkPipelineBindPoint point, VkPipeline pipeline);
 VkShaderStageFlags vkrt_rtp_push(struct vkrt_cmd_buffer_data *cb, VkPipelineLayout layout, VkShaderStageFlags stages,
                                  uint32_t offset, uint32_t size, const void *values);

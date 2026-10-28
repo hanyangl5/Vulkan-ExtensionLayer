@@ -723,8 +723,10 @@ static VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL
 vkrt_GetDeviceProcAddr(VkDevice device, const char *pName)
 {
    void *ptr = vkrt_find_device_fn(pName);
-   if (ptr)
-      return (PFN_vkVoidFunction)ptr;
+   if (ptr) {
+       PFN_vkVoidFunction recorder = vkrt_replay_proc(pName);
+       return recorder ? recorder : (PFN_vkVoidFunction)ptr;
+   }
 
    if (device == VK_NULL_HANDLE)
       return NULL;
@@ -732,7 +734,15 @@ vkrt_GetDeviceProcAddr(VkDevice device, const char *pName)
    struct vkrt_device_data *data = VKRT_FIND(struct vkrt_device_data, device);
    if (!data || !data->vtable.GetDeviceProcAddr)
       return NULL;
-   return data->vtable.GetDeviceProcAddr(device, pName);
+   PFN_vkVoidFunction native = data->vtable.GetDeviceProcAddr(device, pName);
+   PFN_vkVoidFunction recorder = native ? vkrt_replay_proc(pName) : NULL;
+   return recorder ? recorder : native;
+}
+
+PFN_vkVoidFunction vkrt_device_direct_proc(struct vkrt_device_data *dev, const char *name) {
+    PFN_vkVoidFunction hook = (PFN_vkVoidFunction)vkrt_find_device_fn(name);
+    if (hook) return hook;
+    return dev && dev->vtable.GetDeviceProcAddr ? dev->vtable.GetDeviceProcAddr(dev->device, name) : NULL;
 }
 
 static VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL
@@ -755,8 +765,10 @@ vkrt_GetInstanceProcAddr(VkInstance instance, const char *pName)
    }
 
    void *dptr = vkrt_find_device_fn(pName);
-   if (dptr)
-      return (PFN_vkVoidFunction)dptr;
+   if (dptr) {
+       PFN_vkVoidFunction recorder = vkrt_replay_proc(pName);
+       return recorder ? recorder : (PFN_vkVoidFunction)dptr;
+   }
 
    PFN_vkVoidFunction discovery = vkrt_discovery_proc(pName);
    if (discovery) return discovery;
@@ -772,7 +784,9 @@ vkrt_GetInstanceProcAddr(VkInstance instance, const char *pName)
       VKRT_FIND(struct vkrt_instance_data, instance);
    if (!data || !data->vtable.GetInstanceProcAddr)
       return NULL;
-   return data->vtable.GetInstanceProcAddr(instance, pName);
+   PFN_vkVoidFunction native = data->vtable.GetInstanceProcAddr(instance, pName);
+   PFN_vkVoidFunction recorder = native ? vkrt_replay_proc(pName) : NULL;
+   return recorder ? recorder : native;
 }
 
 /* ================================================================== */

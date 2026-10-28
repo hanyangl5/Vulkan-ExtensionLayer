@@ -14,6 +14,7 @@
 #include <set>
 #include <sstream>
 #include <stdexcept>
+#include <tuple>
 
 namespace vel::rt {
 namespace {
@@ -156,7 +157,9 @@ class Compiler {
                 Unsupported("subgroup/derivative execution semantics require scheduler support");
             if (i.type && Def(i.type).op == spv::OpTypePointer && i.op != spv::OpVariable && i.op != spv::OpAccessChain &&
                 i.op != spv::OpInBoundsAccessChain && i.op != spv::OpCopyObject && i.op != spv::OpImageTexelPointer &&
-                !((i.op == spv::OpPhi || i.op == spv::OpSelect) && Def(i.type).words.at(2) == spv::StorageClassStorageBuffer))
+                !((i.op == spv::OpPhi || i.op == spv::OpSelect || i.op == spv::OpLoad || i.op == spv::OpCompositeExtract ||
+                   i.op == spv::OpPtrAccessChain || i.op == spv::OpInBoundsPtrAccessChain) &&
+                  Def(i.type).words.at(2) == spv::StorageClassStorageBuffer))
                 Unsupported("unsupported pointer provenance Op" + std::string(spvOpcodeString(i.op)) + " for ID " +
                             std::to_string(i.result));
             NeedValueType(i.type);
@@ -190,6 +193,7 @@ class Compiler {
         ContinuationFrameOptions options{true, true};
         options.persistent_private_storage = true;
         options.logical_pointer_snapshots = !pointer_plans.empty();
+        options.logical_pointer_words = pointer_words;
         options.physical_frame_addresses = BDA();
         options.private_frame_words = config.private_frame_words;
         if (config.transport == TypedFrameTransport::PrivateArray) {
@@ -342,7 +346,13 @@ class Compiler {
     // selectors keep their module ID; dynamic selectors keep only their type.
     // Equal routes share a tag, while each SSA result owns its own selector
     // snapshots. Pointer Phi cycles therefore have a finite path fixed point.
-    using PointerRoute = std::pair<uint32_t, std::vector<std::pair<uint32_t, uint32_t>>>;
+    struct PointerIndex {
+        uint32_t constant = 0, type = 0, pointer_type = 0;
+        bool operator<(const PointerIndex &other) const {
+            return std::tie(constant, type, pointer_type) < std::tie(other.constant, other.type, other.pointer_type);
+        }
+    };
+    using PointerRoute = std::pair<uint32_t, std::vector<PointerIndex>>;
     struct PointerPlan {
         std::set<uint32_t> routes;
         uint32_t offset = 0, words = 1;
@@ -380,6 +390,7 @@ class Compiler {
     std::map<uint32_t, PointerPlan> pointer_plans;
     std::map<std::string, std::string> null_pointers;
     std::map<uint32_t, uint32_t> active_pointer_routes;
+    uint32_t pointer_words = 0, pointer_arithmetic_type = 0;
     std::set<uint64_t> wide_constants;
     std::vector<std::string> interfaces;
     std::ostringstream source_caps, imports, extensions, execution_modes, annotations, declarations, functions;
@@ -533,6 +544,7 @@ class Compiler {
         if (d.op == spv::OpTypeBool || d.op == spv::OpTypeInt || d.op == spv::OpTypeFloat ||
             d.op == spv::OpTypeAccelerationStructureKHR)
             return true;
+        if (d.op == spv::OpTypePointer && d.words.at(2) == spv::StorageClassStorageBuffer) return true;
         if (d.op == spv::OpTypeVector || d.op == spv::OpTypeMatrix || d.op == spv::OpTypeArray) return Layoutable(d.words.at(2));
         if (d.op == spv::OpTypeStruct) {
             for (size_t n = 2; n < d.words.size(); ++n)
@@ -576,9 +588,10 @@ class Compiler {
             NeedValueType(d.type);
         for (auto child : d.uses) NeedGlobal(child);
     }
-    std::string PointerType(uint32_t storage, const std::string &pointee) {
+    std::string PointerType(uint32_t storage, const std::string &pointee, uint32_t stride = 0) {
         if (IsInvocationStorage(storage)) storage = spv::StorageClassFunction;
         auto key = std::to_string(storage) + " " + pointee;
+        if (stride) key += " stride=" + std::to_string(stride);
         auto found = pointer_types.find(key);
         if (found != pointer_types.end()) return found->second;
         auto id = Fresh();
@@ -594,6 +607,7 @@ class Compiler {
                                                                                : nullptr;
         if (!name) Unsupported("pointer storage class " + std::to_string(storage));
         declarations << id << " = OpTypePointer " << name << " " << pointee << "\n";
+        if (stride) annotations << "OpDecorate " << id << " ArrayStride " << stride << "\n";
         pointer_types[key] = id;
         return id;
     }
@@ -601,7 +615,7 @@ class Compiler {
         const auto &d = Def(id);
         if (d.op == spv::OpTypeVoid) return code.void_type;
         auto codec = codecs.find(id);
-        if (codec != codecs.end()) return codec->second.spirv_type;
+        if (codec != codecs.end() && d.op != spv::OpTypePointer) return codec->second.spirv_type;
         // Runtime arrays and their enclosing blocks have no logical frame
         // codec. Reuse their one resource declaration, including its Block
         // decoration, rather than emitting an invalid unadorned duplicate.
@@ -617,7 +631,7 @@ class Compiler {
             const auto storage = d.words.at(2);
             const bool resource = storage == spv::StorageClassStorageBuffer || storage == spv::StorageClassUniform ||
                                   storage == spv::StorageClassPushConstant || storage == spv::StorageClassShaderRecordBufferKHR;
-            return PointerType(storage, resource ? ResourceType(d.words.at(3)) : Type(d.words.at(3)));
+            return PointerType(storage, resource ? ResourceType(d.words.at(3)) : ValueType(d.words.at(3)), PointerStride(id));
         }
         if (d.op != spv::OpTypeStruct && d.op != spv::OpTypeRuntimeArray && d.op != spv::OpTypeArray && d.op != spv::OpTypeImage &&
             d.op != spv::OpTypeSampler && d.op != spv::OpTypeSampledImage)
@@ -630,6 +644,10 @@ class Compiler {
         declarations << Rewrite(d.text, [&](uint32_t child) { return child == id ? name : Global(child); }) << "\n";
         cloned_types[id] = name;
         return name;
+    }
+    std::string ValueType(uint32_t id) {
+        const auto codec = codecs.find(id);
+        return codec != codecs.end() ? codec->second.spirv_type : Type(id);
     }
     // A source composite can be both an explicitly laid-out resource pointee
     // and an ordinary SSA/Function value. Their nominal types must differ:
@@ -742,7 +760,11 @@ class Compiler {
         }
         for (const auto &i : parsed.instructions) {
             if (!globals.count(i.result)) continue;
-            if (i.op == spv::OpUndef || (i.op >= spv::OpConstantTrue && i.op <= spv::OpConstantNull))
+            if ((i.op == spv::OpUndef || i.op == spv::OpConstantNull) && IsPointer(i.type) &&
+                Def(i.type).words.at(2) == spv::StorageClassStorageBuffer)
+                declarations << SourceID(i.result) << " = " << (i.op == spv::OpUndef ? "OpUndef " : "OpConstantNull ")
+                             << ValueType(i.type) << "\n";
+            else if (i.op == spv::OpUndef || (i.op >= spv::OpConstantTrue && i.op <= spv::OpConstantNull))
                 declarations << Rewrite(i.text, GlobalMapper()) << "\n";
             else if (i.op >= spv::OpSpecConstantTrue && i.op <= spv::OpSpecConstantOp)
                 Unsupported("specialization must run before state lowering");
@@ -774,6 +796,8 @@ class Compiler {
             if (i.op != spv::OpDecorate && i.op != spv::OpMemberDecorate) continue;
             auto target = i.words.at(1);
             if (!globals.count(target) && !needed_types.count(target)) continue;
+            if (i.op == spv::OpDecorate && i.words.at(2) == spv::DecorationArrayStride && Def(target).op == spv::OpTypePointer)
+                continue;  // Native pointer declaration owns its exact stride.
             if (invocation_variables.count(target) || private_variables.count(target)) continue;
             if (BDA() && globals.count(target) && Def(target).op == spv::OpVariable &&
                 (Def(target).words.at(3) == spv::StorageClassInput || Def(target).words.at(3) == spv::StorageClassPushConstant ||
@@ -852,39 +876,90 @@ class Compiler {
     }
     uint32_t RouteWords(uint32_t route) const {
         uint64_t words = 1;
-        for (const auto &[constant, type] : pointer_routes.at(route).second)
-            if (!constant) words += SelectorWords(type);
+        for (const auto &index : pointer_routes.at(route).second)
+            if (!index.constant) words += SelectorWords(index.type);
         if (words > UINT32_MAX / 4) Unsupported("logical pointer selector snapshot exceeds frame indexing");
         return static_cast<uint32_t>(words);
     }
     PointerRoute ExtendPointerRoute(uint32_t base, const Instruction &access) const {
         auto route = pointer_routes.at(base);
-        for (size_t n = 4; n < access.words.size(); ++n) {
+        const bool arithmetic = access.op == spv::OpPtrAccessChain || access.op == spv::OpInBoundsPtrAccessChain;
+        if (arithmetic) {
+            const auto pointer_type = CanonicalPointerType(Def(access.words.at(3)).type);
+            if (route.second.empty() || route.second.back().pointer_type != pointer_type)
+                route.second.push_back({0, pointer_arithmetic_type, pointer_type});
+        }
+        for (size_t n = arithmetic ? 5 : 4; n < access.words.size(); ++n) {
             const auto index = access.words[n];
             const auto &d = Def(index);
-            route.second.push_back(d.in_function ? std::make_pair(0u, d.type) : std::make_pair(index, 0u));
+            route.second.push_back(d.in_function ? PointerIndex{0, d.type, 0} : PointerIndex{index, 0, 0});
         }
         return route;
+    }
+    uint32_t PointerStride(uint32_t type) const {
+        for (const auto &i : parsed.instructions)
+            if (i.op == spv::OpDecorate && i.words.at(1) == type && i.words.at(2) == spv::DecorationArrayStride)
+                return i.words.at(3);
+        return 0;
+    }
+    uint32_t CanonicalPointerType(uint32_t type) const {
+        const auto &definition = Def(type);
+        const auto stride = PointerStride(type);
+        for (const auto &[id, candidate] : definitions)
+            if (candidate->op == spv::OpTypePointer && candidate->words.at(2) == definition.words.at(2) &&
+                candidate->words.at(3) == definition.words.at(3) && PointerStride(id) == stride)
+                return id;
+        return type;
     }
     void PlanPointerRoutes() {
         bool needed = false;
         for (const auto &i : parsed.instructions)
-            needed |= i.type && IsPointer(i.type) && Def(i.type).words.at(2) == spv::StorageClassStorageBuffer &&
-                      (i.op == spv::OpPhi || i.op == spv::OpSelect);
+            needed |= i.type && IsPointer(i.type) && Def(i.type).words.at(2) == spv::StorageClassStorageBuffer;
         if (!needed) return;
+        for (const auto &i : parsed.instructions) {
+            if (!i.result || !IsPointer(i.type) || Def(i.type).words.at(2) != spv::StorageClassStorageBuffer) continue;
+            const bool access = i.op == spv::OpAccessChain || i.op == spv::OpInBoundsAccessChain || i.op == spv::OpPtrAccessChain ||
+                                i.op == spv::OpInBoundsPtrAccessChain;
+            if (!access) continue;
+            const auto base_type = Def(i.words.at(3)).type;
+            if (Def(base_type).words.at(3) == Def(i.type).words.at(3) && PointerStride(base_type) != PointerStride(i.type))
+                Unsupported("same-pointee ArrayStride changes require byte-offset pointer normalization");
+        }
+        // Zero is the null identity even inside a null-initialized aggregate.
+        PointerRouteID({0, {}});
+        for (const auto &[id, type] : definitions)
+            if (type->op == spv::OpTypeInt && type->words.at(2) == 64 && type->words.at(3) == 0) {
+                pointer_arithmetic_type = id;
+                break;
+            }
+        for (const auto &i : parsed.instructions)
+            if (i.op == spv::OpPtrAccessChain || i.op == spv::OpInBoundsPtrAccessChain) {
+                if (!pointer_arithmetic_type) Unsupported("pointer arithmetic has no private uint64 selector type");
+                NeedValueType(pointer_arithmetic_type);
+                break;
+            }
         std::set<uint32_t> non_uniform;
         for (const auto &i : parsed.instructions)
             if (i.op == spv::OpDecorate && i.words.at(2) == spv::DecorationNonUniform) non_uniform.insert(i.words.at(1));
         for (const auto &i : parsed.instructions) {
-            if (!i.result || !IsPointer(i.type) || Def(i.type).words.at(2) != spv::StorageClassStorageBuffer) continue;
+            if (!i.result || !IsPointer(i.type) || Def(i.type).words.at(2) != spv::StorageClassStorageBuffer ||
+                (!i.in_function && !globals.count(i.result)))
+                continue;
             auto &plan = pointer_plans[i.result];
+            NeedValueType(i.type);
             plan.non_uniform = non_uniform.count(i.result) != 0;
-            if (i.op == spv::OpAccessChain || i.op == spv::OpInBoundsAccessChain)
+            if (i.op == spv::OpAccessChain || i.op == spv::OpInBoundsAccessChain || i.op == spv::OpPtrAccessChain ||
+                i.op == spv::OpInBoundsPtrAccessChain)
                 for (size_t n = 4; n < i.words.size(); ++n) plan.non_uniform |= non_uniform.count(i.words[n]) != 0;
             if (!i.in_function) {
-                if (i.op != spv::OpVariable && i.op != spv::OpConstantNull)
+                if (i.op != spv::OpVariable && i.op != spv::OpConstantNull && i.op != spv::OpUndef)
                     Unsupported("logical pointer root is not a descriptor or null");
-                plan.routes.insert(PointerRouteID({i.op == spv::OpConstantNull ? 0u : i.result, {}}));
+                plan.routes.insert(PointerRouteID({i.op == spv::OpVariable ? i.result : 0u, {}}));
+            } else if (i.op == spv::OpLoad || i.op == spv::OpCompositeExtract) {
+                // A null aggregate initializer needs no separate pointer null
+                // instruction. Memory/aggregate dataflow adds other identities
+                // at the fixed point below; zero also represents poison paths.
+                plan.routes.insert(0);
             }
         }
         bool changed = true;
@@ -909,7 +984,8 @@ class Compiler {
                         changed |= result->second.routes.insert(target).second;
                     }
                 };
-                if (i.op == spv::OpAccessChain || i.op == spv::OpInBoundsAccessChain)
+                if (i.op == spv::OpAccessChain || i.op == spv::OpInBoundsAccessChain || i.op == spv::OpPtrAccessChain ||
+                    i.op == spv::OpInBoundsPtrAccessChain)
                     inherit(i.words.at(3), true);
                 else if (i.op == spv::OpCopyObject)
                     inherit(i.words.at(3), false);
@@ -918,6 +994,14 @@ class Compiler {
                     inherit(i.words.at(5), false);
                 } else if (i.op == spv::OpPhi) {
                     for (size_t n = 3; n < i.words.size(); n += 2) inherit(i.words[n], false);
+                } else if (i.op == spv::OpLoad || i.op == spv::OpCompositeExtract) {
+                    // Conservatively join all same-typed identities that can
+                    // be stored in invocation-private memory/composites. The
+                    // runtime tag and actual dynamic cell offset stay exact.
+                    for (const auto &[source, plan] : pointer_plans) {
+                        (void)plan;
+                        if (CanonicalPointerType(Def(source).type) == CanonicalPointerType(i.type)) inherit(source, false);
+                    }
                 } else
                     Unsupported("logical pointer SSA operation requires an explicit identity encoding");
             }
@@ -926,6 +1010,11 @@ class Compiler {
             (void)id;
             if (plan.routes.empty()) Unsupported("logical pointer Phi has no reachable descriptor root");
             for (auto route : plan.routes) plan.words = std::max(plan.words, RouteWords(route));
+            pointer_words = std::max(pointer_words, plan.words);
+        }
+        for (auto &[id, plan] : pointer_plans) {
+            (void)id;
+            plan.words = pointer_words;
         }
     }
     void PlanPointerSnapshots(uint64_t &size) {
@@ -973,6 +1062,18 @@ class Compiler {
             value = Op(std::string(width == 32 ? "OpBitcast " : "OpUConvert ") + code.word_type + " " + value);
         return {value};
     }
+    std::string ArithmeticSelector(uint32_t id) {
+        if (!pointer_arithmetic_type) Unsupported("pointer arithmetic requires the private uint64 selector type");
+        auto value = Value(id);
+        const auto width = Def(Def(id).type).words.at(2);
+        // SPIR-V treats Element as signed regardless of its type's Signedness.
+        return Op(std::string(width == 64 ? "OpBitcast " : "OpSConvert ") + ValueType(pointer_arithmetic_type) + " " + value);
+    }
+    std::vector<std::string> ArithmeticWords(const std::string &value) {
+        const auto pair = Op("OpBitcast " + code.word_pair_type + " " + value);
+        return {Op("OpCompositeExtract " + code.word_type + " " + pair + " 0"),
+                Op("OpCompositeExtract " + code.word_type + " " + pair + " 1")};
+    }
     std::string DecodeSelector(uint32_t type, const std::vector<std::string> &words, size_t &offset) {
         const auto width = Def(type).words.at(2);
         auto value = words.at(offset++);
@@ -1002,8 +1103,10 @@ class Compiler {
         }
         const auto base = i.words.at(3);
         const auto parent = ReadPointerSnapshot(base);
+        const bool arithmetic = i.op == spv::OpPtrAccessChain || i.op == spv::OpInBoundsPtrAccessChain;
+        const auto element = arithmetic ? ArithmeticSelector(i.words.at(4)) : std::string();
         std::vector<std::string> appended;
-        for (size_t n = 4; n < i.words.size(); ++n)
+        for (size_t n = arithmetic ? 5 : 4; n < i.words.size(); ++n)
             if (Def(i.words[n]).in_function) {
                 const auto encoded = EncodeSelector(i.words[n]);
                 appended.insert(appended.end(), encoded.begin(), encoded.end());
@@ -1021,6 +1124,19 @@ class Compiler {
             if (labels.size() > 1) functions << label << " = OpLabel\n";
             std::vector<std::string> result{Constant(pointer_route_ids.at(ExtendPointerRoute(route, i)))};
             result.insert(result.end(), parent.begin() + 1, parent.begin() + RouteWords(route));
+            if (arithmetic) {
+                const auto &path = pointer_routes.at(route).second;
+                const auto canonical = CanonicalPointerType(Def(base).type);
+                auto delta = element;
+                if (!path.empty() && path.back().pointer_type == canonical) {
+                    size_t offset = result.size() - 2;
+                    const auto previous = DecodeSelector(pointer_arithmetic_type, result, offset);
+                    delta = Op("OpIAdd " + ValueType(pointer_arithmetic_type) + " " + previous + " " + element);
+                    result.resize(result.size() - 2);
+                }
+                const auto encoded = ArithmeticWords(delta);
+                result.insert(result.end(), encoded.begin(), encoded.end());
+            }
             result.insert(result.end(), appended.begin(), appended.end());
             WritePointerSnapshot(i.result, result);
             if (labels.size() > 1) functions << "OpBranch " << merge << "\n";
@@ -1045,15 +1161,33 @@ class Compiler {
         }
         if (route.second.empty()) return Global(route.first);
         const auto words = ReadPointerSnapshot(id);
-        std::string operands = Global(route.first);
+        auto pointer = Global(route.first);
+        std::string indexes;
         size_t offset = 1;
-        for (const auto &[constant, type] : route.second)
-            operands += " " + (constant ? Global(constant) : DecodeSelector(type, words, offset));
-        auto result = Op("OpAccessChain " + Type(Def(id).type) + " " + operands);
-        DecoratePointerSnapshot(id, result);
-        return result;
+        for (size_t n = 0; n < route.second.size(); ++n) {
+            const auto &index = route.second[n];
+            if (index.pointer_type) {
+                if (!indexes.empty()) {
+                    pointer = Op("OpAccessChain " + Type(index.pointer_type) + " " + pointer + indexes);
+                    indexes.clear();
+                }
+                const auto element = DecodeSelector(index.type, words, offset);
+                const auto result_type = n + 1 == route.second.size() ? Type(Def(id).type) : Type(index.pointer_type);
+                pointer = Op("OpPtrAccessChain " + result_type + " " + pointer + " " + element);
+            } else
+                indexes += " " + (index.constant ? Global(index.constant) : DecodeSelector(index.type, words, offset));
+        }
+        if (!indexes.empty()) pointer = Op("OpAccessChain " + Type(Def(id).type) + " " + pointer + indexes);
+        DecoratePointerSnapshot(id, pointer);
+        return pointer;
     }
     bool RoutedPointerOperation(const Instruction &i) {
+        const auto opcode_name = std::string(spvOpcodeString(i.op));
+        const bool native = (i.op == spv::OpLoad && Storage(i.words.at(3)) == spv::StorageClassStorageBuffer) ||
+                            (i.op == spv::OpStore && Storage(i.words.at(1)) == spv::StorageClassStorageBuffer) ||
+                            i.op == spv::OpArrayLength || opcode_name.find("Atomic") == 0 || i.op == spv::OpPtrEqual ||
+                            i.op == spv::OpPtrNotEqual || i.op == spv::OpPtrDiff;
+        if (!native) return false;
         std::vector<uint32_t> pointers;
         bool needed = false;
         for (auto id : i.uses) {
@@ -1090,9 +1224,9 @@ class Compiler {
                     const auto type = Def(value_id).type;
                     auto value = Value(value_id);
                     if (ResourceType(type) != Type(type)) value = Op("OpCopyLogical " + ResourceType(type) + " " + value);
-                    functions << Rewrite(i.text, [&](uint32_t id) { return id == value_id ? value : Value(id); }) << "\n";
+                    functions << Rewrite(i.text, [&](uint32_t id) { return id == value_id ? value : NativeValue(id); }) << "\n";
                 } else if (i.op == spv::OpAtomicStore || i.op == spv::OpAtomicFlagClear)
-                    functions << Rewrite(i.text, [&](uint32_t id) { return Value(id); }) << "\n";
+                    functions << Rewrite(i.text, [&](uint32_t id) { return NativeValue(id); }) << "\n";
                 else
                     Generic(i);
                 return;
@@ -1232,7 +1366,15 @@ class Compiler {
     }
     std::string Value(uint32_t id) {
         const auto &d = Def(id);
-        if (IsPointer(d.type)) return RealPointer(id);
+        if (IsPointer(d.type)) {
+            if (pointer_plans.count(id)) {
+                const auto words = ReadPointerSnapshot(id);
+                std::string construct = "OpCompositeConstruct " + ValueType(d.type);
+                for (uint32_t n = 0; n < pointer_words; ++n) construct += " " + (n < words.size() ? words[n] : Constant(0));
+                return Op(construct);
+            }
+            return RealPointer(id);
+        }
         if (!d.in_function) return Global(id);
         if (!d.result || !d.type || Def(d.type).op == spv::OpTypeVoid) Unsupported("non-value source operand");
         if (Ephemeral(d.type)) {
@@ -1247,12 +1389,21 @@ class Compiler {
         return result;
     }
     void Save(uint32_t id, const std::string &value) {
-        if (Ephemeral(Def(id).type))
+        if (pointer_plans.count(id)) {
+            std::vector<std::string> words;
+            for (uint32_t n = 0; n < pointer_words; ++n)
+                words.push_back(Op("OpCompositeExtract " + code.word_type + " " + value + " " + std::to_string(n)));
+            WritePointerSnapshot(id, words);
+        } else if (Ephemeral(Def(id).type))
             ephemeral_values[id] = value;
         else
             functions << "OpStore " << Register(id) << " " << value << "\n";
     }
     uint32_t Storage(uint32_t pointer) const { return Def(Def(pointer).type).words.at(2); }
+    std::string NativeValue(uint32_t id) {
+        const auto &d = Def(id);
+        return IsPointer(d.type) && pointer_plans.count(id) ? RealPointer(id) : Value(id);
+    }
     std::string Offset(uint32_t pointer) {
         auto system = builtin_variables.find(pointer);
         if (system != builtin_variables.end()) return Constant(system->second->byte_offset);
@@ -1466,7 +1617,8 @@ class Compiler {
         functions << "OpReturn\n";
     }
     void Generic(const Instruction &i) {
-        if (!i.result || !i.type || IsPointer(i.type) || Def(i.type).op == spv::OpTypeVoid || i.op == spv::OpFunctionCall)
+        if (!i.result || !i.type || (IsPointer(i.type) && !pointer_plans.count(i.result)) || Def(i.type).op == spv::OpTypeVoid ||
+            i.op == spv::OpFunctionCall)
             Unsupported("unsupported source operation Op" + std::string(spvOpcodeString(i.op)) + " at word " +
                         std::to_string(i.offset));
         auto result = Fresh();
@@ -1494,9 +1646,12 @@ class Compiler {
             return;
         }
         std::map<uint32_t, std::string> loaded;
+        const auto opcode = std::string(spvOpcodeString(i.op));
+        const bool native = i.op == spv::OpLoad || i.op == spv::OpArrayLength || opcode.find("Atomic") == 0 ||
+                            i.op == spv::OpPtrEqual || i.op == spv::OpPtrNotEqual || i.op == spv::OpPtrDiff;
         for (auto id : i.uses)
-            if (!loaded.count(id)) loaded[id] = Value(id);
-        const auto result_type = i.op == spv::OpLoad ? ResourceType(i.type) : Type(i.type);
+            if (!loaded.count(id)) loaded[id] = native ? NativeValue(id) : Value(id);
+        const auto result_type = i.op == spv::OpLoad ? ResourceType(i.type) : ValueType(i.type);
         auto text = Rewrite(i.text, [&](uint32_t id) {
             if (id == i.result) return result;
             if (id == i.type) return result_type;
@@ -1511,7 +1666,7 @@ class Compiler {
             text.replace(name, std::string("OpConvertUToAccelerationStructureKHR").size(), "OpBitcast");
         }
         functions << text << "\n";
-        if (result_type != Type(i.type)) result = Op("OpCopyLogical " + Type(i.type) + " " + result);
+        if (result_type != ValueType(i.type)) result = Op("OpCopyLogical " + ValueType(i.type) + " " + result);
         DecorateResult(i.result, result);
         Save(i.result, result);
         CaptureRecipe(i.result);
@@ -1601,7 +1756,8 @@ class Compiler {
                 }
                 continue;
             }
-            if (i.op == spv::OpAccessChain || i.op == spv::OpInBoundsAccessChain ||
+            if (i.op == spv::OpAccessChain || i.op == spv::OpInBoundsAccessChain || i.op == spv::OpPtrAccessChain ||
+                i.op == spv::OpInBoundsPtrAccessChain ||
                 (i.op == spv::OpCopyObject && IsPointer(i.type) && Def(i.type).words.at(2) != spv::StorageClassImage)) {
                 CapturePointerSnapshot(i);
                 CaptureRecipe(i.result);
@@ -1638,7 +1794,7 @@ class Compiler {
             if (i.op == spv::OpLoad && (IsPersistentStorage(Storage(i.words.at(3))) || SystemPointer(i.words.at(3)))) {
                 if (i.words.size() != 4) Unsupported("persistent local load memory operands");
                 auto address = Offset(i.words.at(3));
-                Save(i.result, Op("OpFunctionCall " + Type(i.type) + " " + codecs.at(i.type).load + " %sc_base " + address));
+                Save(i.result, Op("OpFunctionCall " + ValueType(i.type) + " " + codecs.at(i.type).load + " %sc_base " + address));
             } else if (i.op == spv::OpStore) {
                 if (IsPersistentStorage(Storage(i.words.at(1)))) {
                     if (i.words.size() != 3) Unsupported("persistent local store memory operands");
@@ -1651,7 +1807,7 @@ class Compiler {
                     const auto type = Def(value_id).type;
                     auto value = Value(value_id);
                     if (ResourceType(type) != Type(type)) value = Op("OpCopyLogical " + ResourceType(type) + " " + value);
-                    auto text = Rewrite(i.text, [&](uint32_t id) { return id == value_id ? value : Value(id); });
+                    auto text = Rewrite(i.text, [&](uint32_t id) { return id == value_id ? value : NativeValue(id); });
                     if (PhysicalResourcePointer(i.words.at(1))) text = AlignedMemory(text, i, Def(i.words.at(2)).type, 3);
                     functions << text << "\n";
                 }
@@ -1679,7 +1835,7 @@ class Compiler {
                 return;
             } else if (i.op == spv::OpImageWrite || i.op == spv::OpAtomicStore || i.op == spv::OpAtomicFlagClear ||
                        i.op == spv::OpMemoryBarrier) {
-                functions << Rewrite(i.text, [&](uint32_t id) { return Value(id); }) << "\n";
+                functions << Rewrite(i.text, [&](uint32_t id) { return NativeValue(id); }) << "\n";
             } else if (i.op == spv::OpReturn) {
                 StoreWord(0, Constant(UINT32_MAX));
                 functions << "OpReturn\n";
@@ -1904,10 +2060,17 @@ TypedContinuationProgram CompileTypedContinuationSteps(const std::vector<uint32_
     // semantics and removes the need to pretend helper returns are RT returns.
     const auto selected_entry = AnalyzeContinuations(source, entry, execution_model).entry;
     std::vector<uint32_t> selected(source.begin(), source.begin() + 5);
-    bool has_uint32 = false;
-    for (size_t p = 5; p < source.size(); p += source[p] >> 16)
-        if ((source[p] & 0xffff) == spv::OpTypeInt && source[p + 2] == 32 && source[p + 3] == 0) has_uint32 = true;
+    bool has_uint32 = false, has_uint64 = false, has_int64 = false, pointer_arithmetic = false;
+    for (size_t p = 5; p < source.size(); p += source[p] >> 16) {
+        const auto op = source[p] & 0xffff;
+        if (op == spv::OpTypeInt && source[p + 2] == 32 && source[p + 3] == 0) has_uint32 = true;
+        if (op == spv::OpTypeInt && source[p + 2] == 64 && source[p + 3] == 0) has_uint64 = true;
+        if (op == spv::OpCapability && source[p + 1] == spv::CapabilityInt64) has_int64 = true;
+        pointer_arithmetic |= op == spv::OpPtrAccessChain || op == spv::OpInBoundsPtrAccessChain;
+    }
+    if (pointer_arithmetic && !has_int64) selected.insert(selected.end(), {(2u << 16) | spv::OpCapability, spv::CapabilityInt64});
     bool inserted_control_type = has_uint32;
+    bool inserted_arithmetic_type = has_uint64 || !pointer_arithmetic;
     for (size_t p = 5; p < source.size(); p += source[p] >> 16) {
         auto op = static_cast<spv::Op>(source[p] & 0xffff);
         if (op == spv::OpEntryPoint && source.at(p + 2) != selected_entry) continue;
@@ -1916,6 +2079,11 @@ TypedContinuationProgram CompileTypedContinuationSteps(const std::vector<uint32_
             auto id = selected[3]++;
             selected.insert(selected.end(), {(4u << 16) | spv::OpTypeInt, id, 32, 0});
             inserted_control_type = true;
+        }
+        if (op == spv::OpFunction && !inserted_arithmetic_type) {
+            const auto id = selected[3]++;
+            selected.insert(selected.end(), {(4u << 16) | spv::OpTypeInt, id, 64, 0});
+            inserted_arithmetic_type = true;
         }
         selected.insert(selected.end(), source.begin() + p, source.begin() + p + (source[p] >> 16));
     }

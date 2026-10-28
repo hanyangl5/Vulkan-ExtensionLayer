@@ -9,6 +9,7 @@
 #include "vkrt_common.h"
 #include "vkrt_dispatch.h"
 #include "vkrt_private_pool.h"
+#include "vkrt_replay.h"
 
 /* ------------------------------------------------------------------ */
 /* Virtual acceleration structure (design doc section 7)               */
@@ -95,6 +96,11 @@ struct vkrt_cmd_buffer_data {
     VkCommandBuffer cmd;
     struct vkrt_device_data *device_data;
     VkCommandPool pool;
+    /* Private execution recordings interpret replay layout identities in their
+     * own retained definition table, never as public/native handle values. */
+    bool replaying;
+    VkCommandBufferLevel level;
+    struct vkrt_replay_context replay;
     struct vkrt_cmd_buffer_data *next;
     struct vkrt_saved_push *push_head, *push_tail;
     VkResult record_result;
@@ -207,6 +213,8 @@ VkResult vkrt_create_device_with_features(struct vkrt_instance_data *inst,
    VkPhysicalDevice physical, PFN_vkCreateDevice create,
    const VkDeviceCreateInfo *ci, const VkAllocationCallbacks *alloc, VkDevice *device);
 PFN_vkVoidFunction vkrt_command_proc(const char *name);
+/* Resolve the translating hook/native entry point without replay capture. */
+PFN_vkVoidFunction vkrt_device_direct_proc(struct vkrt_device_data *dev, const char *name);
 void vkrt_commands_finish(struct vkrt_device_data *dev);
 VkResult vkrt_build_init(struct vkrt_device_data *dev);
 void vkrt_build_finish(struct vkrt_device_data *dev);

@@ -223,6 +223,7 @@ struct vkrt_rtp_command {
     std::shared_ptr<Pipeline> bound;
     std::vector<Binding> rt_bindings, compute_bindings;
     std::vector<std::shared_ptr<Layout>> retained_layouts;
+    std::unordered_map<uint64_t, std::shared_ptr<Layout>> replay_layouts;
     std::map<uint32_t, std::vector<uint8_t>> pushes;
     std::map<uint32_t, std::shared_ptr<Layout>> push_layouts;
     std::vector<std::unique_ptr<Packet>> packets;
@@ -244,6 +245,12 @@ std::shared_ptr<Layout> FindLayout(vkrt_device_data *d, VkPipelineLayout h) {
     std::lock_guard<std::mutex> lock(d->rtp->lock);
     auto i = d->rtp->layouts.find(VKRT_HKEY(h));
     return i == d->rtp->layouts.end() ? nullptr : i->second.canonical;
+}
+std::shared_ptr<Layout> FindCommandLayout(vkrt_cmd_buffer_data *cb, VkPipelineLayout h) {
+    if (!cb->replaying) return FindLayout(cb->device_data, h);
+    if (!cb->rtp) return {};
+    auto i = cb->rtp->replay_layouts.find(VKRT_HKEY(h));
+    return i == cb->rtp->replay_layouts.end() ? nullptr : i->second;
 }
 std::shared_ptr<Pipeline> FindPipeline(vkrt_device_data *d, VkPipeline h) {
     if (!d->rtp) return {};
@@ -271,6 +278,17 @@ bool Compatible(const Layout &a, const Layout &b, uint32_t last) {
             a.pushes[i].size != b.pushes[i].size)
             return false;
     for (uint32_t i = 0; i <= last; ++i)
+        if (a.sets[i] != b.sets[i] && (!a.sets[i] || !b.sets[i] || !(*a.sets[i] == *b.sets[i]))) return false;
+    return true;
+}
+bool SameLayoutDefinition(const Layout &a, const Layout &b) {
+    if (a.sets.size() != b.sets.size() || a.pushes.size() != b.pushes.size() || a.independent_sets != b.independent_sets)
+        return false;
+    for (size_t i = 0; i < a.pushes.size(); ++i)
+        if (a.pushes[i].stageFlags != b.pushes[i].stageFlags || a.pushes[i].offset != b.pushes[i].offset ||
+            a.pushes[i].size != b.pushes[i].size)
+            return false;
+    for (size_t i = 0; i < a.sets.size(); ++i)
         if (a.sets[i] != b.sets[i] && (!a.sets[i] || !b.sets[i] || !(*a.sets[i] == *b.sets[i]))) return false;
     return true;
 }
@@ -454,6 +472,12 @@ VKAPI_ATTR VkResult VKAPI_CALL CreatePipelineLayout(VkDevice device, const VkPip
                 if (handle) dev->vtable.DestroyPipelineLayout(dev->device, handle, allocator);
             }
         } public_guard{d, public_layout, a};
+        auto alias = d->rtp->layouts.find(VKRT_HKEY(public_layout));
+        // Stripping RT ranges can make different public definitions identical
+        // to the ICD. A numeric native alias cannot identify both definitions.
+        // Until all public consumers support virtual layout handles, reject
+        // that ambiguity rather than silently replacing recorded semantics.
+        Need(alias == d->rtp->layouts.end() || SameLayoutDefinition(*alias->second.canonical, *v));
         VkPipelineLayout native_layout{};
         Check(d->vtable.CreatePipelineLayout(device, &local, nullptr, &native_layout));
         v->native = native_layout;
@@ -776,7 +800,8 @@ VKAPI_ATTR void VKAPI_CALL CmdBindDescriptorSets(VkCommandBuffer command, VkPipe
     if (!cb) return;
     VkResult result = Guard([&] {
         auto d = cb->device_data;
-        auto owner = FindLayout(d, layout);
+        auto owner = FindCommandLayout(cb, layout);
+        if (cb->replaying) Need(owner != nullptr);
         VkPipelineLayout native = owner ? owner->native : layout;
         CaptureBindings(cb, point, owner, native, first, count, sets, dynamic_count, offsets);
         if (point != VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR)
@@ -816,7 +841,7 @@ VKAPI_ATTR void VKAPI_CALL CmdBindDescriptorSets2(VkCommandBuffer command, const
             Check(CreatePipelineLayout(d->device, &ci, nullptr, &temporary.handle));
             layout = temporary.handle;
         }
-        auto owner = FindLayout(d, layout);
+        auto owner = temporary.handle ? FindLayout(d, temporary.handle) : FindCommandLayout(cb, layout);
         Need(owner != nullptr);
         bool all = info->stageFlags == VK_SHADER_STAGE_ALL;
         if (all || (info->stageFlags & rt_bits))
@@ -1120,6 +1145,53 @@ extern "C" VkPipelineLayout vkrt_rtp_native_layout(vkrt_device_data *dev, VkPipe
     });
     return result;
 }
+extern "C" VkPipelineLayout vkrt_rtp_command_native_layout(vkrt_cmd_buffer_data *cb, VkPipelineLayout h) {
+    VkPipelineLayout result = h;
+    VkResult status = Guard([&] {
+        auto owner = FindCommandLayout(cb, h);
+        if (cb->replaying) Need(owner != nullptr);
+        if (owner) result = owner->native;
+        return VK_SUCCESS;
+    });
+    if (status != VK_SUCCESS) cb->record_result = status;
+    return result;
+}
+extern "C" VkResult vkrt_rtp_replay_layout_capture(vkrt_cmd_buffer_data *cb, VkPipelineLayout h, VkPipelineLayout *identity) {
+    if (!cb || !identity) return VK_ERROR_INITIALIZATION_FAILED;
+    *identity = VK_NULL_HANDLE;
+    return Guard([&] {
+        auto owner = FindLayout(cb->device_data, h);
+        Need(owner != nullptr);
+        // This is a recording-local key, not a Vulkan object handle. The owner
+        // remains live in the table, so its address cannot be reused there.
+        auto key = Handle<VkPipelineLayout>(owner.get());
+        State(cb).replay_layouts.emplace(VKRT_HKEY(key), std::move(owner));
+        *identity = key;
+        return VK_SUCCESS;
+    });
+}
+extern "C" VkResult vkrt_rtp_replay_layouts_inherit(vkrt_cmd_buffer_data *target, const vkrt_cmd_buffer_data *source) {
+    if (!target || !source || target->device_data != source->device_data || !target->replaying)
+        return VK_ERROR_INITIALIZATION_FAILED;
+    return Guard([&] {
+        // This helper initializes one fresh recording, never a concatenation of
+        // histories. Begin/reset must precede inheritance and command emission.
+        Need(!target->rtp || target->rtp->replay_layouts.empty());
+        if (source->rtp) State(target).replay_layouts = source->rtp->replay_layouts;
+        return VK_SUCCESS;
+    });
+}
+extern "C" VkResult vkrt_rtp_replay_layout_native(vkrt_cmd_buffer_data *cb, VkPipelineLayout identity,
+                                                  VkPipelineLayout *native_layout) {
+    if (!cb || !native_layout || !cb->replaying) return VK_ERROR_INITIALIZATION_FAILED;
+    *native_layout = VK_NULL_HANDLE;
+    return Guard([&] {
+        auto owner = FindCommandLayout(cb, identity);
+        Need(owner != nullptr);
+        *native_layout = owner->native;
+        return VK_SUCCESS;
+    });
+}
 extern "C" bool vkrt_rtp_bind_pipeline(vkrt_cmd_buffer_data *cb, VkPipelineBindPoint point, VkPipeline h) {
     if (point != VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR) return false;
     VkResult r = Guard([&] {
@@ -1134,7 +1206,7 @@ extern "C" VkShaderStageFlags vkrt_rtp_push(vkrt_cmd_buffer_data *cb, VkPipeline
                                             uint32_t offset, uint32_t size, const void *values) {
     if (!cb->device_data->rtp) return stages;
     VkResult r = Guard([&] {
-        auto p = FindLayout(cb->device_data, h);
+        auto p = FindCommandLayout(cb, h);
         if (p) State(cb).retained_layouts.push_back(p);
         if (stages & rt_bits) {
             Need(p && offset <= p->push_bytes && size <= p->push_bytes - offset);

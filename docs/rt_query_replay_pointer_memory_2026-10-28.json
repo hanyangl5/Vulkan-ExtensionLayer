@@ -1,0 +1,1058 @@
+{
+  "schema_version": 1,
+  "base_commit": "e162ea3",
+  "goal_complete": false,
+  "query_submission_replay_enabled": false,
+  "logical_stage_native_executor_enabled": false,
+  "canonical_layer": {
+    "path": "build-raytracing-unified\\layers\\VkLayer_VKRT_SOFTWARE_RAY_QUERY.dll",
+    "bytes": 7126016,
+    "sha256": "8874bf5d26df27d4411b51a1e459e408c99757117e2399d73b08d87f3f516b19"
+  },
+  "parent_rt_target": {
+    "path": "build-source-layout\\top-level\\layers\\VkLayer_VKRT_SOFTWARE_RAY_QUERY.dll",
+    "bytes": 7126016,
+    "sha256": "6320cdc6f7bf6fa5fc4d96fd30a0b013e1953cd096b539dafcb40745c0fbf05d"
+  },
+  "source_artifacts": [
+    {
+      "path": "layers\\raytracing\\CMakeLists.txt",
+      "bytes": 55666,
+      "sha256": "42e101a871f5b3e93749f1ffbf7af36e3e393293c71a4b75bb690a2c014305d3"
+    },
+    {
+      "path": "layers\\raytracing\\cmake\\command_replay.cmake",
+      "bytes": 1130,
+      "sha256": "aa63362a75a57e9c15b3e6361c4864ad15afd713bd9927edc3a40a4da3fbe9f9"
+    },
+    {
+      "path": "layers\\raytracing\\cmake\\compiler_tests.cmake",
+      "bytes": 2298,
+      "sha256": "6e8e3a04fd1cf16270fc2a9c8009ae689f4fab79d7c540fb2b6947c2551e2df1"
+    },
+    {
+      "path": "layers\\raytracing\\cmake\\generate_command_replay.py",
+      "bytes": 36242,
+      "sha256": "d1234735c2006881af59aa873f6d4b362742052f3db7d736495138c24f538ef6"
+    },
+    {
+      "path": "layers\\raytracing\\src\\continuations.cpp",
+      "bytes": 23831,
+      "sha256": "8b62c85899333b4733d0dffbb6f43b775a34cf077a62d81a8e7f9fc8c8409b0d"
+    },
+    {
+      "path": "layers\\raytracing\\src\\continuations.h",
+      "bytes": 6568,
+      "sha256": "a3d6b123586e580fa691c3c6a3489b00e5fd7fae826e7f2d6e939065608b7f03"
+    },
+    {
+      "path": "layers\\raytracing\\src\\frame_emitter.cpp",
+      "bytes": 28390,
+      "sha256": "a6930ac116b466b7a101dd3ecaf6ccb5bc0e2872e2621659de9cf9fdedb31d3b"
+    },
+    {
+      "path": "layers\\raytracing\\src\\frame_emitter.h",
+      "bytes": 4074,
+      "sha256": "cd9fccde4b59bc611673b6f24f815a817a1f3ab64ad6639b07903cbefb50770d"
+    },
+    {
+      "path": "layers\\raytracing\\src\\state_compiler.cpp",
+      "bytes": 123639,
+      "sha256": "0f27e815cb8bb973cf8bf0e26d7b0cc7fcdb5de8347c77124d560ad2576e4ea3"
+    },
+    {
+      "path": "layers\\raytracing\\src\\state_compiler.h",
+      "bytes": 9883,
+      "sha256": "ac779d8f9f363204f767179c988c8145b4bae775b9fa0e42422a031a37a85a38"
+    },
+    {
+      "path": "layers\\raytracing\\src\\vkrt_commands.c",
+      "bytes": 16554,
+      "sha256": "6abbb9297c747ee48db9db42116e3970a69379895713ec08dbb772efabf5b2dd"
+    },
+    {
+      "path": "layers\\raytracing\\src\\vkrt_layer.c",
+      "bytes": 36359,
+      "sha256": "0446709bbb9793ce925092bf5af24fd6c0fd7b606cc914533758d256c8a88c01"
+    },
+    {
+      "path": "layers\\raytracing\\src\\vkrt_layer.h",
+      "bytes": 11113,
+      "sha256": "8835256c5928819aee5e482a3a2754987801c55a5e632942d3279c069890bed4"
+    },
+    {
+      "path": "layers\\raytracing\\src\\vkrt_replay.c",
+      "bytes": 10905,
+      "sha256": "a7a97990f385961c189adbd529b892de702f7533eaa5718ed61fc622754c9143"
+    },
+    {
+      "path": "layers\\raytracing\\src\\vkrt_replay.h",
+      "bytes": 3551,
+      "sha256": "26db91a5f700c3dcaf5d162bcbe3dc0169c0abb9cbce6c45f97b7035f6832c2e"
+    },
+    {
+      "path": "layers\\raytracing\\src\\vkrt_rtp.cpp",
+      "bytes": 62318,
+      "sha256": "da928f5cde199409127d304515986bd85294f337d9e10ca077cfdd581b79bf54"
+    },
+    {
+      "path": "layers\\raytracing\\src\\vkrt_rtp.h",
+      "bytes": 2319,
+      "sha256": "9e87063eea990572f31e2d52a22d74eaf25ee24a10d3bac94ae2146fadd36e3e"
+    },
+    {
+      "path": "layers\\raytracing\\src\\vkrt_stage_schedule.c",
+      "bytes": 11634,
+      "sha256": "b504d85f8ded57304503ffde06dba9d055188d166b558b2afb9c0e9904201c6b"
+    },
+    {
+      "path": "layers\\raytracing\\src\\vkrt_stage_schedule.h",
+      "bytes": 5894,
+      "sha256": "83660a7d5cf65dcd029f4f53063aee121df92be30fa42462094561da7fabe389"
+    },
+    {
+      "path": "layers\\raytracing\\tests\\command_replay_host.c",
+      "bytes": 30720,
+      "sha256": "ec075733e3bff189c99f18a196ae9bc7bf174770180f665b19dd2ce5895d54c1"
+    },
+    {
+      "path": "layers\\raytracing\\tests\\frame_emitter_tests.cpp",
+      "bytes": 25068,
+      "sha256": "757394bdfb1e5b4e864671701ee498f8bbdcfc8df75ada733b80e01c7773afc8"
+    },
+    {
+      "path": "layers\\raytracing\\tests\\state_compiler_tests.cpp",
+      "bytes": 70229,
+      "sha256": "912bf71944324a3160d1c2bd6bb36df449d805ed2c20b974209307296c522b74"
+    },
+    {
+      "path": "layers\\raytracing\\tests\\test_command_state.c",
+      "bytes": 13330,
+      "sha256": "2a493824eddcc5119d26f0b08d6dd47cf40141f69dd5ad456bbaac28f3fb87c1"
+    },
+    {
+      "path": "layers\\raytracing\\tests\\test_query_properties.c",
+      "bytes": 25822,
+      "sha256": "d4cbb28e443014d6db356dd019b093a58ac3b91fc64872ca111e5fcbb4323b23"
+    },
+    {
+      "path": "layers\\raytracing\\tests\\test_rtp_bindings.cpp",
+      "bytes": 46652,
+      "sha256": "1a4226fd4797542e6ebb44ebc93e817499dec3364307ac5d7a39536e904ac8f1"
+    },
+    {
+      "path": "layers\\raytracing\\tests\\test_stage_schedule.c",
+      "bytes": 18036,
+      "sha256": "aaad3384578fcd410cef2aacedda52c5070739029fcf48292c0e84f9eb5d1534"
+    }
+  ],
+  "test_executables": [
+    {
+      "path": "build-raytracing-unified\\vel_rt_state_compiler_tests.exe",
+      "bytes": 3528192,
+      "sha256": "72f86a4b41aa024321c62cadc9980510728e71d62044168c1dc3021d32520f10"
+    },
+    {
+      "path": "build-raytracing-unified\\vel_rt_frame_emitter_tests.exe",
+      "bytes": 2062336,
+      "sha256": "09b63e90b470cd674a5ba2a28ecda25e4c556138cdfc0347c802c917e9411e9f"
+    },
+    {
+      "path": "build-raytracing-unified\\test_rtp_bindings.exe",
+      "bytes": 6103040,
+      "sha256": "22579a086d183097cbd94cbd287a8b5ec5e2d2bd46a2cc43ae25d9057ee1787c"
+    },
+    {
+      "path": "build-raytracing-unified\\test_command_state.exe",
+      "bytes": 446976,
+      "sha256": "8341222ed4f0a26c48f3392db518f39cc068ba5f8e9afb921b5f736d4f58850d"
+    },
+    {
+      "path": "build-raytracing-unified\\test_command_replay.exe",
+      "bytes": 450048,
+      "sha256": "864a111e0b972fb89953deef9e3ce869a79212bd21e0a0890071abe527d96dfb"
+    },
+    {
+      "path": "build-raytracing-unified\\test_stage_schedule.exe",
+      "bytes": 34816,
+      "sha256": "edd5e03093739384f8832c04592d6fae6071b4bf2084b84009d99da9162b5f9c"
+    },
+    {
+      "path": "build-raytracing-unified\\test_query_properties.exe",
+      "bytes": 30208,
+      "sha256": "a7f3935c12897bf25eb46f906ea8282178f6a91a278453d91c0ca60b2db1d816"
+    }
+  ],
+  "local_logs": [
+    {
+      "path": "build-query-pointer-2026-10-28\\offline-final.log",
+      "bytes": 4661,
+      "sha256": "a5bdcd23ef0472a5a9e8358628d08710e8446f65912cd548e4ddde41d9613482",
+      "passed": 34,
+      "skipped": 0
+    },
+    {
+      "path": "build-query-pointer-2026-10-28\\gpu-properties-recheck.log",
+      "bytes": 314,
+      "sha256": "3c9c9dc7dc8febb8c2aa3ddbd8e68a47ac41bf08eb9f5c9c67f7376da1e73bc2",
+      "passed": 1,
+      "skipped": 0
+    },
+    {
+      "path": "build-query-pointer-2026-10-28\\gpu-final.log",
+      "bytes": 4550,
+      "sha256": "ff0cb3649840c1a276d4a58e9baf18016603bf5a6e8d8dc8e0081bb345dc9373",
+      "passed": 10,
+      "failed": 1,
+      "scope": "Initial run; query-properties fixture's stale degenerate-instance expectation failed."
+    },
+    {
+      "path": "build-query-pointer-2026-10-28\\canonical-final-build.log",
+      "bytes": 2507,
+      "sha256": "82c7c4b2cfe7b5c858ebe4cdaf0a73037dbc839f3dfaf2bed335e85d21e1df6e"
+    },
+    {
+      "path": "build-query-pointer-2026-10-28\\parent-canonical-final-build.log",
+      "bytes": 838,
+      "sha256": "5890d822e7bc6e923159ecf0cf3b2c5bf77120a37f041116ec222f7e1a76c3ab"
+    },
+    {
+      "path": "build-query-pointer-2026-10-28\\pointer-gpu.log",
+      "bytes": 1078,
+      "sha256": "7c53ebab8eaea4a9c826d7589db09023edf743cd5b23763588523cb42e2d2481",
+      "scope": "Earlier execution before final stride-changing rejection was added; original executable hash not captured. Final source/frame CTest execution is in gpu-final.log."
+    },
+    {
+      "path": "build-query-pointer-2026-10-28\\source-frame-gpu.log",
+      "bytes": 574,
+      "sha256": "553174a08e02c903df973ec5f0ebb3f7722e30e2577e110e10d088774bb10245",
+      "scope": "Earlier execution before final stride-changing rejection was added; original executable hash not captured. Final source/frame CTest execution is in gpu-final.log."
+    },
+    {
+      "path": "build-query-pointer-2026-10-28\\offline.log",
+      "bytes": 5079,
+      "sha256": "26472e2bbbf09dcc83cf776512dd6cf8b28fba3e495b1a9d47ce615b062df719"
+    },
+    {
+      "path": "build-query-pointer-2026-10-28\\rtp-bindings-counter-fix.log",
+      "bytes": 354,
+      "sha256": "f905218d990cfa008324fb6a09a3745f52d224b18aa0d9a549ab64f3101e6abb"
+    },
+    {
+      "path": "build-query-pointer-2026-10-28\\fixture-stage-final-build.log",
+      "bytes": 482,
+      "sha256": "0d298e143827d3724f08c41e93c4e7ee9f2bb41b7c4ea7b00791ec2d6aff9426"
+    },
+    {
+      "path": "build-query-pointer-2026-10-28\\stage-format-recheck.log",
+      "bytes": 354,
+      "sha256": "958277406a601de1b11dd2817906eae154fdd58afda0015f4addda322198a0df"
+    }
+  ],
+  "coverage": {
+    "path": "build-raytracing-unified\\vkrt_replay_coverage.json",
+    "bytes": 68701,
+    "sha256": "b7de9dd94f8a25f6ac0b1517f12d458600c05951fb2b9d9ae62558e1e68ded57",
+    "typed_wrappers": 311,
+    "typed_struct_schemas": 247,
+    "direct_unsupported_commands": [
+      {
+        "name": "vkCmdBeginGpaSampleAMD",
+        "capture": "unsupported",
+        "reasons": [
+          "pSampleID: recording-time writable output requires semantic replay"
+        ],
+        "conditional_schema_restrictions": {}
+      },
+      {
+        "name": "vkCmdPushDescriptorSetWithTemplate",
+        "capture": "unsupported",
+        "reasons": [
+          "pData: opaque void pointer has no byte length"
+        ],
+        "conditional_schema_restrictions": {}
+      },
+      {
+        "name": "vkCmdPushDescriptorSetWithTemplateKHR",
+        "capture": "unsupported",
+        "reasons": [
+          "pData: opaque void pointer has no byte length"
+        ],
+        "conditional_schema_restrictions": {}
+      }
+    ],
+    "scope": "Counts include wrappers/schemas with explicit runtime rejection; not universal command support."
+  },
+  "cts": {
+    "summary": {
+      "path": "build-rt-cts-evidence\\query-pointer-guarded-2026-10-28\\summary.json",
+      "bytes": 128259,
+      "sha256": "a213337b88e493c4dd6116447c0f264634ea7a179b6ae8c26a0a3c714384304b"
+    },
+    "counts": {
+      "pass": 32
+    },
+    "cases": [
+      {
+        "case": "dEQP-VK.ray_tracing_pipeline.pipeline_library.configurations.singlethreaded_compilation.s0_l1",
+        "status": "pass",
+        "exit_code": 0,
+        "qpa": {
+          "path": "build-rt-cts-evidence\\query-pointer-guarded-2026-10-28\\0001-s0_l1-7e48286da4.qpa",
+          "bytes": 31652,
+          "sha256": "ae739d76e044c39987e18cb6f966088aa9fd26eacc293dedacbe9651cc2007ea"
+        },
+        "stdout": {
+          "path": "build-rt-cts-evidence\\query-pointer-guarded-2026-10-28\\0001-s0_l1-7e48286da4.stdout.txt",
+          "bytes": 893,
+          "sha256": "7fe41128a7a39d4332ac0b7d0d031b8fb7a9e896da78fbd0e1ceb2dd0743d94d"
+        },
+        "guard": {
+          "path": "build-rt-cts-evidence\\query-pointer-guarded-2026-10-28\\0001-s0_l1-7e48286da4.guard.jsonl",
+          "bytes": 1661,
+          "sha256": "fc672ebc498b330103c48a5b47d1a4170ee9928507c00476451dc1fb3e2b9b40"
+        },
+        "guard_verified": true,
+        "guard_rejections": 0
+      },
+      {
+        "case": "dEQP-VK.ray_tracing_pipeline.pipeline_library.configurations.singlethreaded_compilation.s0_l1_aabbs",
+        "status": "pass",
+        "exit_code": 0,
+        "qpa": {
+          "path": "build-rt-cts-evidence\\query-pointer-guarded-2026-10-28\\0002-s0_l1_aabbs-f17393d636.qpa",
+          "bytes": 33014,
+          "sha256": "213f22cd1534c4053060851c232a75ac67f6714db2fbd4f8962235f1f8bd9f79"
+        },
+        "stdout": {
+          "path": "build-rt-cts-evidence\\query-pointer-guarded-2026-10-28\\0002-s0_l1_aabbs-f17393d636.stdout.txt",
+          "bytes": 905,
+          "sha256": "62e34ca230de0aa71ca74db4f41487ab017e625b7b02995c2ea2f04688d570b2"
+        },
+        "guard": {
+          "path": "build-rt-cts-evidence\\query-pointer-guarded-2026-10-28\\0002-s0_l1_aabbs-f17393d636.guard.jsonl",
+          "bytes": 1661,
+          "sha256": "a7b8e5c0ef510068131050c5688ba5645c938d0ecb580473a91fde348a8aebaa"
+        },
+        "guard_verified": true,
+        "guard_rejections": 0
+      },
+      {
+        "case": "dEQP-VK.ray_tracing_pipeline.pipeline_library.configurations.singlethreaded_compilation.s3_l11",
+        "status": "pass",
+        "exit_code": 0,
+        "qpa": {
+          "path": "build-rt-cts-evidence\\query-pointer-guarded-2026-10-28\\0003-s3_l11-c858af8604.qpa",
+          "bytes": 31632,
+          "sha256": "3eab6d2e5a7fd7df68e8352649eb46bfaa2ba8768bdab24d349b32d81324bf5c"
+        },
+        "stdout": {
+          "path": "build-rt-cts-evidence\\query-pointer-guarded-2026-10-28\\0003-s3_l11-c858af8604.stdout.txt",
+          "bytes": 895,
+          "sha256": "1ddb7378ffaded42723dbfaad236b96952d4e638e99311f2044e4c45d5f21a05"
+        },
+        "guard": {
+          "path": "build-rt-cts-evidence\\query-pointer-guarded-2026-10-28\\0003-s3_l11-c858af8604.guard.jsonl",
+          "bytes": 1661,
+          "sha256": "371ad84011c0b0d742a91907e7ae72313c84c3292ef549d3127ab41e5fe802da"
+        },
+        "guard_verified": true,
+        "guard_rejections": 0
+      },
+      {
+        "case": "dEQP-VK.ray_tracing_pipeline.pipeline_library.configurations.singlethreaded_compilation.s3_l11_aabbs",
+        "status": "pass",
+        "exit_code": 0,
+        "qpa": {
+          "path": "build-rt-cts-evidence\\query-pointer-guarded-2026-10-28\\0004-s3_l11_aabbs-4a6cf98ec7.qpa",
+          "bytes": 32994,
+          "sha256": "23bea37ad452856a0a6baf69dc5e0e3dc5900a56f8bfab93ef2e91ef00a8c84d"
+        },
+        "stdout": {
+          "path": "build-rt-cts-evidence\\query-pointer-guarded-2026-10-28\\0004-s3_l11_aabbs-4a6cf98ec7.stdout.txt",
+          "bytes": 907,
+          "sha256": "29b022f5e00bac5def0ca5cabac34dae93a632ef80580f9ca7cdda24ef8d5815"
+        },
+        "guard": {
+          "path": "build-rt-cts-evidence\\query-pointer-guarded-2026-10-28\\0004-s3_l11_aabbs-4a6cf98ec7.guard.jsonl",
+          "bytes": 1661,
+          "sha256": "d62d3a732d7c720bb54657509caf0d37bedf4deef44dce19d86390d455dbba20"
+        },
+        "guard_verified": true,
+        "guard_rejections": 0
+      },
+      {
+        "case": "dEQP-VK.ray_tracing_pipeline.pipeline_library.configurations.singlethreaded_compilation.s0_l23",
+        "status": "pass",
+        "exit_code": 0,
+        "qpa": {
+          "path": "build-rt-cts-evidence\\query-pointer-guarded-2026-10-28\\0005-s0_l23-c48c988be4.qpa",
+          "bytes": 31632,
+          "sha256": "ca8f55874078d04247d8f476d3eb76eadd49cbc65cf949a8d6f656433bbe9c8b"
+        },
+        "stdout": {
+          "path": "build-rt-cts-evidence\\query-pointer-guarded-2026-10-28\\0005-s0_l23-c48c988be4.stdout.txt",
+          "bytes": 895,
+          "sha256": "81f6582ae65dfbe9b63624bdd55480e8885a6b3140b74410e540b528a4390675"
+        },
+        "guard": {
+          "path": "build-rt-cts-evidence\\query-pointer-guarded-2026-10-28\\0005-s0_l23-c48c988be4.guard.jsonl",
+          "bytes": 1661,
+          "sha256": "e0beb041914764405a95d19a21a51a6b06aaba2c2136a339893c12ea9236f218"
+        },
+        "guard_verified": true,
+        "guard_rejections": 0
+      },
+      {
+        "case": "dEQP-VK.ray_tracing_pipeline.pipeline_library.configurations.singlethreaded_compilation.s0_l23_aabbs",
+        "status": "pass",
+        "exit_code": 0,
+        "qpa": {
+          "path": "build-rt-cts-evidence\\query-pointer-guarded-2026-10-28\\0006-s0_l23_aabbs-5c5395585a.qpa",
+          "bytes": 32992,
+          "sha256": "4e55c2f2edf3690d29c545413fd8b7ef3f38ff585c0ed25669b0322798834a5f"
+        },
+        "stdout": {
+          "path": "build-rt-cts-evidence\\query-pointer-guarded-2026-10-28\\0006-s0_l23_aabbs-5c5395585a.stdout.txt",
+          "bytes": 907,
+          "sha256": "818bc9985be91119356c279d758b021e57fc2443e4b388d23ac247a59cfd0cb2"
+        },
+        "guard": {
+          "path": "build-rt-cts-evidence\\query-pointer-guarded-2026-10-28\\0006-s0_l23_aabbs-5c5395585a.guard.jsonl",
+          "bytes": 1661,
+          "sha256": "63811b80115c8f65e28fba5c39275874d1e10a7ac87315ef4e3f0d8262b1cd06"
+        },
+        "guard_verified": true,
+        "guard_rejections": 0
+      },
+      {
+        "case": "dEQP-VK.ray_tracing_pipeline.pipeline_library.configurations.singlethreaded_compilation.s0_l1_l1",
+        "status": "pass",
+        "exit_code": 0,
+        "qpa": {
+          "path": "build-rt-cts-evidence\\query-pointer-guarded-2026-10-28\\0007-s0_l1_l1-75bbf67b14.qpa",
+          "bytes": 31656,
+          "sha256": "35a1d701dae4f2aa0b7e6d94205188ea6f0247b131b0cf2b3e9e2e8c0848bca4"
+        },
+        "stdout": {
+          "path": "build-rt-cts-evidence\\query-pointer-guarded-2026-10-28\\0007-s0_l1_l1-75bbf67b14.stdout.txt",
+          "bytes": 899,
+          "sha256": "b93df26f0302990ef427e71468a2e935f9c7e13500851d7bfcbb0c2421a8eb1b"
+        },
+        "guard": {
+          "path": "build-rt-cts-evidence\\query-pointer-guarded-2026-10-28\\0007-s0_l1_l1-75bbf67b14.guard.jsonl",
+          "bytes": 1661,
+          "sha256": "6dba6e1d1e87f693da80b5987278f19ac0206a807e6f94b26ce6d52e67fe5bf7"
+        },
+        "guard_verified": true,
+        "guard_rejections": 0
+      },
+      {
+        "case": "dEQP-VK.ray_tracing_pipeline.pipeline_library.configurations.singlethreaded_compilation.s0_l1_l1_aabbs",
+        "status": "pass",
+        "exit_code": 0,
+        "qpa": {
+          "path": "build-rt-cts-evidence\\query-pointer-guarded-2026-10-28\\0008-s0_l1_l1_aabbs-55613e1587.qpa",
+          "bytes": 33018,
+          "sha256": "d182d8c0d3be6dd90dfb468690d38b4c9dc4f242b0f71c1c5d8dcc9833176ec0"
+        },
+        "stdout": {
+          "path": "build-rt-cts-evidence\\query-pointer-guarded-2026-10-28\\0008-s0_l1_l1_aabbs-55613e1587.stdout.txt",
+          "bytes": 911,
+          "sha256": "fafd357888a1407fa45d8782e2b9403fdcef4c50604afd97cd416f9787467ea3"
+        },
+        "guard": {
+          "path": "build-rt-cts-evidence\\query-pointer-guarded-2026-10-28\\0008-s0_l1_l1_aabbs-55613e1587.guard.jsonl",
+          "bytes": 1661,
+          "sha256": "32e76bd4f7a45bc13cbe0b2b316e16834e4d024091801e8ab0c40d4e3add15bd"
+        },
+        "guard_verified": true,
+        "guard_rejections": 0
+      },
+      {
+        "case": "dEQP-VK.ray_tracing_pipeline.pipeline_library.configurations.singlethreaded_compilation.s3_l22_l22",
+        "status": "pass",
+        "exit_code": 0,
+        "qpa": {
+          "path": "build-rt-cts-evidence\\query-pointer-guarded-2026-10-28\\0009-s3_l22_l22-3492b3c18c.qpa",
+          "bytes": 31611,
+          "sha256": "9224e57a4e38df781d9947b1ba645feb2e2557623023687445b4f94a877e5fd8"
+        },
+        "stdout": {
+          "path": "build-rt-cts-evidence\\query-pointer-guarded-2026-10-28\\0009-s3_l22_l22-3492b3c18c.stdout.txt",
+          "bytes": 903,
+          "sha256": "f7b46b87bc9dca1271d5fc6dac0b5932941fb222a6d139ed83ffe828cc3e976c"
+        },
+        "guard": {
+          "path": "build-rt-cts-evidence\\query-pointer-guarded-2026-10-28\\0009-s3_l22_l22-3492b3c18c.guard.jsonl",
+          "bytes": 1661,
+          "sha256": "fc67abb61596819cdb1c3f90dc3eb591ba706e4f8793f14a17ede76a3a00876c"
+        },
+        "guard_verified": true,
+        "guard_rejections": 0
+      },
+      {
+        "case": "dEQP-VK.ray_tracing_pipeline.pipeline_library.configurations.singlethreaded_compilation.s3_l22_l22_aabbs",
+        "status": "pass",
+        "exit_code": 0,
+        "qpa": {
+          "path": "build-rt-cts-evidence\\query-pointer-guarded-2026-10-28\\0010-s3_l22_l22_aabbs-65cf8a63f1.qpa",
+          "bytes": 32973,
+          "sha256": "6edaf12c3fc1a4f71e205e78aae03279842dff38e7e1a3e758e171c8e3ba0689"
+        },
+        "stdout": {
+          "path": "build-rt-cts-evidence\\query-pointer-guarded-2026-10-28\\0010-s3_l22_l22_aabbs-65cf8a63f1.stdout.txt",
+          "bytes": 915,
+          "sha256": "641d68d4e65dd6093341634bba9523dc994f4e37965f05d93b7f8c48690a47f1"
+        },
+        "guard": {
+          "path": "build-rt-cts-evidence\\query-pointer-guarded-2026-10-28\\0010-s3_l22_l22_aabbs-65cf8a63f1.guard.jsonl",
+          "bytes": 1661,
+          "sha256": "21fde2d564a258ee3bec5bfe4367f0c7960264ba8806742131f13453d87fcdc3"
+        },
+        "guard_verified": true,
+        "guard_rejections": 0
+      },
+      {
+        "case": "dEQP-VK.ray_tracing_pipeline.pipeline_library.configurations.multithreaded_compilation.s3_l232",
+        "status": "pass",
+        "exit_code": 0,
+        "qpa": {
+          "path": "build-rt-cts-evidence\\query-pointer-guarded-2026-10-28\\0011-s3_l232-cf2b4d6b68.qpa",
+          "bytes": 31601,
+          "sha256": "a6a812589f7f167e72ad7c3dd45b8a3a3cf4ddc1d80c324f11dda0e15cd27ec6"
+        },
+        "stdout": {
+          "path": "build-rt-cts-evidence\\query-pointer-guarded-2026-10-28\\0011-s3_l232-cf2b4d6b68.stdout.txt",
+          "bytes": 896,
+          "sha256": "1508b496aae8552fb7e31c4bce3c8081628eef159be36b4348d9f5b4e7c2c94f"
+        },
+        "guard": {
+          "path": "build-rt-cts-evidence\\query-pointer-guarded-2026-10-28\\0011-s3_l232-cf2b4d6b68.guard.jsonl",
+          "bytes": 1661,
+          "sha256": "5bd82a47ff801cb68127626fb1c0f5ada2d968404ac1d64039c4a151fb69f5f5"
+        },
+        "guard_verified": true,
+        "guard_rejections": 0
+      },
+      {
+        "case": "dEQP-VK.ray_tracing_pipeline.pipeline_library.configurations.multithreaded_compilation.s3_l232_aabbs",
+        "status": "pass",
+        "exit_code": 0,
+        "qpa": {
+          "path": "build-rt-cts-evidence\\query-pointer-guarded-2026-10-28\\0012-s3_l232_aabbs-f063f3d2b5.qpa",
+          "bytes": 32965,
+          "sha256": "de6f18e3f3c6a1988981a000ca72abad8ae9dcc0bef4ac4a0d5ba79f88cdf253"
+        },
+        "stdout": {
+          "path": "build-rt-cts-evidence\\query-pointer-guarded-2026-10-28\\0012-s3_l232_aabbs-f063f3d2b5.stdout.txt",
+          "bytes": 908,
+          "sha256": "c405c0164a80f3af8b8fc58a5030229c74612d1e9dc15a084bfbb22c58f14195"
+        },
+        "guard": {
+          "path": "build-rt-cts-evidence\\query-pointer-guarded-2026-10-28\\0012-s3_l232_aabbs-f063f3d2b5.guard.jsonl",
+          "bytes": 1661,
+          "sha256": "3c83dc8fdb77e4e092175fb809abe405fabce5cc553d1b163f4afc57904dc60f"
+        },
+        "guard_verified": true,
+        "guard_rejections": 0
+      },
+      {
+        "case": "dEQP-VK.ray_tracing_pipeline.pipeline_library.configurations.multithreaded_compilation_dho.s3_l2_l3",
+        "status": "pass",
+        "exit_code": 0,
+        "qpa": {
+          "path": "build-rt-cts-evidence\\query-pointer-guarded-2026-10-28\\0013-s3_l2_l3-9ad57e1726.qpa",
+          "bytes": 31631,
+          "sha256": "8eb69530fade5602bd780f74b8e549f7d3de4a4d8ae993d0d7c2e3746ed00159"
+        },
+        "stdout": {
+          "path": "build-rt-cts-evidence\\query-pointer-guarded-2026-10-28\\0013-s3_l2_l3-9ad57e1726.stdout.txt",
+          "bytes": 902,
+          "sha256": "88ae5aa7796d2fed5f185d8ff67cd0f2c6508653a958506e847569b7bfafdcfb"
+        },
+        "guard": {
+          "path": "build-rt-cts-evidence\\query-pointer-guarded-2026-10-28\\0013-s3_l2_l3-9ad57e1726.guard.jsonl",
+          "bytes": 1661,
+          "sha256": "186c141ac1de384af443797a6c3d6bd443cbe89494dbd3ebc8145090d5ff0482"
+        },
+        "guard_verified": true,
+        "guard_rejections": 0
+      },
+      {
+        "case": "dEQP-VK.ray_tracing_pipeline.pipeline_library.configurations.multithreaded_compilation_dho.s3_l2_l3_aabbs",
+        "status": "pass",
+        "exit_code": 0,
+        "qpa": {
+          "path": "build-rt-cts-evidence\\query-pointer-guarded-2026-10-28\\0014-s3_l2_l3_aabbs-3e0c4285ec.qpa",
+          "bytes": 32993,
+          "sha256": "5019f24136505960cad911c99255b96eb95848fab4f4d9c64d40365817a84424"
+        },
+        "stdout": {
+          "path": "build-rt-cts-evidence\\query-pointer-guarded-2026-10-28\\0014-s3_l2_l3_aabbs-3e0c4285ec.stdout.txt",
+          "bytes": 914,
+          "sha256": "d46e32c3cf3011d7b5638f6fb204ecf723ffb39f33abd5ab1741f6cb504d3906"
+        },
+        "guard": {
+          "path": "build-rt-cts-evidence\\query-pointer-guarded-2026-10-28\\0014-s3_l2_l3_aabbs-3e0c4285ec.guard.jsonl",
+          "bytes": 1661,
+          "sha256": "63cbf78f832e88c149852a03548051791199d82e64f2cc148a17426343ba3190"
+        },
+        "guard_verified": true,
+        "guard_rejections": 0
+      },
+      {
+        "case": "dEQP-VK.ray_tracing_pipeline.pipeline_library.configurations.rgen_miss_in_library.s0_l1",
+        "status": "pass",
+        "exit_code": 0,
+        "qpa": {
+          "path": "build-rt-cts-evidence\\query-pointer-guarded-2026-10-28\\0015-s0_l1-adacb8915a.qpa",
+          "bytes": 31632,
+          "sha256": "163677cbbe2c46328460965475b210e63d2b16485890937d1c8fb6e9c0953f71"
+        },
+        "stdout": {
+          "path": "build-rt-cts-evidence\\query-pointer-guarded-2026-10-28\\0015-s0_l1-adacb8915a.stdout.txt",
+          "bytes": 887,
+          "sha256": "7cd082c2086b515538ddc7a23cd69fd7050f77997607eed17dca667850f820fe"
+        },
+        "guard": {
+          "path": "build-rt-cts-evidence\\query-pointer-guarded-2026-10-28\\0015-s0_l1-adacb8915a.guard.jsonl",
+          "bytes": 1661,
+          "sha256": "9355c841af44b10cdfab5b6f2d2d8a979e7cd55fb7bae27ac299238b838d802a"
+        },
+        "guard_verified": true,
+        "guard_rejections": 0
+      },
+      {
+        "case": "dEQP-VK.ray_tracing_pipeline.pipeline_library.configurations.rgen_miss_in_library.s0_l1_aabbs",
+        "status": "pass",
+        "exit_code": 0,
+        "qpa": {
+          "path": "build-rt-cts-evidence\\query-pointer-guarded-2026-10-28\\0016-s0_l1_aabbs-e6051e43d9.qpa",
+          "bytes": 32994,
+          "sha256": "8d001aba01f5a7a0f01566c0846d33dace6a1d1fd940e53cbc662bdadab979f2"
+        },
+        "stdout": {
+          "path": "build-rt-cts-evidence\\query-pointer-guarded-2026-10-28\\0016-s0_l1_aabbs-e6051e43d9.stdout.txt",
+          "bytes": 899,
+          "sha256": "fa1af98eb086d47ed8832465b3da40cf7ac9fc2cb241b14f83d555f7be1613e0"
+        },
+        "guard": {
+          "path": "build-rt-cts-evidence\\query-pointer-guarded-2026-10-28\\0016-s0_l1_aabbs-e6051e43d9.guard.jsonl",
+          "bytes": 1661,
+          "sha256": "de124e7077503e4302936fce906aecae92666c2ff28231373ab5d43ff6a36c66"
+        },
+        "guard_verified": true,
+        "guard_rejections": 0
+      },
+      {
+        "case": "dEQP-VK.ray_tracing_pipeline.pipeline_library.configurations.rgen_miss_in_library.s0_l2_l3",
+        "status": "pass",
+        "exit_code": 0,
+        "qpa": {
+          "path": "build-rt-cts-evidence\\query-pointer-guarded-2026-10-28\\0017-s0_l2_l3-900854fde7.qpa",
+          "bytes": 31622,
+          "sha256": "3227af5801595aa276155d11f24fee8b532ace15ae8fb63dd13d129807dcede6"
+        },
+        "stdout": {
+          "path": "build-rt-cts-evidence\\query-pointer-guarded-2026-10-28\\0017-s0_l2_l3-900854fde7.stdout.txt",
+          "bytes": 893,
+          "sha256": "56e5b60548524feaa42e6c7570b798d1cb9ef0725b4075f73648c65d0955094e"
+        },
+        "guard": {
+          "path": "build-rt-cts-evidence\\query-pointer-guarded-2026-10-28\\0017-s0_l2_l3-900854fde7.guard.jsonl",
+          "bytes": 1661,
+          "sha256": "0dfc0d5fd632aef2db90fe2c3649f8bf4973a50320dc4a9e9b41f9dd1ae491e4"
+        },
+        "guard_verified": true,
+        "guard_rejections": 0
+      },
+      {
+        "case": "dEQP-VK.ray_tracing_pipeline.pipeline_library.configurations.rgen_miss_in_library.s0_l2_l3_aabbs",
+        "status": "pass",
+        "exit_code": 0,
+        "qpa": {
+          "path": "build-rt-cts-evidence\\query-pointer-guarded-2026-10-28\\0018-s0_l2_l3_aabbs-af533ccd25.qpa",
+          "bytes": 32982,
+          "sha256": "38ec2cae68534c8058b97ff7b4f783deec481eb84b256b59fbe8c548886860ce"
+        },
+        "stdout": {
+          "path": "build-rt-cts-evidence\\query-pointer-guarded-2026-10-28\\0018-s0_l2_l3_aabbs-af533ccd25.stdout.txt",
+          "bytes": 905,
+          "sha256": "99f25cd40da8f266f0116b3c8fb8b51c2242816d64666da618acf0147b7e726b"
+        },
+        "guard": {
+          "path": "build-rt-cts-evidence\\query-pointer-guarded-2026-10-28\\0018-s0_l2_l3_aabbs-af533ccd25.guard.jsonl",
+          "bytes": 1661,
+          "sha256": "8896c467d26fdb2d66160e49b0e858effab800823ffe237bd09788384ef92618"
+        },
+        "guard_verified": true,
+        "guard_rejections": 0
+      },
+      {
+        "case": "dEQP-VK.ray_tracing_pipeline.pipeline_library.configurations.misc.use_link_time_optimizations",
+        "status": "pass",
+        "exit_code": 0,
+        "qpa": {
+          "path": "build-rt-cts-evidence\\query-pointer-guarded-2026-10-28\\0019-use_link_time_optimizations-05cf8cc1dd.qpa",
+          "bytes": 32976,
+          "sha256": "e1b215e81f72e1f62ea112e97058c478ff7dda1940b173fe53f4bc20b9b46b1c"
+        },
+        "stdout": {
+          "path": "build-rt-cts-evidence\\query-pointer-guarded-2026-10-28\\0019-use_link_time_optimizations-05cf8cc1dd.stdout.txt",
+          "bytes": 915,
+          "sha256": "4220e60115746fe7d87789803fb5923c5da8b3152a98ec81344058d00fdbe71f"
+        },
+        "guard": {
+          "path": "build-rt-cts-evidence\\query-pointer-guarded-2026-10-28\\0019-use_link_time_optimizations-05cf8cc1dd.guard.jsonl",
+          "bytes": 1661,
+          "sha256": "f9afc155f0f4607c07a50e3c3c6814c3ab99a9a1b31d7b5d27c205adeb2635dc"
+        },
+        "guard_verified": true,
+        "guard_rejections": 0
+      },
+      {
+        "case": "dEQP-VK.ray_tracing_pipeline.pipeline_library.configurations.misc.retain_link_time_optimizations",
+        "status": "pass",
+        "exit_code": 0,
+        "qpa": {
+          "path": "build-rt-cts-evidence\\query-pointer-guarded-2026-10-28\\0020-retain_link_time_optimizations-46f256b7fc.qpa",
+          "bytes": 32987,
+          "sha256": "d347e1c3addc4a7ad03b6b0fc36d03d806f6d8f2e5c197c883f012ec725e40be"
+        },
+        "stdout": {
+          "path": "build-rt-cts-evidence\\query-pointer-guarded-2026-10-28\\0020-retain_link_time_optimizations-46f256b7fc.stdout.txt",
+          "bytes": 921,
+          "sha256": "f26c929c9b65b2bdec3ae7d9dfc4a393631b7a0ac7678c0643ea847edab1ef16"
+        },
+        "guard": {
+          "path": "build-rt-cts-evidence\\query-pointer-guarded-2026-10-28\\0020-retain_link_time_optimizations-46f256b7fc.guard.jsonl",
+          "bytes": 1661,
+          "sha256": "ab8819778ccf18bb880fcce2e8639ca1c19618c841540ab52c4dee87c4f29404"
+        },
+        "guard_verified": true,
+        "guard_rejections": 0
+      },
+      {
+        "case": "dEQP-VK.ray_tracing_pipeline.acceleration_structures.update.traditional_structures.gpu.normal.vertices",
+        "status": "pass",
+        "exit_code": 0,
+        "qpa": {
+          "path": "build-rt-cts-evidence\\query-pointer-guarded-2026-10-28\\0021-vertices-b835de18b5.qpa",
+          "bytes": 19474,
+          "sha256": "549c4eb433a7395b01475d4bd6fbf2b9eb02960e4bee7225ee565f11b00f73db"
+        },
+        "stdout": {
+          "path": "build-rt-cts-evidence\\query-pointer-guarded-2026-10-28\\0021-vertices-b835de18b5.stdout.txt",
+          "bytes": 905,
+          "sha256": "cf464c467dfd6ba27421e723ea89fd854b567df6aa137086a0d9e4e9af70d3a2"
+        },
+        "guard": {
+          "path": "build-rt-cts-evidence\\query-pointer-guarded-2026-10-28\\0021-vertices-b835de18b5.guard.jsonl",
+          "bytes": 1660,
+          "sha256": "5122b713083fe6f507b89692f903b9cda83a9ccb5daf319f0aa5f467ed290861"
+        },
+        "guard_verified": true,
+        "guard_rejections": 0
+      },
+      {
+        "case": "dEQP-VK.ray_tracing_pipeline.acceleration_structures.update.traditional_structures.gpu.normal.indices",
+        "status": "pass",
+        "exit_code": 0,
+        "qpa": {
+          "path": "build-rt-cts-evidence\\query-pointer-guarded-2026-10-28\\0022-indices-155be45232.qpa",
+          "bytes": 19470,
+          "sha256": "3221a141b729cd5b5cfbd0922e408ec25033a3b418d1e71c7241943ae01868ca"
+        },
+        "stdout": {
+          "path": "build-rt-cts-evidence\\query-pointer-guarded-2026-10-28\\0022-indices-155be45232.stdout.txt",
+          "bytes": 903,
+          "sha256": "4fedc1e452c91870e2bfc5538d61c62e8cf47e4d249e828feaca39fa03b8207c"
+        },
+        "guard": {
+          "path": "build-rt-cts-evidence\\query-pointer-guarded-2026-10-28\\0022-indices-155be45232.guard.jsonl",
+          "bytes": 1660,
+          "sha256": "904e5a2c7a648b34d6be27ac2c5b02280408eebc2d67273c2980094b9241b4df"
+        },
+        "guard_verified": true,
+        "guard_rejections": 0
+      },
+      {
+        "case": "dEQP-VK.ray_tracing_pipeline.acceleration_structures.update.traditional_structures.gpu.normal.transform",
+        "status": "pass",
+        "exit_code": 0,
+        "qpa": {
+          "path": "build-rt-cts-evidence\\query-pointer-guarded-2026-10-28\\0023-transform-1fcaf5d297.qpa",
+          "bytes": 19478,
+          "sha256": "7a71de3c91c12c36fbd0ac5c48ab1fce99ed180fa9bbd7457dc026a5d97ab31d"
+        },
+        "stdout": {
+          "path": "build-rt-cts-evidence\\query-pointer-guarded-2026-10-28\\0023-transform-1fcaf5d297.stdout.txt",
+          "bytes": 907,
+          "sha256": "261e288fef86f6c87d9c6c20fb4003d8b5d6816c9257b5549d661b6ad15cc11c"
+        },
+        "guard": {
+          "path": "build-rt-cts-evidence\\query-pointer-guarded-2026-10-28\\0023-transform-1fcaf5d297.guard.jsonl",
+          "bytes": 1660,
+          "sha256": "494687edede3e20160eeab2e965b856896a3a99d9218ebeb9c066387e69f3262"
+        },
+        "guard_verified": true,
+        "guard_rejections": 0
+      },
+      {
+        "case": "dEQP-VK.ray_tracing_pipeline.acceleration_structures.update.traditional_structures.gpu.normal.geometry_transform",
+        "status": "pass",
+        "exit_code": 0,
+        "qpa": {
+          "path": "build-rt-cts-evidence\\query-pointer-guarded-2026-10-28\\0024-geometry_transform-b16d215aca.qpa",
+          "bytes": 19514,
+          "sha256": "27ff389400247ab713acb6c927b8c9bb5d122813612959a56ceb640971f7c9e8"
+        },
+        "stdout": {
+          "path": "build-rt-cts-evidence\\query-pointer-guarded-2026-10-28\\0024-geometry_transform-b16d215aca.stdout.txt",
+          "bytes": 925,
+          "sha256": "6af11bc31fbae3b844f469f548a672bb7f231af25f16e1ce706ec42befea9515"
+        },
+        "guard": {
+          "path": "build-rt-cts-evidence\\query-pointer-guarded-2026-10-28\\0024-geometry_transform-b16d215aca.guard.jsonl",
+          "bytes": 1660,
+          "sha256": "4689ac1fe1bbb26225031c053bb99b3d04706941bb0a4836f84d01e0ec2425b5"
+        },
+        "guard_verified": true,
+        "guard_rejections": 0
+      },
+      {
+        "case": "dEQP-VK.ray_tracing_pipeline.acceleration_structures.update.traditional_structures.gpu.normal.degenerate",
+        "status": "pass",
+        "exit_code": 0,
+        "qpa": {
+          "path": "build-rt-cts-evidence\\query-pointer-guarded-2026-10-28\\0025-degenerate-d689de7de3.qpa",
+          "bytes": 19482,
+          "sha256": "ef118715f9ea2ed0134f567e572327d92e8a267c7ef78d918459d07f87b08bc5"
+        },
+        "stdout": {
+          "path": "build-rt-cts-evidence\\query-pointer-guarded-2026-10-28\\0025-degenerate-d689de7de3.stdout.txt",
+          "bytes": 909,
+          "sha256": "56167bed9c39046f5d5883463e12e34d47160b2164b8e3641c6844c8f76ce50a"
+        },
+        "guard": {
+          "path": "build-rt-cts-evidence\\query-pointer-guarded-2026-10-28\\0025-degenerate-d689de7de3.guard.jsonl",
+          "bytes": 1660,
+          "sha256": "ee076b9a57a930638ea71d6d9c9e98e095901be1357fec14f3b53e9ef7a1b6df"
+        },
+        "guard_verified": true,
+        "guard_rejections": 0
+      },
+      {
+        "case": "dEQP-VK.ray_tracing_pipeline.acceleration_structures.update.traditional_structures.gpu.compact.vertices",
+        "status": "pass",
+        "exit_code": 0,
+        "qpa": {
+          "path": "build-rt-cts-evidence\\query-pointer-guarded-2026-10-28\\0026-vertices-0c4202325b.qpa",
+          "bytes": 19477,
+          "sha256": "62b2e16e1d1d619d0ba0ebc447b227ccd7268b2b7081917cca484a627350f3ca"
+        },
+        "stdout": {
+          "path": "build-rt-cts-evidence\\query-pointer-guarded-2026-10-28\\0026-vertices-0c4202325b.stdout.txt",
+          "bytes": 906,
+          "sha256": "d12b5747d94c137872008e47200b5988cf9c0d756b687811923c8871b98cddb3"
+        },
+        "guard": {
+          "path": "build-rt-cts-evidence\\query-pointer-guarded-2026-10-28\\0026-vertices-0c4202325b.guard.jsonl",
+          "bytes": 1660,
+          "sha256": "b2f0aca8497bd07f083057beed927d5193f31a0d1e59347e24c45692210df7c4"
+        },
+        "guard_verified": true,
+        "guard_rejections": 0
+      },
+      {
+        "case": "dEQP-VK.ray_tracing_pipeline.acceleration_structures.update.traditional_structures.gpu.compact.indices",
+        "status": "pass",
+        "exit_code": 0,
+        "qpa": {
+          "path": "build-rt-cts-evidence\\query-pointer-guarded-2026-10-28\\0027-indices-9bde46ac2b.qpa",
+          "bytes": 19473,
+          "sha256": "35581201fd4751571f06d727a108c20337d425bbae27c2efcc1db0c4c5e3334c"
+        },
+        "stdout": {
+          "path": "build-rt-cts-evidence\\query-pointer-guarded-2026-10-28\\0027-indices-9bde46ac2b.stdout.txt",
+          "bytes": 904,
+          "sha256": "b168ae9337935bd480731a7ae178578798ecd6c1a894df522cd474e19fb23d70"
+        },
+        "guard": {
+          "path": "build-rt-cts-evidence\\query-pointer-guarded-2026-10-28\\0027-indices-9bde46ac2b.guard.jsonl",
+          "bytes": 1660,
+          "sha256": "e82803d910b40b74edbb5d344dd4e6ed4e2432fba81d894f5188251a72bb1fbe"
+        },
+        "guard_verified": true,
+        "guard_rejections": 0
+      },
+      {
+        "case": "dEQP-VK.ray_tracing_pipeline.acceleration_structures.update.traditional_structures.gpu.compact.transform",
+        "status": "pass",
+        "exit_code": 0,
+        "qpa": {
+          "path": "build-rt-cts-evidence\\query-pointer-guarded-2026-10-28\\0028-transform-1097ce9084.qpa",
+          "bytes": 19481,
+          "sha256": "50bc3249c78862f464419d362c8eac7b72242312c7372683222c24cc234ff627"
+        },
+        "stdout": {
+          "path": "build-rt-cts-evidence\\query-pointer-guarded-2026-10-28\\0028-transform-1097ce9084.stdout.txt",
+          "bytes": 908,
+          "sha256": "560bcbe5a19bcd2fe9da8e3bfde74900c2f14da8a8eb0bb8ab79bcd074d6f1d2"
+        },
+        "guard": {
+          "path": "build-rt-cts-evidence\\query-pointer-guarded-2026-10-28\\0028-transform-1097ce9084.guard.jsonl",
+          "bytes": 1660,
+          "sha256": "a95b9436c6dabead327e5310f65839ed8fbb73fb67ba2bb4967d432e572faa99"
+        },
+        "guard_verified": true,
+        "guard_rejections": 0
+      },
+      {
+        "case": "dEQP-VK.ray_tracing_pipeline.acceleration_structures.update.traditional_structures.gpu.compact.geometry_transform",
+        "status": "pass",
+        "exit_code": 0,
+        "qpa": {
+          "path": "build-rt-cts-evidence\\query-pointer-guarded-2026-10-28\\0029-geometry_transform-7dbdac196e.qpa",
+          "bytes": 19517,
+          "sha256": "c748a696874613cb982453a965b3ed7ece0ece4a182c32751a03945df35d63e8"
+        },
+        "stdout": {
+          "path": "build-rt-cts-evidence\\query-pointer-guarded-2026-10-28\\0029-geometry_transform-7dbdac196e.stdout.txt",
+          "bytes": 926,
+          "sha256": "1606fcfa949f655afcc6b14bedc3411bcd19a1895f0e23dc87b0157c82306294"
+        },
+        "guard": {
+          "path": "build-rt-cts-evidence\\query-pointer-guarded-2026-10-28\\0029-geometry_transform-7dbdac196e.guard.jsonl",
+          "bytes": 1660,
+          "sha256": "6e3e59acac781fa006e0d4a98a5c630b042b16aedab049829754100fcede5c41"
+        },
+        "guard_verified": true,
+        "guard_rejections": 0
+      },
+      {
+        "case": "dEQP-VK.ray_tracing_pipeline.acceleration_structures.update.traditional_structures.gpu.compact.degenerate",
+        "status": "pass",
+        "exit_code": 0,
+        "qpa": {
+          "path": "build-rt-cts-evidence\\query-pointer-guarded-2026-10-28\\0030-degenerate-e7552e93c0.qpa",
+          "bytes": 19485,
+          "sha256": "959560be8512ddcc91e5728be8726c4569e1ed5ad01df5c49bf65f8dd3fa4407"
+        },
+        "stdout": {
+          "path": "build-rt-cts-evidence\\query-pointer-guarded-2026-10-28\\0030-degenerate-e7552e93c0.stdout.txt",
+          "bytes": 910,
+          "sha256": "43649b874481ec5844548880b0f9b73a2a353c5bb87cfa75bd1c24935abb4a00"
+        },
+        "guard": {
+          "path": "build-rt-cts-evidence\\query-pointer-guarded-2026-10-28\\0030-degenerate-e7552e93c0.guard.jsonl",
+          "bytes": 1660,
+          "sha256": "48d8ce329658ffd6b7a9aa0974f3ef919efaf883d05028b339a19ea4794fb192"
+        },
+        "guard_verified": true,
+        "guard_rejections": 0
+      },
+      {
+        "case": "dEQP-VK.ray_query.acceleration_structures.instance_update.traditional_structures.gpu_built.update",
+        "status": "pass",
+        "exit_code": 0,
+        "qpa": {
+          "path": "build-rt-cts-evidence\\query-pointer-guarded-2026-10-28\\0031-update-dae2c02081.qpa",
+          "bytes": 10231,
+          "sha256": "53adb734ae7f85a245f7c6b5b53a550b321914ccf06faf7a2a846da376a76d95"
+        },
+        "stdout": {
+          "path": "build-rt-cts-evidence\\query-pointer-guarded-2026-10-28\\0031-update-dae2c02081.stdout.txt",
+          "bytes": 955,
+          "sha256": "76354b5844c2e21aad0ff3457619321b6d20ef414571d48346e8a7477a51fd1f"
+        },
+        "guard": {
+          "path": "build-rt-cts-evidence\\query-pointer-guarded-2026-10-28\\0031-update-dae2c02081.guard.jsonl",
+          "bytes": 1661,
+          "sha256": "b27c9a15a4a786d88b7e51bb120116252db036f4f532927cb874daceae7a50c4"
+        },
+        "guard_verified": true,
+        "guard_rejections": 0
+      },
+      {
+        "case": "dEQP-VK.ray_query.acceleration_structures.instance_update.traditional_structures.gpu_built.update_in_place",
+        "status": "pass",
+        "exit_code": 0,
+        "qpa": {
+          "path": "build-rt-cts-evidence\\query-pointer-guarded-2026-10-28\\0032-update_in_place-23e834f508.qpa",
+          "bytes": 10267,
+          "sha256": "f169d51986a300c6449092257a7ff4b3064c0e72751165a90afabc4128e3efe9"
+        },
+        "stdout": {
+          "path": "build-rt-cts-evidence\\query-pointer-guarded-2026-10-28\\0032-update_in_place-23e834f508.stdout.txt",
+          "bytes": 973,
+          "sha256": "bdfe9b3840c6e5d56cb84ec874959d9cca4343977ba12b6bab416d1de6cf6b9c"
+        },
+        "guard": {
+          "path": "build-rt-cts-evidence\\query-pointer-guarded-2026-10-28\\0032-update_in_place-23e834f508.guard.jsonl",
+          "bytes": 1661,
+          "sha256": "cc4b7ebae1b4ec585aebd811a4b73d65c796c2bf43826f519da78dc1f493134c"
+        },
+        "guard_verified": true,
+        "guard_rejections": 0
+      }
+    ],
+    "executable": {
+      "path": "D:\\Codes\\VK-GL-CTS\\build\\external\\vulkancts\\modules\\vulkan\\Release\\deqp-vk.exe",
+      "bytes": 63076864,
+      "sha256": "8cf824c598181ef43ccd74d67acce89c9cc6fc47029a164440f0b0ea74af0380"
+    },
+    "revision": "d18e4c68543103371715845cd914c71e5859963e",
+    "layer_snapshot": {
+      "name": "VK_LAYER_VKRT_SOFTWARE_RAY_QUERY",
+      "source_manifest": "D:\\Codes\\Vulkan-ExtensionLayer\\build-raytracing-unified\\layers\\VkLayer_VKRT_SOFTWARE_RAY_QUERY.json",
+      "source_manifest_sha256": "256efbc35db5f4d5fcf5fe2c606d9b676bb36e2ecb92513b31d49a8443fef02b",
+      "source_library": "D:\\Codes\\Vulkan-ExtensionLayer\\build-raytracing-unified\\VkLayer_VKRT_SOFTWARE_RAY_QUERY.dll",
+      "snapshot_manifest": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\query-pointer-guarded-2026-10-28\\layer_snapshot\\VkLayer_VKRT_SOFTWARE_RAY_QUERY.json",
+      "snapshot_manifest_sha256": "6ca6fe6873e56695310914c3b6ab8f64a41e51f37b9be541f618e49924b90891",
+      "snapshot_library": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\query-pointer-guarded-2026-10-28\\layer_snapshot\\VkLayer_VKRT_SOFTWARE_RAY_QUERY.dll",
+      "library_sha256": "8874bf5d26df27d4411b51a1e459e408c99757117e2399d73b08d87f3f516b19",
+      "snapshot_scope": "manifest_and_layer_library"
+    },
+    "guard_snapshot": {
+      "name": "VK_LAYER_VKRT_NO_NATIVE_RT_GUARD",
+      "source_manifest": "D:\\Codes\\Vulkan-ExtensionLayer\\build-raytracing-unified\\no-native-rt-guard\\VkLayer_VKRT_NO_NATIVE_RT_GUARD.json",
+      "source_manifest_sha256": "5c57a12cbb68587cb33ecf46c0cfe05ad4e889223a6689ba4a39359216a57235",
+      "source_library": "D:\\Codes\\Vulkan-ExtensionLayer\\build-raytracing-unified\\vkrt_no_native_rt_guard.dll",
+      "snapshot_manifest": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\query-pointer-guarded-2026-10-28\\guard_snapshot\\VkLayer_VKRT_NO_NATIVE_RT_GUARD.json",
+      "snapshot_manifest_sha256": "7f71ade9be1a6a97e140138b61b2fc76aae54c856833116aa452a1180cb1a8a6",
+      "snapshot_library": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\query-pointer-guarded-2026-10-28\\guard_snapshot\\vkrt_no_native_rt_guard.dll",
+      "library_sha256": "e9334c97f171ab4933d80a2f1955e97dbd0573c8a1e4cd14dadd0d8d79fd9fb8",
+      "snapshot_scope": "manifest_and_layer_library",
+      "auditor_snapshot": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\query-pointer-guarded-2026-10-28\\guard_snapshot\\guard_auditor.py",
+      "auditor_sha256": "d224732f36b7a7d3cdf045d6217ba30c0300ecdeb980c76a1c541d32cd508fcb"
+    },
+    "validation": {
+      "manifest": "C:\\VulkanSDK\\1.4.357.0\\Bin\\VkLayer_khronos_validation.json",
+      "manifest_sha256": "20d3ef44fe96aa41fceefab2308892f9d4b346d23eebfe8b5e1690715f23f472",
+      "library": "C:\\VulkanSDK\\1.4.357.0\\Bin\\VkLayer_khronos_validation.dll",
+      "library_sha256": "9725ce7a9225f42f8961c433dacae4cc8fae3a16e95ef1d0a7c7e8bc09132c40",
+      "scope": "original SDK installation, hashed but not copied"
+    },
+    "diagnostic_matches": [],
+    "scope": "Existing library/UPDATE regression selection, not per-execution query replay qualification."
+  },
+  "retained_observations": {
+    "first_offline": "33 pass / 1 fail: fixture counter baseline, retained offline.log; corrected in final 34/34.",
+    "first_pointer_compile": "Old NonUniform assertion required CopyObject; now checks the actual load pointer decoration.",
+    "invalid_pointer_composite_source": "Validator correctly rejected logical-pointer CompositeConstruct; valid member/whole aggregate fixture replaced it.",
+    "first_gpu": "10 pass / 1 fail: property-query fixture still expected masked instances to disappear; retained gpu-final.log, corrected query oracle rechecked separately.",
+    "parent_default_build": "Failed in unchanged synchronization2.cpp and shader_object.cpp on Windows min/max macros; only parent RT target is claimed passing.",
+    "historic_226_cts": "220 pass / 2 NotSupported / 4 crashes, unresolved and not rewritten by this regression."
+  },
+  "remaining": [
+    "Fresh per-execution native/query recordings and retirement",
+    "Logical-stage native executor and acquisition",
+    "Inline layout snapshot retention and transparent ambiguous public layout aliases",
+    "Unwrapped platform/beta command replay admission",
+    "Same-pointee ArrayStride changes",
+    "Volatile/memory operands and OpCopyMemory",
+    "Full no-RT discovery/resource/physical-device qualification"
+  ]
+}

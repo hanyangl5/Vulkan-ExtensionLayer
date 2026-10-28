@@ -60,6 +60,8 @@ the final layout, passing build/local checks and the 16-case external CTS rechec
 - [x] Refit shared BVH4 topology on GPU UPDATE, retaining recoverable degenerate instances.
 - [x] Preserve logical StorageBuffer pointer Phi/Select/helper values across suspension with typed route/selector snapshots.
 - [x] Link nested RT pipeline libraries through the shared typed compute runtime.
+- [x] Execute typed Function/Private pointer memory and supported PtrAccessChain loops across suspension.
+- [x] Add SDK-derived owned command capture and independently tested logical-stage planning components.
 - [ ] M0: complete all capability, no-native-RT, resource ABI, and continuation proofs.
 - [ ] M1: integrate Mesa builders, GPU BVH4 encoding/refit, and shared AS objects.
 - [ ] M2: complete Ray Query lowering and state semantics.
@@ -74,9 +76,9 @@ Component checkmarks do not complete M0/M1/M2 or the full goal.
 | Component | Implemented and tested | Remaining boundary |
 | --- | --- | --- |
 | [Portable BVH4 components](../layers/raytracing/docs/BVH4.md) | Checked reference/CPU adapter; generic BDA hierarchy encoder; direct default Mesa GPU IR adaptation/record emission with compact active leaves, full flags and explicit TLAS relocation; actual LBVH build-to-encode and two-to-four-child GPU collapse, followed by topology-preserving UPDATE/refit | Broader builder variants/large construction IDs, numerical qualification and full object/resource qualification |
-| Typed continuation frames | Typed CFG/continuations; BDA and invocation-private library backing; builtin/push/record state; specialization, linked six-stage scheduler/shared traversal; traditional descriptor-backed opaque provenance and logical StorageBuffer pointer Phi/Select/helper snapshots | OpPtrAccessChain, mutable pointer memory, multi-root/NonUniform execution qualification, actual large aggregate values, conflicting per-stage FP modes and complete resource qualification |
+| Typed continuation frames | Typed CFG/continuations; BDA and invocation-private library backing; builtin/push/record state; specialization, linked six-stage scheduler/shared traversal; traditional descriptor-backed opaque provenance; logical StorageBuffer pointer snapshots, supported PtrAccessChain loops and typed Function/Private pointer memory | Remaining pointer arithmetic/memory variants, multi-root/NonUniform execution qualification, actual large aggregate values, conflicting per-stage FP modes and complete resource qualification |
 | RQ host translation | Consume AS/RQ device requirements; translate resource/synchronization masks and explicit RT buffer queries; lifetime-owned AS address cells with allocator/flush/failure handling and enabled-queue-family sharing; private SSBO indexing/variable-pointer prerequisites | Complete emulation capability/limit reporting on no-RT ICDs, future unknown buffer chains, full-layout descriptor transport and private allocation budgets |
-| AS operations and host dependency | GPU CLONE/COMPACT, serialization/UUID/BLAS relocation, topology-preserving UPDATE/refit; bounded public property pools with GPU payload/native completion acquisition and reuse/reset/free publication; synchronous deferred operations | Simultaneous query replay, complete logical-stage/native-query interaction, true shrinking compaction, refit performance and full resource budgets |
+| AS operations and host dependency | GPU CLONE/COMPACT, serialization/UUID/BLAS relocation, topology-preserving UPDATE/refit; bounded public property pools with GPU payload/native completion acquisition and reuse/reset/free publication; synchronous deferred operations; owned command-capture and logical-stage planning components | Per-execution native/query replay, native logical-stage executor, complete native-query interaction, true shrinking compaction, refit performance and full resource budgets |
 | RQ compiler compatibility | Actual per-query AS roots from scalar/array descriptors and integer conversions; helper/value/Phi flow; direct/grouped NonUniform propagation; preserve application workgroup/specialization metadata and remove native RT declarations | Full resource-limit transparency, complete opcode/stage coverage and full shared traversal qualification |
 | RTP API compatibility | Canonical shader/pipeline/SBT/stack/Trace path; cached native variants/private context push; public layouts with retained private copies; copied descriptor definitions; nested pipeline libraries; maintenance6 and compute pipeline/shader-object state restoration | Remaining pipeline options and optional library-handle contracts, remaining descriptor disturbance/interoperability paths, complete mandatory API/resource qualification |
 | Base RQ SBT offset | Lower opcode 6021; select candidate/committed instance; return only the low 24 offset bits; shared-BVH4 helper and CTS evidence | Complete required getter/stage and shared-consumer qualification remain open |
@@ -520,6 +522,38 @@ milestone. Query execution replay, logical-stage scheduling, full resource and
 capability contracts, additional builder variants/large IDs, and physical no-RT
 qualification remain required.
 
+## 2026-10-28 command capture and pointer-memory checkpoint
+
+The [new checkpoint](rt_query_replay_pointer_memory_2026-10-28.md) adds numeric
+identity records for supported pointer-valued Function/Private cells and
+aggregates, same-stride PtrAccessChain loop advancement, and dynamic array frame
+codecs. Source and generated SPIR-V validation remain mandatory. Source-validated
+same-pointee stride-changing loops are explicitly rejected before fixed-point
+analysis; volatile pointer memory, OpCopyMemory and additional views remain open.
+
+New GPU checks execute both source storage classes over an 8193-cell pointer
+table with dynamic indices, alias writes, aggregate suspension and signed loop
+advancement. These executions use the standalone StorageBuffer frame harness;
+new BDA/PrivateArray variants and the 65537-element array-codec case have
+compilation/validation evidence only.
+
+SDK-derived owned command capture is connected to command entrypoint/lifecycle
+hooks, with retained named-layout definitions and explicit unsupported schemas.
+The separately tested logical-stage planner preserves future-submission gates
+and includes a progress counterexample against broadening TRANSFER waits to
+physical compute. Neither component enables per-execution native/query replay
+or a native logical-stage executor. Simultaneous-query and unsafe-wait rejection
+remain. Inline layout retention, ambiguous public native aliases and unwrapped
+platform/beta commands need complete admission/virtualization before replay
+can be enabled. M0-M5 and the complete fallback goal remain unfinished.
+
+Final offline checks pass 34/34. All 11 selected GPU checks have passing
+observations across an initial 10 pass/1 stale-property-oracle failure and its
+separate corrected 1/1 recheck. The frozen external library/UPDATE selection
+passes 32/32 with zero-rejection guard audits and no validation diagnostics.
+Canonical/parent RT targets pass; the unrelated parent default-build Windows
+macro failures and every intermediate failure are recorded in the checkpoint.
+
 ## Next work
 
 Run M0 proof work in parallel with shared-backend construction:
@@ -544,7 +578,7 @@ Run M0 proof work in parallel with shared-backend construction:
    traditional descriptor-backed opaque values now cross suspension. Qualify the
    new logical StorageBuffer pointer Phi/Select/helper route with
    multiple descriptor roots and real descriptor-array NonUniform execution;
-   implement OpPtrAccessChain, mutable pointer memory, mutable opaque encodings
+   complete remaining pointer arithmetic/memory variants, mutable opaque encodings
    and the full argument/return ABI. Complete descriptor disturbance, push-descriptor
    and descriptor-buffer interoperability, and pipeline option/API coverage before
    claiming the full typed-continuation M0 proof. Cached native pipelines now

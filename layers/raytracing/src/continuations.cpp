@@ -375,7 +375,10 @@ class FramePlanner {
         if (!laying_out.insert(id).second) throw std::runtime_error("Recursive continuation frame type");
         const auto &type = Definition(id);
         ContinuationTypeLayout result{id, 0, 1, 0, {}};
-        if (type.op == spv::OpTypeAccelerationStructureKHR && options.acceleration_structure_addresses) {
+        if (type.op == spv::OpTypePointer && type.words.at(2) == spv::StorageClassStorageBuffer && options.logical_pointer_words) {
+            result.size = CheckedMultiply(options.logical_pointer_words, 4);
+            result.alignment = 4;
+        } else if (type.op == spv::OpTypeAccelerationStructureKHR && options.acceleration_structure_addresses) {
             result.size = result.alignment = 8;
         } else if (type.op == spv::OpTypeBool) {
             result.size = result.alignment = 4;
