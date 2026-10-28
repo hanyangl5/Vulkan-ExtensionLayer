@@ -3,6 +3,7 @@
  */
 #include "vkrt_layer.h"
 #include "vkrt_resource_profile.h"
+#include "vkrt_software_profile.h"
 #include <stddef.h>
 
 #define HANDLE(type, value) ((type)(uintptr_t)(value))
@@ -27,6 +28,40 @@ static uint32_t expected_extension_count;
 static VkResult downstream_result;
 static bool expect_private_dynamic_indexing;
 static unsigned query_capabilities;
+static const char *missing_alias;
+static bool native_pipeline_library;
+static const char *private_aliases[] = {VK_KHR_16BIT_STORAGE_EXTENSION_NAME,       VK_KHR_8BIT_STORAGE_EXTENSION_NAME,
+                                        VK_KHR_SHADER_FLOAT16_INT8_EXTENSION_NAME, VK_EXT_SCALAR_BLOCK_LAYOUT_EXTENSION_NAME,
+                                        VK_KHR_VULKAN_MEMORY_MODEL_EXTENSION_NAME, VK_KHR_BUFFER_DEVICE_ADDRESS_EXTENSION_NAME,
+                                        VK_KHR_VARIABLE_POINTERS_EXTENSION_NAME,   VK_EXT_DESCRIPTOR_INDEXING_EXTENSION_NAME,
+                                        VK_EXT_HOST_QUERY_RESET_EXTENSION_NAME,    VK_KHR_SHADER_ATOMIC_INT64_EXTENSION_NAME,
+                                        VK_KHR_SPIRV_1_4_EXTENSION_NAME,           VK_KHR_SHADER_FLOAT_CONTROLS_EXTENSION_NAME};
+static VKAPI_ATTR VkResult VKAPI_CALL mock_extensions(VkPhysicalDevice p, const char *layer, uint32_t *count,
+                                                      VkExtensionProperties *properties) {
+    REQUIRE(p == physical && !layer);
+    uint32_t total = native_pipeline_library ? 1 : 0;
+    for (unsigned i = 0; i < VKRT_ARRAY_SIZE(private_aliases); ++i)
+        total += !missing_alias || (strcmp(missing_alias, "*") && strcmp(private_aliases[i], missing_alias));
+    if (!properties) {
+        *count = total;
+        return VK_SUCCESS;
+    }
+    uint32_t capacity = *count, written = 0;
+    for (unsigned i = 0; i < VKRT_ARRAY_SIZE(private_aliases); ++i) {
+        if (missing_alias && (!strcmp(missing_alias, "*") || !strcmp(private_aliases[i], missing_alias))) continue;
+        if (written < capacity) properties[written] = (VkExtensionProperties){.specVersion = 1};
+        if (written < capacity) strcpy(properties[written].extensionName, private_aliases[i]);
+        ++written;
+    }
+    if (native_pipeline_library) {
+        if (written < capacity) {
+            properties[written] = (VkExtensionProperties){VK_KHR_PIPELINE_LIBRARY_EXTENSION_NAME, 1};
+        }
+        ++written;
+    }
+    *count = written < capacity ? written : capacity;
+    return capacity < total ? VK_INCOMPLETE : VK_SUCCESS;
+}
 
 static const VkBaseInStructure *find_original(VkStructureType type) {
     for (const VkBaseInStructure *p = original->pNext; p; p = p->pNext)
@@ -257,6 +292,8 @@ static size_t bool_payload_size(VkStructureType type) {
                 scalarBlockLayout);
         PAYLOAD(VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_BUFFER_DEVICE_ADDRESS_FEATURES, VkPhysicalDeviceBufferDeviceAddressFeatures,
                 bufferDeviceAddressMultiDevice);
+        PAYLOAD(VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_BUFFER_DEVICE_ADDRESS_FEATURES_EXT,
+                VkPhysicalDeviceBufferDeviceAddressFeaturesEXT, bufferDeviceAddressMultiDevice);
         PAYLOAD(VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_MEMORY_MODEL_FEATURES, VkPhysicalDeviceVulkanMemoryModelFeatures,
                 vulkanMemoryModelAvailabilityVisibilityChains);
         PAYLOAD(VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_INDEXING_FEATURES, VkPhysicalDeviceDescriptorIndexingFeatures,
@@ -269,8 +306,24 @@ static size_t bool_payload_size(VkStructureType type) {
                 shaderSharedInt64Atomics);
         PAYLOAD(VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_OBJECT_FEATURES_EXT, VkPhysicalDeviceShaderObjectFeaturesEXT,
                 shaderObject);
+        PAYLOAD(VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_GRAPHICS_PIPELINE_LIBRARY_FEATURES_EXT,
+                VkPhysicalDeviceGraphicsPipelineLibraryFeaturesEXT, graphicsPipelineLibrary);
         PAYLOAD(VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PER_STAGE_DESCRIPTOR_SET_FEATURES_NV,
                 VkPhysicalDevicePerStageDescriptorSetFeaturesNV, dynamicPipelineLayout);
+        PAYLOAD(VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_MODULE_IDENTIFIER_FEATURES_EXT,
+                VkPhysicalDeviceShaderModuleIdentifierFeaturesEXT, shaderModuleIdentifier);
+        PAYLOAD(VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PIPELINE_EXECUTABLE_PROPERTIES_FEATURES_KHR,
+                VkPhysicalDevicePipelineExecutablePropertiesFeaturesKHR, pipelineExecutableInfo);
+        PAYLOAD(VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PIPELINE_PROPERTIES_FEATURES_EXT, VkPhysicalDevicePipelinePropertiesFeaturesEXT,
+                pipelinePropertiesIdentifier);
+        PAYLOAD(VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PIPELINE_BINARY_FEATURES_KHR, VkPhysicalDevicePipelineBinaryFeaturesKHR,
+                pipelineBinaries);
+        PAYLOAD(VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DEVICE_GENERATED_COMMANDS_FEATURES_EXT,
+                VkPhysicalDeviceDeviceGeneratedCommandsFeaturesEXT, dynamicGeneratedPipelineLayout);
+        PAYLOAD(VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DEVICE_GENERATED_COMMANDS_FEATURES_NV,
+                VkPhysicalDeviceDeviceGeneratedCommandsFeaturesNV, deviceGeneratedCommands);
+        PAYLOAD(VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DEVICE_GENERATED_COMMANDS_COMPUTE_FEATURES_NV,
+                VkPhysicalDeviceDeviceGeneratedCommandsComputeFeaturesNV, deviceGeneratedComputeCaptureReplay);
         default:
             REQUIRE(false);
             return 0;
@@ -398,6 +451,27 @@ static VKAPI_ATTR VkResult VKAPI_CALL mock_create(VkPhysicalDevice p, const VkDe
             case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PER_STAGE_DESCRIPTOR_SET_FEATURES_NV:
                 EXPECT_NODE(VkPhysicalDevicePerStageDescriptorSetFeaturesNV, next, (void)0);
                 break;
+            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_MODULE_IDENTIFIER_FEATURES_EXT:
+                EXPECT_NODE(VkPhysicalDeviceShaderModuleIdentifierFeaturesEXT, next, (void)0);
+                break;
+            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PIPELINE_EXECUTABLE_PROPERTIES_FEATURES_KHR:
+                EXPECT_NODE(VkPhysicalDevicePipelineExecutablePropertiesFeaturesKHR, next, (void)0);
+                break;
+            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PIPELINE_PROPERTIES_FEATURES_EXT:
+                EXPECT_NODE(VkPhysicalDevicePipelinePropertiesFeaturesEXT, next, (void)0);
+                break;
+            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PIPELINE_BINARY_FEATURES_KHR:
+                EXPECT_NODE(VkPhysicalDevicePipelineBinaryFeaturesKHR, next, (void)0);
+                break;
+            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DEVICE_GENERATED_COMMANDS_FEATURES_EXT:
+                EXPECT_NODE(VkPhysicalDeviceDeviceGeneratedCommandsFeaturesEXT, next, (void)0);
+                break;
+            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DEVICE_GENERATED_COMMANDS_FEATURES_NV:
+                EXPECT_NODE(VkPhysicalDeviceDeviceGeneratedCommandsFeaturesNV, next, (void)0);
+                break;
+            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DEVICE_GENERATED_COMMANDS_COMPUTE_FEATURES_NV:
+                EXPECT_NODE(VkPhysicalDeviceDeviceGeneratedCommandsComputeFeaturesNV, next, (void)0);
+                break;
             default:
                 REQUIRE(next == opaque_suffix);
                 break;
@@ -493,6 +567,7 @@ static void defaults(void) {
     instance.vtable.GetPhysicalDeviceFeatures2 = mock_features;
     instance.vtable.GetPhysicalDeviceProperties = mock_properties;
     instance.vtable.GetPhysicalDeviceProperties2 = mock_properties2;
+    instance.vtable.EnumerateDeviceExtensionProperties = mock_extensions;
     driver_api = VK_API_VERSION_1_2;
     basic = (VkDeviceCreateInfo){.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO};
     expected_extension_count = 0;
@@ -502,6 +577,8 @@ static void defaults(void) {
     downstream_result = VK_SUCCESS;
     expect_private_dynamic_indexing = false;
     query_capabilities = 3;
+    missing_alias = NULL;
+    native_pipeline_library = true;
 }
 
 static void non_rt_boundary(void) {
@@ -758,7 +835,8 @@ static void versions_and_opaque_chains(void) {
                                      VK_KHR_SHADER_FLOAT16_INT8_EXTENSION_NAME, VK_EXT_SCALAR_BLOCK_LAYOUT_EXTENSION_NAME,
                                      VK_KHR_VULKAN_MEMORY_MODEL_EXTENSION_NAME, VK_KHR_BUFFER_DEVICE_ADDRESS_EXTENSION_NAME,
                                      VK_KHR_VARIABLE_POINTERS_EXTENSION_NAME,   VK_EXT_DESCRIPTOR_INDEXING_EXTENSION_NAME,
-                                     VK_EXT_HOST_QUERY_RESET_EXTENSION_NAME,    VK_KHR_SHADER_ATOMIC_INT64_EXTENSION_NAME};
+                                     VK_EXT_HOST_QUERY_RESET_EXTENSION_NAME,    VK_KHR_SHADER_ATOMIC_INT64_EXTENSION_NAME,
+                                     VK_KHR_SPIRV_1_4_EXTENSION_NAME,           VK_KHR_SHADER_FLOAT_CONTROLS_EXTENSION_NAME};
     for (uint32_t instance_api = 0; instance_api < 3; ++instance_api) {
         for (uint32_t device_api = 0; device_api < 3; ++device_api) {
             instance.api_version = VK_MAKE_VERSION(1, instance_api, 0);
@@ -770,7 +848,7 @@ static void versions_and_opaque_chains(void) {
             unsigned before = creates;
             VkDeviceCreateInfo saved = basic;
             VkResult result = call(&basic);
-            if (device_api < 2)
+            if (!instance_api || device_api < 2)
                 REQUIRE(result == VK_ERROR_FEATURE_NOT_PRESENT && creates == before);
             else
                 REQUIRE(result == VK_SUCCESS);
@@ -778,7 +856,7 @@ static void versions_and_opaque_chains(void) {
         }
     }
     /* A requested alias is not duplicated when private requirements add it. */
-    instance.api_version = VK_API_VERSION_1_0;
+    instance.api_version = VK_API_VERSION_1_1;
     driver_api = VK_API_VERSION_1_2;
     const char *extensions[] = {required[5], "VK_KHR_swapchain", VK_KHR_RAY_QUERY_EXTENSION_NAME};
     basic.ppEnabledExtensionNames = extensions;
@@ -787,7 +865,7 @@ static void versions_and_opaque_chains(void) {
     expected_extensions[1] = extensions[1];
     expected_extension_count = 2;
     for (uint32_t i = 0; i < VKRT_ARRAY_SIZE(required); ++i)
-        if (i != 5) expected_extensions[expected_extension_count++] = required[i];
+        if (i != 0 && i != 5 && i != 6) expected_extensions[expected_extension_count++] = required[i];
     REQUIRE(call(&basic) == VK_SUCCESS);
 
     defaults();
@@ -884,7 +962,8 @@ static void descriptor_array_feature(void) {
                               VK_KHR_SHADER_FLOAT16_INT8_EXTENSION_NAME, VK_EXT_SCALAR_BLOCK_LAYOUT_EXTENSION_NAME,
                               VK_KHR_VULKAN_MEMORY_MODEL_EXTENSION_NAME, VK_KHR_BUFFER_DEVICE_ADDRESS_EXTENSION_NAME,
                               VK_KHR_VARIABLE_POINTERS_EXTENSION_NAME,   VK_EXT_DESCRIPTOR_INDEXING_EXTENSION_NAME,
-                              VK_EXT_HOST_QUERY_RESET_EXTENSION_NAME,    VK_KHR_SHADER_ATOMIC_INT64_EXTENSION_NAME};
+                              VK_EXT_HOST_QUERY_RESET_EXTENSION_NAME,    VK_KHR_SHADER_ATOMIC_INT64_EXTENSION_NAME,
+                              VK_KHR_SPIRV_1_4_EXTENSION_NAME,           VK_KHR_SHADER_FLOAT_CONTROLS_EXTENSION_NAME};
     for (uint32_t application_version = 0; application_version < 3; ++application_version) {
         for (uint32_t device_version = 0; device_version < 3; ++device_version) {
             instance.api_version = VK_MAKE_VERSION(1, application_version, 0);
@@ -895,7 +974,7 @@ static void descriptor_array_feature(void) {
                     expected_extensions[expected_extension_count++] = required[i];
             unsigned before = creates;
             VkResult result = call(&basic);
-            if (device_version < 2)
+            if (!application_version || device_version < 2)
                 REQUIRE(result == VK_ERROR_FEATURE_NOT_PRESENT && creates == before);
             else
                 REQUIRE(result == VK_SUCCESS);
@@ -913,13 +992,13 @@ static void descriptor_array_feature(void) {
         if (i != 6 && i != 7) expected_extensions[expected_extension_count++] = required[i];
     REQUIRE(call(&basic) == VK_SUCCESS);
 
-    instance.api_version = VK_API_VERSION_1_0;
+    instance.api_version = VK_API_VERSION_1_1;
     const char *pointers_alias = VK_KHR_VARIABLE_POINTERS_EXTENSION_NAME;
     basic.ppEnabledExtensionNames = &pointers_alias;
     expected_extensions[0] = pointers_alias;
     expected_extension_count = 1;
     for (unsigned i = 0; i < VKRT_ARRAY_SIZE(required); ++i)
-        if (i != 6) expected_extensions[expected_extension_count++] = required[i];
+        if (i != 0 && i != 6) expected_extensions[expected_extension_count++] = required[i];
     REQUIRE(call(&basic) == VK_SUCCESS);
 }
 
@@ -1007,7 +1086,6 @@ static void rejection(void) {
                                  "VK_KHR_ray_tracing_position_fetch",
                                  "VK_NV_ray_tracing",
                                  "VK_EXT_opacity_micromap",
-                                 VK_EXT_BUFFER_DEVICE_ADDRESS_EXTENSION_NAME,
                                  "VK_EXT_pipeline_library_group_handles",
                                  "VK_EXT_ray_tracing_invocation_reorder",
                                  "VK_HUAWEI_invocation_mask",
@@ -1234,6 +1312,200 @@ static void query_backend_boundary(void) {
     }
 }
 
+static void library_and_alias_availability(void) {
+    defaults();
+    const char *rt[] = {VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME, VK_KHR_PIPELINE_LIBRARY_EXTENSION_NAME};
+    basic.ppEnabledExtensionNames = rt;
+    basic.enabledExtensionCount = VKRT_ARRAY_SIZE(rt);
+    expect_private_dynamic_indexing = true;
+    native_pipeline_library = false;
+    REQUIRE(call(&basic) == VK_SUCCESS); /* Both software names are consumed. */
+    native_pipeline_library = true;
+    expected_extensions[0] = rt[1];
+    expected_extension_count = 1;
+    REQUIRE(call(&basic) == VK_SUCCESS); /* Native library remains available to GPL. */
+
+    defaults();
+    const char *only_library[] = {VK_KHR_PIPELINE_LIBRARY_EXTENSION_NAME, "VK_KHR_swapchain"};
+    basic.ppEnabledExtensionNames = only_library;
+    basic.enabledExtensionCount = VKRT_ARRAY_SIZE(only_library);
+    native_pipeline_library = false;
+    REQUIRE(!vkrt_device_uses_virtual_rt(&basic));
+    expected_extensions[0] = only_library[1];
+    expected_extension_count = 1;
+    original = &basic;
+    expected_allocator = &allocator;
+    VkDevice device = VK_NULL_HANDLE;
+    REQUIRE(vkrt_create_device_with_features(&instance, physical, mock_non_rt_create, &basic, &allocator, &device) == VK_SUCCESS);
+    REQUIRE(device == created_device);
+    missing_resource = 1;
+    unsigned before = creates;
+    REQUIRE(vkrt_create_device_with_features(&instance, physical, mock_non_rt_create, &basic, &allocator, &device) ==
+            VK_ERROR_EXTENSION_NOT_PRESENT);
+    REQUIRE(creates == before);
+    /* Native GPL is independent of the software RT capability/budget gate. */
+    native_pipeline_library = true;
+    expected_extensions[0] = only_library[0];
+    expected_extensions[1] = only_library[1];
+    expected_extension_count = 2;
+    VkPhysicalDeviceGraphicsPipelineLibraryFeaturesEXT gpl = {
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_GRAPHICS_PIPELINE_LIBRARY_FEATURES_EXT, .graphicsPipelineLibrary = VK_TRUE};
+    basic.pNext = &gpl;
+    VkPhysicalDeviceGraphicsPipelineLibraryFeaturesEXT saved_gpl = gpl;
+    REQUIRE(call_non_rt(&basic) == VK_SUCCESS && !memcmp(&gpl, &saved_gpl, sizeof(gpl)));
+
+    defaults();
+    const char *as = VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME;
+    basic.ppEnabledExtensionNames = &as;
+    basic.enabledExtensionCount = 1;
+    expect_private_dynamic_indexing = true;
+    instance.api_version = VK_API_VERSION_1_1;
+    for (unsigned i = 0; i < VKRT_ARRAY_SIZE(private_aliases); ++i) {
+        missing_alias = private_aliases[i];
+        expected_extension_count = 0;
+        for (unsigned j = 0; j < VKRT_ARRAY_SIZE(private_aliases); ++j)
+            if (j != 0 && j != 6) expected_extensions[expected_extension_count++] = private_aliases[j];
+        struct vkrt_software_rt_profile profile;
+        memset(&profile, 0xa5, sizeof(profile));
+        struct vkrt_software_rt_profile saved_profile = profile;
+        const bool required = i != 0 && i != 6; /* Already core in application 1.1. */
+        REQUIRE(vkrt_virtual_rt_profile(&instance, physical, &profile) == !required);
+        if (required) REQUIRE(!memcmp(&profile, &saved_profile, sizeof(profile)));
+        before = creates;
+        REQUIRE(call(&basic) == (required ? VK_ERROR_FEATURE_NOT_PRESENT : VK_SUCCESS));
+        REQUIRE(creates == before + !required);
+        if (i == 8 || i == 9) REQUIRE(vkrt_native_backend_eligible(&instance, physical));
+    }
+    /* Core 1.2 needs no promoted alias names, even when all are absent. */
+    missing_alias = "*";
+    instance.api_version = VK_API_VERSION_1_2;
+    expected_extension_count = 0;
+    REQUIRE(call(&basic) == VK_SUCCESS);
+    instance.api_version = VK_API_VERSION_1_0;
+    struct vkrt_software_rt_profile profile;
+    REQUIRE(!vkrt_virtual_rt_profile(&instance, physical, &profile));
+    before = creates;
+    REQUIRE(call(&basic) == VK_ERROR_FEATURE_NOT_PRESENT && creates == before);
+}
+
+static void legacy_native_address_boundary(void) {
+    defaults();
+    /* An unrelated missing private GPU capability cannot reject a native EXT
+     * address/GPL device or cause any private capability query. */
+    missing_capability = 1;
+    VkPhysicalDeviceBufferDeviceAddressFeaturesEXT legacy = {
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_BUFFER_DEVICE_ADDRESS_FEATURES_EXT,
+        .bufferDeviceAddress = VK_TRUE,
+        .bufferDeviceAddressCaptureReplay = VK_TRUE,
+        .bufferDeviceAddressMultiDevice = VK_TRUE};
+    VkPhysicalDeviceGraphicsPipelineLibraryFeaturesEXT gpl = {
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_GRAPHICS_PIPELINE_LIBRARY_FEATURES_EXT,
+        .pNext = &legacy,
+        .graphicsPipelineLibrary = VK_TRUE};
+    const char *extensions[] = {VK_EXT_BUFFER_DEVICE_ADDRESS_EXTENSION_NAME, VK_EXT_GRAPHICS_PIPELINE_LIBRARY_EXTENSION_NAME};
+    basic.pNext = &gpl;
+    basic.ppEnabledExtensionNames = extensions;
+    basic.enabledExtensionCount = VKRT_ARRAY_SIZE(extensions);
+    expected_extensions[0] = extensions[0];
+    expected_extensions[1] = extensions[1];
+    expected_extension_count = 2;
+    REQUIRE(!vkrt_device_uses_virtual_rt(&basic) && call_non_rt(&basic) == VK_SUCCESS);
+    REQUIRE(legacy.bufferDeviceAddress && legacy.bufferDeviceAddressCaptureReplay && legacy.bufferDeviceAddressMultiDevice &&
+            gpl.graphicsPipelineLibrary && gpl.pNext == &legacy);
+    /* An all-false EXT node/name is still rejected when software RT selects
+     * its incompatible core/KHR private address ABI. Fail before qualification. */
+    VkPhysicalDeviceAccelerationStructureFeaturesKHR as = {
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_FEATURES_KHR,
+        .pNext = &legacy,
+        .accelerationStructure = VK_TRUE};
+    legacy.bufferDeviceAddress = legacy.bufferDeviceAddressCaptureReplay = legacy.bufferDeviceAddressMultiDevice = VK_FALSE;
+    const char *rt_extensions[] = {extensions[0], VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME};
+    basic.pNext = &as;
+    basic.ppEnabledExtensionNames = rt_extensions;
+    unsigned before = creates, before_queries = queries;
+    REQUIRE(call(&basic) == VK_ERROR_FEATURE_NOT_PRESENT && creates == before && queries == before_queries);
+    REQUIRE(as.pNext == &legacy && as.accelerationStructure && !legacy.bufferDeviceAddress);
+}
+
+static void optional_virtual_object_consumers(void) {
+    VkPhysicalDeviceShaderModuleIdentifierFeaturesEXT identifier = {
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_MODULE_IDENTIFIER_FEATURES_EXT};
+    VkPhysicalDevicePipelineExecutablePropertiesFeaturesKHR executable = {
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PIPELINE_EXECUTABLE_PROPERTIES_FEATURES_KHR};
+    VkPhysicalDevicePipelinePropertiesFeaturesEXT properties = {
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PIPELINE_PROPERTIES_FEATURES_EXT};
+    VkPhysicalDevicePipelineBinaryFeaturesKHR binaries = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PIPELINE_BINARY_FEATURES_KHR};
+    VkPhysicalDeviceDeviceGeneratedCommandsFeaturesEXT generated = {
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DEVICE_GENERATED_COMMANDS_FEATURES_EXT};
+    VkPhysicalDeviceDeviceGeneratedCommandsFeaturesNV generated_nv = {
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DEVICE_GENERATED_COMMANDS_FEATURES_NV};
+    VkPhysicalDeviceDeviceGeneratedCommandsComputeFeaturesNV compute_nv = {
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DEVICE_GENERATED_COMMANDS_COMPUTE_FEATURES_NV};
+    struct {
+        void *node;
+        VkBool32 *bits;
+        uint32_t count;
+        const char *extension;
+    } cases[] = {
+        {&identifier, &identifier.shaderModuleIdentifier, 1, VK_EXT_SHADER_MODULE_IDENTIFIER_EXTENSION_NAME},
+        {&executable, &executable.pipelineExecutableInfo, 1, VK_KHR_PIPELINE_EXECUTABLE_PROPERTIES_EXTENSION_NAME},
+        {&properties, &properties.pipelinePropertiesIdentifier, 1, VK_EXT_PIPELINE_PROPERTIES_EXTENSION_NAME},
+        {&binaries, &binaries.pipelineBinaries, 1, VK_KHR_PIPELINE_BINARY_EXTENSION_NAME},
+        {&generated, &generated.deviceGeneratedCommands, 2, VK_EXT_DEVICE_GENERATED_COMMANDS_EXTENSION_NAME},
+        {&generated_nv, &generated_nv.deviceGeneratedCommands, 1, VK_NV_DEVICE_GENERATED_COMMANDS_EXTENSION_NAME},
+        {&compute_nv, &compute_nv.deviceGeneratedCompute, 3, VK_NV_DEVICE_GENERATED_COMMANDS_COMPUTE_EXTENSION_NAME},
+    };
+    for (unsigned i = 0; i < VKRT_ARRAY_SIZE(cases); ++i) {
+        defaults();
+        expect_private_dynamic_indexing = true;
+        VkBaseOutStructure *node = cases[i].node;
+        const char *extensions[] = {VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME, cases[i].extension};
+        VkPhysicalDeviceAccelerationStructureFeaturesKHR as = {
+            .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_FEATURES_KHR, .accelerationStructure = VK_TRUE};
+        node->pNext = (void *)&as;
+        basic.pNext = node;
+        basic.ppEnabledExtensionNames = extensions;
+        basic.enabledExtensionCount = VKRT_ARRAY_SIZE(extensions);
+        expected_extensions[0] = cases[i].extension;
+        expected_extension_count = 1;
+        /* The binary key command can read shader modules even with its feature
+         * false. Other names alone do not enable their unsafe consumers. */
+        bool binary = i == 3;
+        unsigned before = creates;
+        REQUIRE(call(&basic) == (binary ? VK_ERROR_FEATURE_NOT_PRESENT : VK_SUCCESS));
+        REQUIRE(creates == before + !binary);
+        basic.pNext = &as; /* Absent feature structure is equally safe. */
+        before = creates;
+        REQUIRE(call(&basic) == (binary ? VK_ERROR_FEATURE_NOT_PRESENT : VK_SUCCESS));
+        REQUIRE(creates == before + !binary);
+        basic.pNext = node;
+        if (binary) basic.enabledExtensionCount = 1; /* Exercise its feature gate separately from the name gate. */
+        /* Test every individual bit, including DGC's adjacent optional bits. */
+        for (unsigned bit = 0; bit < cases[i].count; ++bit) {
+            cases[i].bits[bit] = VK_TRUE;
+            before = creates;
+            REQUIRE(call(&basic) == VK_ERROR_FEATURE_NOT_PRESENT && creates == before);
+            REQUIRE(cases[i].bits[bit] && node->pNext == (void *)&as);
+            cases[i].bits[bit] = VK_FALSE;
+        }
+        /* A native non-RT/GPL device keeps every feature byte and name. */
+        VkPhysicalDeviceGraphicsPipelineLibraryFeaturesEXT gpl = {
+            .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_GRAPHICS_PIPELINE_LIBRARY_FEATURES_EXT, .graphicsPipelineLibrary = VK_TRUE};
+        node->pNext = (void *)&gpl;
+        for (unsigned bit = 0; bit < cases[i].count; ++bit) cases[i].bits[bit] = VK_TRUE;
+        const char *native_names[] = {cases[i].extension, VK_EXT_GRAPHICS_PIPELINE_LIBRARY_EXTENSION_NAME};
+        basic.ppEnabledExtensionNames = native_names;
+        basic.enabledExtensionCount = VKRT_ARRAY_SIZE(native_names);
+        expected_extensions[0] = native_names[0];
+        expected_extensions[1] = native_names[1];
+        expected_extension_count = 2;
+        REQUIRE(call_non_rt(&basic) == VK_SUCCESS);
+        for (unsigned bit = 0; bit < cases[i].count; ++bit) REQUIRE(cases[i].bits[bit] == VK_TRUE);
+        REQUIRE(gpl.graphicsPipelineLibrary && node->pNext == (void *)&gpl);
+        for (unsigned bit = 0; bit < cases[i].count; ++bit) cases[i].bits[bit] = VK_FALSE;
+    }
+}
+
 int main(void) {
     non_rt_boundary();
     shader_object_backend();
@@ -1247,6 +1519,9 @@ int main(void) {
     per_stage_descriptor_interaction();
     descriptor_profile_boundary();
     query_backend_boundary();
+    library_and_alias_availability();
+    optional_virtual_object_consumers();
+    legacy_native_address_boundary();
     printf("No-native-RT device creation boundary: %s (%u failures, %u creates, %u capability queries)\n",
            failures ? "FAIL" : "PASS", failures, creates, queries);
     return failures ? 1 : 0;

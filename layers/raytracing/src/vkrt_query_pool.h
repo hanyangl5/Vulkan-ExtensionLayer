@@ -12,6 +12,7 @@ struct vkrt_query_admission;
  * overlap and unsupported recording contexts remain explicitly bounded. */
 VkResult vkrt_query_device_init(struct vkrt_device_data *dev);
 void vkrt_query_device_finish(struct vkrt_device_data *dev);
+bool vkrt_query_pool_owns(struct vkrt_device_data *dev, uint64_t handle);
 VkResult vkrt_query_command_reset(struct vkrt_cmd_buffer_data *cb);
 /* Query-only secondary qualification and publication bookkeeping. RTP-only
  * recordings do not inherit native-query/timestamp restrictions from here. */

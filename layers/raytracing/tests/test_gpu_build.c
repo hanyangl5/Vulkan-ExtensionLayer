@@ -5,7 +5,26 @@
 #include "bvh4_abi.h"
 #define VKRT_TEST_FIXTURE_ONLY
 #include <stdbool.h>
+#include <vulkan/vulkan.h>
+static bool g_vulkan11;
+#ifndef vkCreateInstance
+static VkResult create_api_instance(const VkInstanceCreateInfo *info, const VkAllocationCallbacks *allocator, VkInstance *out);
+#define vkCreateInstance create_api_instance
+#define VKRT_GPU_BUILD_INSTANCE_WRAPPER
+#endif
+#define VKRT_TEST_RQ_SHADER_PATH (g_vulkan11 ? "rq_test11.comp.spv" : "rq_test.comp.spv")
 #include "00_single_tri/main.c"
+#ifdef VKRT_GPU_BUILD_INSTANCE_WRAPPER
+#undef vkCreateInstance
+
+static VkResult create_api_instance(const VkInstanceCreateInfo *info, const VkAllocationCallbacks *allocator, VkInstance *out) {
+    VkApplicationInfo app = *info->pApplicationInfo;
+    VkInstanceCreateInfo local = *info;
+    if (g_vulkan11) app.apiVersion = VK_API_VERSION_1_1;
+    local.pApplicationInfo = &app;
+    return vkCreateInstance(&local, allocator, out);
+}
+#endif
 
 struct built_as {
    struct gpu_buf output, scratch;
@@ -22,6 +41,7 @@ static bool g_software;
 static bool g_split_builds;
 static bool g_aligned_values;
 static bool g_pool_pressure;
+static bool g_rejected_builds;
 static VkAccelerationStructureKHR g_pressure_views[1023];
 
 /* Bind at the smallest legal nonzero offset. Ordinary translated storage
@@ -500,7 +520,7 @@ static void triangles_case(uint32_t n, bool inactive, bool indexed, bool two_geo
    validate_tree(&blas, active);
    /* A non-null reference to an empty BLAS is a recoverable degenerate instance. */
    validate_tree(&tlas, 1);
-   if (n == 1 && !g_aligned_values && !g_pool_pressure) rejected_builds(&blas);
+   if (n == 1 && g_rejected_builds) rejected_builds(&blas);
    g_before_dispatch = NULL;
    destroy_as(&tlas); destroy_as(&blas);
    buf_destroy(&instances); buf_destroy(&transforms); buf_destroy(&indices); buf_destroy(&vertices);
@@ -529,8 +549,9 @@ static void aabb_instances_case(void)
    prepare_as(&blas, VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR, 1, &box_geom, &box_range, false);
    buf_create(5 * 64, VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR |
       VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, &instances);
-   buf_create(6 * 8, VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR |
-      VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, &pointers);
+   buf_create(7 * 8,
+              VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
+              VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, &pointers);
    for (uint32_t i = 0; i < 5; ++i) {
       VkAccelerationStructureInstanceKHR instance = {.transform = {.matrix = {{1,0,0,0},{0,1,0,0},{0,0,1,0}}},
          .instanceCustomIndex = 100 + i, .mask = i == 1 ? 0 : 1u << i,
@@ -538,13 +559,14 @@ static void aabb_instances_case(void)
       if (i == 2) instance.transform.matrix[0][3] = 100;
       if (i == 4) instance.transform.matrix[2][3] = -2;
       memcpy((uint8_t *)instances.mapped + i * 64, &instance, sizeof(instance));
-      ((uint64_t *)pointers.mapped)[1 + i] = instances.addr + i * 64;
+      ((uint64_t *)pointers.mapped)[2 + i] = instances.addr + i * 64;
    }
    VkAccelerationStructureGeometryKHR inst_geom = {.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR,
       .geometryType = VK_GEOMETRY_TYPE_INSTANCES_KHR,
       .geometry.instances = {.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_INSTANCES_DATA_KHR,
          .arrayOfPointers = VK_TRUE, .data.deviceAddress = pointers.addr}};
-   VkAccelerationStructureBuildRangeInfoKHR inst_range = {.primitiveCount = 5, .primitiveOffset = 8};
+   /* Instance primitiveOffset is 16-aligned even for an array of pointers. */
+   VkAccelerationStructureBuildRangeInfoKHR inst_range = {.primitiveCount = 5, .primitiveOffset = 16};
    prepare_as(&tlas, VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR, 1, &inst_geom, &inst_range, false);
    g_builds[0] = &blas; g_builds[1] = &tlas; g_before_dispatch = record_builds;
    const uint32_t masks[] = {0xff, 1u << 4, 1u << 3, 1u << 2, 1u << 1, 0};
@@ -575,10 +597,22 @@ int main(int argc, char **argv) {
     g_software = layers && strstr(layers, "VK_LAYER_VKRT_SOFTWARE_RAY_QUERY");
     g_aligned_values = argc == 2 && !strcmp(argv[1], "--aligned-values");
     g_pool_pressure = argc == 2 && !strcmp(argv[1], "--pool-pressure");
+    g_rejected_builds = argc == 2 && !strcmp(argv[1], "--rejected-builds");
+    g_vulkan11 = argc == 2 && !strcmp(argv[1], "--vulkan11");
+    if (g_vulkan11) {
+        size_t words;
+        uint32_t *shader = read_spv("rq_test11.comp.spv", &words);
+        if (words < 5 || shader[1] != 0x10400) {
+            fprintf(stderr, "Vulkan1.1 requires separately compiled SPIR-V1.4 input\n");
+            free(shader);
+            return 1;
+        }
+        free(shader);
+    }
     init_vulkan();
     pBuild = (void *)vkGetDeviceProcAddr(g_dev, "vkCmdBuildAccelerationStructuresKHR");
     if (!pBuild) return 1;
-    if (g_aligned_values || g_pool_pressure) {
+    if (g_aligned_values || g_pool_pressure || g_rejected_builds) {
         triangles_case(1, false, false, false, false);
         goto finish;
     }

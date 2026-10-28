@@ -36,6 +36,11 @@ static enum failure_stage {
 } fail_stage;
 static uint32_t type_bits, fail_device_types;
 static VkDeviceSize descriptor_alignment;
+static uint32_t native_api_version;
+static VkDeviceSize max_buffer_size, max_allocation_size, requirements_extra;
+static bool extension3, extension4, ignore_limits;
+static VkResult extension_count_result, extension_fill_result;
+static unsigned extension_incomplete, extension_calls, properties2_calls, queries3, queries4;
 static VkDeviceAddress address_low;
 static unsigned buffer_calls, buffer_success, buffer_destroys, memory_calls, memory_success, memory_frees, maps, unmaps;
 static unsigned chosen_types[64], chosen_count, next_id;
@@ -87,7 +92,9 @@ static VKAPI_ATTR VkResult VKAPI_CALL create_buffer(VkDevice d, const VkBufferCr
                                                     VkBuffer *buffer) {
     check_allocator(a);
     CHECK(d == device && info->sType == VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO && !info->pNext);
-    CHECK(info->size >= 65536 && !(info->size & 7));
+    CHECK(info->size >= 8 && !(info->size & 7));
+    if (!ignore_limits && (native_api_version >= VK_API_VERSION_1_3 || extension4) && max_buffer_size)
+        CHECK(info->size <= max_buffer_size);
     CHECK(info->usage ==
           (VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT));
     CHECK(info->sharingMode == VK_SHARING_MODE_CONCURRENT && info->queueFamilyIndexCount == 2 &&
@@ -110,9 +117,10 @@ static VKAPI_ATTR VkResult VKAPI_CALL create_buffer(VkDevice d, const VkBufferCr
 static VKAPI_ATTR void VKAPI_CALL requirements(VkDevice d, VkBuffer buffer, VkMemoryRequirements *out) {
     struct native_chunk *p = cell((uintptr_t)buffer);
     CHECK(d == device && p->buffer_live);
-    *out = (VkMemoryRequirements){.size = fail_stage == REQUIREMENTS ? p->size - 1 : (p->size + 255) & ~UINT64_C(255),
-                                  .alignment = 64,
-                                  .memoryTypeBits = type_bits};
+    *out = (VkMemoryRequirements){
+        .size = fail_stage == REQUIREMENTS ? p->size - 1 : ((p->size + 255) & ~UINT64_C(255)) + requirements_extra,
+        .alignment = 64,
+        .memoryTypeBits = type_bits};
 }
 static VKAPI_ATTR void VKAPI_CALL memory_properties(VkPhysicalDevice p, VkPhysicalDeviceMemoryProperties *out) {
     CHECK(p == physical);
@@ -129,7 +137,45 @@ static VKAPI_ATTR void VKAPI_CALL memory_properties(VkPhysicalDevice p, VkPhysic
 static VKAPI_ATTR void VKAPI_CALL properties(VkPhysicalDevice p, VkPhysicalDeviceProperties *out) {
     CHECK(p == physical);
     memset(out, 0, sizeof(*out));
+    out->apiVersion = native_api_version;
     out->limits.minStorageBufferOffsetAlignment = descriptor_alignment;
+}
+static VKAPI_ATTR void VKAPI_CALL properties2(VkPhysicalDevice p, VkPhysicalDeviceProperties2 *out) {
+    CHECK(p == physical && out->sType == VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2);
+    ++properties2_calls;
+    properties(p, &out->properties);
+    for (VkBaseOutStructure *next = out->pNext; next; next = next->pNext) {
+        if (next->sType == VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MAINTENANCE_3_PROPERTIES) {
+            CHECK(native_api_version >= VK_API_VERSION_1_1 || extension3);
+            ++queries3;
+            if (!ignore_limits) ((VkPhysicalDeviceMaintenance3Properties *)next)->maxMemoryAllocationSize = max_allocation_size;
+        } else if (next->sType == VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MAINTENANCE_4_PROPERTIES) {
+            CHECK(native_api_version >= VK_API_VERSION_1_3 || extension4);
+            ++queries4;
+            if (!ignore_limits) ((VkPhysicalDeviceMaintenance4Properties *)next)->maxBufferSize = max_buffer_size;
+        } else
+            CHECK(false);
+    }
+}
+static VKAPI_ATTR VkResult VKAPI_CALL extensions(VkPhysicalDevice p, const char *layer, uint32_t *count,
+                                                 VkExtensionProperties *out) {
+    CHECK(p == physical && !layer);
+    ++extension_calls;
+    if (!out) {
+        *count = (unsigned)extension3 + (unsigned)extension4;
+        return extension_count_result;
+    }
+    if (extension_fill_result != VK_SUCCESS) return extension_fill_result;
+    if (extension_incomplete) {
+        --extension_incomplete;
+        return VK_INCOMPLETE;
+    }
+    unsigned index = 0;
+    if (extension3) strcpy(out[index++].extensionName, VK_KHR_MAINTENANCE_3_EXTENSION_NAME);
+    if (extension4) strcpy(out[index++].extensionName, VK_KHR_MAINTENANCE_4_EXTENSION_NAME);
+    CHECK(index == *count);
+    *count = index;
+    return VK_SUCCESS;
 }
 static VKAPI_ATTR VkResult VKAPI_CALL allocate_memory(VkDevice d, const VkMemoryAllocateInfo *info, const VkAllocationCallbacks *a,
                                                       VkDeviceMemory *memory) {
@@ -140,7 +186,9 @@ static VKAPI_ATTR VkResult VKAPI_CALL allocate_memory(VkDevice d, const VkMemory
     const VkMemoryDedicatedAllocateInfo *dedicated = flags->pNext;
     CHECK(dedicated && dedicated->sType == VK_STRUCTURE_TYPE_MEMORY_DEDICATED_ALLOCATE_INFO && !dedicated->image);
     struct native_chunk *p = cell((uintptr_t)dedicated->buffer);
-    CHECK(p->buffer_live && !p->memory_live && info->allocationSize == ((p->size + 255) & ~UINT64_C(255)));
+    CHECK(p->buffer_live && !p->memory_live && info->allocationSize == ((p->size + 255) & ~UINT64_C(255)) + requirements_extra);
+    if (!ignore_limits && (native_api_version >= VK_API_VERSION_1_1 || extension3) && max_allocation_size)
+        CHECK(info->allocationSize <= max_allocation_size);
     CHECK(info->memoryTypeIndex < 4 && (type_bits & (1u << info->memoryTypeIndex)));
     ++memory_calls;
     if (chosen_count < VKRT_ARRAY_SIZE(chosen_types)) chosen_types[chosen_count++] = info->memoryTypeIndex;
@@ -222,6 +270,11 @@ static void setup(void) {
     type_bits = 0x3f;
     fail_device_types = 0;
     descriptor_alignment = 256;
+    native_api_version = VK_API_VERSION_1_3;
+    max_buffer_size = max_allocation_size = requirements_extra = 0;
+    extension3 = extension4 = ignore_limits = false;
+    extension_count_result = extension_fill_result = VK_SUCCESS;
+    extension_incomplete = extension_calls = properties2_calls = queries3 = queries4 = 0;
     address_low = 3;
     buffer_calls = buffer_success = buffer_destroys = memory_calls = memory_success = memory_frees = maps = unmaps = 0;
     chosen_count = next_id = 0;
@@ -233,6 +286,8 @@ static void setup(void) {
     dev.queue_families = (uint32_t *)families;
     inst.vtable.GetPhysicalDeviceMemoryProperties = memory_properties;
     inst.vtable.GetPhysicalDeviceProperties = properties;
+    inst.vtable.GetPhysicalDeviceProperties2 = properties2;
+    inst.vtable.EnumerateDeviceExtensionProperties = extensions;
     dev.vtable.CreateBuffer = create_buffer;
     dev.vtable.DestroyBuffer = destroy_buffer;
     dev.vtable.GetBufferMemoryRequirements = requirements;
@@ -252,6 +307,169 @@ static void finish(void) {
         CHECK(!p->buffer_live && !p->memory_live && !p->mapped && !p->bytes);
 }
 static void initialize(void) { CHECK(vkrt_private_pool_init(&dev, &allocator) == VK_SUCCESS); }
+static void native_size_limits(void) {
+    for (unsigned class_index = 0; class_index < 2; ++class_index) {
+        enum vkrt_private_memory_class memory_class =
+            class_index ? VKRT_PRIVATE_DEVICE_LOCAL_PREFERRED : VKRT_PRIVATE_HOST_COHERENT;
+        setup();
+        max_buffer_size = max_allocation_size = 65536;
+        initialize();
+        CHECK(queries3 == 1 && queries4 == 1 && !extension_calls);
+        struct vkrt_private_slice a;
+        CHECK(vkrt_private_pool_allocate_ex(&dev, 65521, memory_class, 16, 1, &a) == VK_SUCCESS);
+        CHECK(buffer_calls == 1 && memory_calls == 1 && a.offset == 13 && a.size == 65521);
+        vkrt_private_pool_release(&dev, &a);
+        memset(&a, 0xcd, sizeof(a));
+        CHECK(vkrt_private_pool_allocate_ex(&dev, 65522, memory_class, 16, 1, &a) == VK_ERROR_OUT_OF_DEVICE_MEMORY);
+        CHECK(empty_slice(&a) && buffer_calls == 1 && memory_calls == 1 && properties2_calls == 1);
+        finish();
+
+        setup();
+        max_buffer_size = 64;
+        max_allocation_size = 256;
+        initialize();
+        /* The 64KiB preference must not become an artificial support floor. */
+        CHECK(vkrt_private_pool_allocate_ex(&dev, 32, memory_class, 16, 1, &a) == VK_SUCCESS);
+        CHECK(cell((uintptr_t)a.buffer)->size == 48 && a.offset == 13 && memory_calls == 1);
+        vkrt_private_pool_release(&dev, &a);
+        CHECK(vkrt_private_pool_allocate_ex(&dev, 50, memory_class, 16, 1, &a) == VK_ERROR_OUT_OF_DEVICE_MEMORY);
+        CHECK(empty_slice(&a) && buffer_calls == 1);
+        finish();
+
+        setup();
+        max_buffer_size = 65536;
+        max_allocation_size = 65536;
+        requirements_extra = 256;
+        initialize();
+        CHECK(vkrt_private_pool_allocate_ex(&dev, 65521, memory_class, 16, 1, &a) == VK_ERROR_OUT_OF_DEVICE_MEMORY);
+        CHECK(empty_slice(&a) && buffer_calls == 1 && buffer_destroys == 1 && !memory_calls);
+        finish();
+
+        setup();
+        max_buffer_size = 65536;
+        max_allocation_size = 65792;
+        requirements_extra = 256;
+        initialize();
+        CHECK(vkrt_private_pool_allocate_ex(&dev, 65521, memory_class, 16, 1, &a) == VK_SUCCESS);
+        CHECK(memory_calls == 1);
+        vkrt_private_pool_release(&dev, &a);
+        finish();
+
+        setup();
+        max_allocation_size = 65536;
+        initialize();
+        CHECK(vkrt_private_pool_allocate_ex(&dev, 65522, memory_class, 16, 1, &a) == VK_ERROR_OUT_OF_DEVICE_MEMORY);
+        CHECK(empty_slice(&a) && !buffer_calls && !memory_calls);
+        finish();
+    }
+    setup();
+    max_buffer_size = max_allocation_size = (UINT64_C(1) << 32) + 65536;
+    initialize();
+    fail_stage = BUFFER; /* Prove full-width limits without a multi-GiB host allocation. */
+    struct vkrt_private_slice a;
+    CHECK(vkrt_private_pool_allocate_ex(&dev, UINT64_C(1) << 32, VKRT_PRIVATE_DEVICE_LOCAL_PREFERRED, 16, 1, &a) ==
+          VK_ERROR_OUT_OF_DEVICE_MEMORY);
+    CHECK(empty_slice(&a) && buffer_calls == 1);
+    CHECK(vkrt_private_pool_allocate_ex(&dev, max_buffer_size, VKRT_PRIVATE_DEVICE_LOCAL_PREFERRED, 16, 1, &a) ==
+          VK_ERROR_OUT_OF_DEVICE_MEMORY);
+    CHECK(empty_slice(&a) && buffer_calls == 1);
+    finish();
+}
+static void native_limit_queries(void) {
+    struct vkrt_private_slice a;
+    setup();
+    native_api_version = VK_API_VERSION_1_2;
+    max_buffer_size = 1; /* Unsupported maintenance4 must not fabricate this limit. */
+    max_allocation_size = 65536;
+    initialize();
+    CHECK(queries3 == 1 && !queries4 && extension_calls == 1);
+    CHECK(vkrt_private_pool_allocate(&dev, 32, false, &a) == VK_SUCCESS);
+    vkrt_private_pool_release(&dev, &a);
+    finish();
+
+    setup();
+    native_api_version = VK_API_VERSION_1_2;
+    extension4 = true;
+    max_buffer_size = 65536;
+    max_allocation_size = 65536;
+    extension_incomplete = 1;
+    initialize();
+    CHECK(queries3 == 1 && queries4 == 1 && extension_calls == 4);
+    CHECK(vkrt_private_pool_allocate_ex(&dev, 65522, VKRT_PRIVATE_DEVICE_LOCAL_PREFERRED, 16, 1, &a) ==
+          VK_ERROR_OUT_OF_DEVICE_MEMORY);
+    CHECK(empty_slice(&a) && !buffer_calls);
+    finish();
+
+    setup();
+    native_api_version = VK_API_VERSION_1_0;
+    extension3 = extension4 = true;
+    max_buffer_size = 64;
+    max_allocation_size = 256;
+    initialize();
+    CHECK(queries3 == 1 && queries4 == 1 && extension_calls == 2);
+    CHECK(vkrt_private_pool_allocate(&dev, 32, false, &a) == VK_SUCCESS);
+    vkrt_private_pool_release(&dev, &a);
+    finish();
+
+    setup();
+    native_api_version = VK_API_VERSION_1_0;
+    max_buffer_size = max_allocation_size = 1;
+    initialize();
+    CHECK(!queries3 && !queries4 && !properties2_calls && extension_calls == 1);
+    CHECK(vkrt_private_pool_allocate(&dev, 32, false, &a) == VK_SUCCESS);
+    vkrt_private_pool_release(&dev, &a);
+    finish();
+
+    setup();
+    ignore_limits = true;
+    max_buffer_size = max_allocation_size = 1;
+    initialize();
+    CHECK(queries3 == 1 && queries4 == 1);
+    CHECK(vkrt_private_pool_allocate(&dev, 65536, false, &a) == VK_SUCCESS);
+    vkrt_private_pool_release(&dev, &a);
+    finish();
+
+    setup();
+    inst.vtable.GetPhysicalDeviceProperties2 = NULL;
+    initialize();
+    CHECK(!queries3 && !queries4 && !extension_calls);
+    CHECK(vkrt_private_pool_allocate(&dev, 32, false, &a) == VK_SUCCESS);
+    vkrt_private_pool_release(&dev, &a);
+    finish();
+
+    setup();
+    inst.vtable.GetPhysicalDeviceProperties = NULL;
+    max_buffer_size = 65536;
+    initialize();
+    CHECK(properties2_calls == 2 && queries3 == 1 && queries4 == 1);
+    CHECK(vkrt_private_pool_allocate_ex(&dev, 65522, VKRT_PRIVATE_DEVICE_LOCAL_PREFERRED, 16, 1, &a) ==
+          VK_ERROR_OUT_OF_DEVICE_MEMORY);
+    CHECK(empty_slice(&a) && !buffer_calls);
+    finish();
+
+    for (unsigned failure = 0; failure < 5; ++failure) {
+        setup();
+        native_api_version = VK_API_VERSION_1_2;
+        extension4 = true;
+        VkResult expected = VK_ERROR_OUT_OF_HOST_MEMORY;
+        if (failure == 0)
+            owner.fail_on = 2; /* Extension array, after the pool owner. */
+        else if (failure == 1)
+            extension_count_result = VK_ERROR_OUT_OF_HOST_MEMORY;
+        else if (failure == 2)
+            extension_fill_result = VK_ERROR_OUT_OF_HOST_MEMORY;
+        else if (failure == 3) {
+            extension_count_result = VK_ERROR_DEVICE_LOST;
+            expected = VK_ERROR_DEVICE_LOST;
+        } else {
+            extension_incomplete = 8;
+            expected = VK_ERROR_INITIALIZATION_FAILED;
+        }
+        CHECK(vkrt_private_pool_init(&dev, &allocator) == expected);
+        CHECK(!dev.private_pool && !atomic_load(&owner.live) && !buffer_calls && !memory_calls);
+        finish();
+    }
+}
 static void alignment_and_classes(void) {
     setup();
     initialize();
@@ -480,6 +698,8 @@ static void concurrency_and_finish(void) {
     finish(); /* Exclusive device teardown also cleans all outstanding leases. */
 }
 int main(void) {
+    native_size_limits();
+    native_limit_queries();
     alignment_and_classes();
     holes_and_constraints();
     memory_fallback();
@@ -488,7 +708,7 @@ int main(void) {
     concurrency_and_finish();
     setup(); /* Release the native mock records after their final lifetime checks. */
     unsigned result = atomic_load(&failures);
-    printf("Private pool: %s (%u failures; alignment/classes/holes/fallback/failures/1600 concurrent leases)\n",
+    printf("Private pool: %s (%u failures; native limits/alignment/classes/holes/fallback/failures/1600 concurrent leases)\n",
            result ? "FAIL" : "PASS", result);
     return result ? 1 : 0;
 }

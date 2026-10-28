@@ -27,6 +27,10 @@ def name_of(node):
 
 
 class Generator:
+    TEMPLATE_COMMANDS = {
+        "vkCmdPushDescriptorSetWithTemplate", "vkCmdPushDescriptorSetWithTemplateKHR",
+        "vkCmdPushDescriptorSetWithTemplate2", "vkCmdPushDescriptorSetWithTemplate2KHR",
+    }
     INACTIVE_DYNAMIC_INHERITANCE = {
         "VkCommandBufferInheritanceRenderingInfo",
         "VkAttachmentSampleCountInfoAMD",
@@ -43,8 +47,9 @@ class Generator:
         "VkCommandBufferBeginInfo.pInheritanceInfo": "one structure for secondary buffers; caller sanitizes ignored primary-buffer inheritance",
         "VkCommandBufferInheritanceViewportScissorInfoNV.pViewportDepths": "viewportScissor2D ? viewportDepthCount : 0; never dereference when disabled",
         "vkCmdClearColorImage.pColor": "one POD VkClearColorValue union",
-        "vkCmdPushDescriptorSetWithTemplate.pData": "opaque template payload; explicitly unsupported",
-        "vkCmdPushDescriptorSetWithTemplateKHR.pData": "opaque template payload; explicitly unsupported",
+        "vkCmdPushDescriptorSetWithTemplate.pData": "normalize with immutable integration template metadata; otherwise unsupported",
+        "vkCmdPushDescriptorSetWithTemplateKHR.pData": "normalize with immutable integration template metadata; otherwise unsupported",
+        "VkPushDescriptorSetWithTemplateInfo.pData": "normalize with immutable integration template metadata; otherwise unsupported",
         "vkCmdSetCheckpointNV.pCheckpointMarker": "opaque identity token; never dereference",
         "VkDeviceOrHostAddressKHR.hostAddress": "vkCmd operations interpret the union as deviceAddress bits; never dereference hostAddress",
         "VkDeviceOrHostAddressConstKHR.hostAddress": "vkCmd operations interpret the union as deviceAddress bits; never dereference hostAddress",
@@ -801,19 +806,41 @@ class Generator:
                           "    const struct replay_args_" + n + " *saved = data;", "    (void)saved;"])
             lines.extend(metadata)
             lines.extend(["    return VK_SUCCESS;", "}"])
+        capture_sig = ", ".join(["struct vkrt_replay_context *context"] + [self.shape(p)[2] for p in params[1:]])
+        lines.extend(["static VKAPI_ATTR VkResult VKAPI_CALL replay_capture_" + n + "(" + capture_sig + ") {",
+                      "    if (!context || !context->journal) return VK_ERROR_INITIALIZATION_FAILED;",
+                      "    if (vkrt_replay_journal_status(context->journal) != VK_SUCCESS) return vkrt_replay_journal_status(context->journal);"])
+        if n in self.TEMPLATE_COMMANDS:
+            lines.append("    if (context->capture_descriptor_template) {")
+            if n in ("vkCmdPushDescriptorSetWithTemplate", "vkCmdPushDescriptorSetWithTemplateKHR"):
+                lines.extend(["        const VkPushDescriptorSetWithTemplateInfo info = {",
+                              "            .sType = VK_STRUCTURE_TYPE_PUSH_DESCRIPTOR_SET_WITH_TEMPLATE_INFO,",
+                              "            .descriptorUpdateTemplate = descriptorUpdateTemplate, .layout = layout, .set = set, .pData = pData};"])
+                template_info = "&info"
+            else:
+                template_info = args[1]
+            lines.extend(["        VkResult result = context->capture_descriptor_template(context, " + template_info + ");",
+                          "        if (result != VK_SUCCESS) {",
+                          "            struct replay_arena failure = replay_capture_begin(context);",
+                          "            if (failure.status == VK_SUCCESS) failure.status = result;",
+                          "            replay_capture_end(context, \"" + n + "\", NULL, NULL, NULL, &failure);",
+                          "        }", "        return vkrt_replay_journal_status(context->journal);", "    }"])
+        lines.extend([
+                      "    struct replay_arena storage = replay_capture_begin(context);",
+                      "    struct replay_arena *arena = &storage;",
+                      "    struct replay_args_" + n + " *saved = replay_alloc(arena, 1, sizeof(*saved));",
+                      "    if (saved) {"])
+        initializers = ["." + a + " = " + a for a in args[1:]] or [".unused = 0"]
+        lines.append("        struct replay_args_" + n + " source = {" + ", ".join(initializers) + "};")
+        lines.append("        replay_clone_args_" + n + "(arena, saved, &source);")
+        describe = "replay_metadata_" + n if metadata else "NULL"
+        lines.extend(["    }", "    replay_capture_end(context, \"" + n + "\", replay_emit_" + n + ", " + describe + ", saved, arena);",
+                      "    return vkrt_replay_journal_status(context->journal);", "}"])
         sig = ", ".join(self.shape(p)[2] for p in params)
+        capture_args = ["context"] + args[1:]
         lines.extend(["static VKAPI_ATTR " + ret + " VKAPI_CALL replay_record_" + n + "(" + sig + ") {",
                       "    struct vkrt_replay_context *context = vkrt_replay_lookup_context(" + first + ");",
-                      "    if (context && context->journal) {",
-                      "        struct replay_arena storage = replay_capture_begin(context);",
-                      "        struct replay_arena *arena = &storage;",
-                      "        struct replay_args_" + n + " *saved = replay_alloc(arena, 1, sizeof(*saved));",
-                      "        if (saved) {"])
-        initializers = ["." + a + " = " + a for a in args[1:]] or [".unused = 0"]
-        lines.append("            struct replay_args_" + n + " source = {" + ", ".join(initializers) + "};")
-        lines.append("            replay_clone_args_" + n + "(arena, saved, &source);")
-        describe = "replay_metadata_" + n if metadata else "NULL"
-        lines.extend(["        }", "        replay_capture_end(context, \"" + n + "\", replay_emit_" + n + ", " + describe + ", saved, arena);", "    }",
+                      "    if (context && context->journal) replay_capture_" + n + "(" + ", ".join(capture_args) + ");",
                       "    PFN_" + n + " proc = context && context->resolve ? (PFN_" + n + ")context->resolve(context->user, \"" + n + "\") : NULL;"])
         if ret == "void":
             lines.append("    if (proc) proc(" + ", ".join(args) + ");")
@@ -877,6 +904,10 @@ class Generator:
         for n, _, _, _, _ in forwarding:
             lines.append("    if (!strcmp(name, \"" + n + "\")) return (PFN_vkVoidFunction)replay_record_" + n + ";")
         lines.extend(["    return NULL;", "}", ""])
+        lines.extend(["PFN_vkVoidFunction vkrt_replay_capture_proc(const char *name) {", "    if (!name) return NULL;"])
+        for n, _, _ in self.commands:
+            lines.append("    if (!strcmp(name, \"" + n + "\")) return (PFN_vkVoidFunction)replay_capture_" + n + ";")
+        lines.extend(["    return NULL;", "}", ""])
         # Attribute conditional restrictions to each command as well as listing
         # schemas globally. A typed outer signature is not evidence that opaque
         # optional payloads (video standard structures, templates, etc.) work.
@@ -901,8 +932,10 @@ class Generator:
                 seen.add(t)
                 pending.extend(edges.get(t, ()))
             restrictions = {t: self.struct_reasons[t] for t in sorted(seen) if t in self.struct_reasons}
+            capture_kind = "owned_template_normalization_or_unsupported" if n in self.TEMPLATE_COMMANDS else (
+                "unsupported" if n in self.command_reasons else "typed_with_runtime_schema_checks")
             command_manifest.append({"name": n,
-                                     "capture": "unsupported" if n in self.command_reasons else "typed_with_runtime_schema_checks",
+                                     "capture": capture_kind,
                                      "metadata": "reviewed_or_registry_state" if self.metadata(command, params) else "incomplete",
                                      "reasons": self.command_reasons.get(n, []),
                                      "conditional_schema_restrictions": restrictions})
@@ -917,6 +950,8 @@ class Generator:
                     "header_sha256": hashlib.sha256(self.header.read_bytes()).hexdigest(),
                     "policy": "Typed command inputs are owned; unknown pNext, opaque schemas, and unsupported union cases fail capture. Native handles obey Vulkan object lifetimes. Pipeline layouts are normalized by the caller callback. Device-address unions retain address bits, opaque checkpoint markers retain identity.",
                     "command_count": len(wrapped_names), "typed_struct_count": len(self.reachable),
+                    "capture_only_command_count": len(self.commands),
+                    "template_normalization": "An integration-provided immutable template schema normalizes template payloads into ordinary owning push entries; missing metadata fails capture without borrowing pData.",
                     "metadata_command_count": sum(c["metadata"] != "incomplete" for c in command_manifest),
                     "metadata_policy": "Reviewed action/synchronization facts and registry state-only tasks; raw scopes and context flags are not complete dependency/replay certificates. Unknown action semantics fail metadata queries without poisoning ordinary capture/replay.",
                     "commands": command_manifest,
@@ -931,6 +966,16 @@ class Generator:
                     "unavailable_commands": sorted(n for n in self.all_commands if n and n.startswith("vkCmd") and n not in wrapped_names)}
         return "\n".join(lines), manifest
 
+    def capture_header(self):
+        lines = ["/* Generated by generate_command_replay.py; do not edit. */",
+                 "#ifndef VKRT_REPLAY_CAPTURE_GENERATED_H", "#define VKRT_REPLAY_CAPTURE_GENERATED_H",
+                 "#include <vulkan/vulkan.h>", "struct vkrt_replay_context;"]
+        for n, _, params in self.commands:
+            signature = ", ".join(["struct vkrt_replay_context *context"] + [self.shape(p)[2] for p in params[1:]])
+            lines.append("typedef VkResult (VKAPI_PTR *PFN_vkrt_capture_" + n[2:] + ")(" + signature + ");")
+        lines.extend(["#endif", ""])
+        return "\n".join(lines)
+
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
@@ -938,14 +983,19 @@ def main():
     parser.add_argument("--header", required=True, type=Path)
     parser.add_argument("--output", required=True, type=Path)
     parser.add_argument("--coverage", required=True, type=Path)
+    parser.add_argument("--capture-header", type=Path)
     args = parser.parse_args()
-    output, manifest = Generator(args.registry, args.header).generate()
+    generator = Generator(args.registry, args.header)
+    output, manifest = generator.generate()
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.coverage.parent.mkdir(parents=True, exist_ok=True)
     args.coverage.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
     if manifest["abi_rejections"]:
         parser.error("Cannot generate ABI-safe command admission blockers: " + json.dumps(manifest["abi_rejections"]))
     args.output.write_text(output, encoding="utf-8")
+    capture_header = args.capture_header or args.output.with_name("vkrt_replay_capture_generated.h")
+    capture_header.parent.mkdir(parents=True, exist_ok=True)
+    capture_header.write_text(generator.capture_header(), encoding="utf-8")
     unsupported = sum(c["capture"] == "unsupported" for c in manifest["commands"])
     print(f"command replay: {manifest['command_count']} typed wrappers, {unsupported} explicit unsupported commands, {manifest['typed_struct_count']} struct schemas")
 

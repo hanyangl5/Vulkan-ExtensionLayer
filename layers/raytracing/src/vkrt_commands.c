@@ -4,6 +4,7 @@
 #include "vkrt_rt_capabilities.h"
 #include "vkrt_query_pool.h"
 #include "vkrt_execution_replay.h"
+#include "vkrt_descriptor_template.h"
 
 static PFN_vkVoidFunction replay_resolve(void *user, const char *name) {
     struct vkrt_cmd_buffer_data *cb = user;
@@ -25,7 +26,12 @@ static VkResult replay_emit_layout(void *user, const char *name, VkPipelineLayou
      * consumers require a genuine retained ICD layout. Aliases keep their name. */
     if (!strcmp(name, "vkCmdBindDescriptorSets") || !strcmp(name, "vkCmdBindDescriptorSets2") ||
         !strcmp(name, "vkCmdBindDescriptorSets2KHR") || !strcmp(name, "vkCmdPushConstants") ||
-        !strcmp(name, "vkCmdPushConstants2") || !strcmp(name, "vkCmdPushConstants2KHR"))
+        !strcmp(name, "vkCmdPushConstants2") || !strcmp(name, "vkCmdPushConstants2KHR") ||
+        !strcmp(name, "vkCmdPushDescriptorSet") || !strcmp(name, "vkCmdPushDescriptorSetKHR") ||
+        !strcmp(name, "vkCmdPushDescriptorSet2") || !strcmp(name, "vkCmdPushDescriptorSet2KHR") ||
+        !strcmp(name, "vkCmdSetDescriptorBufferOffsetsEXT") || !strcmp(name, "vkCmdSetDescriptorBufferOffsets2EXT") ||
+        !strcmp(name, "vkCmdBindDescriptorBufferEmbeddedSamplersEXT") ||
+        !strcmp(name, "vkCmdBindDescriptorBufferEmbeddedSamplers2EXT"))
         return VK_SUCCESS;
     return vkrt_rtp_replay_layout_native(cb, identity, forward);
 }
@@ -38,6 +44,7 @@ struct vkrt_replay_context *vkrt_replay_lookup_context(VkCommandBuffer command) 
     cb->replay.user = cb;
     cb->replay.normalize_pipeline_layout = replay_capture_layout;
     cb->replay.emit_pipeline_layout = replay_emit_layout;
+    cb->replay.capture_descriptor_template = vkrt_descriptor_template_capture;
     return &cb->replay;
 }
 

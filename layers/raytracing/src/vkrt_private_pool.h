@@ -26,12 +26,16 @@ extern "C" {
 #endif
 
 /* Initialize once before concurrent use. No GPU memory is allocated here.
- * Finish after registry/AS users, before the native device and allocator owner. */
+ * Cache supported native buffer/allocation limits without inventing limits for
+ * unavailable/ignored queries. Finish after registry/AS users, before the native
+ * device and allocator owner. */
 VkResult vkrt_private_pool_init(struct vkrt_device_data *dev, const VkAllocationCallbacks *allocator);
 void vkrt_private_pool_finish(struct vkrt_device_data *dev);
 /* Align the physical BDA and the native buffer offset independently. Both
  * alignments must be nonzero powers of two. Incompatible constraints fail;
  * neither promise is silently weakened. Memory classes never share chunks.
+ * Native chunk sizes include alignment padding; known buffer/allocation limits
+ * fail with OUT_OF_DEVICE_MEMORY before the corresponding native call.
  * HOST_COHERENT slices are mapped and zeroed. DEVICE_LOCAL_PREFERRED slices
  * prefer device-local memory, fall back to another buffer-compatible memory
  * type if needed, are not mapped/initialized, and require device-side ordering

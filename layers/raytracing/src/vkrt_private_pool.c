@@ -24,6 +24,9 @@ struct vkrt_private_pool {
     struct vkrt_private_chunk *chunks;
     vkrt_mutex_t lock;
     VkDeviceSize descriptor_alignment;
+    /* Zero means the native query was unavailable or ignored, not a guessed
+     * allocation guarantee. Limits apply to native chunks, not slice sizes. */
+    VkDeviceSize max_buffer_size, max_allocation_size;
     bool custom;
     VkAllocationCallbacks allocator;
 };
@@ -48,6 +51,53 @@ static bool aligned(VkDeviceSize value, VkDeviceSize alignment, VkDeviceSize *ou
     if (!alignment || (alignment & (alignment - 1)) || value > UINT64_MAX - (alignment - 1)) return false;
     *out = (value + alignment - 1) & ~(alignment - 1);
     return true;
+}
+static VkResult query_limits(struct vkrt_private_pool *pool, uint32_t api_version) {
+    struct vkrt_device_data *dev = pool->dev;
+    const struct vkrt_instance_dispatch *native = &dev->instance_data->vtable;
+    if (!native->GetPhysicalDeviceProperties2) return VK_SUCCESS;
+    if (!api_version) {
+        VkPhysicalDeviceProperties2 properties = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2};
+        native->GetPhysicalDeviceProperties2(dev->physical_device, &properties);
+        api_version = properties.properties.apiVersion;
+    }
+    bool maintenance3 = api_version >= VK_API_VERSION_1_1, maintenance4 = api_version >= VK_API_VERSION_1_3;
+    /* Device properties may be queried before their features/extensions are
+     * enabled, but an older device need not implement an unadvertised struct. */
+    if ((!maintenance3 || !maintenance4) && native->EnumerateDeviceExtensionProperties) {
+        for (unsigned attempt = 0; attempt < 8; ++attempt) {
+            uint32_t count = 0;
+            VkResult result = native->EnumerateDeviceExtensionProperties(dev->physical_device, NULL, &count, NULL);
+            if (result != VK_SUCCESS) return result;
+            if (!count) break;
+            if ((uint64_t)count * sizeof(VkExtensionProperties) > SIZE_MAX) return VK_ERROR_OUT_OF_HOST_MEMORY;
+            VkExtensionProperties *extensions =
+                allocate(pool, (size_t)count * sizeof(*extensions), _Alignof(VkExtensionProperties));
+            if (!extensions) return VK_ERROR_OUT_OF_HOST_MEMORY;
+            result = native->EnumerateDeviceExtensionProperties(dev->physical_device, NULL, &count, extensions);
+            if (result == VK_SUCCESS) {
+                for (uint32_t i = 0; i < count; ++i) {
+                    maintenance3 |= !strcmp(extensions[i].extensionName, VK_KHR_MAINTENANCE_3_EXTENSION_NAME);
+                    maintenance4 |= !strcmp(extensions[i].extensionName, VK_KHR_MAINTENANCE_4_EXTENSION_NAME);
+                }
+            }
+            release(pool, extensions);
+            if (result == VK_SUCCESS) break;
+            if (result != VK_INCOMPLETE) return result;
+            if (attempt == 7) return VK_ERROR_INITIALIZATION_FAILED;
+        }
+    }
+    VkPhysicalDeviceMaintenance4Properties four = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MAINTENANCE_4_PROPERTIES};
+    VkPhysicalDeviceMaintenance3Properties three = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MAINTENANCE_3_PROPERTIES,
+                                                    .pNext = maintenance4 ? &four : NULL};
+    VkPhysicalDeviceProperties2 properties = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2,
+                                              .pNext = maintenance3   ? (void *)&three
+                                                       : maintenance4 ? (void *)&four
+                                                                      : NULL};
+    if (properties.pNext) native->GetPhysicalDeviceProperties2(dev->physical_device, &properties);
+    pool->max_buffer_size = four.maxBufferSize;
+    pool->max_allocation_size = three.maxMemoryAllocationSize;
+    return VK_SUCCESS;
 }
 static void chunk_destroy(struct vkrt_private_pool *pool, struct vkrt_private_chunk *chunk) {
     struct vkrt_device_data *dev = pool->dev;
@@ -81,6 +131,10 @@ static VkResult chunk_create(struct vkrt_private_pool *pool, VkDeviceSize size, 
     dev->vtable.GetBufferMemoryRequirements(dev->device, buffer, &requirements);
     if (requirements.size < size) {
         result = VK_ERROR_INITIALIZATION_FAILED;
+        goto fail;
+    }
+    if (pool->max_allocation_size && requirements.size > pool->max_allocation_size) {
+        result = VK_ERROR_OUT_OF_DEVICE_MEMORY;
         goto fail;
     }
     VkPhysicalDeviceMemoryProperties properties = {0};
@@ -171,15 +225,22 @@ VkResult vkrt_private_pool_init(struct vkrt_device_data *dev, const VkAllocation
     /* The core required-limits maximum is a safe fallback for isolated host
      * adapters without a properties callback. Production uses the actual limit. */
     pool->descriptor_alignment = 256;
+    uint32_t api_version = 0;
     if (dev->instance_data->vtable.GetPhysicalDeviceProperties) {
         VkPhysicalDeviceProperties properties = {0};
         dev->instance_data->vtable.GetPhysicalDeviceProperties(dev->physical_device, &properties);
         pool->descriptor_alignment = properties.limits.minStorageBufferOffsetAlignment;
+        api_version = properties.apiVersion;
     }
     if (pool->descriptor_alignment < 8) pool->descriptor_alignment = 8;
     if (pool->descriptor_alignment & (pool->descriptor_alignment - 1)) {
         release(pool, pool);
         return VK_ERROR_INITIALIZATION_FAILED;
+    }
+    VkResult result = query_limits(pool, api_version);
+    if (result != VK_SUCCESS) {
+        release(pool, pool);
+        return result;
     }
 #ifdef _WIN32
     vkrt_mutex_init(&pool->lock);
@@ -248,7 +309,15 @@ VkResult vkrt_private_pool_allocate_ex(struct vkrt_device_data *dev, VkDeviceSiz
         result = VK_ERROR_OUT_OF_DEVICE_MEMORY;
         goto fail;
     }
-    if (needed < 65536) needed = 65536;
+    VkDeviceSize limit = pool->max_buffer_size;
+    if (pool->max_allocation_size && (!limit || pool->max_allocation_size < limit)) limit = pool->max_allocation_size;
+    if (limit && needed > limit) {
+        result = VK_ERROR_OUT_OF_DEVICE_MEMORY;
+        goto fail;
+    }
+    /* The normal chunk minimum is an allocation policy, never a new native
+     * support floor. Small real limits still permit fitting small chunks. */
+    if (needed < 65536 && (!limit || limit >= 65536)) needed = 65536;
     result = chunk_create(pool, needed, memory_class, &chunk);
     if (result != VK_SUCCESS) goto fail;
     if (!chunk_find(chunk, size, physical_alignment, offset_alignment, &link, &offset)) {

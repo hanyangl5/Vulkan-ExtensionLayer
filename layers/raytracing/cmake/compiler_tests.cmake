@@ -29,11 +29,13 @@ foreach(pair
     set_tests_properties(ray_tracing_fallback_${test} PROPERTIES
         LABELS "gpu;compiler;no_native_rt" SKIP_RETURN_CODE 77 TIMEOUT 600)
 endforeach()
+# Destination transports are SSBO and BDA. Source Function/Private storage
+# remains covered: two baseline BDA cases, plus four real-root/NonUniform cases.
 add_test(NAME ray_tracing_fallback_pointer_transports COMMAND vel_rt_state_compiler_tests --transport-pointer-only)
 add_test(NAME ray_tracing_fallback_pointer_qualified COMMAND vel_rt_state_compiler_tests --qualified-pointer-only)
 set_tests_properties(ray_tracing_fallback_pointer_transports ray_tracing_fallback_pointer_qualified PROPERTIES
     LABELS "gpu;compiler;no_native_rt" SKIP_RETURN_CODE 77 TIMEOUT 600)
-foreach(component frame_emitter state_compiler)
+foreach(component frame_emitter state_compiler typed_runtime typed_pipeline)
     add_test(NAME ray_tracing_fallback_${component}_compile COMMAND vel_rt_${component}_tests --compile-only)
     set_tests_properties(ray_tracing_fallback_${component}_compile PROPERTIES LABELS "offline;compiler" TIMEOUT 120)
 endforeach()

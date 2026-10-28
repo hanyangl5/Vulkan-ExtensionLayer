@@ -1,6 +1,7 @@
 // Copyright 2026 The Khronos Group Inc.
 // SPDX-License-Identifier: Apache-2.0
 #include "typed_pipeline.h"
+#include "spirv_environment.h"
 #include <spirv-tools/libspirv.hpp>
 #include <spirv-tools/linker.hpp>
 #include <spirv-tools/optimizer.hpp>
@@ -66,8 +67,9 @@ void Emit(Words &output, spv::Op op, std::initializer_list<uint32_t> arguments) 
     output.insert(output.end(), arguments);
 }
 Words Specialize(const Words &source, const VkSpecializationInfo *info) {
-    Validate(source, SPV_ENV_VULKAN_1_3);
-    spvtools::Optimizer flatten(SPV_ENV_VULKAN_1_3);
+    const auto environment = VulkanEnvironmentForSPIRV(source.size() > 1 ? source[1] : 0);
+    Validate(source, environment);
+    spvtools::Optimizer flatten(environment);
     flatten.RegisterPass(spvtools::CreateFlattenDecorationPass());
     Words normalized;
     spvtools::ValidatorOptions validation;
@@ -106,7 +108,7 @@ Words Specialize(const Words &source, const VkSpecializationInfo *info) {
             Require(values.emplace(entry.constantID, std::move(value)).second, "duplicate specialization ID");
         }
     }
-    spvtools::Optimizer optimizer(SPV_ENV_VULKAN_1_3);
+    spvtools::Optimizer optimizer(environment);
     std::string error;
     optimizer.SetMessageConsumer([&](spv_message_level_t, const char *, const spv_position_t &, const char *message) {
         error += std::string(message) + "\n";
@@ -120,25 +122,18 @@ Words Specialize(const Words &source, const VkSpecializationInfo *info) {
     return result;
 }
 Words ImportStages(const Words &scheduler, const std::vector<TypedContinuationProgram> &stages) {
-    Validate(scheduler, SPV_ENV_VULKAN_1_3);
+    Validate(scheduler, VulkanEnvironmentForSPIRV(scheduler.size() > 1 ? scheduler[1] : 0));
     std::map<std::string, uint32_t> targets;
     std::map<uint32_t, uint32_t> function_types;
     std::map<uint32_t, Words> signatures;
     std::map<uint32_t, uint32_t> address_pointers;
     std::set<uint32_t> void_types, address_types;
     bool physical_capability = false;
-    uint32_t private_variable = 0, private_words = 0;
     std::set<std::string> requested;
     for (const auto &stage : stages) {
-        Require((stage.transport == TypedFrameTransport::PhysicalAddress || stage.transport == TypedFrameTransport::PrivateArray) &&
-                    !stage.step_export_name.empty(),
+        Require(stage.transport == TypedFrameTransport::PhysicalAddress && !stage.step_export_name.empty(),
                 "stage does not expose a physical frame library");
         Require(requested.insert(stage.step_export_name).second, "duplicate stage export");
-        if (stage.transport == TypedFrameTransport::PrivateArray) {
-            Require(stage.private_frame_words && (!private_words || private_words == stage.private_frame_words),
-                    "private stage libraries disagree on invocation stack capacity");
-            private_words = stage.private_frame_words;
-        }
     }
     for (size_t p = 5; p < scheduler.size(); p += scheduler[p] >> 16) {
         auto op = spv::Op(scheduler[p] & 0xffff);
@@ -147,10 +142,6 @@ Words ImportStages(const Words &scheduler, const std::vector<TypedContinuationPr
             physical_capability = true;
         if (op == spv::OpName) {
             auto name = String(scheduler, p + 2, p + length);
-            if (name == "vel_rt_private_frames") {
-                Require(!private_variable, "ambiguous scheduler private frame variable");
-                private_variable = scheduler[p + 1];
-            }
             auto end = name.find('(');
             auto stem = name.substr(0, end);
             if (requested.count(stem)) Require(targets.emplace(stem, scheduler[p + 1]).second, "ambiguous scheduler stub");
@@ -167,15 +158,6 @@ Words ImportStages(const Words &scheduler, const std::vector<TypedContinuationPr
     }
     Require(targets.size() == requested.size(), "scheduler is missing a required typed stage stub");
     Words annotations, declarations, imports;
-    if (private_words) {
-        Require(private_variable, "scheduler is missing per-invocation private frame storage");
-        auto name = Literal("vel_rt_private_frames");
-        annotations.push_back((uint32_t(name.size() + 4) << 16) | spv::OpDecorate);
-        annotations.push_back(private_variable);
-        annotations.push_back(spv::DecorationLinkageAttributes);
-        annotations.insert(annotations.end(), name.begin(), name.end());
-        annotations.push_back(spv::LinkageTypeExport);
-    }
     struct Adapter {
         uint32_t import, result_type, address_type;
         bool reference;
@@ -270,7 +252,7 @@ Words ImportStages(const Words &scheduler, const std::vector<TypedContinuationPr
         }
     }
     result[3] = bound;
-    Validate(result, SPV_ENV_UNIVERSAL_1_5);
+    Validate(result, UniversalEnvironmentForSPIRV(result.at(1)));
     return result;
 }
 }  // namespace
@@ -295,8 +277,10 @@ Words LinkTypedPipelineProgram(const Words &scheduler, const std::vector<TypedCo
     std::vector<Words> modules{ImportStages(scheduler, stages)};
     std::set<Words> required_modes;
     std::map<std::pair<uint32_t, uint32_t>, uint32_t> exclusive_modes;
+    uint32_t version = scheduler.at(1);
     for (const auto &stage : stages) {
-        Validate(stage.spirv, SPV_ENV_UNIVERSAL_1_5);
+        Validate(stage.spirv, UniversalEnvironmentForSPIRV(stage.spirv.size() > 1 ? stage.spirv[1] : 0));
+        version = std::max(version, stage.spirv.at(1));
         modules.push_back(stage.spirv);
         for (const auto &mode : stage.required_execution_modes) {
             Words words{mode.mode};
@@ -313,7 +297,8 @@ Words LinkTypedPipelineProgram(const Words &scheduler, const std::vector<TypedCo
             }
         }
     }
-    spvtools::Context context(SPV_ENV_UNIVERSAL_1_5);
+    const auto environment = UniversalEnvironmentForSPIRV(version);
+    spvtools::Context context(environment);
     std::string error;
     context.SetMessageConsumer([&](spv_message_level_t, const char *, const spv_position_t &, const char *message) {
         error += std::string(message) + "\n";
@@ -321,12 +306,13 @@ Words LinkTypedPipelineProgram(const Words &scheduler, const std::vector<TypedCo
     spvtools::LinkerOptions options;
     options.SetCreateLibrary(false);
     options.SetAllowPartialLinkage(false);
+    options.SetUseHighestVersion(true);
     Words result;
     auto linked = spvtools::Link(context, modules, &result, options);
     Require(linked == SPV_SUCCESS, "stage link failed: " + error);
     // SPIR-V1.4+ interfaces include every global used by called stage code.
     // After eliminating dead helpers, conservatively list all remaining globals.
-    spvtools::Optimizer optimizer(SPV_ENV_UNIVERSAL_1_5);
+    spvtools::Optimizer optimizer(environment);
     optimizer.RegisterPass(spvtools::CreateEliminateDeadFunctionsPass());
     optimizer.RegisterPass(spvtools::CreateRemoveDuplicatesPass());
     Words cleaned;
@@ -414,7 +400,7 @@ Words LinkTypedPipelineProgram(const Words &scheduler, const std::vector<TypedCo
             result.insert(result.end(), cleaned.begin() + p, cleaned.begin() + p + length);
     }
     Require(entry_count == 1, "scheduler has no compute entry point");
-    Validate(result, SPV_ENV_VULKAN_1_3);
+    Validate(result, VulkanEnvironmentForSPIRV(result.at(1)));
     return result;
 }
 }  // namespace vel::rt

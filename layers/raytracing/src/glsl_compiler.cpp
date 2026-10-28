@@ -8,7 +8,7 @@
 #include <stdexcept>
 
 namespace vel::rt {
-std::vector<uint32_t> CompileGLSL(const std::string &source, VkShaderStageFlagBits stage) {
+std::vector<uint32_t> CompileGLSL(const std::string &source, VkShaderStageFlagBits stage, GLSLTarget target) {
     static std::once_flag init;
     std::call_once(init, [] { glslang::InitializeProcess(); });
     EShLanguage lang;
@@ -41,8 +41,9 @@ std::vector<uint32_t> CompileGLSL(const std::string &source, VkShaderStageFlagBi
     const char *text = source.c_str();
     shader.setStrings(&text, 1);
     shader.setEnvInput(glslang::EShSourceGlsl, lang, glslang::EShClientVulkan, 460);
-    shader.setEnvClient(glslang::EShClientVulkan, glslang::EShTargetVulkan_1_2);
-    shader.setEnvTarget(glslang::EShTargetSpv, glslang::EShTargetSpv_1_5);
+    const bool private14 = target == GLSLTarget::Vulkan11Spirv14;
+    shader.setEnvClient(glslang::EShClientVulkan, private14 ? glslang::EShTargetVulkan_1_1 : glslang::EShTargetVulkan_1_2);
+    shader.setEnvTarget(glslang::EShTargetSpv, private14 ? glslang::EShTargetSpv_1_4 : glslang::EShTargetSpv_1_5);
     auto messages = static_cast<EShMessages>(EShMsgSpvRules | EShMsgVulkanRules);
     if (!shader.parse(GetDefaultResources(), 460, false, messages)) throw std::runtime_error(shader.getInfoLog());
     glslang::TProgram program;

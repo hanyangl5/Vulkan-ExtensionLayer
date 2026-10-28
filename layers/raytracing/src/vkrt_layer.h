@@ -215,6 +215,8 @@ bool vkrt_native_backend_eligible(struct vkrt_instance_data *inst, VkPhysicalDev
 struct vkrt_resource_profile;
 bool vkrt_virtual_rt_resource_profile(struct vkrt_instance_data *inst, VkPhysicalDevice physical,
                                       struct vkrt_resource_profile *profile);
+struct vkrt_software_rt_profile;
+bool vkrt_virtual_rt_profile(struct vkrt_instance_data *inst, VkPhysicalDevice physical, struct vkrt_software_rt_profile *profile);
 VkResult vkrt_create_device_with_features(struct vkrt_instance_data *inst,
    VkPhysicalDevice physical, PFN_vkCreateDevice create,
    const VkDeviceCreateInfo *ci, const VkAllocationCallbacks *alloc, VkDevice *device);
@@ -232,8 +234,9 @@ void vkrt_cmd_build_as(struct vkrt_device_data *dev,
 
 /* vkrt_sync.c */
 PFN_vkVoidFunction vkrt_sync_proc(const char *name);
-/* vkrt_discovery.c: mask incompatible native RT options without exposing new
- * base support before the complete capability/implementation gate passes. */
+/* Software discovery and device creation share one candidate profile.
+ * Complete mandatory implementation/qualification is tracked separately. */
 PFN_vkVoidFunction vkrt_discovery_proc(const char *name);
+PFN_vkVoidFunction vkrt_optional_rt_proc(const char *name);
 
 #endif /* VKRT_LAYER_H */

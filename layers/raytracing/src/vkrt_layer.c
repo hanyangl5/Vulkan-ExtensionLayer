@@ -3,20 +3,15 @@
  * vkrt_layer.c - loader-layer entry points for the VKRT software ray query
  * layer.
  *
- * Implements milestone M0 of
- * layers/raytracing/docs/rayquery_software_rt_layer_design.md:
- *   - vkNegotiateLoaderLayerInterfaceVersion
- *   - instance/device dispatch walking VK_LAYER_LINK_INFO
- *   - shader-module interception (detect + fail-fast on RT-pipeline ops)
- *   - acceleration-structure API virtualisation
- *
- * Prototype deployment: AS/RQ names and features are consumed by the layer
- * during device creation. Discovery does not add base support on a no-RT ICD
- * until the complete capability/implementation proof is available. Native
- * control runs are separate processes without this layer.
+ * AS/RQ/RTP requests use the shared software backend and candidate capability
+ * profile independently of native RT discovery. Complete mandatory-function
+ * and M0-M5 qualification remains tracked in docs/ray_tracing_fallback_status.md.
+ * Native control runs are separate processes without this layer.
  */
 
 #include "vkrt_layer.h"
+#include "vkrt_descriptor_template.h"
+#include "vkrt_debug_objects.h"
 #include "vkrt_execution_replay.h"
 #include "vkrt_query_pool.h"
 #include "vkrt_shader_objects.h"
@@ -160,6 +155,14 @@ static void vkrt_free_device_data(struct vkrt_device_data *data) {
     free(data);
 }
 
+static bool debug_object_owns(struct vkrt_device_data *dev, VkObjectType type, uint64_t handle) {
+    if (type == VK_OBJECT_TYPE_ACCELERATION_STRUCTURE_KHR) return vkrt_virtual_as_owns(dev, handle);
+    if (type == VK_OBJECT_TYPE_DESCRIPTOR_UPDATE_TEMPLATE) return vkrt_descriptor_template_owns(dev, handle);
+    if (type == VK_OBJECT_TYPE_QUERY_POOL) return vkrt_query_pool_owns(dev, handle);
+    if (type == VK_OBJECT_TYPE_DEFERRED_OPERATION_KHR) return vkrt_deferred_owns(dev, handle);
+    return vkrt_rtp_debug_owns(dev, type, handle);
+}
+
 static VKAPI_ATTR VkResult VKAPI_CALL
 vkrt_CreateDevice(VkPhysicalDevice physicalDevice,
                   const VkDeviceCreateInfo *pCreateInfo,
@@ -250,6 +253,7 @@ vkrt_CreateDevice(VkPhysicalDevice physicalDevice,
        return result;
    }
    result = vkrt_deferred_init(data, pAllocator);
+   if (result == VK_SUCCESS) result = vkrt_debug_objects_init(data, pAllocator, debug_object_owns);
    if (result == VK_SUCCESS && data->virtual_rt) {
        result = vkrt_as_registry_init(data, pAllocator);
        if (result == VK_SUCCESS) result = vkrt_build_init(data);
@@ -287,6 +291,7 @@ vkrt_CreateDevice(VkPhysicalDevice physicalDevice,
       vkrt_shader_interface_finish(data);
       vkrt_as_registry_finish(data);
       vkrt_private_pool_finish(data);
+      vkrt_debug_objects_finish(data);
       data->vtable.DestroyDevice(*pDevice, pAllocator);
       *pDevice = VK_NULL_HANDLE;
       vkrt_free_device_data(data);
@@ -321,6 +326,7 @@ vkrt_DestroyDevice(VkDevice device, const VkAllocationCallbacks *pAllocator)
 
    vkrt_execution_device_finish(data);
    vkrt_commands_finish(data);
+   vkrt_descriptor_template_finish(data);
    vkrt_query_device_finish(data);
    vkrt_rtp_finish(data);
    vkrt_as_copy_finish(data);
@@ -331,6 +337,7 @@ vkrt_DestroyDevice(VkDevice device, const VkAllocationCallbacks *pAllocator)
    vkrt_shader_interface_finish(data);
    vkrt_as_registry_finish(data);
    vkrt_private_pool_finish(data);
+   vkrt_debug_objects_finish(data);
    data->vtable.DestroyDevice(device, pAllocator);
    /* Remove device and queue aliases before releasing their shared owner. */
    vkrt_mutex_lock(&vkrt_global.objects_lock);
@@ -673,11 +680,15 @@ vkrt_GetDeviceProcAddr(VkDevice device, const char *pName);
 static void *
 vkrt_find_device_fn(const char *name)
 {
+    PFN_vkVoidFunction debug = vkrt_debug_objects_proc(name);
+    if (debug) return (void *)debug;
     PFN_vkVoidFunction query = vkrt_query_pool_proc(name);
     if (query) return (void *)query;
     PFN_vkVoidFunction shader_object = vkrt_shader_object_proc(name);
     if (shader_object) return (void *)shader_object;
     PFN_vkVoidFunction command = vkrt_rtp_proc(name);
+    if (command) return (void *)command;
+    command = vkrt_descriptor_template_proc(name);
     if (command) return (void *)command;
     command = vkrt_descriptor_layout_proc(name);
     if (command) return (void *)command;
@@ -690,6 +701,8 @@ vkrt_find_device_fn(const char *name)
     command = vkrt_sync_proc(name);
     if (command) return (void *)command;
     command = vkrt_deferred_proc(name);
+    if (command) return (void *)command;
+    command = vkrt_optional_rt_proc(name);
     if (command) return (void *)command;
     static const struct {
         const char *name;

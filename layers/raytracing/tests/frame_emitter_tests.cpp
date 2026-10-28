@@ -33,9 +33,9 @@ std::vector<uint32_t> Assemble(const std::string &source) {
     return binary;
 }
 void ValidateComponent(const ContinuationFrameCodecs &code) {
-    Assemble(code.capabilities + "OpMemoryModel Logical GLSL450\nOpEntryPoint GLCompute %probe \"probe\" " + code.memory +
-             "\nOpExecutionMode %probe LocalSize 1 1 1\n" + code.annotations + code.declarations + "%probe_sig = OpTypeFunction " +
-             code.void_type + "\n" + code.functions + "%probe = OpFunction " + code.void_type +
+    Assemble(code.capabilities + code.extensions + "OpMemoryModel Logical GLSL450\nOpEntryPoint GLCompute %probe \"probe\" " +
+             code.memory + "\nOpExecutionMode %probe LocalSize 1 1 1\n" + code.annotations + code.declarations +
+             "%probe_sig = OpTypeFunction " + code.void_type + "\n" + code.functions + "%probe = OpFunction " + code.void_type +
              " None %probe_sig\n%probe_entry = OpLabel\nOpReturn\nOpFunctionEnd\n");
 }
 void RejectionsAndEmptySpills() {
@@ -250,7 +250,7 @@ struct Proof {
         const auto &layout = Layout(slots.at("payload").type);
         const auto array_offset = layout.member_offsets.at(6);
         std::ostringstream s;
-        s << code.capabilities << "OpMemoryModel Logical GLSL450\n"
+        s << code.capabilities << code.extensions << "OpMemoryModel Logical GLSL450\n"
           << "OpEntryPoint GLCompute %main \"main\" " << code.memory << " %gid %push\n"
           << "OpExecutionMode %main LocalSize 1 1 1\n"
           << code.annotations << "OpDecorate %gid BuiltIn GlobalInvocationId\n"

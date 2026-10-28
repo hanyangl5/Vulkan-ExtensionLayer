@@ -10,6 +10,7 @@ struct vkrt_deferred_state;
 
 VkResult vkrt_deferred_init(struct vkrt_device_data *dev, const VkAllocationCallbacks *allocator);
 void vkrt_deferred_finish(struct vkrt_device_data *dev);
+bool vkrt_deferred_owns(struct vkrt_device_data *dev, uint64_t handle);
 
 /* Optional deferral arguments may be null. Non-null handles must belong to
  * this device. Commands execute synchronously and never put a handle into a

@@ -1,0 +1,1994 @@
+{
+  "schema_version": 1,
+  "source_base": "461adaf52bff47cd261828d0730dddc73a0d0f95",
+  "goal_status": "active; full M0-M5 not achieved",
+  "scope": "User permits newer optional incompatibilities and does not require all tests to pass; mandatory AS/RQ/RTP remains the target. No conformance or physical no-RT claim.",
+  "source_scope": "Working-tree bytes before commit normalization; manifest excludes itself. Component manifests retain their own earlier frozen hashes. Final GPU matrix preceded whitespace-only formatting; final DLL CTS is identified separately.",
+  "sources": [
+    {
+      "path": "docs/ray_tracing_fallback_goal.md",
+      "sha256": "e37b2144448d0f3103da12217bcc667b5183c760fc176691db0ef2cfdbf19d75",
+      "bytes": 20290
+    },
+    {
+      "path": "docs/ray_tracing_fallback_layer.md",
+      "sha256": "b00a54e4c68a16a9ca5a15aeb9a5dee2dd3da4057121e0a7da2fa08a1f5ff26e",
+      "bytes": 15645
+    },
+    {
+      "path": "docs/ray_tracing_fallback_status.md",
+      "sha256": "2a846c835da11c41dffb53ded7c31b2489217ee8ffb9abb8381b90635d1baa45",
+      "bytes": 60234
+    },
+    {
+      "path": "docs/rt_software_discovery_2026-10-28.md",
+      "sha256": "e5141dc5183ff063c4689a2815b974e5131f9e9d3b19f47aa5ba531752e75967",
+      "bytes": 9873
+    },
+    {
+      "path": "layers/raytracing/CMakeLists.txt",
+      "sha256": "3e86092d1a0c983c6c20b581cb15dc62a3332529dfffaf70211148ff0823efd8",
+      "bytes": 71910
+    },
+    {
+      "path": "layers/raytracing/README.md",
+      "sha256": "3c6b71405e2490b1dce0b038ee3009ae0d07194b5089713dfe95a52867b81af8",
+      "bytes": 9657
+    },
+    {
+      "path": "layers/raytracing/cmake/command_replay.cmake",
+      "sha256": "eceeb9edce489c4f39c8dd51441583d1eca6217a24d4c93b08485d58842b1549",
+      "bytes": 1321
+    },
+    {
+      "path": "layers/raytracing/cmake/compiler_tests.cmake",
+      "sha256": "281975756b58fce30086af148fb69a1df2817c47792dd845e7195e4ba95082ad",
+      "bytes": 2903
+    },
+    {
+      "path": "layers/raytracing/cmake/generate_command_replay.py",
+      "sha256": "39019be44b69a90f16b46a3cc35c47411a854b9b5b23c3814aa979c5c7d61f81",
+      "bytes": 63522
+    },
+    {
+      "path": "layers/raytracing/shaders/typed_runtime.glsl",
+      "sha256": "cffc5ecd5de07dbf46c63fd33613e3f96df12eb9e3bab2f8b3d37b0b2c2dc6a9",
+      "bytes": 26377
+    },
+    {
+      "path": "layers/raytracing/src/bvh_ir_builder.h",
+      "sha256": "bcdb844060a34de2b213a4667f998be0035430e3ecb84006a406bc20d57a8717",
+      "bytes": 7950
+    },
+    {
+      "path": "layers/raytracing/src/bvh_vertex_format.h",
+      "sha256": "6e83a8a7b33fe4c48ceb82347f7759b158754b66473679d3c10fccd0a49394fe",
+      "bytes": 1062
+    },
+    {
+      "path": "layers/raytracing/src/continuations.cpp",
+      "sha256": "9cde49f1749c94b78f28408afdf8de406e20d466b0959aec90d046bde750531f",
+      "bytes": 23943
+    },
+    {
+      "path": "layers/raytracing/src/continuations.h",
+      "sha256": "38adb349f6c9eaa4422df9b5aeb8d409e77f1d476922e5930c82761b9c1b629f",
+      "bytes": 6371
+    },
+    {
+      "path": "layers/raytracing/src/frame_emitter.cpp",
+      "sha256": "6712fe2bf8778f7d736ae66ea237856ce5547d3abf5086798dba5ea821c6a60f",
+      "bytes": 26791
+    },
+    {
+      "path": "layers/raytracing/src/frame_emitter.h",
+      "sha256": "8c38af56940489eb5538fe39f4e976d276dd2ecf4771c9481556c3033607de94",
+      "bytes": 3994
+    },
+    {
+      "path": "layers/raytracing/src/glsl_compiler.cpp",
+      "sha256": "49fc31cd769cfcc8090a26b47ebb1174cf1feabc39e0e2bb9122f9b17f1df241",
+      "bytes": 2442
+    },
+    {
+      "path": "layers/raytracing/src/glsl_compiler.h",
+      "sha256": "52c0c25d93b07fedec89852e339e585d9ab1a10486cea98252fefe21c9e490f3",
+      "bytes": 418
+    },
+    {
+      "path": "layers/raytracing/src/spirv_environment.h",
+      "sha256": "a38b2bcfeba5c689683fc898f42e0d904b1fc8b2f28c545f288e18fba63e920c",
+      "bytes": 851
+    },
+    {
+      "path": "layers/raytracing/src/state_compiler.cpp",
+      "sha256": "a52ced57e2e4cde853afe2eb4e6ae13aeb92fb395117a78b0189e33c05327cae",
+      "bytes": 136335
+    },
+    {
+      "path": "layers/raytracing/src/state_compiler.h",
+      "sha256": "40e1c46d70666b1b6d06a521731601b117aae87f93c6a95d2a3625168093c402",
+      "bytes": 10540
+    },
+    {
+      "path": "layers/raytracing/src/typed_pipeline.cpp",
+      "sha256": "9aa26352af28b9079018d9296d0e1326a37e7b7d248b93629fc3eb58de9c8454",
+      "bytes": 22877
+    },
+    {
+      "path": "layers/raytracing/src/typed_runtime.cpp",
+      "sha256": "4bdbab339475f33cbfe429bdfd9e2f9147999b14da4dc7253efc3c1367fffe37",
+      "bytes": 17600
+    },
+    {
+      "path": "layers/raytracing/src/typed_runtime.h",
+      "sha256": "fb2fccb67978e24d765e42c0fcf9f884c742aceed8d2bc1a3e58eec21aefe9b8",
+      "bytes": 4027
+    },
+    {
+      "path": "layers/raytracing/src/typed_runtime_abi.h",
+      "sha256": "e082cae49805f77d82d4e3382299704ca19f77a9ee65f857dcc2dd8a5676a7e2",
+      "bytes": 2330
+    },
+    {
+      "path": "layers/raytracing/src/vkrt_commands.c",
+      "sha256": "6b7b3c673d984e6a088ced1195246c2fd041d8404c70b9f2e108be8a515b9ba0",
+      "bytes": 19402
+    },
+    {
+      "path": "layers/raytracing/src/vkrt_debug_objects.c",
+      "sha256": "abd0c302c041360d86923bb926d3749cd0b6a6f42fdabc73bcb5a5744230610d",
+      "bytes": 18167
+    },
+    {
+      "path": "layers/raytracing/src/vkrt_debug_objects.h",
+      "sha256": "743d98f7cf54eb043517e84ff64afb08434585784ae29a3280281d0801c3fbcf",
+      "bytes": 1206
+    },
+    {
+      "path": "layers/raytracing/src/vkrt_deferred.c",
+      "sha256": "40dccd2f37766fe0f91cee99e1482225fe6f822c65fafd8d13d74d9d4ed160cc",
+      "bytes": 8156
+    },
+    {
+      "path": "layers/raytracing/src/vkrt_deferred.h",
+      "sha256": "1394ff656240dbd0a06885af23f7e9ac2e81a7f9b1f91e552bc7bbc8332649b0",
+      "bytes": 885
+    },
+    {
+      "path": "layers/raytracing/src/vkrt_descriptor_template.c",
+      "sha256": "4588fa062e5219d5ce9747b29c03a54c165f116f062e95f64d42ed1f84437d2f",
+      "bytes": 24859
+    },
+    {
+      "path": "layers/raytracing/src/vkrt_descriptor_template.h",
+      "sha256": "5be716f0cbb49fd35343dbf33700a39efd13094956b523edaeae0b09b0738dc1",
+      "bytes": 870
+    },
+    {
+      "path": "layers/raytracing/src/vkrt_discovery.c",
+      "sha256": "acddfa57fbccfcd9b9409edde51a1f039035805bb061d298b5a806cd994950d1",
+      "bytes": 14792
+    },
+    {
+      "path": "layers/raytracing/src/vkrt_dispatch.h",
+      "sha256": "9228413bb5c6da46a37fc360faf5bcab88a2db25e9b5efaae4bfaa7bb11d6614",
+      "bytes": 17414
+    },
+    {
+      "path": "layers/raytracing/src/vkrt_features.c",
+      "sha256": "ce2891582ad83a5e5e501a616ba21cda2d8e67802fa416a939acef7e30c1bc5a",
+      "bytes": 33733
+    },
+    {
+      "path": "layers/raytracing/src/vkrt_layer.c",
+      "sha256": "3cc3ed7b96681a9b7f8037cebef0c955ef3bd383de69d17b587508b473d4629c",
+      "bytes": 37818
+    },
+    {
+      "path": "layers/raytracing/src/vkrt_layer.h",
+      "sha256": "366206486f3d00cb94a4d3aedc09d7ba925dad52d835af65745d5005ecdb9313",
+      "bytes": 11556
+    },
+    {
+      "path": "layers/raytracing/src/vkrt_optional_rt_commands.c",
+      "sha256": "8abaeadd57a20b79fd5ca9e6d415306f821d4f212b6da73415c834564f75eb45",
+      "bytes": 4515
+    },
+    {
+      "path": "layers/raytracing/src/vkrt_private_pool.c",
+      "sha256": "3566a89d983ad9e21989b984d55a5ad6819b4d0503e849b92644b31b28585b26",
+      "bytes": 20290
+    },
+    {
+      "path": "layers/raytracing/src/vkrt_private_pool.h",
+      "sha256": "31fd0da687b61e12fdfe043a5a0d8f6575f65b0748d287b997e42f09e109bbe0",
+      "bytes": 2939
+    },
+    {
+      "path": "layers/raytracing/src/vkrt_query_pool.c",
+      "sha256": "9a6603caea5b6cba85fe5cd484a46157ce65896cf84bda807d166a6fd15f0004",
+      "bytes": 42317
+    },
+    {
+      "path": "layers/raytracing/src/vkrt_query_pool.h",
+      "sha256": "ec1fe5c1840abaf99bdb6e3c6bfd81f4f443f5f4049bdd9b8aab997550d85d72",
+      "bytes": 1937
+    },
+    {
+      "path": "layers/raytracing/src/vkrt_replay.h",
+      "sha256": "ac0b823bec963320f298d2337f98871db7c464764dc567a8128720a4f1d071ad",
+      "bytes": 11192
+    },
+    {
+      "path": "layers/raytracing/src/vkrt_rt_capabilities.h",
+      "sha256": "5eeebaa6e399221343d1045d72106e8f18fbe57206e096cef7890672a9bc0aa6",
+      "bytes": 10100
+    },
+    {
+      "path": "layers/raytracing/src/vkrt_rtp.cpp",
+      "sha256": "3700751e726eb4d91c0a7ac72110ea7ea60ae7d85c0ec1631e32b1161795c49a",
+      "bytes": 79127
+    },
+    {
+      "path": "layers/raytracing/src/vkrt_rtp.h",
+      "sha256": "68ff346292a104837a395648220cbd33bbc24848271f324710f22294bd2a6d59",
+      "bytes": 2411
+    },
+    {
+      "path": "layers/raytracing/src/vkrt_software_profile.c",
+      "sha256": "a897ca4f38044f26945a1c4064363130b5b40e5c38459e8b4cc3641f0cb9e8b1",
+      "bytes": 4605
+    },
+    {
+      "path": "layers/raytracing/src/vkrt_software_profile.h",
+      "sha256": "619c6956d82010220cfd8ac86af5c5768dbf902ededf92ef0c05f424f926ef42",
+      "bytes": 1317
+    },
+    {
+      "path": "layers/raytracing/src/vkrt_spirv_lower.cpp",
+      "sha256": "8907f4a75f3cf4ccd7cfa2d2dba0759f8893a6af627294933fa05763031502a4",
+      "bytes": 93912
+    },
+    {
+      "path": "layers/raytracing/src/vkrt_virtual_as.c",
+      "sha256": "59ca11d6dc9210a5b16e37473b72c7094c8065b68bc5b6321e51bc302a48afd4",
+      "bytes": 9028
+    },
+    {
+      "path": "layers/raytracing/tests/00_single_tri/main.c",
+      "sha256": "5a0c40baf8dad9a7cecfc35f5e2f89b9a70adf3158678c73616af22018a14556",
+      "bytes": 34949
+    },
+    {
+      "path": "layers/raytracing/tests/command_replay_host.c",
+      "sha256": "d2b3b20e80599820276d2376ca96c2c132dcfdf6a9c46cc1b142372fa6d70677",
+      "bytes": 66485
+    },
+    {
+      "path": "layers/raytracing/tests/cts_raytmax_intersection_fixture.h",
+      "sha256": "3adf5e0d44f575606bf9cfe1bb4912464e5c986da2f515f3f05433f2579317a0",
+      "bytes": 3202
+    },
+    {
+      "path": "layers/raytracing/tests/descriptor_template_host.c",
+      "sha256": "0a3674b72f743b068d41c2f7733892aadd6197e415f3e60ceb4092ddc77c0397",
+      "bytes": 17960
+    },
+    {
+      "path": "layers/raytracing/tests/frame_emitter_tests.cpp",
+      "sha256": "cead555107a65120fd3959980ac04dcfdba4b591b1c707390b0f3669dddf2212",
+      "bytes": 25105
+    },
+    {
+      "path": "layers/raytracing/tests/no_native_rt_guard_audit.py",
+      "sha256": "a91b3bf7b8a0906255c33c714b8e004dd99f9cb402ecb2d84a06be789fc39133",
+      "bytes": 9458
+    },
+    {
+      "path": "layers/raytracing/tests/no_native_rt_guard_layer.c",
+      "sha256": "e2054e15d7e0aa7bc508d3362952fd5238d3ea198ca1e11da766ead93805de01",
+      "bytes": 55862
+    },
+    {
+      "path": "layers/raytracing/tests/rtp_nested.rchit",
+      "sha256": "421eb7d680777272ddf9955a2dc1fd487a87a3f68fedf88ccd440670c12030f8",
+      "bytes": 206
+    },
+    {
+      "path": "layers/raytracing/tests/rtp_nested.rgen",
+      "sha256": "28633113519ee4deeeee48d61b0b2949527ff3e5e12566ddc0de25402ebd6680",
+      "bytes": 1285
+    },
+    {
+      "path": "layers/raytracing/tests/rtp_nested.rmiss",
+      "sha256": "6e98bb7e1b95b0c0af9ad31f1907ff80485d4140edd884ffd9efc0e289663944",
+      "bytes": 171
+    },
+    {
+      "path": "layers/raytracing/tests/rtp_nested_common.glsl",
+      "sha256": "5b5fe8df1d7334e6f708faddea7f0c4fc4e5776ac7427bc32ea6054a5b639899",
+      "bytes": 1754
+    },
+    {
+      "path": "layers/raytracing/tests/rtp_nested_fixture.h",
+      "sha256": "c6e0cef70ec9298a2bddedf937c48e86affd3ba3153b91191a5ffc9bd73347fc",
+      "bytes": 21506
+    },
+    {
+      "path": "layers/raytracing/tests/state_compiler_tests.cpp",
+      "sha256": "9621c2a9ac901e70bdc950d5404c52b8e452cef74c993a1e229b29b856cf972c",
+      "bytes": 107166
+    },
+    {
+      "path": "layers/raytracing/tests/test_command_state.c",
+      "sha256": "cb359053b5117d80529d626b5a24e8d1e5ce48a699367ae8ae67e90499527b7b",
+      "bytes": 24023
+    },
+    {
+      "path": "layers/raytracing/tests/test_debug_objects.c",
+      "sha256": "20e4f398f59cdae6941a94fce79a2b13dde955105daf463725a3bfcaaffc420d",
+      "bytes": 27564
+    },
+    {
+      "path": "layers/raytracing/tests/test_deferred.c",
+      "sha256": "a0674681f070b63c9085ae049f749cd71fb3c523a3f4edc7e19056e558c226b3",
+      "bytes": 14670
+    },
+    {
+      "path": "layers/raytracing/tests/test_device_features.c",
+      "sha256": "ca756dfc31e00057760c866707d9fe044942f51a20cfc34290e71592d7886da2",
+      "bytes": 89030
+    },
+    {
+      "path": "layers/raytracing/tests/test_discovery.c",
+      "sha256": "9ccce0938d4c4dd3779f4e1fd90cc716a4610cee61590c4d29883445bb6f9ab0",
+      "bytes": 55009
+    },
+    {
+      "path": "layers/raytracing/tests/test_gpu_build.c",
+      "sha256": "11bff08d67ac5d7d698815a372087a8ea52c0385a9751c63bf4d024c0213438f",
+      "bytes": 35534
+    },
+    {
+      "path": "layers/raytracing/tests/test_no_native_rt_guard.c",
+      "sha256": "f5dd946fc88919bf56fe04bd73aa361b6266d310aef407252dd7138812592206",
+      "bytes": 32645
+    },
+    {
+      "path": "layers/raytracing/tests/test_optional_rt_commands.c",
+      "sha256": "dd366f4c0650fb15972ecc856d738b0a2be834425b1c9441803fb701487ccf1a",
+      "bytes": 6107
+    },
+    {
+      "path": "layers/raytracing/tests/test_private_pool.c",
+      "sha256": "ef72c6bb6273942ab23005d904c19374a2462134cd0f6b2cb27cf234c0496fdf",
+      "bytes": 34491
+    },
+    {
+      "path": "layers/raytracing/tests/test_query_pool_publication.c",
+      "sha256": "bef673f95e71f25cba4d9e6e17a4ba190c892c5d8aab2eed4279f7e70744eba8",
+      "bytes": 45794
+    },
+    {
+      "path": "layers/raytracing/tests/test_rtp_api.c",
+      "sha256": "42d927839ed7629ba7b0e41a398d5ad7f46112e45f453662abca9092e178a7e6",
+      "bytes": 74582
+    },
+    {
+      "path": "layers/raytracing/tests/test_rtp_bindings.cpp",
+      "sha256": "2dbd985a35cd15eb0cdaa6bf2fb8c613dcd8d0485b3feea619b3d126597c421f",
+      "bytes": 80900
+    },
+    {
+      "path": "layers/raytracing/tests/test_software_discovery_gpu.c",
+      "sha256": "4f2cbb71c12be2960bee1bf06c7d43b9f0b2bc15c99bf2b3ed826df1812b1c2f",
+      "bytes": 13427
+    },
+    {
+      "path": "layers/raytracing/tests/test_software_profile.c",
+      "sha256": "d1fe14e83b554b3145f02f62cd83fe58a897cb06005710200a3636721b99d496",
+      "bytes": 11634
+    },
+    {
+      "path": "layers/raytracing/tests/test_spirv_lower.cpp",
+      "sha256": "da8c4d2a7ded4dd530ca1b0e884677cd13acb77ff200be0890f81d9786708e5b",
+      "bytes": 48975
+    },
+    {
+      "path": "layers/raytracing/tests/typed_pipeline_tests.cpp",
+      "sha256": "253ace0c8f5bf4c13c6e6e55da37d5cd9fabb08a7949a2698c5522c8324dd2bc",
+      "bytes": 32336
+    },
+    {
+      "path": "layers/raytracing/tests/typed_runtime_tests.cpp",
+      "sha256": "b27911c83fc7f245da967d8d75e6bea56491bdf956d61a2cdc96d2eedc70f82f",
+      "bytes": 24722
+    },
+    {
+      "path": "scripts/run_rt_cts.py",
+      "sha256": "205dfe3fe8542d286d75b15381bf78454f52ca1bbd9a41317624e83a8413d398",
+      "bytes": 21529
+    },
+    {
+      "path": "scripts/test_rt_cts_guard_evidence.py",
+      "sha256": "c200784c0b8e9b01338ad4963f24dd633e6f768d2010e8d5a54612bad6ba86d1",
+      "bytes": 5751
+    }
+  ],
+  "deleted": [
+    {
+      "path": "layers/raytracing/tests/state_private_pointer_gpu.h",
+      "previous_sha256": "70d23c15b01f210eecbc56b00b59886f1b41c079a07271c32aa06cf307dc9e45",
+      "previous_bytes": 11623
+    }
+  ],
+  "components": [
+    {
+      "path": "build-source-layout/arena-pool-limits/verification.json",
+      "sha256": "9a7fd589b8be10dce034eb9cc5fc17dba81f4c78fd93ff9d5e7148df4df84335",
+      "bytes": 6956
+    },
+    {
+      "path": "build-source-layout/capture-only/verification.json",
+      "sha256": "8e65c0227f311656c383fed69b2081d3c037cf36367a7381fd29c9061c0267d7",
+      "bytes": 3586
+    },
+    {
+      "path": "build-source-layout/debug-objects/verification.json",
+      "sha256": "2fbb0fa22e7b306cc0aeb2c0bf395bd1809247da1c80b10e34dd6791260143ae",
+      "bytes": 9697
+    },
+    {
+      "path": "build-source-layout/private-data/verification.json",
+      "sha256": "8949dfa7aa0fd886ef115322fc702af468def5369e2ff113655a90bdbddfeb48",
+      "bytes": 7478
+    },
+    {
+      "path": "build-source-layout/rtp-descriptor-state/verification.json",
+      "sha256": "6438711d3eafa7c3eadcafdb6ed8103c31cfa6bd90a088637ec317c651e53497",
+      "bytes": 4707
+    },
+    {
+      "path": "build-source-layout/rtp-descriptor-state/manifest.json",
+      "sha256": "b0dbe2e69b9f32ec96fec8cc762a2248e08bb08bc1bbc6c89a8fd3c5a3f1c13d",
+      "bytes": 1262
+    },
+    {
+      "path": "build-source-layout/rtp-nested/manifest.json",
+      "sha256": "9e9d9f54b23166b3fbfb43752d8cdceea462aafaedc7f19513694e7b78df1c7b",
+      "bytes": 3387
+    },
+    {
+      "path": "build-source-layout/spirv14-backend/manifest.json",
+      "sha256": "3a53cc890093964224fd0cd1e538c8ecb82f3b735fdbbff5f6302105a728700e",
+      "bytes": 3954
+    },
+    {
+      "path": "build-source-layout/spirv14-backend/private-shader-manifest.json",
+      "sha256": "79cdbbb49e38d4026266af3f4a196ac0f4003f30fca3145277d5ec90d449d8cf",
+      "bytes": 15023
+    },
+    {
+      "path": "build-source-layout/optional-object-gates/verification.json",
+      "sha256": "4a0964f0e9e150b2296cdd25969719cdd1ecfa323d88f1184f059ab4c81450e5",
+      "bytes": 3403
+    },
+    {
+      "path": "build-source-layout/legacy-native-address/verification.json",
+      "sha256": "9488c16200140aa26979bcb292aa8abce38bb25a2398d4db430315cf602d4d69",
+      "bytes": 2485
+    }
+  ],
+  "builds": [
+    {
+      "path": "build-no-rt-profile-2026-10-28/integrated-final-build.log",
+      "sha256": "853420df18278e121533cca12c3a5171702045f1cf825f0ad48f238fda50241b",
+      "bytes": 14496
+    },
+    {
+      "path": "build-no-rt-profile-2026-10-28/integrated-frozen-build.log",
+      "sha256": "ab6d90707eb18ad18ee6602a7b6efa1a4f8acecc101c32642ca9262c0411db7e",
+      "bytes": 3975
+    },
+    {
+      "path": "build-no-rt-profile-2026-10-28/parent-rt-build.log",
+      "sha256": "e482acf1a6b5ad91c8148a8e7da1779b388b924a973b04968ce03fbd695b6afc",
+      "bytes": 6237
+    },
+    {
+      "path": "build-no-rt-profile-2026-10-28/formatted-build.log",
+      "sha256": "fdc9f08317195acbb70dbe1d60933696f89188b7e575c9d09312226a07e9e7a2",
+      "bytes": 633
+    }
+  ],
+  "offline": {
+    "passed": 46,
+    "failed": 0,
+    "log": {
+      "path": "build-no-rt-profile-2026-10-28/offline-final.log",
+      "sha256": "eade56187721aba2553b92ebe877ebd7c5fea2c423ab351c19f80a6bdc21f94b",
+      "bytes": 6300
+    },
+    "subsequent_ext_bda_change": "Two affected unified host tests rerun successfully; independent O0/O2 and negative controls in legacy-native-address manifest.",
+    "formatted_lowering_checks": {
+      "path": "build-no-rt-profile-2026-10-28/format-lowering-host-tests.log",
+      "sha256": "8a9e14ba6a38d98097657e9dbebfd506ef34fa07584e7675b45c8fb0d9f9f82f",
+      "bytes": 2703
+    }
+  },
+  "gpu": {
+    "path": "build-no-rt-profile-2026-10-28/final-gpu/summary.json",
+    "sha256": "21dc6599b7b9d677ee96dd9321173730d33e2cf6bd577736d95325e006b91f82",
+    "bytes": 52724,
+    "dll_sha256": "e03d2180d83a33ecd468865d952be827859e1e4ae78d42fe58e2c7f707b3d0b1",
+    "passed": 30,
+    "notSupported": 0,
+    "public_runs": 28,
+    "compiler_component_runs": 2,
+    "guard_checked": 17097,
+    "guard_rejected": 0,
+    "raw_outputs": [
+      {
+        "path": "build-no-rt-profile-2026-10-28/final-gpu/below-vkrt.software_discovery.software.log",
+        "sha256": "d0e4138c07907bdaa98147abe6e742651e3096ef1e4be1196b0ecfe6b77839d2",
+        "bytes": 363
+      },
+      {
+        "path": "build-no-rt-profile-2026-10-28/final-gpu/above-vkrt.software_discovery.software.log",
+        "sha256": "30c4e2f49109228213c33a936277289903a1d6687cc14029aa48348d4f47589a",
+        "bytes": 363
+      },
+      {
+        "path": "build-no-rt-profile-2026-10-28/final-gpu/below-vkrt.software_discovery.vulkan11.full.software.log",
+        "sha256": "1135375fc77e437b4422f182d8240544e6519c012d154683fe07ac357c3d7bc6",
+        "bytes": 363
+      },
+      {
+        "path": "build-no-rt-profile-2026-10-28/final-gpu/above-vkrt.software_discovery.vulkan11.full.software.log",
+        "sha256": "b8fd03b35ad15fc646cb055478e5160342cdbf5e7b134b94d106ceb57e624b21",
+        "bytes": 363
+      },
+      {
+        "path": "build-no-rt-profile-2026-10-28/final-gpu/below-vkrt.software_discovery.vulkan11.as-only.software.log",
+        "sha256": "0de0562d06650c7d51642c417b305c6084d4e85571120b4af62fe29e9b6cbf61",
+        "bytes": 363
+      },
+      {
+        "path": "build-no-rt-profile-2026-10-28/final-gpu/above-vkrt.software_discovery.vulkan11.as-only.software.log",
+        "sha256": "bab70520878c3a713a86fb500d7d0b58f0eb7031746105af022ba2694544d5b7",
+        "bytes": 363
+      },
+      {
+        "path": "build-no-rt-profile-2026-10-28/final-gpu/native-vkrt.rtp_api.nested_trace.native.log",
+        "sha256": "5035f753c247818ced6abebd084b91d24908c4c3bbfd8d5b22e7d47e5041f52e",
+        "bytes": 2783
+      },
+      {
+        "path": "build-no-rt-profile-2026-10-28/final-gpu/below-vkrt.rtp_api.nested_trace.software.log",
+        "sha256": "26b0ba36b0d3a1bdf47c2adcd5bbe6b3cf746a0b9ce7ffa45d2f576742bc008c",
+        "bytes": 4053
+      },
+      {
+        "path": "build-no-rt-profile-2026-10-28/final-gpu/above-vkrt.rtp_api.nested_trace.software.log",
+        "sha256": "0d766c78d733c76f696fb75fd6c61c80b740ec862fbde6a97118bdc134b4cf54",
+        "bytes": 4053
+      },
+      {
+        "path": "build-no-rt-profile-2026-10-28/final-gpu/native-vkrt.rtp_api.vulkan11.native.log",
+        "sha256": "e3cb7656aefbcf49bccba8c00b0c96377e7bb028367eda6ac33c57088bcffe14",
+        "bytes": 1892
+      },
+      {
+        "path": "build-no-rt-profile-2026-10-28/final-gpu/below-vkrt.rtp_api.vulkan11.software.log",
+        "sha256": "9b3233fdf7fa19dd0c043b8efc340d2a3187bcfda776255e1fb463b807d422d2",
+        "bytes": 2449
+      },
+      {
+        "path": "build-no-rt-profile-2026-10-28/final-gpu/above-vkrt.rtp_api.vulkan11.software.log",
+        "sha256": "3bfe7a732539a54e033b9b90d694c0fcea9d9137e567ba5be80f1d951507ee52",
+        "bytes": 2543
+      },
+      {
+        "path": "build-no-rt-profile-2026-10-28/final-gpu/native-vkrt.rtp_api.descriptor-buffer.native.log",
+        "sha256": "6777b1ab6d5d9ab465602f627450e29b13b6f3707141b1cc073f0caa4886ed97",
+        "bytes": 2185
+      },
+      {
+        "path": "build-no-rt-profile-2026-10-28/final-gpu/below-vkrt.rtp_api.descriptor-buffer.software.log",
+        "sha256": "ec9a26dc93183adc96f6f1bc27902f219a26d742b42733198c5360b415b75d00",
+        "bytes": 2836
+      },
+      {
+        "path": "build-no-rt-profile-2026-10-28/final-gpu/above-vkrt.rtp_api.descriptor-buffer.software.log",
+        "sha256": "59382ae615331ff387421d38fafb5da69c94d061df97435298f792f0ec8b2f2b",
+        "bytes": 2742
+      },
+      {
+        "path": "build-no-rt-profile-2026-10-28/final-gpu/native-vkrt.rtp_api.descriptor-buffer-maintenance6.native.log",
+        "sha256": "89184fa2d71e496dc89f1b34716b27270110ad7e99d85c8cc76dc0c571701d9e",
+        "bytes": 2249
+      },
+      {
+        "path": "build-no-rt-profile-2026-10-28/final-gpu/below-vkrt.rtp_api.descriptor-buffer-maintenance6.software.log",
+        "sha256": "c245685966938607f50e9331f1cbf3d9133a5f35e560aa50b02702da095f142c",
+        "bytes": 2806
+      },
+      {
+        "path": "build-no-rt-profile-2026-10-28/final-gpu/above-vkrt.rtp_api.descriptor-buffer-maintenance6.software.log",
+        "sha256": "d754a3a3a08edda50025e10d9b267d5174c296c937e16982c5991c5ceaa506d1",
+        "bytes": 2806
+      },
+      {
+        "path": "build-no-rt-profile-2026-10-28/final-gpu/native-vkrt.gpu_build.vulkan11.native.log",
+        "sha256": "9f92f2794e02a9659b0d7ef30b357c6f90ef53cb7c834b618005151041c3e781",
+        "bytes": 40318
+      },
+      {
+        "path": "build-no-rt-profile-2026-10-28/final-gpu/below-vkrt.gpu_build.vulkan11.software.log",
+        "sha256": "d10d96e7298176fa62bc6dcf72791752f42bee2d6ae3f2e97055d8d8ab512f94",
+        "bytes": 53101
+      },
+      {
+        "path": "build-no-rt-profile-2026-10-28/final-gpu/above-vkrt.gpu_build.vulkan11.software.log",
+        "sha256": "f2e4f5d71a5160372e2947856cee29f0efe48d69b878c58e78080de45263704f",
+        "bytes": 53101
+      },
+      {
+        "path": "build-no-rt-profile-2026-10-28/final-gpu/native-vkrt.rtp_api.push-template-debug.native.log",
+        "sha256": "f426ffb4e27118d16afb7c0ef9ddf979458fabebb3d19696ace2ee997f149706",
+        "bytes": 2070
+      },
+      {
+        "path": "build-no-rt-profile-2026-10-28/final-gpu/below-vkrt.rtp_api.push-template-debug.software.log",
+        "sha256": "22658d4a9d1ff57b173862986e347e5b64038b41382bb932658191257470453b",
+        "bytes": 2627
+      },
+      {
+        "path": "build-no-rt-profile-2026-10-28/final-gpu/native-vkrt.rtp_api.push-template-private-data.native.log",
+        "sha256": "b877ab858baa342830ee0e74706cd80c6031b513033a5c1071fcd84fd63b7e1b",
+        "bytes": 2119
+      },
+      {
+        "path": "build-no-rt-profile-2026-10-28/final-gpu/below-vkrt.rtp_api.push-template-private-data.software.log",
+        "sha256": "2bc7457de7c58aedfa6cadaf51f2a0cfdf980c1a8a1dc1e0a8e7955d33c63d79",
+        "bytes": 2676
+      },
+      {
+        "path": "build-no-rt-profile-2026-10-28/final-gpu/below-vkrt.query_acquire.software.log",
+        "sha256": "b8fc36c3fd7dcaf67595f27e67fdaee91a7b35c5ba19a7a3d43bc1cc547a9e48",
+        "bytes": 3349
+      },
+      {
+        "path": "build-no-rt-profile-2026-10-28/final-gpu/below-vkrt.query_replay.software.log",
+        "sha256": "1bfc565cc688ba4ae02abb698c93afd4e9b69d61e5c4a519f0c80a267fbbfab2",
+        "bytes": 2819
+      },
+      {
+        "path": "build-no-rt-profile-2026-10-28/final-gpu/below-vkrt.rtp_arenas.software.log",
+        "sha256": "66c127a1e57069c4c3185316f2b556257bfa397f1f1f4a41542bc1a4bce1cd26",
+        "bytes": 3097
+      },
+      {
+        "path": "build-no-rt-profile-2026-10-28/final-gpu/below-ray_tracing_fallback_pointer_qualified.log",
+        "sha256": "005e7d7a63f3f8119ed9b9faefed6e37bbc34b1d28ef9df45e1fc6695ec014f3",
+        "bytes": 1574
+      },
+      {
+        "path": "build-no-rt-profile-2026-10-28/final-gpu/below-ray_tracing_fallback_typed_runtime.log",
+        "sha256": "926b3c27b773948c93cb1ff9cc3ef21792591928a8d4f604e032050f12d68278",
+        "bytes": 1067
+      }
+    ],
+    "cases": [
+      {
+        "name": "below-vkrt.software_discovery.software",
+        "exit_code": 0,
+        "validation_error_markers": 0,
+        "pass": true,
+        "notSupported": false
+      },
+      {
+        "name": "above-vkrt.software_discovery.software",
+        "exit_code": 0,
+        "validation_error_markers": 0,
+        "pass": true,
+        "notSupported": false
+      },
+      {
+        "name": "below-vkrt.software_discovery.vulkan11.full.software",
+        "exit_code": 0,
+        "validation_error_markers": 0,
+        "pass": true,
+        "notSupported": false
+      },
+      {
+        "name": "above-vkrt.software_discovery.vulkan11.full.software",
+        "exit_code": 0,
+        "validation_error_markers": 0,
+        "pass": true,
+        "notSupported": false
+      },
+      {
+        "name": "below-vkrt.software_discovery.vulkan11.as-only.software",
+        "exit_code": 0,
+        "validation_error_markers": 0,
+        "pass": true,
+        "notSupported": false
+      },
+      {
+        "name": "above-vkrt.software_discovery.vulkan11.as-only.software",
+        "exit_code": 0,
+        "validation_error_markers": 0,
+        "pass": true,
+        "notSupported": false
+      },
+      {
+        "name": "native-vkrt.rtp_api.nested_trace.native",
+        "exit_code": 0,
+        "validation_error_markers": 0,
+        "pass": true,
+        "notSupported": false
+      },
+      {
+        "name": "below-vkrt.rtp_api.nested_trace.software",
+        "exit_code": 0,
+        "validation_error_markers": 0,
+        "pass": true,
+        "notSupported": false
+      },
+      {
+        "name": "above-vkrt.rtp_api.nested_trace.software",
+        "exit_code": 0,
+        "validation_error_markers": 0,
+        "pass": true,
+        "notSupported": false
+      },
+      {
+        "name": "native-vkrt.rtp_api.vulkan11.native",
+        "exit_code": 0,
+        "validation_error_markers": 0,
+        "pass": true,
+        "notSupported": false
+      },
+      {
+        "name": "below-vkrt.rtp_api.vulkan11.software",
+        "exit_code": 0,
+        "validation_error_markers": 0,
+        "pass": true,
+        "notSupported": false
+      },
+      {
+        "name": "above-vkrt.rtp_api.vulkan11.software",
+        "exit_code": 0,
+        "validation_error_markers": 0,
+        "pass": true,
+        "notSupported": false
+      },
+      {
+        "name": "native-vkrt.rtp_api.descriptor-buffer.native",
+        "exit_code": 0,
+        "validation_error_markers": 0,
+        "pass": true,
+        "notSupported": false
+      },
+      {
+        "name": "below-vkrt.rtp_api.descriptor-buffer.software",
+        "exit_code": 0,
+        "validation_error_markers": 0,
+        "pass": true,
+        "notSupported": false
+      },
+      {
+        "name": "above-vkrt.rtp_api.descriptor-buffer.software",
+        "exit_code": 0,
+        "validation_error_markers": 0,
+        "pass": true,
+        "notSupported": false
+      },
+      {
+        "name": "native-vkrt.rtp_api.descriptor-buffer-maintenance6.native",
+        "exit_code": 0,
+        "validation_error_markers": 0,
+        "pass": true,
+        "notSupported": false
+      },
+      {
+        "name": "below-vkrt.rtp_api.descriptor-buffer-maintenance6.software",
+        "exit_code": 0,
+        "validation_error_markers": 0,
+        "pass": true,
+        "notSupported": false
+      },
+      {
+        "name": "above-vkrt.rtp_api.descriptor-buffer-maintenance6.software",
+        "exit_code": 0,
+        "validation_error_markers": 0,
+        "pass": true,
+        "notSupported": false
+      },
+      {
+        "name": "native-vkrt.gpu_build.vulkan11.native",
+        "exit_code": 0,
+        "validation_error_markers": 0,
+        "pass": true,
+        "notSupported": false
+      },
+      {
+        "name": "below-vkrt.gpu_build.vulkan11.software",
+        "exit_code": 0,
+        "validation_error_markers": 0,
+        "pass": true,
+        "notSupported": false
+      },
+      {
+        "name": "above-vkrt.gpu_build.vulkan11.software",
+        "exit_code": 0,
+        "validation_error_markers": 0,
+        "pass": true,
+        "notSupported": false
+      },
+      {
+        "name": "native-vkrt.rtp_api.push-template-debug.native",
+        "exit_code": 0,
+        "validation_error_markers": 0,
+        "pass": true,
+        "notSupported": false
+      },
+      {
+        "name": "below-vkrt.rtp_api.push-template-debug.software",
+        "exit_code": 0,
+        "validation_error_markers": 0,
+        "pass": true,
+        "notSupported": false
+      },
+      {
+        "name": "native-vkrt.rtp_api.push-template-private-data.native",
+        "exit_code": 0,
+        "validation_error_markers": 0,
+        "pass": true,
+        "notSupported": false
+      },
+      {
+        "name": "below-vkrt.rtp_api.push-template-private-data.software",
+        "exit_code": 0,
+        "validation_error_markers": 0,
+        "pass": true,
+        "notSupported": false
+      },
+      {
+        "name": "below-vkrt.query_acquire.software",
+        "exit_code": 0,
+        "validation_error_markers": 0,
+        "pass": true,
+        "notSupported": false
+      },
+      {
+        "name": "below-vkrt.query_replay.software",
+        "exit_code": 0,
+        "validation_error_markers": 0,
+        "pass": true,
+        "notSupported": false
+      },
+      {
+        "name": "below-vkrt.rtp_arenas.software",
+        "exit_code": 0,
+        "validation_error_markers": 0,
+        "pass": true,
+        "notSupported": false
+      },
+      {
+        "name": "below-ray_tracing_fallback_pointer_qualified",
+        "exit_code": 0,
+        "validation_error_markers": 0,
+        "pass": true,
+        "notSupported": false
+      },
+      {
+        "name": "below-ray_tracing_fallback_typed_runtime",
+        "exit_code": 0,
+        "validation_error_markers": 0,
+        "pass": true,
+        "notSupported": false
+      }
+    ]
+  },
+  "retained_observations": [
+    {
+      "path": "build-no-rt-profile-2026-10-28/masked-summary.json",
+      "sha256": "92987782bd20278aa6568bae769b160fac0ccaff8c7a4a09966522c69ed28e74",
+      "bytes": 3259
+    },
+    {
+      "path": "build-no-rt-profile-2026-10-28/masked-cwd-summary.json",
+      "sha256": "3fb983c40c062f363b93eb1fbf4c0b6fb266ec93bf549be130d8c5781dc85c07",
+      "bytes": 10954
+    },
+    {
+      "path": "build-no-rt-profile-2026-10-28/masked-valid-summary.json",
+      "sha256": "dce9c53231df954bf7bf129ca9598927c9e11081c0217dbfdd58a151f8b40965",
+      "bytes": 14482
+    },
+    {
+      "path": "build-no-rt-profile-2026-10-28/interop-summary.json",
+      "sha256": "3f5b735720f320a99f6806b40cf8ebab3b7f7f84bb25b5dbdea926c3e273bc3a",
+      "bytes": 18070
+    }
+  ],
+  "cts_preliminary": {
+    "path": "build-rt-cts-evidence/software-discovery-pre-compat-2026-10-28/summary.json",
+    "sha256": "a73d936b6b21b0a9803ccf1ca3f82e961ed67c58f6cc3553092e7a9240951b8f",
+    "bytes": 206452,
+    "dll_sha256": "482a74431c156efa6b56110b60c0351dcfdfecf10b0ab3df67a92496b8620ffa",
+    "counts": {
+      "pass": 50,
+      "fail": 0,
+      "notSupported": 0,
+      "crash": 0,
+      "timeout": 0,
+      "noresult": 0
+    },
+    "cts_revision": "d18e4c68543103371715845cd914c71e5859963e",
+    "cts_sha256": "8cf824c598181ef43ccd74d67acce89c9cc6fc47029a164440f0b0ea74af0380",
+    "masked_discovery": true,
+    "guard_all_verified": true,
+    "guard_checked": 125113,
+    "guard_rejected": 0,
+    "validation_error_markers": 0,
+    "raw_outputs": [
+      {
+        "path": "build-rt-cts-evidence/software-discovery-pre-compat-2026-10-28/0001-s0_l1-7e48286da4.stdout.txt",
+        "sha256": "d271797e33adb22f0e67e84c675d7203d94ffc432afa3b2ea7d3f8e4f22abc5e",
+        "bytes": 1009
+      },
+      {
+        "path": "build-rt-cts-evidence/software-discovery-pre-compat-2026-10-28/0001-s0_l1-7e48286da4.qpa",
+        "sha256": "b9493718646a23be84afc223362da95e24512e39f168aadf384fff0a9180ea5a",
+        "bytes": 31658
+      },
+      {
+        "path": "build-rt-cts-evidence/software-discovery-pre-compat-2026-10-28/0002-s0_l1_aabbs-f17393d636.stdout.txt",
+        "sha256": "5f87235deacae20929dedb8cafcc6e30380fe3a56ea44cdab1a3b51f5046096a",
+        "bytes": 1021
+      },
+      {
+        "path": "build-rt-cts-evidence/software-discovery-pre-compat-2026-10-28/0002-s0_l1_aabbs-f17393d636.qpa",
+        "sha256": "58d62dea00b65560c0587682ce16669361eb205afab259dab65da0f98595e71b",
+        "bytes": 33020
+      },
+      {
+        "path": "build-rt-cts-evidence/software-discovery-pre-compat-2026-10-28/0003-s3_l11-c858af8604.stdout.txt",
+        "sha256": "69843d325fc2672ba2dfb86006cb5a9f2913400185da0447808e974b77bc1da7",
+        "bytes": 1011
+      },
+      {
+        "path": "build-rt-cts-evidence/software-discovery-pre-compat-2026-10-28/0003-s3_l11-c858af8604.qpa",
+        "sha256": "20a725eb2aa4124c2b8c21dd48ff4c8e04c2f2523695c2f44066401039fc0d7e",
+        "bytes": 31638
+      },
+      {
+        "path": "build-rt-cts-evidence/software-discovery-pre-compat-2026-10-28/0004-s3_l11_aabbs-4a6cf98ec7.stdout.txt",
+        "sha256": "54ac7fa33487574c46c7ecd68531ef92c915f5e46e8778f13e104f5234736b56",
+        "bytes": 1023
+      },
+      {
+        "path": "build-rt-cts-evidence/software-discovery-pre-compat-2026-10-28/0004-s3_l11_aabbs-4a6cf98ec7.qpa",
+        "sha256": "91218cd33d5c3616ecf231901ed1e4a2aad72b222843a31541f27f9e2fecfa1d",
+        "bytes": 33000
+      },
+      {
+        "path": "build-rt-cts-evidence/software-discovery-pre-compat-2026-10-28/0005-s0_l23-c48c988be4.stdout.txt",
+        "sha256": "b01e85523c0b8bad5a9be84bc91bd395417fdfffd0428f4fc3e0ee859a326974",
+        "bytes": 1011
+      },
+      {
+        "path": "build-rt-cts-evidence/software-discovery-pre-compat-2026-10-28/0005-s0_l23-c48c988be4.qpa",
+        "sha256": "523ea64ea27d01c907dd251d7ad5acdf80ff70df7e38910128a56aa662eca50d",
+        "bytes": 31638
+      },
+      {
+        "path": "build-rt-cts-evidence/software-discovery-pre-compat-2026-10-28/0006-s0_l23_aabbs-5c5395585a.stdout.txt",
+        "sha256": "26c2c19beaeb2be65666ca430ae0e6e37f580c999fdd2c8c374993f643b7e116",
+        "bytes": 1023
+      },
+      {
+        "path": "build-rt-cts-evidence/software-discovery-pre-compat-2026-10-28/0006-s0_l23_aabbs-5c5395585a.qpa",
+        "sha256": "7a23bb6c326caccb319feb484d694fc962e6a01dc2979907fb401792988362a9",
+        "bytes": 33000
+      },
+      {
+        "path": "build-rt-cts-evidence/software-discovery-pre-compat-2026-10-28/0007-s0_l1_l1-75bbf67b14.stdout.txt",
+        "sha256": "1b724b1e02f16ef9e114f0404ab5e1152dcb7b7e04a029946c1b0b1741271560",
+        "bytes": 1015
+      },
+      {
+        "path": "build-rt-cts-evidence/software-discovery-pre-compat-2026-10-28/0007-s0_l1_l1-75bbf67b14.qpa",
+        "sha256": "433435d70419e1ddb229ad76d96dca7085814d96ddd5e901107e28ecffa210fd",
+        "bytes": 31664
+      },
+      {
+        "path": "build-rt-cts-evidence/software-discovery-pre-compat-2026-10-28/0008-s0_l1_l1_aabbs-55613e1587.stdout.txt",
+        "sha256": "82c8dfcf35ba3f792f76b95f2a9088d50da57ba6e1b9525502691dab9fbecf04",
+        "bytes": 1027
+      },
+      {
+        "path": "build-rt-cts-evidence/software-discovery-pre-compat-2026-10-28/0008-s0_l1_l1_aabbs-55613e1587.qpa",
+        "sha256": "aaeb3f826e952ec8f5af6d43dfc5f9d7c5ec3754de40d64e7d9cfc49d2d0b2c3",
+        "bytes": 33026
+      },
+      {
+        "path": "build-rt-cts-evidence/software-discovery-pre-compat-2026-10-28/0009-s3_l22_l22-3492b3c18c.stdout.txt",
+        "sha256": "aa9e86e6b4de8bde69c0401a405d41bac124474adc3c1f54d612988e8f4a9393",
+        "bytes": 1019
+      },
+      {
+        "path": "build-rt-cts-evidence/software-discovery-pre-compat-2026-10-28/0009-s3_l22_l22-3492b3c18c.qpa",
+        "sha256": "c9d852639ed670677204f85dbfe9658c34a48e325bbb4fc36d9cc4ce6ecdd889",
+        "bytes": 31617
+      },
+      {
+        "path": "build-rt-cts-evidence/software-discovery-pre-compat-2026-10-28/0010-s3_l22_l22_aabbs-65cf8a63f1.stdout.txt",
+        "sha256": "17393b3cc545f074868bbb04a2965e6fe2b10bde2a75066e8033b4885cc5acd4",
+        "bytes": 1031
+      },
+      {
+        "path": "build-rt-cts-evidence/software-discovery-pre-compat-2026-10-28/0010-s3_l22_l22_aabbs-65cf8a63f1.qpa",
+        "sha256": "eb6d434f3ec1be53a49c781f5c7331c985479bcf9ed8b0f5e0955162e5ad3d69",
+        "bytes": 32979
+      },
+      {
+        "path": "build-rt-cts-evidence/software-discovery-pre-compat-2026-10-28/0011-s3_l232-cf2b4d6b68.stdout.txt",
+        "sha256": "6bc65e81f4dd70c18b3f7fc1e8fe9e05e6d67717657324362bea6d2170445702",
+        "bytes": 1012
+      },
+      {
+        "path": "build-rt-cts-evidence/software-discovery-pre-compat-2026-10-28/0011-s3_l232-cf2b4d6b68.qpa",
+        "sha256": "d7a88651db4cae1d879b3e1f8e8ad53697dddc79bd56e2ccbbc8db2d77096f6e",
+        "bytes": 31609
+      },
+      {
+        "path": "build-rt-cts-evidence/software-discovery-pre-compat-2026-10-28/0012-s3_l232_aabbs-f063f3d2b5.stdout.txt",
+        "sha256": "d31176ab7a8b3836bb4462f9ada9d90dac8e66d18e5ca8b653d76c2dc50a32eb",
+        "bytes": 1024
+      },
+      {
+        "path": "build-rt-cts-evidence/software-discovery-pre-compat-2026-10-28/0012-s3_l232_aabbs-f063f3d2b5.qpa",
+        "sha256": "70567b882c59aadfa44cc09ab734dc1b6e1cf6704198dd8beafa0b67a4c53aa0",
+        "bytes": 32971
+      },
+      {
+        "path": "build-rt-cts-evidence/software-discovery-pre-compat-2026-10-28/0013-s3_l2_l3-9ad57e1726.stdout.txt",
+        "sha256": "f53014becd6561ffbc66aa25d2bbed981376b9bb781b18bee7cf3fe622093152",
+        "bytes": 1018
+      },
+      {
+        "path": "build-rt-cts-evidence/software-discovery-pre-compat-2026-10-28/0013-s3_l2_l3-9ad57e1726.qpa",
+        "sha256": "c3bf67e8f438120ab46117b177b377edf2a3f0aa5e99f16d77bc5ea34af892f1",
+        "bytes": 31637
+      },
+      {
+        "path": "build-rt-cts-evidence/software-discovery-pre-compat-2026-10-28/0014-s3_l2_l3_aabbs-3e0c4285ec.stdout.txt",
+        "sha256": "4781fa4501b8ce13c88959e2c192656604af774e6f47a34005f5c05e1fc31f5a",
+        "bytes": 1030
+      },
+      {
+        "path": "build-rt-cts-evidence/software-discovery-pre-compat-2026-10-28/0014-s3_l2_l3_aabbs-3e0c4285ec.qpa",
+        "sha256": "974183303cd618f43eae47c2887df564bb50b1d9e6ae4569333b43d35aa2015a",
+        "bytes": 32999
+      },
+      {
+        "path": "build-rt-cts-evidence/software-discovery-pre-compat-2026-10-28/0015-s0_l1-adacb8915a.stdout.txt",
+        "sha256": "3e4cb8f1b2feb66d8f00d9767bf20a93d550d3847985185e028d4df9e1589656",
+        "bytes": 1003
+      },
+      {
+        "path": "build-rt-cts-evidence/software-discovery-pre-compat-2026-10-28/0015-s0_l1-adacb8915a.qpa",
+        "sha256": "8b622159182b309c562eb84cc820a6508a5f3d9a203692079c35c47be8d18e35",
+        "bytes": 31640
+      },
+      {
+        "path": "build-rt-cts-evidence/software-discovery-pre-compat-2026-10-28/0016-s0_l1_aabbs-e6051e43d9.stdout.txt",
+        "sha256": "40537634cd9a3270beb78e01e02f56169d03b8e898477c146ed970b9116e82ca",
+        "bytes": 1015
+      },
+      {
+        "path": "build-rt-cts-evidence/software-discovery-pre-compat-2026-10-28/0016-s0_l1_aabbs-e6051e43d9.qpa",
+        "sha256": "29e6b2e747981ec44910cf1a72127592af756c3a4f4fb39ae007b651d38a246f",
+        "bytes": 33002
+      },
+      {
+        "path": "build-rt-cts-evidence/software-discovery-pre-compat-2026-10-28/0017-s0_l2_l3-900854fde7.stdout.txt",
+        "sha256": "c6c202c012f665f86237af4358fedb7350018e35cde96aac4ca567bbfd1925fe",
+        "bytes": 1009
+      },
+      {
+        "path": "build-rt-cts-evidence/software-discovery-pre-compat-2026-10-28/0017-s0_l2_l3-900854fde7.qpa",
+        "sha256": "d11bd7ed0d3b93dad36ee1d306cb859e6f29d85073cbc61b8ec9369cb87d4704",
+        "bytes": 31628
+      },
+      {
+        "path": "build-rt-cts-evidence/software-discovery-pre-compat-2026-10-28/0018-s0_l2_l3_aabbs-af533ccd25.stdout.txt",
+        "sha256": "0bf83ba6f2cab6bad5d7de9bfe9ee28b0fb89330fef9a67e8f433341fa4a6307",
+        "bytes": 1021
+      },
+      {
+        "path": "build-rt-cts-evidence/software-discovery-pre-compat-2026-10-28/0018-s0_l2_l3_aabbs-af533ccd25.qpa",
+        "sha256": "acdb387377a08285a4ec39c6cfc5f71fbabcf65633fb9fc7a011fb98d0d0acb0",
+        "bytes": 32990
+      },
+      {
+        "path": "build-rt-cts-evidence/software-discovery-pre-compat-2026-10-28/0019-use_link_time_optimizations-05cf8cc1dd.stdout.txt",
+        "sha256": "8400e0d53a4e8e19baf79a0788a4f57040a0601197352ca2325e628590820a11",
+        "bytes": 1031
+      },
+      {
+        "path": "build-rt-cts-evidence/software-discovery-pre-compat-2026-10-28/0019-use_link_time_optimizations-05cf8cc1dd.qpa",
+        "sha256": "ee8e1a982ec7d142b03ae62879d1b13e6eb6d0d3726484bce857e6ca59f59800",
+        "bytes": 32982
+      },
+      {
+        "path": "build-rt-cts-evidence/software-discovery-pre-compat-2026-10-28/0020-retain_link_time_optimizations-46f256b7fc.stdout.txt",
+        "sha256": "a508acb2698693aa339e8fe25399bcdd360054b05b36269d7319562465b9bd68",
+        "bytes": 1037
+      },
+      {
+        "path": "build-rt-cts-evidence/software-discovery-pre-compat-2026-10-28/0020-retain_link_time_optimizations-46f256b7fc.qpa",
+        "sha256": "00da8c9c3db69efa66f24decca04fd32c3c327760a0215733e03e83d9206bdde",
+        "bytes": 32994
+      },
+      {
+        "path": "build-rt-cts-evidence/software-discovery-pre-compat-2026-10-28/0021-vertices-b835de18b5.stdout.txt",
+        "sha256": "bf95b75943e1074b15126e013710350468486e502cc69c8051cb851e0de77c2c",
+        "bytes": 1021
+      },
+      {
+        "path": "build-rt-cts-evidence/software-discovery-pre-compat-2026-10-28/0021-vertices-b835de18b5.qpa",
+        "sha256": "279aed374c58704ab942ba74899e8c5d71d35afd2e4bc21c219fd8596a3fc171",
+        "bytes": 19482
+      },
+      {
+        "path": "build-rt-cts-evidence/software-discovery-pre-compat-2026-10-28/0022-indices-155be45232.stdout.txt",
+        "sha256": "39d335fb0f5fe34c1121ce71af53c11b475e85264a69491afaf80f94d6887941",
+        "bytes": 1019
+      },
+      {
+        "path": "build-rt-cts-evidence/software-discovery-pre-compat-2026-10-28/0022-indices-155be45232.qpa",
+        "sha256": "f06be3f1db6cbbf990c3f4fe5f6776f59f5a9c3afe070f12eda079d5cfc3f01c",
+        "bytes": 19478
+      },
+      {
+        "path": "build-rt-cts-evidence/software-discovery-pre-compat-2026-10-28/0023-transform-1fcaf5d297.stdout.txt",
+        "sha256": "6d527a903de73def0794421f36462b302d188e4d08738de5ff70da22804a2519",
+        "bytes": 1023
+      },
+      {
+        "path": "build-rt-cts-evidence/software-discovery-pre-compat-2026-10-28/0023-transform-1fcaf5d297.qpa",
+        "sha256": "13c7b84e52044a73cb2420e3e9727aaeaafc514d219eb6b9dcf1de8494907245",
+        "bytes": 19486
+      },
+      {
+        "path": "build-rt-cts-evidence/software-discovery-pre-compat-2026-10-28/0024-geometry_transform-b16d215aca.stdout.txt",
+        "sha256": "aa93b4c1fe18a174b92a72c308feecb9aca6b17a3cc14a766e007acdf3eef1a9",
+        "bytes": 1041
+      },
+      {
+        "path": "build-rt-cts-evidence/software-discovery-pre-compat-2026-10-28/0024-geometry_transform-b16d215aca.qpa",
+        "sha256": "a3387c2f64fd79823e298530ea9670a851c5797e6a5235608b51fdd7a4444b8b",
+        "bytes": 19522
+      },
+      {
+        "path": "build-rt-cts-evidence/software-discovery-pre-compat-2026-10-28/0025-degenerate-d689de7de3.stdout.txt",
+        "sha256": "170ae33f66a2722048569b94fbb5e4d26d593db49cc4ff606e80ac984300bbe1",
+        "bytes": 1025
+      },
+      {
+        "path": "build-rt-cts-evidence/software-discovery-pre-compat-2026-10-28/0025-degenerate-d689de7de3.qpa",
+        "sha256": "a8edcb58cc93936d231d94a3646bf5d68b16376d8cdac1f78e58bd949bc12025",
+        "bytes": 19490
+      },
+      {
+        "path": "build-rt-cts-evidence/software-discovery-pre-compat-2026-10-28/0026-vertices-0c4202325b.stdout.txt",
+        "sha256": "47912ddfa8fac1088590337b325a1385ef4a4b8698e51fa1dfef6576cfbc304b",
+        "bytes": 1022
+      },
+      {
+        "path": "build-rt-cts-evidence/software-discovery-pre-compat-2026-10-28/0026-vertices-0c4202325b.qpa",
+        "sha256": "8581ae6132e93294e1148a2a9cc06ca66f18d89034ed25340a45e106097a1d31",
+        "bytes": 19485
+      },
+      {
+        "path": "build-rt-cts-evidence/software-discovery-pre-compat-2026-10-28/0027-indices-9bde46ac2b.stdout.txt",
+        "sha256": "dea7f3fe8158c58e0796a31596ee2f7c0af6e0ed8e08934a3d042b3221722589",
+        "bytes": 1020
+      },
+      {
+        "path": "build-rt-cts-evidence/software-discovery-pre-compat-2026-10-28/0027-indices-9bde46ac2b.qpa",
+        "sha256": "37483e6c3f465c055226573a8d60d5c0fbb03aa7fec5f10c90b486e23834da72",
+        "bytes": 19481
+      },
+      {
+        "path": "build-rt-cts-evidence/software-discovery-pre-compat-2026-10-28/0028-transform-1097ce9084.stdout.txt",
+        "sha256": "bdbe4b58d80a8205f15a78fcf63f6654145937a649c2c538ac40bdb0a15db511",
+        "bytes": 1024
+      },
+      {
+        "path": "build-rt-cts-evidence/software-discovery-pre-compat-2026-10-28/0028-transform-1097ce9084.qpa",
+        "sha256": "fdb094f8247a926840f1a99af236793305b2bfa546bc0d9417bc7ab2462012e7",
+        "bytes": 19489
+      },
+      {
+        "path": "build-rt-cts-evidence/software-discovery-pre-compat-2026-10-28/0029-geometry_transform-7dbdac196e.stdout.txt",
+        "sha256": "546e2f2e49b976acc1bccc1ada30bc41cc4e24d2c52ffa81aff1f66cfbd2bfbb",
+        "bytes": 1042
+      },
+      {
+        "path": "build-rt-cts-evidence/software-discovery-pre-compat-2026-10-28/0029-geometry_transform-7dbdac196e.qpa",
+        "sha256": "c6c9de8ad717c0ef3b7555d73af3bf2c12e947e0083b78388cae9adcf23dba9a",
+        "bytes": 19525
+      },
+      {
+        "path": "build-rt-cts-evidence/software-discovery-pre-compat-2026-10-28/0030-degenerate-e7552e93c0.stdout.txt",
+        "sha256": "41a07b523c8a994399e4eb20f33c5ca14077c9dac1592bb76b43293ff060001e",
+        "bytes": 1026
+      },
+      {
+        "path": "build-rt-cts-evidence/software-discovery-pre-compat-2026-10-28/0030-degenerate-e7552e93c0.qpa",
+        "sha256": "3c8cdf678f39ac06810850ba47d396cca5da2df3b51cfac4acab2c963eebb003",
+        "bytes": 19493
+      },
+      {
+        "path": "build-rt-cts-evidence/software-discovery-pre-compat-2026-10-28/0031-update-dae2c02081.stdout.txt",
+        "sha256": "9e133593267eb5acf6ec7ced50a0b447805f6ad26cfd44b3e19c3a5150484d80",
+        "bytes": 983
+      },
+      {
+        "path": "build-rt-cts-evidence/software-discovery-pre-compat-2026-10-28/0031-update-dae2c02081.qpa",
+        "sha256": "99f436bf2b975f33c12691e30d30a78240ab016918dd209c55d29d368ff3a7e7",
+        "bytes": 10239
+      },
+      {
+        "path": "build-rt-cts-evidence/software-discovery-pre-compat-2026-10-28/0032-update_in_place-23e834f508.stdout.txt",
+        "sha256": "8a13a967edca389cb159a7093941e5a998edb1ac56c84d95c1dc2731e91b034e",
+        "bytes": 1001
+      },
+      {
+        "path": "build-rt-cts-evidence/software-discovery-pre-compat-2026-10-28/0032-update_in_place-23e834f508.qpa",
+        "sha256": "b8eefcdc8575e3ab23912aa0ec57d924c97a50b85fc3577167726dc9f66c6df1",
+        "bytes": 10275
+      },
+      {
+        "path": "build-rt-cts-evidence/software-discovery-pre-compat-2026-10-28/0033-aabbs-d9d08a9863.stdout.txt",
+        "sha256": "4f1594754d118402907cbda7946d50db997c79cfa41db6564091cb14913991fa",
+        "bytes": 1059
+      },
+      {
+        "path": "build-rt-cts-evidence/software-discovery-pre-compat-2026-10-28/0033-aabbs-d9d08a9863.qpa",
+        "sha256": "556fd6317478e0ea2a3fc7b4f9dcc14a5b6456a12e5e5e4e3e865ea3f6f37d3c",
+        "bytes": 19614
+      },
+      {
+        "path": "build-rt-cts-evidence/software-discovery-pre-compat-2026-10-28/0034-triangles-1e760a1f60.stdout.txt",
+        "sha256": "887c5a3d13ec4644522d285e591ca36caaea25193ed3fad47010b65a129d777b",
+        "bytes": 1067
+      },
+      {
+        "path": "build-rt-cts-evidence/software-discovery-pre-compat-2026-10-28/0034-triangles-1e760a1f60.qpa",
+        "sha256": "ecf1c7bbd349d374b640cd9cb1174c4883800c575ab9692e9e3a21b1686d2d37",
+        "bytes": 19636
+      },
+      {
+        "path": "build-rt-cts-evidence/software-discovery-pre-compat-2026-10-28/0035-aabbs-06b51add77.stdout.txt",
+        "sha256": "7629ff45ca777a25d35ad2350cb9127d77e34bd056c4679ad9e21be288746e0f",
+        "bytes": 1056
+      },
+      {
+        "path": "build-rt-cts-evidence/software-discovery-pre-compat-2026-10-28/0035-aabbs-06b51add77.qpa",
+        "sha256": "f481794bb1148dde1f35f9ca86f2f6d1547bbb56ac303cfaaa1020851b94b836",
+        "bytes": 19605
+      },
+      {
+        "path": "build-rt-cts-evidence/software-discovery-pre-compat-2026-10-28/0036-triangles-ad875b86ae.stdout.txt",
+        "sha256": "8597b7e75365d799818bee524402f0411b46cdb0d0029d31f12643a3548ec9c7",
+        "bytes": 1064
+      },
+      {
+        "path": "build-rt-cts-evidence/software-discovery-pre-compat-2026-10-28/0036-triangles-ad875b86ae.qpa",
+        "sha256": "53e0bd32fd4209ba0d5c763a40d8147c26f5011610950265531c9dab06aee4e3",
+        "bytes": 19627
+      },
+      {
+        "path": "build-rt-cts-evidence/software-discovery-pre-compat-2026-10-28/0037-aabbs-cb5ac305f0.stdout.txt",
+        "sha256": "58b6588839681a99b90e5b2815f16cfd6256899c47064f4131bd7dcd393f56d4",
+        "bytes": 1053
+      },
+      {
+        "path": "build-rt-cts-evidence/software-discovery-pre-compat-2026-10-28/0037-aabbs-cb5ac305f0.qpa",
+        "sha256": "a4c72432c35813427a51446b8eec3301ac9fc6b3edb480e9c740774711b18e6b",
+        "bytes": 19596
+      },
+      {
+        "path": "build-rt-cts-evidence/software-discovery-pre-compat-2026-10-28/0038-triangles-0e9d0b7f65.stdout.txt",
+        "sha256": "9c732950cbfe1e243f88771358347f99dac84218fccf814520dcc595336c5cb2",
+        "bytes": 1061
+      },
+      {
+        "path": "build-rt-cts-evidence/software-discovery-pre-compat-2026-10-28/0038-triangles-0e9d0b7f65.qpa",
+        "sha256": "170857e41f5313123d783b7442d790b7b8e0c2d6c2cedde140710b80f9a1047a",
+        "bytes": 19618
+      },
+      {
+        "path": "build-rt-cts-evidence/software-discovery-pre-compat-2026-10-28/0039-aabbs-618e9d0ad4.stdout.txt",
+        "sha256": "bae3737aa728f409a4ad4343eff5b21d9699686f88672904751204a28a064b1e",
+        "bytes": 1050
+      },
+      {
+        "path": "build-rt-cts-evidence/software-discovery-pre-compat-2026-10-28/0039-aabbs-618e9d0ad4.qpa",
+        "sha256": "5ea3226a90767e5560f0a2cb254e5d0178c3dddb4a1d91129f9d99cb6719bfe0",
+        "bytes": 19587
+      },
+      {
+        "path": "build-rt-cts-evidence/software-discovery-pre-compat-2026-10-28/0040-triangles-8feb5db00c.stdout.txt",
+        "sha256": "dbcf95a4e4baaedc694ada2d8f9eb989554976a25dbe05ae2b728d56889b7a3e",
+        "bytes": 1058
+      },
+      {
+        "path": "build-rt-cts-evidence/software-discovery-pre-compat-2026-10-28/0040-triangles-8feb5db00c.qpa",
+        "sha256": "b7038fca44d00cedc67f6704e66a1a6c09f8d6a5df69037b84dac76f38de0a5f",
+        "bytes": 19609
+      },
+      {
+        "path": "build-rt-cts-evidence/software-discovery-pre-compat-2026-10-28/0041-aabbs-6798d94352.stdout.txt",
+        "sha256": "fdef96c93b936e4db49617bc76cdb8460809c72d030cb4f841bc918da3fd7336",
+        "bytes": 1062
+      },
+      {
+        "path": "build-rt-cts-evidence/software-discovery-pre-compat-2026-10-28/0041-aabbs-6798d94352.qpa",
+        "sha256": "fe52851f51fa292698a56219611dad8b1dcc6f3ea8fc85cb45f9960a89392f8d",
+        "bytes": 19623
+      },
+      {
+        "path": "build-rt-cts-evidence/software-discovery-pre-compat-2026-10-28/0042-triangles-c4083afddb.stdout.txt",
+        "sha256": "6704b525bfce5a89a44e35108ac1540a576e1d06a681fff443640795439d9cae",
+        "bytes": 1070
+      },
+      {
+        "path": "build-rt-cts-evidence/software-discovery-pre-compat-2026-10-28/0042-triangles-c4083afddb.qpa",
+        "sha256": "aa6181e010949b379ccce1f7c1a26f79f82d5d7191dd31ff8d13a577ea45dc1a",
+        "bytes": 19645
+      },
+      {
+        "path": "build-rt-cts-evidence/software-discovery-pre-compat-2026-10-28/0043-aabbs-fea7963476.stdout.txt",
+        "sha256": "134bd951e5c894060667924addf2fda05c478591097e62ced45e7650acf77f04",
+        "bytes": 1059
+      },
+      {
+        "path": "build-rt-cts-evidence/software-discovery-pre-compat-2026-10-28/0043-aabbs-fea7963476.qpa",
+        "sha256": "2478b68a8581fe38a1e2c4bdf0bf7940c750872822871300ab9af3433bcb7fcf",
+        "bytes": 19614
+      },
+      {
+        "path": "build-rt-cts-evidence/software-discovery-pre-compat-2026-10-28/0044-triangles-18d9439aab.stdout.txt",
+        "sha256": "bd7e5b023d68d77375e8edf953b5502f70874b1164920986edf83d678dd21bf2",
+        "bytes": 1067
+      },
+      {
+        "path": "build-rt-cts-evidence/software-discovery-pre-compat-2026-10-28/0044-triangles-18d9439aab.qpa",
+        "sha256": "9818ea48ec55ae127076106a4864f6f10d372547ec84fa9ca152f352a6ba5d84",
+        "bytes": 19636
+      },
+      {
+        "path": "build-rt-cts-evidence/software-discovery-pre-compat-2026-10-28/0045-triangles-d475649773.stdout.txt",
+        "sha256": "3c43594f3b7b224f4d4315d30f2188579211f3d7ad67735cf8a01ca8a8616a62",
+        "bytes": 1037
+      },
+      {
+        "path": "build-rt-cts-evidence/software-discovery-pre-compat-2026-10-28/0045-triangles-d475649773.qpa",
+        "sha256": "b6627d585bef4399a60e0e02f706697bca18fa89ef23ad8324dfe10fe5e1aa8a",
+        "bytes": 9816
+      },
+      {
+        "path": "build-rt-cts-evidence/software-discovery-pre-compat-2026-10-28/0046-triangles-b8a612fc4d.stdout.txt",
+        "sha256": "77b9a4289290b35c606f756be06efc7a4bbfaead109fe6a83da0b5b873f3ec25",
+        "bytes": 1040
+      },
+      {
+        "path": "build-rt-cts-evidence/software-discovery-pre-compat-2026-10-28/0046-triangles-b8a612fc4d.qpa",
+        "sha256": "6df653e552454db444585531ab4320ed8b4469b5ddd68ad7f603a57a973b6baa",
+        "bytes": 9826
+      },
+      {
+        "path": "build-rt-cts-evidence/software-discovery-pre-compat-2026-10-28/0047-v3uint64-881d824867.stdout.txt",
+        "sha256": "a8b266d0ef824c093c20aa8c5b75b6c2deab63a8082f8e235bb9d7570b020c12",
+        "bytes": 982
+      },
+      {
+        "path": "build-rt-cts-evidence/software-discovery-pre-compat-2026-10-28/0047-v3uint64-881d824867.qpa",
+        "sha256": "80c8f4e85df2a5304a23b7de80b022f70d872105d519c49f8f1e462171acfe7e",
+        "bytes": 12661
+      },
+      {
+        "path": "build-rt-cts-evidence/software-discovery-pre-compat-2026-10-28/0048-a5float64-4c9b402c2a.stdout.txt",
+        "sha256": "13f951c2d113061a630c29b54f3ea27f75887cb7c539e350e50fdfb6d76292b9",
+        "bytes": 987
+      },
+      {
+        "path": "build-rt-cts-evidence/software-discovery-pre-compat-2026-10-28/0048-a5float64-4c9b402c2a.qpa",
+        "sha256": "e59173cec84bdb418337cf7bb3cd0604bb0b8e6c6a4f878cd0dc97e2f99c51a0",
+        "bytes": 16788
+      },
+      {
+        "path": "build-rt-cts-evidence/software-discovery-pre-compat-2026-10-28/0049-v3uint64-8dd4a670a2.stdout.txt",
+        "sha256": "69698c8348909bcd521088372d1a80a92d939ddf579d38da3774a135d7e6eefe",
+        "bytes": 975
+      },
+      {
+        "path": "build-rt-cts-evidence/software-discovery-pre-compat-2026-10-28/0049-v3uint64-8dd4a670a2.qpa",
+        "sha256": "4aeccc0715868cb23927e950fb420ab368c0146fd1cc2882157c43f84d78e8c1",
+        "bytes": 12926
+      },
+      {
+        "path": "build-rt-cts-evidence/software-discovery-pre-compat-2026-10-28/0050-sampler-2987447cfc.stdout.txt",
+        "sha256": "58bcf7ff1dcd486df96bf0f67546325bbb47739c4ae00edbd3bc323398258da3",
+        "bytes": 973
+      },
+      {
+        "path": "build-rt-cts-evidence/software-discovery-pre-compat-2026-10-28/0050-sampler-2987447cfc.qpa",
+        "sha256": "f3a26f2577abf6cdd6cf8ab0cbd089309442deb2d6fb379e9aaeb0cf6b646c9c",
+        "bytes": 15813
+      }
+    ],
+    "cases": [
+      {
+        "case": "dEQP-VK.ray_tracing_pipeline.pipeline_library.configurations.singlethreaded_compilation.s0_l1",
+        "status": "pass",
+        "reason": "Pass",
+        "exit_code": 0
+      },
+      {
+        "case": "dEQP-VK.ray_tracing_pipeline.pipeline_library.configurations.singlethreaded_compilation.s0_l1_aabbs",
+        "status": "pass",
+        "reason": "Pass",
+        "exit_code": 0
+      },
+      {
+        "case": "dEQP-VK.ray_tracing_pipeline.pipeline_library.configurations.singlethreaded_compilation.s3_l11",
+        "status": "pass",
+        "reason": "Pass",
+        "exit_code": 0
+      },
+      {
+        "case": "dEQP-VK.ray_tracing_pipeline.pipeline_library.configurations.singlethreaded_compilation.s3_l11_aabbs",
+        "status": "pass",
+        "reason": "Pass",
+        "exit_code": 0
+      },
+      {
+        "case": "dEQP-VK.ray_tracing_pipeline.pipeline_library.configurations.singlethreaded_compilation.s0_l23",
+        "status": "pass",
+        "reason": "Pass",
+        "exit_code": 0
+      },
+      {
+        "case": "dEQP-VK.ray_tracing_pipeline.pipeline_library.configurations.singlethreaded_compilation.s0_l23_aabbs",
+        "status": "pass",
+        "reason": "Pass",
+        "exit_code": 0
+      },
+      {
+        "case": "dEQP-VK.ray_tracing_pipeline.pipeline_library.configurations.singlethreaded_compilation.s0_l1_l1",
+        "status": "pass",
+        "reason": "Pass",
+        "exit_code": 0
+      },
+      {
+        "case": "dEQP-VK.ray_tracing_pipeline.pipeline_library.configurations.singlethreaded_compilation.s0_l1_l1_aabbs",
+        "status": "pass",
+        "reason": "Pass",
+        "exit_code": 0
+      },
+      {
+        "case": "dEQP-VK.ray_tracing_pipeline.pipeline_library.configurations.singlethreaded_compilation.s3_l22_l22",
+        "status": "pass",
+        "reason": "Pass",
+        "exit_code": 0
+      },
+      {
+        "case": "dEQP-VK.ray_tracing_pipeline.pipeline_library.configurations.singlethreaded_compilation.s3_l22_l22_aabbs",
+        "status": "pass",
+        "reason": "Pass",
+        "exit_code": 0
+      },
+      {
+        "case": "dEQP-VK.ray_tracing_pipeline.pipeline_library.configurations.multithreaded_compilation.s3_l232",
+        "status": "pass",
+        "reason": "Pass",
+        "exit_code": 0
+      },
+      {
+        "case": "dEQP-VK.ray_tracing_pipeline.pipeline_library.configurations.multithreaded_compilation.s3_l232_aabbs",
+        "status": "pass",
+        "reason": "Pass",
+        "exit_code": 0
+      },
+      {
+        "case": "dEQP-VK.ray_tracing_pipeline.pipeline_library.configurations.multithreaded_compilation_dho.s3_l2_l3",
+        "status": "pass",
+        "reason": "Pass",
+        "exit_code": 0
+      },
+      {
+        "case": "dEQP-VK.ray_tracing_pipeline.pipeline_library.configurations.multithreaded_compilation_dho.s3_l2_l3_aabbs",
+        "status": "pass",
+        "reason": "Pass",
+        "exit_code": 0
+      },
+      {
+        "case": "dEQP-VK.ray_tracing_pipeline.pipeline_library.configurations.rgen_miss_in_library.s0_l1",
+        "status": "pass",
+        "reason": "Pass",
+        "exit_code": 0
+      },
+      {
+        "case": "dEQP-VK.ray_tracing_pipeline.pipeline_library.configurations.rgen_miss_in_library.s0_l1_aabbs",
+        "status": "pass",
+        "reason": "Pass",
+        "exit_code": 0
+      },
+      {
+        "case": "dEQP-VK.ray_tracing_pipeline.pipeline_library.configurations.rgen_miss_in_library.s0_l2_l3",
+        "status": "pass",
+        "reason": "Pass",
+        "exit_code": 0
+      },
+      {
+        "case": "dEQP-VK.ray_tracing_pipeline.pipeline_library.configurations.rgen_miss_in_library.s0_l2_l3_aabbs",
+        "status": "pass",
+        "reason": "Pass",
+        "exit_code": 0
+      },
+      {
+        "case": "dEQP-VK.ray_tracing_pipeline.pipeline_library.configurations.misc.use_link_time_optimizations",
+        "status": "pass",
+        "reason": "Pass",
+        "exit_code": 0
+      },
+      {
+        "case": "dEQP-VK.ray_tracing_pipeline.pipeline_library.configurations.misc.retain_link_time_optimizations",
+        "status": "pass",
+        "reason": "Pass",
+        "exit_code": 0
+      },
+      {
+        "case": "dEQP-VK.ray_tracing_pipeline.acceleration_structures.update.traditional_structures.gpu.normal.vertices",
+        "status": "pass",
+        "reason": "Pass",
+        "exit_code": 0
+      },
+      {
+        "case": "dEQP-VK.ray_tracing_pipeline.acceleration_structures.update.traditional_structures.gpu.normal.indices",
+        "status": "pass",
+        "reason": "Pass",
+        "exit_code": 0
+      },
+      {
+        "case": "dEQP-VK.ray_tracing_pipeline.acceleration_structures.update.traditional_structures.gpu.normal.transform",
+        "status": "pass",
+        "reason": "Pass",
+        "exit_code": 0
+      },
+      {
+        "case": "dEQP-VK.ray_tracing_pipeline.acceleration_structures.update.traditional_structures.gpu.normal.geometry_transform",
+        "status": "pass",
+        "reason": "Pass",
+        "exit_code": 0
+      },
+      {
+        "case": "dEQP-VK.ray_tracing_pipeline.acceleration_structures.update.traditional_structures.gpu.normal.degenerate",
+        "status": "pass",
+        "reason": "Pass",
+        "exit_code": 0
+      },
+      {
+        "case": "dEQP-VK.ray_tracing_pipeline.acceleration_structures.update.traditional_structures.gpu.compact.vertices",
+        "status": "pass",
+        "reason": "Pass",
+        "exit_code": 0
+      },
+      {
+        "case": "dEQP-VK.ray_tracing_pipeline.acceleration_structures.update.traditional_structures.gpu.compact.indices",
+        "status": "pass",
+        "reason": "Pass",
+        "exit_code": 0
+      },
+      {
+        "case": "dEQP-VK.ray_tracing_pipeline.acceleration_structures.update.traditional_structures.gpu.compact.transform",
+        "status": "pass",
+        "reason": "Pass",
+        "exit_code": 0
+      },
+      {
+        "case": "dEQP-VK.ray_tracing_pipeline.acceleration_structures.update.traditional_structures.gpu.compact.geometry_transform",
+        "status": "pass",
+        "reason": "Pass",
+        "exit_code": 0
+      },
+      {
+        "case": "dEQP-VK.ray_tracing_pipeline.acceleration_structures.update.traditional_structures.gpu.compact.degenerate",
+        "status": "pass",
+        "reason": "Pass",
+        "exit_code": 0
+      },
+      {
+        "case": "dEQP-VK.ray_query.acceleration_structures.instance_update.traditional_structures.gpu_built.update",
+        "status": "pass",
+        "reason": "Pass",
+        "exit_code": 0
+      },
+      {
+        "case": "dEQP-VK.ray_query.acceleration_structures.instance_update.traditional_structures.gpu_built.update_in_place",
+        "status": "pass",
+        "reason": "Pass",
+        "exit_code": 0
+      },
+      {
+        "case": "dEQP-VK.ray_tracing_pipeline.acceleration_structures.operations.traditional_structures.compaction.gpu_built.bottom_acceleration_structure.aabbs",
+        "status": "pass",
+        "reason": "Pass",
+        "exit_code": 0
+      },
+      {
+        "case": "dEQP-VK.ray_tracing_pipeline.acceleration_structures.operations.traditional_structures.compaction.gpu_built.bottom_acceleration_structure.triangles",
+        "status": "pass",
+        "reason": "Pass",
+        "exit_code": 0
+      },
+      {
+        "case": "dEQP-VK.ray_tracing_pipeline.acceleration_structures.operations.traditional_structures.compaction.gpu_built.top_acceleration_structure.aabbs",
+        "status": "pass",
+        "reason": "Pass",
+        "exit_code": 0
+      },
+      {
+        "case": "dEQP-VK.ray_tracing_pipeline.acceleration_structures.operations.traditional_structures.compaction.gpu_built.top_acceleration_structure.triangles",
+        "status": "pass",
+        "reason": "Pass",
+        "exit_code": 0
+      },
+      {
+        "case": "dEQP-VK.ray_tracing_pipeline.acceleration_structures.operations.traditional_structures.copy.gpu_built.bottom_acceleration_structure.aabbs",
+        "status": "pass",
+        "reason": "Pass",
+        "exit_code": 0
+      },
+      {
+        "case": "dEQP-VK.ray_tracing_pipeline.acceleration_structures.operations.traditional_structures.copy.gpu_built.bottom_acceleration_structure.triangles",
+        "status": "pass",
+        "reason": "Pass",
+        "exit_code": 0
+      },
+      {
+        "case": "dEQP-VK.ray_tracing_pipeline.acceleration_structures.operations.traditional_structures.copy.gpu_built.top_acceleration_structure.aabbs",
+        "status": "pass",
+        "reason": "Pass",
+        "exit_code": 0
+      },
+      {
+        "case": "dEQP-VK.ray_tracing_pipeline.acceleration_structures.operations.traditional_structures.copy.gpu_built.top_acceleration_structure.triangles",
+        "status": "pass",
+        "reason": "Pass",
+        "exit_code": 0
+      },
+      {
+        "case": "dEQP-VK.ray_tracing_pipeline.acceleration_structures.operations.traditional_structures.serialization.gpu_built.bottom_acceleration_structure.aabbs",
+        "status": "pass",
+        "reason": "Pass",
+        "exit_code": 0
+      },
+      {
+        "case": "dEQP-VK.ray_tracing_pipeline.acceleration_structures.operations.traditional_structures.serialization.gpu_built.bottom_acceleration_structure.triangles",
+        "status": "pass",
+        "reason": "Pass",
+        "exit_code": 0
+      },
+      {
+        "case": "dEQP-VK.ray_tracing_pipeline.acceleration_structures.operations.traditional_structures.serialization.gpu_built.top_acceleration_structure.aabbs",
+        "status": "pass",
+        "reason": "Pass",
+        "exit_code": 0
+      },
+      {
+        "case": "dEQP-VK.ray_tracing_pipeline.acceleration_structures.operations.traditional_structures.serialization.gpu_built.top_acceleration_structure.triangles",
+        "status": "pass",
+        "reason": "Pass",
+        "exit_code": 0
+      },
+      {
+        "case": "dEQP-VK.ray_query.acceleration_structures.operations.traditional_structures.compute_shader.compaction.gpu_built.top_acceleration_structure.triangles",
+        "status": "pass",
+        "reason": "Pass",
+        "exit_code": 0
+      },
+      {
+        "case": "dEQP-VK.ray_query.acceleration_structures.operations.traditional_structures.compute_shader.serialization.gpu_built.top_acceleration_structure.triangles",
+        "status": "pass",
+        "reason": "Pass",
+        "exit_code": 0
+      },
+      {
+        "case": "dEQP-VK.ray_tracing_pipeline.data_spill.execute_callable.v3uint64",
+        "status": "pass",
+        "reason": "Pass",
+        "exit_code": 0
+      },
+      {
+        "case": "dEQP-VK.ray_tracing_pipeline.data_spill.report_intersection.a5float64",
+        "status": "pass",
+        "reason": "Pass",
+        "exit_code": 0
+      },
+      {
+        "case": "dEQP-VK.ray_tracing_pipeline.data_spill.trace_ray.v3uint64",
+        "status": "pass",
+        "reason": "Pass",
+        "exit_code": 0
+      },
+      {
+        "case": "dEQP-VK.ray_tracing_pipeline.data_spill.trace_ray.sampler",
+        "status": "pass",
+        "reason": "Pass",
+        "exit_code": 0
+      }
+    ]
+  },
+  "cts_final": {
+    "path": "build-rt-cts-evidence/software-discovery-final-2026-10-28/summary.json",
+    "sha256": "9d2db65c098866d7ebcda55bfb68a66538b3a183d1a96ef3ba180c0de29f4fd7",
+    "bytes": 61449,
+    "dll_sha256": "327e13480f8986817af7d174fb15d274975378ef66b2f73f90ba8111310c78d5",
+    "counts": {
+      "pass": 13,
+      "fail": 0,
+      "notSupported": 0,
+      "crash": 0,
+      "timeout": 0,
+      "noresult": 0
+    },
+    "cts_revision": "d18e4c68543103371715845cd914c71e5859963e",
+    "cts_sha256": "8cf824c598181ef43ccd74d67acce89c9cc6fc47029a164440f0b0ea74af0380",
+    "masked_discovery": true,
+    "guard_all_verified": true,
+    "guard_checked": 27302,
+    "guard_rejected": 0,
+    "validation_error_markers": 0,
+    "raw_outputs": [
+      {
+        "path": "build-rt-cts-evidence/software-discovery-final-2026-10-28/0001-aabbs-d9d08a9863.stdout.txt",
+        "sha256": "46df14424024142fa151512ad200fcf480d0d256b4193e9a5dd272c208592211",
+        "bytes": 1054
+      },
+      {
+        "path": "build-rt-cts-evidence/software-discovery-final-2026-10-28/0001-aabbs-d9d08a9863.qpa",
+        "sha256": "2b7705c66f5d536dbd34f89435a5211a040d906b0ee8860865d582ba4880c58d",
+        "bytes": 19609
+      },
+      {
+        "path": "build-rt-cts-evidence/software-discovery-final-2026-10-28/0002-triangles-1e760a1f60.stdout.txt",
+        "sha256": "8d23ee62ed249cd333383c09121367372cfae054da2a2e4705995f5fe7bceb8e",
+        "bytes": 1062
+      },
+      {
+        "path": "build-rt-cts-evidence/software-discovery-final-2026-10-28/0002-triangles-1e760a1f60.qpa",
+        "sha256": "b79eddf451f268fe974cce20a1b13076fefd2f4a3c53b0aba55ef9c3e0fe4ff9",
+        "bytes": 19631
+      },
+      {
+        "path": "build-rt-cts-evidence/software-discovery-final-2026-10-28/0003-aabbs-06b51add77.stdout.txt",
+        "sha256": "f7c40a41ffdd789c68a4778e1cf30e8058aff42399c6c8bb39f2506378acce49",
+        "bytes": 1051
+      },
+      {
+        "path": "build-rt-cts-evidence/software-discovery-final-2026-10-28/0003-aabbs-06b51add77.qpa",
+        "sha256": "7226021ac113c0ad9c161ec3c17ef3726419983165067a23547d78ac7d34c936",
+        "bytes": 19600
+      },
+      {
+        "path": "build-rt-cts-evidence/software-discovery-final-2026-10-28/0004-triangles-ad875b86ae.stdout.txt",
+        "sha256": "40561ead241b59de3b11ab2137aaa9e20cf04dd4ca4b4b405365240647932728",
+        "bytes": 1059
+      },
+      {
+        "path": "build-rt-cts-evidence/software-discovery-final-2026-10-28/0004-triangles-ad875b86ae.qpa",
+        "sha256": "fda0293bda72d36d094222d09684c8a65b8f4f02124e671a19720e8fa47ad001",
+        "bytes": 19622
+      },
+      {
+        "path": "build-rt-cts-evidence/software-discovery-final-2026-10-28/0005-aabbs-6798d94352.stdout.txt",
+        "sha256": "ac4e23921d1509cf454f4e0c18fd400fb03d4b75a07d32af359b6231df3f9d2f",
+        "bytes": 1057
+      },
+      {
+        "path": "build-rt-cts-evidence/software-discovery-final-2026-10-28/0005-aabbs-6798d94352.qpa",
+        "sha256": "f3e7674cf5c9bace5fa45e33f43e0f54cb3a1d20effdb42b5aaa99e3685fce9e",
+        "bytes": 19618
+      },
+      {
+        "path": "build-rt-cts-evidence/software-discovery-final-2026-10-28/0006-triangles-c4083afddb.stdout.txt",
+        "sha256": "70a9fec024a86b1ee8c639629070ea3a81e3b94b859d4e9f577bb2f781826051",
+        "bytes": 1065
+      },
+      {
+        "path": "build-rt-cts-evidence/software-discovery-final-2026-10-28/0006-triangles-c4083afddb.qpa",
+        "sha256": "9d968df60d106a0cf1bad832d1c531b8349b9fd18454931a82190d97eaae0c0c",
+        "bytes": 19640
+      },
+      {
+        "path": "build-rt-cts-evidence/software-discovery-final-2026-10-28/0007-aabbs-fea7963476.stdout.txt",
+        "sha256": "7d4f38a0314cc1485523694e255b7edae080b3db5c792cb5fa47bc4f9770b086",
+        "bytes": 1054
+      },
+      {
+        "path": "build-rt-cts-evidence/software-discovery-final-2026-10-28/0007-aabbs-fea7963476.qpa",
+        "sha256": "2260e24cfb0ccc1206de903e3063c6139d95695d8cd733b08e2aa6cec0f3c554",
+        "bytes": 19609
+      },
+      {
+        "path": "build-rt-cts-evidence/software-discovery-final-2026-10-28/0008-triangles-18d9439aab.stdout.txt",
+        "sha256": "41f97bd26b6bbca080861c1b6e145f93e5b184f219ddf801fc943fe59845f15e",
+        "bytes": 1062
+      },
+      {
+        "path": "build-rt-cts-evidence/software-discovery-final-2026-10-28/0008-triangles-18d9439aab.qpa",
+        "sha256": "ddcdaf54dc9e62cda29a37a9335e03a4d43c9e3299f8057fa11c3d60b3f2e22c",
+        "bytes": 19631
+      },
+      {
+        "path": "build-rt-cts-evidence/software-discovery-final-2026-10-28/0009-triangles-d475649773.stdout.txt",
+        "sha256": "980c6d12c7733cd8093cbc985fc502e0a71205ba930cd0540d453a2632cddaff",
+        "bytes": 1032
+      },
+      {
+        "path": "build-rt-cts-evidence/software-discovery-final-2026-10-28/0009-triangles-d475649773.qpa",
+        "sha256": "58b0258350bdd1c2777766eb0de44418cd97684ca94a1e787944791fa466a9ee",
+        "bytes": 9811
+      },
+      {
+        "path": "build-rt-cts-evidence/software-discovery-final-2026-10-28/0010-triangles-b8a612fc4d.stdout.txt",
+        "sha256": "f4803fb1d002ae1a4a6f8db91937ad26c70393f1c8c5146753572f9d3667346b",
+        "bytes": 1035
+      },
+      {
+        "path": "build-rt-cts-evidence/software-discovery-final-2026-10-28/0010-triangles-b8a612fc4d.qpa",
+        "sha256": "c248de51307b0b09c11b9c2be8b0fb45104f16f760c3888532c6118268792383",
+        "bytes": 9821
+      },
+      {
+        "path": "build-rt-cts-evidence/software-discovery-final-2026-10-28/0011-s0_l1-7e48286da4.stdout.txt",
+        "sha256": "e4840c69702a6e8e61cc12019c637feed96cfc85feff14c4a43249dfb260478d",
+        "bytes": 1004
+      },
+      {
+        "path": "build-rt-cts-evidence/software-discovery-final-2026-10-28/0011-s0_l1-7e48286da4.qpa",
+        "sha256": "abbed26fde0640731d2c72e1bdb44aca2cc336e31829d205093ffe385c1f4ed2",
+        "bytes": 31653
+      },
+      {
+        "path": "build-rt-cts-evidence/software-discovery-final-2026-10-28/0012-geometry_transform-b16d215aca.stdout.txt",
+        "sha256": "86429bb034826e8768bdb2a91595e540b6ce10e6c37b7a61a5c6a73bfb62e281",
+        "bytes": 1036
+      },
+      {
+        "path": "build-rt-cts-evidence/software-discovery-final-2026-10-28/0012-geometry_transform-b16d215aca.qpa",
+        "sha256": "562e5ce99b25f280390c6a6d1bde2f24f59eed673a9f1ec0c07b68b64ef1547d",
+        "bytes": 19517
+      },
+      {
+        "path": "build-rt-cts-evidence/software-discovery-final-2026-10-28/0013-v3uint64-8dd4a670a2.stdout.txt",
+        "sha256": "8af29ce6676a478dc503401689416438154c8402bf324d1030e99117e4cf9c87",
+        "bytes": 970
+      },
+      {
+        "path": "build-rt-cts-evidence/software-discovery-final-2026-10-28/0013-v3uint64-8dd4a670a2.qpa",
+        "sha256": "b2c22d903610be1a3f555c674c08301c8543ea7a04b0876a7819fcfb084076f6",
+        "bytes": 12921
+      }
+    ],
+    "cases": [
+      {
+        "case": "dEQP-VK.ray_tracing_pipeline.acceleration_structures.operations.traditional_structures.compaction.gpu_built.bottom_acceleration_structure.aabbs",
+        "status": "pass",
+        "reason": "Pass",
+        "exit_code": 0
+      },
+      {
+        "case": "dEQP-VK.ray_tracing_pipeline.acceleration_structures.operations.traditional_structures.compaction.gpu_built.bottom_acceleration_structure.triangles",
+        "status": "pass",
+        "reason": "Pass",
+        "exit_code": 0
+      },
+      {
+        "case": "dEQP-VK.ray_tracing_pipeline.acceleration_structures.operations.traditional_structures.compaction.gpu_built.top_acceleration_structure.aabbs",
+        "status": "pass",
+        "reason": "Pass",
+        "exit_code": 0
+      },
+      {
+        "case": "dEQP-VK.ray_tracing_pipeline.acceleration_structures.operations.traditional_structures.compaction.gpu_built.top_acceleration_structure.triangles",
+        "status": "pass",
+        "reason": "Pass",
+        "exit_code": 0
+      },
+      {
+        "case": "dEQP-VK.ray_tracing_pipeline.acceleration_structures.operations.traditional_structures.serialization.gpu_built.bottom_acceleration_structure.aabbs",
+        "status": "pass",
+        "reason": "Pass",
+        "exit_code": 0
+      },
+      {
+        "case": "dEQP-VK.ray_tracing_pipeline.acceleration_structures.operations.traditional_structures.serialization.gpu_built.bottom_acceleration_structure.triangles",
+        "status": "pass",
+        "reason": "Pass",
+        "exit_code": 0
+      },
+      {
+        "case": "dEQP-VK.ray_tracing_pipeline.acceleration_structures.operations.traditional_structures.serialization.gpu_built.top_acceleration_structure.aabbs",
+        "status": "pass",
+        "reason": "Pass",
+        "exit_code": 0
+      },
+      {
+        "case": "dEQP-VK.ray_tracing_pipeline.acceleration_structures.operations.traditional_structures.serialization.gpu_built.top_acceleration_structure.triangles",
+        "status": "pass",
+        "reason": "Pass",
+        "exit_code": 0
+      },
+      {
+        "case": "dEQP-VK.ray_query.acceleration_structures.operations.traditional_structures.compute_shader.compaction.gpu_built.top_acceleration_structure.triangles",
+        "status": "pass",
+        "reason": "Pass",
+        "exit_code": 0
+      },
+      {
+        "case": "dEQP-VK.ray_query.acceleration_structures.operations.traditional_structures.compute_shader.serialization.gpu_built.top_acceleration_structure.triangles",
+        "status": "pass",
+        "reason": "Pass",
+        "exit_code": 0
+      },
+      {
+        "case": "dEQP-VK.ray_tracing_pipeline.pipeline_library.configurations.singlethreaded_compilation.s0_l1",
+        "status": "pass",
+        "reason": "Pass",
+        "exit_code": 0
+      },
+      {
+        "case": "dEQP-VK.ray_tracing_pipeline.acceleration_structures.update.traditional_structures.gpu.normal.geometry_transform",
+        "status": "pass",
+        "reason": "Pass",
+        "exit_code": 0
+      },
+      {
+        "case": "dEQP-VK.ray_tracing_pipeline.data_spill.trace_ray.v3uint64",
+        "status": "pass",
+        "reason": "Pass",
+        "exit_code": 0
+      }
+    ]
+  },
+  "final_binary": {
+    "path": "build-raytracing-unified/layers/VkLayer_VKRT_SOFTWARE_RAY_QUERY.dll",
+    "sha256": "327e13480f8986817af7d174fb15d274975378ef66b2f73f90ba8111310c78d5",
+    "bytes": 7296512
+  },
+  "negative_controls": {
+    "path": "build-no-rt-profile-2026-10-28/negative-controls/summary.json",
+    "sha256": "d0554b1a46cd2f436df4d53fb38c6ba890eb693a709b0f3acb845476fd829781",
+    "bytes": 5021
+  },
+  "remaining": [
+    "Queue/timestamp/protected/device-group substrate qualification",
+    "Complete application/private resource budgets",
+    "Complete compiler pointer/memory-model semantics",
+    "AS construction/count/numerical qualification",
+    "Logical-stage synchronization and native-query interactions",
+    "Physical no-RT/cross-vendor/POSIX qualification"
+  ]
+}

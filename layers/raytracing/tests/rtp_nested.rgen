@@ -1,0 +1,32 @@
+#version 460
+#extension GL_EXT_ray_tracing : require
+#extension GL_GOOGLE_include_directive : require
+#define NESTED_RAYGEN
+#include "rtp_nested_common.glsl"
+void main() {
+    uint id=nested_id(),scalar=pc.seed^(id*65537u+0x2468u);
+    uint localValues[17];
+    for(uint i=0;i<17u;++i) localValues[i]=nested_local(id,0u,3u,i);
+    payload=NestedPayload(1u,nested_mix(pc.seed,id),0u,0u);
+    nested_trace(1u);
+    uint checksum=0u;
+    for(uint i=0;i<17u;++i) checksum=(checksum*33u)^localValues[i];
+    payload.hash=nested_mix(payload.hash,checksum^scalar);
+    uint row=id*96u;
+    outputData.words[row+0u]=payload.hash;
+    outputData.words[row+1u]=payload.visits;
+    outputData.words[row+2u]=payload.unwind;
+    outputData.words[row+3u]=payload.level;
+    outputData.words[row+4u]=checksum;
+    outputData.words[row+5u]=pc.limit;
+    outputData.words[row+6u]=pc.seed;
+    outputData.words[row+7u]=gl_LaunchIDEXT.x;
+    outputData.words[row+8u]=gl_LaunchIDEXT.y;
+    outputData.words[row+9u]=gl_LaunchIDEXT.z;
+    outputData.words[row+10u]=gl_LaunchSizeEXT.x;
+    outputData.words[row+11u]=gl_LaunchSizeEXT.y;
+    outputData.words[row+12u]=gl_LaunchSizeEXT.z;
+    outputData.words[row+13u]=scalar;
+    outputData.words[row+14u]=pc.flip;
+    outputData.words[row+15u]=0x52544e31u;
+}

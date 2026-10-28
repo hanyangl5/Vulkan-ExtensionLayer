@@ -10,7 +10,7 @@
 // vktRayTracingBuiltinTests.cpp.
 // Captured from the unmodified external CTS QPA. Keep numeric IDs and source
 // SPIR-V1.4 version when assembling; this fixture exercises the production
-// BDA/PrivateArray stage-library path, not just the standalone SSBO wrapper.
+// production BDA stage-library path, not just the standalone SSBO wrapper.
 inline constexpr char kCtsRayTMaxIntersectionSource[] = R"spv(
 ; SPIR-V
 ; Version: 1.4

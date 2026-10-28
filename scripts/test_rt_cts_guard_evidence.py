@@ -4,6 +4,7 @@
 """Check that missing, rejected, or incomplete downstream proof cannot pass."""
 import json
 from pathlib import Path
+import runpy
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -12,6 +13,34 @@ from run_rt_cts import guard_evidence, run_environment
 
 
 class GuardEvidenceTests(unittest.TestCase):
+    def test_masked_discovery_requires_explicit_complete_profile(self):
+        audit = runpy.run_path(str(Path(__file__).resolve().parents[1] / "layers/raytracing/tests/no_native_rt_guard_audit.py"))["audit_records"]
+        done = dict(schema_version=2, pid=123, load_id="masked-load", event="summary", mode="mask-discovery", devices=1,
+                    shader_definitions=3, checked=12, rejected=0, discovery_mask_version=1)
+        records = [dict(done, event="start", devices=0, shader_definitions=0, checked=0),
+                   dict(done, event="instance"), done]
+        self.assertEqual(audit(records, expected_discovery_mask=True)["mode"], "mask-discovery")
+        with self.assertRaises(ValueError):
+            audit(records)
+        for version in (None, 0, True, "1"):
+            changed = [dict(r, discovery_mask_version=version) for r in records]
+            with self.subTest(version=version), self.assertRaises(ValueError):
+                audit(changed, expected_discovery_mask=True)
+        with self.assertRaises(ValueError):
+            audit(records, expected_discovery_mask=True, expected_dispatch_limits=(2, 2, 64))
+        with tempfile.TemporaryDirectory() as directory:
+            log = Path(directory) / "mask.jsonl"
+            log.write_text("".join(json.dumps(r) + "\n" for r in records), encoding="utf-8")
+            self.assertTrue(guard_evidence(log, expected_discovery_mask=True)[0]["verified"])
+            self.assertFalse(guard_evidence(log)[0]["verified"])
+        env, meta = run_environment("software-rt", Path("fallback"), guard_dir=Path("guard"), mask_native_rt_discovery=True)
+        self.assertEqual(env["VKRT_NO_RT_GUARD_MASK_DISCOVERY"], "1")
+        self.assertEqual(meta["overrides"]["VKRT_NO_RT_GUARD_MASK_DISCOVERY"], "1")
+        with self.assertRaises(ValueError):
+            run_environment("native", None, guard_dir=Path("guard"), mask_native_rt_discovery=True)
+        with self.assertRaises(ValueError):
+            run_environment("software-rt", Path("fallback"), mask_native_rt_discovery=True)
+
     def test_required_execution_evidence(self):
         completed = dict(schema_version=2, pid=123, load_id="test-load-1", event="summary", mode="execution-only", devices=1,
                          shader_definitions=3, checked=12, rejected=0)

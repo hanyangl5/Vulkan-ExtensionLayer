@@ -6,6 +6,7 @@
 #include "vkrt_layer.h"
 #include "vkrt_build_layout.h"
 #include "vkrt_as_registry.h"
+#include "vkrt_debug_objects.h"
 
 VkResult vkrt_device_queue_families_init(struct vkrt_device_data *dev, const VkDeviceCreateInfo *ci,
                                          const VkAllocationCallbacks *allocator) {
@@ -139,7 +140,13 @@ void vkrt_destroy_virtual_as(struct vkrt_device_data *dev, VkAccelerationStructu
     /* The application must complete all uses, including GPU descriptor
      * reads, before destroying the AS. */
     vkrt_unmap_object(VKRT_HKEY(handle));
+    vkrt_debug_object_forget(dev, VK_OBJECT_TYPE_ACCELERATION_STRUCTURE_KHR, VKRT_HKEY(handle));
     free_virtual_as(dev, as);
+}
+bool vkrt_virtual_as_owns(struct vkrt_device_data *dev, uint64_t handle) {
+    if (!dev || !handle) return false;
+    struct vkrt_virtual_as *as = (struct vkrt_virtual_as *)vkrt_find_object(handle);
+    return as && as->owner == dev->device;
 }
 
 void vkrt_as_build_sizes(struct vkrt_device_data *dev, const VkAccelerationStructureBuildGeometryInfoKHR *pBuildInfo,

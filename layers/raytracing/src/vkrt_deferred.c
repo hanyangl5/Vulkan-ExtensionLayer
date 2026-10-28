@@ -4,6 +4,7 @@
  */
 #include "vkrt_deferred.h"
 #include "vkrt_layer.h"
+#include "vkrt_debug_objects.h"
 
 struct vkrt_deferred_operation {
     struct vkrt_deferred_operation *next;
@@ -70,6 +71,7 @@ void vkrt_deferred_finish(struct vkrt_device_data *dev) {
     vkrt_mutex_unlock(&state->lock);
     while (operation) {
         struct vkrt_deferred_operation *next = operation->next;
+        vkrt_debug_object_forget(dev, VK_OBJECT_TYPE_DEFERRED_OPERATION_KHR, (uint64_t)(uintptr_t)operation);
         operation_free(operation);
         operation = next;
     }
@@ -99,6 +101,19 @@ bool vkrt_deferred_valid(struct vkrt_device_data *dev, VkDeferredOperationKHR op
     bool valid = find_locked(state, operation) != NULL;
     vkrt_mutex_unlock(&state->lock);
     return valid;
+}
+bool vkrt_deferred_owns(struct vkrt_device_data *dev, uint64_t handle) {
+    if (!dev || !dev->deferred || !handle) return false;
+    struct vkrt_deferred_state *state = dev->deferred;
+    vkrt_mutex_lock(&state->lock);
+    bool owned = false;
+    for (const struct vkrt_deferred_operation *operation = state->operations; operation; operation = operation->next)
+        if ((uint64_t)(uintptr_t)operation == handle) {
+            owned = true;
+            break;
+        }
+    vkrt_mutex_unlock(&state->lock);
+    return owned;
 }
 
 static VKAPI_ATTR VkResult VKAPI_CALL CreateDeferredOperationKHR(VkDevice device, const VkAllocationCallbacks *allocator,
@@ -139,7 +154,10 @@ static VKAPI_ATTR void VKAPI_CALL DestroyDeferredOperationKHR(VkDevice device, V
         break;
     }
     vkrt_mutex_unlock(&state->lock);
-    if (removed) operation_free(removed);
+    if (removed) {
+        vkrt_debug_object_forget(dev, VK_OBJECT_TYPE_DEFERRED_OPERATION_KHR, (uint64_t)(uintptr_t)removed);
+        operation_free(removed);
+    }
 }
 
 static VKAPI_ATTR uint32_t VKAPI_CALL GetDeferredOperationMaxConcurrencyKHR(VkDevice device, VkDeferredOperationKHR operation) {

@@ -1,7 +1,9 @@
 /* SPDX-License-Identifier: MIT */
 #include "vkrt_deferred.h"
 #include "vkrt_layer.h"
+#include "vkrt_debug_objects.h"
 #include <stdatomic.h>
+#include <stddef.h>
 
 #if !defined(_WIN32)
 #include <sched.h>
@@ -26,6 +28,49 @@ static PFN_vkDeferredOperationJoinKHR join;
 static const VkDevice device_a = H(VkDevice, 0x100);
 static const VkDevice device_b = H(VkDevice, 0x200);
 static VkDeferredOperationKHR shared_operation;
+struct debug_tracker {
+    struct vkrt_device_data *dev;
+    unsigned live, allocations, frees;
+};
+static VKAPI_ATTR void *VKAPI_CALL debug_allocate(void *user, size_t size, size_t alignment, VkSystemAllocationScope scope) {
+    struct debug_tracker *tracker = user;
+    CHECK(scope == VK_SYSTEM_ALLOCATION_SCOPE_DEVICE && alignment <= _Alignof(max_align_t));
+    CHECK(!vkrt_deferred_owns(tracker->dev, UINT64_MAX));
+    void *memory = malloc(size);
+    if (memory) {
+        ++tracker->live;
+        ++tracker->allocations;
+    }
+    return memory;
+}
+static VKAPI_ATTR void VKAPI_CALL debug_free(void *user, void *memory) {
+    struct debug_tracker *tracker = user;
+    /* Annotation callbacks may inspect the actual registry. Destroy/finish
+     * must release deferred->lock before forget takes the debug lock. */
+    CHECK(!vkrt_deferred_owns(tracker->dev, UINT64_MAX) && tracker->live);
+    --tracker->live;
+    ++tracker->frees;
+    free(memory);
+}
+static bool debug_owned(struct vkrt_device_data *dev, VkObjectType type, uint64_t handle) {
+    return type == VK_OBJECT_TYPE_DEFERRED_OPERATION_KHR && vkrt_deferred_owns(dev, handle);
+}
+static void annotate(VkDevice device, VkDeferredOperationKHR operation) {
+    PFN_vkSetDebugUtilsObjectNameEXT name = (void *)vkrt_debug_objects_proc("vkSetDebugUtilsObjectNameEXT");
+    PFN_vkSetDebugUtilsObjectTagEXT tag = (void *)vkrt_debug_objects_proc("vkSetDebugUtilsObjectTagEXT");
+    uint32_t data = 0x12345678;
+    const VkDebugUtilsObjectNameInfoEXT info = {VK_STRUCTURE_TYPE_DEBUG_UTILS_OBJECT_NAME_INFO_EXT, NULL,
+                                                VK_OBJECT_TYPE_DEFERRED_OPERATION_KHR, (uint64_t)(uintptr_t)operation,
+                                                "CPU deferred operation"};
+    const VkDebugUtilsObjectTagInfoEXT tagging = {VK_STRUCTURE_TYPE_DEBUG_UTILS_OBJECT_TAG_INFO_EXT,
+                                                  NULL,
+                                                  VK_OBJECT_TYPE_DEFERRED_OPERATION_KHR,
+                                                  (uint64_t)(uintptr_t)operation,
+                                                  7,
+                                                  sizeof(data),
+                                                  &data};
+    CHECK(name(device, &info) == VK_SUCCESS && tag(device, &tagging) == VK_SUCCESS);
+}
 
 struct allocation_tracker {
     VkSystemAllocationScope scope;
@@ -136,10 +181,21 @@ int main(void) {
     CHECK(vkrt_deferred_init(&b, NULL) == VK_SUCCESS);
     vkrt_map_object(VKRT_HKEY(device_a), &a);
     vkrt_map_object(VKRT_HKEY(device_b), &b);
+    /* DHO is provided even on ordinary devices with no virtual RT profile. */
+    CHECK(!a.virtual_rt && !b.virtual_rt);
+    struct debug_tracker debug_a = {.dev = &a}, debug_b = {.dev = &b};
+    VkAllocationCallbacks debug_allocator_a = {.pUserData = &debug_a, .pfnAllocation = debug_allocate, .pfnFree = debug_free};
+    VkAllocationCallbacks debug_allocator_b = {.pUserData = &debug_b, .pfnAllocation = debug_allocate, .pfnFree = debug_free};
+    CHECK(vkrt_debug_objects_init(&a, &debug_allocator_a, debug_owned) == VK_SUCCESS);
+    CHECK(vkrt_debug_objects_init(&b, &debug_allocator_b, debug_owned) == VK_SUCCESS);
+    CHECK(!vkrt_deferred_owns(&a, 0) && !vkrt_deferred_owns(&a, UINT64_MAX));
     CHECK(vkrt_deferred_valid(&a, VK_NULL_HANDLE));
     CHECK(!vkrt_deferred_valid(NULL, VK_NULL_HANDLE));
 
     CHECK(create_operation(device_a, NULL, &shared_operation) == VK_SUCCESS);
+    CHECK(vkrt_deferred_owns(&a, (uint64_t)(uintptr_t)shared_operation));
+    CHECK(!vkrt_deferred_owns(&b, (uint64_t)(uintptr_t)shared_operation));
+    CHECK(!vkrt_deferred_owns(&a, (uint64_t)(uintptr_t)shared_operation ^ (UINT64_C(1) << 63)));
     CHECK(result(device_a, shared_operation) == VK_SUCCESS);
     CHECK(join(device_a, shared_operation) == VK_SUCCESS);
     CHECK(concurrency(device_a, shared_operation) == 0);
@@ -160,9 +216,12 @@ int main(void) {
     /* User callback storage can disappear after Create. Retain the creation
      * callbacks in the operation, rather than borrowing their stack address. */
     CHECK(create_operation(device_a, &operation_allocator, &operation) == VK_SUCCESS);
+    annotate(device_a, operation);
+    CHECK(debug_a.live == 4); /* Device debug state plus name/object/tag. */
     VkAllocationCallbacks compatible_allocator = operation_allocator;
     memset(&operation_allocator, 0, sizeof(operation_allocator));
     destroy_operation(device_a, operation, &compatible_allocator);
+    CHECK(!vkrt_deferred_owns(&a, (uint64_t)(uintptr_t)operation) && debug_a.live == 1);
     CHECK(!vkrt_deferred_valid(&a, operation));
     CHECK(atomic_load(&operation_tracker.live) == 0);
 
@@ -200,12 +259,18 @@ int main(void) {
      * and use each creation allocator even when callbacks differ by object. */
     operation_allocator = callbacks(&operation_tracker);
     CHECK(create_operation(device_a, &operation_allocator, &operation) == VK_SUCCESS);
+    annotate(device_a, operation);
     CHECK(create_operation(device_b, NULL, &operation) == VK_SUCCESS);
+    annotate(device_b, operation);
     memset(&device_allocator, 0, sizeof(device_allocator));
     vkrt_deferred_finish(&a);
     vkrt_deferred_finish(&b);
     vkrt_deferred_finish(&a);
     CHECK(!a.deferred && !b.deferred);
+    CHECK(debug_a.live == 1 && debug_b.live == 1);
+    vkrt_debug_objects_finish(&a);
+    vkrt_debug_objects_finish(&b);
+    CHECK(!debug_a.live && !debug_b.live && debug_a.allocations == debug_a.frees && debug_b.allocations == debug_b.frees);
     CHECK(atomic_load(&device_tracker.live) == 0);
     CHECK(atomic_load(&device_tracker.frees) == 1);
     CHECK(atomic_load(&operation_tracker.live) == 0);

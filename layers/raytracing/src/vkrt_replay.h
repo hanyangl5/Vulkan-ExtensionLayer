@@ -182,7 +182,18 @@ struct vkrt_replay_context {
     /* Capture may retain a unique semantic token. Re-emission chooses between
      * passing that token to a translating upper hook and a real native handle. */
     VkResult (*emit_pipeline_layout)(void *user, const char *command_name, VkPipelineLayout recorded, VkPipelineLayout *forward);
+    /* Template payloads have no XML extent. An integration with immutable
+     * template metadata can normalize them into ordinary owned push writes. */
+    VkResult (*capture_descriptor_template)(struct vkrt_replay_context *context, const VkPushDescriptorSetWithTemplateInfo *info);
 };
+
+/* Typed capture-only entry points reuse the owning command schemas. The first
+ * argument is a context rather than a command buffer, and every entry returns
+ * the journal status. They neither look up command state nor forward a native
+ * command. A standalone history may omit resolve and normalization callbacks.
+ * Consumers of their PFN_vkrt_capture_Cmd* typedefs explicitly include
+ * vkrt_replay_capture_generated.h from the generator's output directory. */
+PFN_vkVoidFunction vkrt_replay_capture_proc(const char *name);
 
 /* Supplied by command-buffer integration. During re-emission the fresh command
  * buffer has a context with journal=NULL, avoiding recursive capture. */
@@ -200,8 +211,8 @@ const char *vkrt_replay_journal_error_command(const struct vkrt_replay_journal *
 size_t vkrt_replay_journal_count(const struct vkrt_replay_journal *journal);
 
 /* Entries own every supported pointer-valued command input. Handles retain
- * Vulkan's normal object-lifetime requirements; opaque template payloads and
- * unknown structure schemas fail capture explicitly instead of borrowing data. */
+ * Vulkan's normal object-lifetime requirements. Templates need an immutable
+ * integration schema; opaque inputs never fall back to borrowed data. */
 const struct vkrt_replay_entry *vkrt_replay_first(const struct vkrt_replay_journal *journal);
 const struct vkrt_replay_entry *vkrt_replay_next(const struct vkrt_replay_entry *entry);
 const char *vkrt_replay_entry_name(const struct vkrt_replay_entry *entry);

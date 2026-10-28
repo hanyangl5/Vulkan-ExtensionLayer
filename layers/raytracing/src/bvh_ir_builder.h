@@ -2,6 +2,7 @@
 #ifndef BVH_IR_BUILDER_H
 #define BVH_IR_BUILDER_H
 #include "bvh_ir_build_layout.h"
+#include "bvh_vertex_format.h"
 #include <stdbool.h>
 #include <string.h>
 
@@ -38,26 +39,7 @@ static inline bool bvh_ir_supported_geometry(const VkAccelerationStructureGeomet
        (t->indexType != VK_INDEX_TYPE_NONE_KHR && t->indexType != VK_INDEX_TYPE_UINT16 &&
         t->indexType != VK_INDEX_TYPE_UINT32 && t->indexType != VK_INDEX_TYPE_UINT8_EXT))
       return false;
-   switch (t->vertexFormat) {
-   case VK_FORMAT_R32G32_SFLOAT:
-   case VK_FORMAT_R32G32B32_SFLOAT:
-   case VK_FORMAT_R32G32B32A32_SFLOAT:
-   case VK_FORMAT_R16G16_SFLOAT:
-   case VK_FORMAT_R16G16B16_SFLOAT:
-   case VK_FORMAT_R16G16B16A16_SFLOAT:
-   case VK_FORMAT_R16G16_SNORM:
-   case VK_FORMAT_R16G16B16A16_SNORM:
-   case VK_FORMAT_R8G8_SNORM:
-   case VK_FORMAT_R8G8B8A8_SNORM:
-   case VK_FORMAT_R16G16_UNORM:
-   case VK_FORMAT_R16G16B16A16_UNORM:
-   case VK_FORMAT_R8G8_UNORM:
-   case VK_FORMAT_R8G8B8A8_UNORM:
-   case VK_FORMAT_A2B10G10R10_UNORM_PACK32:
-      return true;
-   default:
-      return false;
-   }
+   return bvh_supported_vertex_format(t->vertexFormat);
 }
 
 static inline VkResult bvh_ir_record_build(const VkAccelerationStructureBuildGeometryInfoKHR *info,

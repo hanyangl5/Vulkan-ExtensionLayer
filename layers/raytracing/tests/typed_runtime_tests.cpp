@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #include "typed_runtime.h"
 #include "glsl_compiler.h"
+#include "spirv_environment.h"
 #include "bvh4_abi.h"
 #include <spirv-tools/libspirv.hpp>
 #include <spirv/unified1/spirv.hpp>
@@ -190,7 +191,70 @@ void AS(GPU &gpu, uint64_t blas, uint64_t tlas, bool procedural) {
     instance.world_to_object[0] = instance.world_to_object[5] = instance.world_to_object[10] = 1;
     Write(gpu, tlas + 128, instance);
 }
-bool Execute(bool private_frames, bool compile_only, const std::string &dump_path, bool unused_attribute = false) {
+void SPIRV14ExtensionDeclarations() {
+    const auto shader = CompileGLSL(R"glsl(#version 460
+#extension GL_EXT_buffer_reference : require
+#extension GL_EXT_shader_explicit_arithmetic_types_int64 : require
+#extension GL_EXT_nonuniform_qualifier : require
+#extension GL_KHR_memory_scope_semantics : require
+#pragma use_vulkan_memory_model
+layout(local_size_x=1) in;
+layout(buffer_reference,std430,buffer_reference_align=4) buffer Reference { uint value; };
+layout(set=0,binding=0,std430) buffer Resource { uint value; } resources[2];
+layout(push_constant) uniform Push { uint64_t address; } pc;
+void main(){resources[nonuniformEXT(gl_GlobalInvocationID.x&1u)].value=Reference(pc.address).value;}
+)glsl",
+                                    VK_SHADER_STAGE_COMPUTE_BIT, GLSLTarget::Vulkan11Spirv14);
+    Require(shader.at(1) == 0x00010400u, "Explicit 1.4 GLSL compilation changed its requested target");
+    spvtools::SpirvTools validator(SPV_ENV_VULKAN_1_1_SPIRV_1_4);
+    Require(validator.Validate(shader), "Vulkan 1.1/SPIR-V 1.4 extension shader is invalid");
+    std::string assembly;
+    Require(validator.Disassemble(shader, &assembly), "SPIR-V 1.4 extension shader disassembly");
+    for (const char *extension : {"SPV_KHR_physical_storage_buffer", "SPV_KHR_vulkan_memory_model", "SPV_EXT_descriptor_indexing"})
+        Require(assembly.find(std::string("OpExtension \"") + extension + "\"") != std::string::npos,
+                std::string("SPIR-V 1.4 is missing required extension declaration: ") + extension);
+    bool vulkan_memory = false;
+    for (size_t p = 5; p < shader.size(); p += shader[p] >> 16)
+        if ((shader[p] & 65535) == spv::OpMemoryModel) vulkan_memory = shader[p + 2] == spv::MemoryModelVulkan;
+    Require(
+        assembly.find("NonUniform") != std::string::npos && assembly.find("OpConvertUToPtr") != std::string::npos && vulkan_memory,
+        "Extension declaration regression lacks actual NonUniform/BDA/Vulkan memory-model use");
+}
+void SPIRV14NonUniformStage() {
+    const auto source = CompileGLSL(R"glsl(#version 460
+#extension GL_EXT_ray_tracing : require
+#extension GL_EXT_nonuniform_qualifier : require
+layout(set=0,binding=0) uniform accelerationStructureEXT scenes[2];
+layout(set=0,binding=1,std430) buffer Output { uint values[]; } outputData;
+layout(location=0) rayPayloadEXT uint payload;
+void main(){
+    payload=3u;
+    traceRayEXT(scenes[nonuniformEXT(gl_LaunchIDEXT.x&1u)],0u,255u,0u,0u,0u,vec3(0),0.0,vec3(0,0,1),1.0,0);
+    outputData.values[gl_LaunchIDEXT.x]=payload;
+}
+)glsl",
+                                    VK_SHADER_STAGE_RAYGEN_BIT_KHR, GLSLTarget::Vulkan11Spirv14);
+    const auto stage = CompileTypedPipelineStage(source, "main", VK_SHADER_STAGE_RAYGEN_BIT_KHR, nullptr, "vel_rt_stage_0");
+    VkRayTracingShaderGroupCreateInfoKHR group{VK_STRUCTURE_TYPE_RAY_TRACING_SHADER_GROUP_CREATE_INFO_KHR};
+    group.type = VK_RAY_TRACING_SHADER_GROUP_TYPE_GENERAL_KHR;
+    group.generalShader = 0;
+    group.closestHitShader = group.anyHitShader = group.intersectionShader = VK_SHADER_UNUSED_KHR;
+    const auto program = BuildTypedRuntimeProgram({stage}, {group}, {1, UINT64_C(0x140000007), true, true, true});
+    Require(source.at(1) == 0x00010400u && stage.spirv.at(1) == 0x00010400u && program.spirv.at(1) == 0x00010400u,
+            "Actual NonUniform descriptor stage was upgraded from SPIR-V 1.4");
+    spvtools::SpirvTools validator(SPV_ENV_VULKAN_1_1_SPIRV_1_4);
+    spvtools::ValidatorOptions options;
+    options.SetScalarBlockLayout(true);
+    Require(validator.Validate(program.spirv.data(), program.spirv.size(), options), "SPIR-V 1.4 NonUniform runtime validation");
+    std::string assembly;
+    Require(validator.Disassemble(program.spirv, &assembly) &&
+                assembly.find("OpExtension \"SPV_EXT_descriptor_indexing\"") != std::string::npos &&
+                assembly.find("StorageBufferArrayNonUniformIndexing") != std::string::npos &&
+                assembly.find("NonUniform") != std::string::npos,
+            "Actual NonUniform SSBO access lost its extension/capability/decorations after typed linking");
+}
+bool Execute(bool compile_only, const std::string &dump_path, bool unused_attribute = false,
+             GLSLTarget target = GLSLTarget::Vulkan12) {
     std::string sources[] = {Raygen(),       Miss(),    Closest(unused_attribute), Any(false), Closest(false), Any(true),
                              Intersection(), Callable()};
     const VkShaderStageFlagBits kinds[] = {VK_SHADER_STAGE_RAYGEN_BIT_KHR,       VK_SHADER_STAGE_MISS_BIT_KHR,
@@ -200,24 +264,26 @@ bool Execute(bool private_frames, bool compile_only, const std::string &dump_pat
     std::vector<std::vector<uint32_t>> native;
     std::vector<TypedContinuationProgram> stages;
     for (uint32_t i = 0; i < 8; ++i) {
-        native.push_back(CompileGLSL(sources[i], kinds[i]));
+        native.push_back(CompileGLSL(sources[i], kinds[i], target));
         stages.push_back(CompileTypedPipelineStage(native.back(), "main", kinds[i], nullptr, "vel_rt_stage_" + std::to_string(i)));
+        if (target == GLSLTarget::Vulkan11Spirv14) {
+            Require(native.back().at(1) == 0x00010400u && stages.back().spirv.at(1) == 0x00010400u,
+                    "SPIR-V 1.4 source/stage was silently upgraded");
+            spvtools::SpirvTools source_validator(SPV_ENV_VULKAN_1_1_SPIRV_1_4);
+            Require(source_validator.Validate(native.back()), "SPIR-V 1.4 source validation");
+        }
     }
     auto groups = Groups();
     auto plan = PlanTypedRuntimeArena(stages, groups, 2);
-    TypedContinuationCompileOptions config;
-    config.transport = private_frames ? TypedFrameTransport::PrivateArray : TypedFrameTransport::PhysicalAddress;
-    config.private_frame_words = private_frames ? uint32_t(plan.default_arena_bytes / 4) : 0;
-    for (uint32_t i = 0; i < 8; ++i)
-        stages[i] = CompileTypedPipelineStage(native[i], "main", kinds[i], nullptr, "vel_rt_stage_" + std::to_string(i), config);
     auto program = BuildTypedRuntimeProgram(stages, groups, {2, UINT64_C(0x100000007)});
     if (compile_only) {
         // Exercise the production execution ABI from actual stage libraries,
         // including the existing wide scalar/aggregate source fixtures.
         for (const bool optimize : {false, true}) {
             auto production = BuildTypedRuntimeProgram(stages, groups, {2, UINT64_C(0x100000007), true, optimize, true});
-            spvtools::SpirvTools validator(SPV_ENV_VULKAN_1_3);
+            spvtools::SpirvTools validator(VulkanEnvironmentForSPIRV(production.spirv.at(1)));
             Require(validator.Validate(production.spirv), "16-byte context/launch push runtime validation");
+            Require(production.spirv.at(1) == native.front().at(1), "Production scheduler changed application module version");
             std::set<uint32_t> push_structs;
             uint32_t highest_offset = 0;
             for (size_t p = 5; p < production.spirv.size(); p += production.spirv[p] >> 16) {
@@ -236,11 +302,12 @@ bool Execute(bool private_frames, bool compile_only, const std::string &dump_pat
         std::ofstream dump(dump_path, std::ios::binary);
         dump.write(reinterpret_cast<const char *>(program.spirv.data()), program.spirv.size() * 4);
     }
-    spvtools::SpirvTools tools(SPV_ENV_VULKAN_1_3);
+    spvtools::SpirvTools tools(VulkanEnvironmentForSPIRV(program.spirv.at(1)));
     Require(tools.Validate(program.spirv), "Final native runtime validation");
+    Require(program.spirv.at(1) == native.front().at(1), "Runtime link changed application module version");
     Require(program.recommended_arena_bytes == plan.default_arena_bytes, "Private transport changed frame sizing");
-    std::cout << "Runtime SPIR-V validated; per-invocation " << (private_frames ? "Private" : "BDA")
-              << " arena=" << plan.default_arena_bytes << " bytes\n";
+    std::cout << "Runtime SPIR-V " << ((program.spirv[1] >> 8) & 255)
+              << " validated; per-invocation BDA arena=" << plan.default_arena_bytes << " bytes\n";
     if (compile_only) return true;
     constexpr uint32_t count = 8, base = 2;
     constexpr uint64_t bytes = 65536, registry = 256, pages = 512, blas = 15360, tlas = 15872, sbt = 16384, pushes = 16896,
@@ -250,10 +317,8 @@ bool Execute(bool private_frames, bool compile_only, const std::string &dump_pat
     std::memset(gpu.mapped, 0, bytes);
     Write(gpu, 0, VEL_RT_RUNTIME_MAGIC);
     Write(gpu, 4, VEL_RT_RUNTIME_VERSION);
-    if (!private_frames) {
-        Write(gpu, 8, gpu.address + 20480);
-        Write(gpu, 16, UINT64_C(45056));
-    }
+    Write(gpu, 8, gpu.address + 20480);
+    Write(gpu, 16, UINT64_C(45056));
     Write(gpu, 24, plan.default_arena_bytes);
     Write(gpu, 32, uint64_t(count));
     Write(gpu, 40, 10u);
@@ -368,21 +433,30 @@ bool Execute(bool private_frames, bool compile_only, const std::string &dump_pat
 }  // namespace
 int main(int argc, char **argv) {
     try {
-        bool private_frames = true, compile_only = false;
+        bool compile_only = false;
+        bool spirv14_only = false;
         std::string dump;
         for (int i = 1; i < argc; ++i) {
             std::string arg = argv[i];
             if (arg == "--bda")
-                private_frames = false;
+                continue;  // Compatibility alias; BDA is the only runtime transport.
             else if (arg == "--compile-only")
                 compile_only = true;
+            else if (arg == "--compile-spirv14")
+                compile_only = spirv14_only = true;
             else if (arg == "--dump" && i + 1 < argc)
                 dump = argv[++i];
             else
                 throw std::runtime_error("Unknown runtime test argument");
         }
-        if (!Execute(private_frames, compile_only, dump)) return 77;
-        if (!Execute(private_frames, compile_only, {}, true)) return 77;
+        if (compile_only) {
+            SPIRV14ExtensionDeclarations();
+            SPIRV14NonUniformStage();
+            Execute(true, spirv14_only ? dump : std::string(), false, GLSLTarget::Vulkan11Spirv14);
+        }
+        if (spirv14_only) return 0;
+        if (!Execute(compile_only, dump)) return 77;
+        if (!Execute(compile_only, {}, true)) return 77;
         return 0;
     } catch (const std::exception &e) {
         std::cerr << e.what() << "\n";

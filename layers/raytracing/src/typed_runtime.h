@@ -32,7 +32,6 @@ struct TypedRuntimeProgram {
     uint64_t max_shader_frame_bytes = 0;
     uint32_t max_ray_recursion_depth = 0;
     uint32_t max_hit_attribute_bytes = 0;
-    uint32_t private_frame_words = 0;
     std::vector<uint64_t> stage_stack_bytes;
 };
 struct TypedRuntimeArenaPlan {
@@ -49,8 +48,7 @@ TypedRuntimeArenaPlan PlanTypedRuntimeArena(const std::vector<TypedContinuationP
 uint64_t PlanTypedRuntimeArenaBytes(const std::vector<TypedContinuationProgram> &stages,
                                     const std::vector<VkRayTracingShaderGroupCreateInfoKHR> &groups,
                                     uint32_t max_ray_recursion_depth);
-// Stages must be homogeneous BDA (production) or PrivateArray (component)
-// libraries from CompileTypedPipelineStage, with unique
+// Stages must be BDA libraries from CompileTypedPipelineStage, with unique
 // exports. The result is one ordinary Vulkan compute program. Its private
 // uint32 specialization IDs0/1 contain the immutable context BDA by default.
 // context_via_push_constants instead uses an independent 8-byte compute push

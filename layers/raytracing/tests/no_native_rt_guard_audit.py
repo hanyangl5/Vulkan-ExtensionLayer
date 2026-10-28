@@ -26,13 +26,15 @@ def dispatch_limits(value):
     return tuple(value)
 
 
-def audit_records(records, require_shaders=True, expected_dispatch_limits=None):
+def audit_records(records, require_shaders=True, expected_dispatch_limits=None, expected_discovery_mask=False):
     if not records or not isinstance(records[0], dict) or records[0].get("event") != "start":
         raise ValueError("guard configuration/start record is missing")
     counter_keys = ("checked", "rejected", "devices", "shader_definitions")
     forced = expected_dispatch_limits is not None
     expected = dispatch_limits(expected_dispatch_limits) if forced else None
-    mode = "forced-dispatch-limits" if forced else "execution-only"
+    if forced and expected_discovery_mask:
+        raise ValueError("masked discovery and artificial dispatch are distinct profiles")
+    mode = "forced-dispatch-limits" if forced else "mask-discovery" if expected_discovery_mask else "execution-only"
     if forced:
         counter_keys += ("dispatches", "multidimensional_dispatches")
     process = records[0].get("pid")
@@ -56,6 +58,9 @@ def audit_records(records, require_shaders=True, expected_dispatch_limits=None):
             raise ValueError("guard log mixes different process identities")
         if record.get("mode") != mode:
             raise ValueError("guard mode is not the explicitly expected execution/dispatch profile")
+        if expected_discovery_mask and (type(record.get("discovery_mask_version")) is not int or
+                                        record["discovery_mask_version"] != 1):
+            raise ValueError("masked discovery lacks complete feature/property/extension/format/proc masking")
         if forced:
             if dispatch_limits(record.get("dispatch_limits")) != expected:
                 raise ValueError("guard dispatch limits differ from the explicitly expected test profile")
@@ -125,12 +130,16 @@ def audit_records(records, require_shaders=True, expected_dispatch_limits=None):
         result["dispatch_limits"] = list(expected)
         result["dispatch_max"] = [max(s["dispatch_max"][axis] for s in segments) for axis in range(3)]
         result["qualification"] = "artificial limits; not an ordinary Vulkan mandatory-limit proof"
+    if expected_discovery_mask:
+        result["discovery_mask_version"] = 1
+        result["qualification"] = "masked discovery; not physical no-RT or complete mandatory qualification"
     return result
 
 
-def audit(path, require_shaders=True, expected_dispatch_limits=None):
+def audit(path, require_shaders=True, expected_dispatch_limits=None, expected_discovery_mask=False):
     records = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
-    return audit_records(records, require_shaders=require_shaders, expected_dispatch_limits=expected_dispatch_limits)
+    return audit_records(records, require_shaders=require_shaders, expected_dispatch_limits=expected_dispatch_limits,
+                         expected_discovery_mask=expected_discovery_mask)
 
 
 if __name__ == "__main__":
@@ -138,9 +147,11 @@ if __name__ == "__main__":
     parser.add_argument("log", type=Path)
     parser.add_argument("--allow-no-shaders", action="store_true", help="device-only controls; does not establish shader execution")
     parser.add_argument("--expected-dispatch-limits", help="explicit artificial X,Y,Z test profile; never ordinary conformance proof")
+    parser.add_argument("--expected-discovery-mask", action="store_true", help="explicit masked feature/property/format/proc profile")
     args = parser.parse_args()
     try:
-        result = audit(args.log, require_shaders=not args.allow_no_shaders, expected_dispatch_limits=args.expected_dispatch_limits)
+        result = audit(args.log, require_shaders=not args.allow_no_shaders, expected_dispatch_limits=args.expected_dispatch_limits,
+                       expected_discovery_mask=args.expected_discovery_mask)
     except (OSError, ValueError, KeyError, TypeError) as error:
         parser.exit(1, f"Guard evidence FAIL: {error}\n")
     print(json.dumps(result, sort_keys=True))

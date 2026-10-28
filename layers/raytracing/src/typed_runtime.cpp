@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #include "typed_runtime.h"
 #include "glsl_compiler.h"
+#include "spirv_environment.h"
 #include "typed_runtime_sources.h"
 #include <spirv/unified1/spirv.hpp>
 #include <spirv-tools/optimizer.hpp>
@@ -179,11 +180,9 @@ TypedRuntimeProgram BuildTypedRuntimeProgram(const std::vector<TypedContinuation
     constexpr uint32_t triangle_type = UINT32_MAX;
     for (size_t i = 0; i < stages.size(); ++i) {
         const auto &s = stages[i];
-        Need(s.transport != TypedFrameTransport::StorageBuffer && s.system_header_bytes == VEL_RT_SYSTEM_BYTES &&
+        Need(s.transport == TypedFrameTransport::PhysicalAddress && s.system_header_bytes == VEL_RT_SYSTEM_BYTES &&
                  !s.step_export_name.empty(),
              "stage is not a typed BDA library");
-        Need(s.transport == stages.front().transport && s.private_frame_words == stages.front().private_frame_words,
-             "stage frame transports/budgets differ");
         Need(exports.insert(s.step_export_name).second, "duplicate stage export");
         Need(s.frame_stride_bytes && s.frame_stride_bytes % 4 == 0, "invalid stage frame size");
         types.emplace_back(s.source);
@@ -227,14 +226,12 @@ TypedRuntimeProgram BuildTypedRuntimeProgram(const std::vector<TypedContinuation
     auto arena = PlanTypedRuntimeArena(stages, groups, options.max_ray_recursion_depth);
     result.recommended_arena_bytes = arena.default_arena_bytes;
     result.stage_stack_bytes = arena.stage_stack_bytes;
-    result.private_frame_words = stages.front().private_frame_words;
     std::ostringstream out;
     out << "#version 460\n#extension GL_EXT_buffer_reference : require\n"
            "#extension GL_EXT_buffer_reference2 : require\n#extension GL_EXT_scalar_block_layout : require\n"
            "#extension GL_EXT_shader_explicit_arithmetic_types : require\n";
     out << Filter(kTypedRuntimeAbi) << Filter(kTypedRuntimeSystem) << Filter(kTypedRuntimeBvh4) << Filter(kTypedRuntimeAddress)
         << Filter(kTypedRuntimeTraversal, true);
-    if (result.private_frame_words) out << "#define RT_PRIVATE_WORDS " << result.private_frame_words << "\n";
     if (options.context_via_push_constants) out << "#define RT_CONTEXT_PUSH 1\n";
     Need(!options.launch_base_via_push_constants || options.context_via_push_constants,
          "launch base push requires context push transport");
@@ -279,13 +276,13 @@ TypedRuntimeProgram BuildTypedRuntimeProgram(const std::vector<TypedContinuation
         out << "}break;\n";
     }
     out << "}return uvec4(0u);}\n" << kTypedRuntimeBody;
-    auto scheduler = CompileGLSL(out.str(), VK_SHADER_STAGE_COMPUTE_BIT);
+    auto scheduler = CompileGLSL(out.str(), VK_SHADER_STAGE_COMPUTE_BIT, GLSLTarget::Vulkan11Spirv14);
     result.spirv = LinkTypedPipelineProgram(scheduler, stages);
     // Eliminate aggregate parameter shuttles and trivial codec calls before
     // native compilation. No fast-math or floating-point contraction passes
     // are used; source NoContraction and execution controls remain intact.
     if (options.optimize) {
-        spvtools::Optimizer optimizer(SPV_ENV_VULKAN_1_3);
+        spvtools::Optimizer optimizer(VulkanEnvironmentForSPIRV(result.spirv.at(1)));
         std::string cleanup_error;
         optimizer.SetMessageConsumer([&](spv_message_level_t, const char *, const spv_position_t &, const char *message) {
             cleanup_error += std::string(message) + "\n";

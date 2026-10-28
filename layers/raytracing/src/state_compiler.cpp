@@ -1,6 +1,7 @@
 // Copyright 2026 The Khronos Group Inc.
 // SPDX-License-Identifier: Apache-2.0
 #include "state_compiler.h"
+#include "spirv_environment.h"
 #include "frame_emitter.h"
 #include <spirv-tools/libspirv.hpp>
 #include <spirv-tools/optimizer.hpp>
@@ -95,11 +96,12 @@ class Compiler {
             Unsupported("invalid stage export name");
         if (BDA() && this->config.context_root_low_spec_id == this->config.context_root_high_spec_id)
             Unsupported("BDA context root specialization IDs must differ");
-        spvtools::SpirvTools tools(SPV_ENV_VULKAN_1_3);
+        const auto environment = VulkanEnvironmentForSPIRV(output.source.size() > 1 ? output.source[1] : 0);
+        spvtools::SpirvTools tools(environment);
         std::string assembly;
         if (!tools.Disassemble(output.source, &assembly, SPV_BINARY_TO_TEXT_OPTION_NO_HEADER))
             Unsupported("source disassembly failed");
-        auto context = spvContextCreate(SPV_ENV_VULKAN_1_3);
+        auto context = spvContextCreate(environment);
         auto status =
             spvBinaryParse(context, &parsed, output.source.data(), output.source.size(), nullptr, ParseInstruction, nullptr);
         spvContextDestroy(context);
@@ -195,14 +197,6 @@ class Compiler {
         options.logical_pointer_snapshots = !pointer_plans.empty();
         options.logical_pointer_words = pointer_words;
         options.physical_frame_addresses = BDA();
-        options.private_frame_words = config.private_frame_words;
-        if (config.transport == TypedFrameTransport::PrivateArray) {
-            if (!config.private_frame_words || config.private_frame_words > UINT32_MAX / 4u || config.emit_compute_entry)
-                Unsupported("PrivateArray requires a library and a nonzero checked word budget");
-            output.private_frame_words = config.private_frame_words;
-        } else if (config.private_frame_words) {
-            Unsupported("private word budget requires PrivateArray transport");
-        }
         options.prefix_bytes = BDA() ? VEL_RT_SYSTEM_BYTES : 0;
         output.system_header_bytes = options.prefix_bytes;
         const auto preview = PlanContinuationFrames(output.source, this->entry, model, types, options);
@@ -256,19 +250,14 @@ class Compiler {
         output.control_word = static_cast<uint32_t>((persistent_size + 3) / 4);
         output.control_byte_offset = output.control_word * 4;
         output.frame_stride_bytes = uint64_t(output.frame_stride_words) * 4;
-        if (config.transport == TypedFrameTransport::PrivateArray &&
-            output.frame_stride_bytes > uint64_t(config.private_frame_words) * 4)
-            Unsupported("source frame exceeds the PrivateArray word budget");
         output.max_invocations64 = BDA() ? UINT64_MAX / output.frame_stride_bytes : output.max_invocations;
         for (const auto &variable : output.invocation_variables) invocation_variables[variable.variable] = &variable;
         for (const auto &variable : output.private_variables) private_variables[variable.variable] = &variable;
         code = EmitContinuationFrameCodecs(output.source, this->entry, model, set, binding, "sc_cf_", types, options);
         // Reuse the component's existing word pointer declaration rather than
         // emit an illegal duplicate non-aggregate SPIR-V pointer type.
-        pointer_types[std::to_string(config.transport == TypedFrameTransport::PrivateArray ? spv::StorageClassPrivate
-                                     : BDA()                                               ? spv::StorageClassPhysicalStorageBuffer
-                                                                                           : spv::StorageClassStorageBuffer) +
-                      " " + code.word_type] = code.word_pointer_type;
+        pointer_types[std::to_string(BDA() ? spv::StorageClassPhysicalStorageBuffer : spv::StorageClassStorageBuffer) + " " +
+                      code.word_type] = code.word_pointer_type;
         output.frames = code.plan;
         for (const auto &c : code.types) codecs[c.type] = c;
         for (const auto &f : code.plan.functions) {
@@ -295,7 +284,8 @@ class Compiler {
             EnsureCapability("Linkage");
             annotations << "OpDecorate %sc_step LinkageAttributes \"" << config.step_export_name << "\" Export\n";
         }
-        std::string assembly = code.capabilities + source_caps.str() + extensions.str() + imports.str() +
+        if (source_caps.str().find("NonUniform") != std::string::npos) EnsureExtension("SPV_EXT_descriptor_indexing");
+        std::string assembly = code.capabilities + source_caps.str() + code.extensions + extensions.str() + imports.str() +
                                (BDA() ? "OpMemoryModel PhysicalStorageBuffer64 GLSL450\n" : "OpMemoryModel Logical GLSL450\n");
         if (config.emit_compute_entry) {
             assembly += "OpEntryPoint GLCompute %sc_main \"main\" " + code.memory;
@@ -304,7 +294,9 @@ class Compiler {
         }
         assembly += code.annotations + annotations.str() + code.declarations + declarations.str() + code.functions +
                     qualified_functions.str() + functions.str();
-        spvtools::SpirvTools tools(config.emit_compute_entry ? SPV_ENV_VULKAN_1_3 : SPV_ENV_UNIVERSAL_1_5);
+        const auto version = std::max(output.source.at(1), 0x00010400u);
+        spvtools::SpirvTools tools(config.emit_compute_entry ? VulkanEnvironmentForSPIRV(version)
+                                                             : UniversalEnvironmentForSPIRV(version));
         std::string error;
         tools.SetMessageConsumer([&](spv_message_level_t, const char *, const spv_position_t &p, const char *message) {
             error += std::to_string(p.index) + ": " + message + "\n";
@@ -396,7 +388,7 @@ class Compiler {
     std::vector<std::string> interfaces;
     std::ostringstream source_caps, imports, extensions, execution_modes, annotations, declarations, functions, qualified_functions;
     std::string gid, gid_type, group_count, pc_pointer;
-    bool BDA() const { return config.transport != TypedFrameTransport::StorageBuffer; }
+    bool BDA() const { return config.transport == TypedFrameTransport::PhysicalAddress; }
     void CollectBuiltins() {
         for (auto id : globals) {
             const auto &variable = Def(id);
@@ -689,6 +681,10 @@ class Compiler {
         auto line = "OpCapability " + capability + "\n";
         if (source_caps.str().find(line) == std::string::npos && code.capabilities.find(line) == std::string::npos)
             source_caps << line;
+    }
+    void EnsureExtension(const std::string &extension) {
+        const auto line = "OpExtension \"" + extension + "\"\n";
+        if (extensions.str().find(line) == std::string::npos) extensions << line;
     }
     std::string DescriptorType(uint32_t type) {
         auto known = descriptor_types.find(type);
@@ -2297,7 +2293,7 @@ TypedContinuationProgram CompileTypedContinuationSteps(const std::vector<uint32_
         }
         selected.insert(selected.end(), source.begin() + p, source.begin() + p + (source[p] >> 16));
     }
-    spvtools::Optimizer optimizer(SPV_ENV_VULKAN_1_3);
+    spvtools::Optimizer optimizer(VulkanEnvironmentForSPIRV(selected.at(1)));
     std::string error;
     optimizer.SetMessageConsumer(
         [&](spv_message_level_t, const char *, const spv_position_t &, const char *message) { error += message; });

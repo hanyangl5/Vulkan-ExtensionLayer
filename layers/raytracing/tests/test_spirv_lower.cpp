@@ -303,9 +303,9 @@ static bool check_as_value_stores(const std::vector<uint32_t> &words, const std:
     return valid;
 }
 
-static bool lower_assembly(const char *label, const char *source, const std::vector<uint32_t> &lib,
-                           std::vector<uint32_t> *lowered) {
-    spvtools::SpirvTools tools(SPV_ENV_VULKAN_1_2);
+static bool lower_assembly(const char *label, const char *source, const std::vector<uint32_t> &lib, std::vector<uint32_t> *lowered,
+                           spv_target_env environment = SPV_ENV_VULKAN_1_2) {
+    spvtools::SpirvTools tools(environment);
     tools.SetMessageConsumer([](spv_message_level_t, const char *, const spv_position_t &, const char *message) {
         std::fprintf(stderr, "fixture diagnostic: %s\n", message);
     });
@@ -437,7 +437,7 @@ OpFunctionEnd
                          "regression_phi", "regression_helper_pointer", "regression_element_pointer"});
 }
 
-static bool check_as_runtime_nonuniform(const std::vector<uint32_t> &lib, bool grouped = false) {
+static bool check_as_runtime_nonuniform(const std::vector<uint32_t> &lib, bool grouped = false, bool spirv14 = false) {
     const char *source = R"spv(
 OpCapability Shader
 OpCapability RayQueryKHR
@@ -497,7 +497,7 @@ OpFunctionEnd
     }
     std::vector<uint32_t> lowered;
     if (!lower_assembly(grouped ? "runtime/grouped nonuniform AS descriptor array" : "runtime/nonuniform AS descriptor array",
-                        assembly.c_str(), lib, &lowered) ||
+                        assembly.c_str(), lib, &lowered, spirv14 ? SPV_ENV_VULKAN_1_1_SPIRV_1_4 : SPV_ENV_VULKAN_1_2) ||
         !check_as_value_stores(lowered, {"regression_nonuniform"}))
         return false;
     std::unordered_set<uint32_t> nonuniform;
@@ -515,7 +515,16 @@ OpFunctionEnd
         std::fprintf(stderr, "FAIL: nonuniform AS cell load lost storage-buffer capability/pointer decoration\n");
         return false;
     }
-    return grouped || check_as_runtime_nonuniform(lib, true);
+    if (spirv14) {
+        spvtools::SpirvTools validator(SPV_ENV_VULKAN_1_1_SPIRV_1_4);
+        spvtools::ValidatorOptions options;
+        options.SetScalarBlockLayout(true);
+        if (lowered.at(1) != 0x00010400u || !validator.Validate(lowered.data(), lowered.size(), options)) {
+            std::fprintf(stderr, "FAIL: actual SPIR-V 1.4 NonUniform lowering upgraded or failed Vulkan 1.1 validation\n");
+            return false;
+        }
+    }
+    return grouped || check_as_runtime_nonuniform(lib, true, spirv14);
 }
 
 static bool check_workgroup_metadata(const std::vector<uint32_t> &lib) {
@@ -929,6 +938,7 @@ main(int argc, char **argv)
    if (!check_function_query_image(lib)) failures++;
    if (!check_as_operand_values(lib)) failures++;
    if (!check_as_runtime_nonuniform(lib)) failures++;
+   if (lib[1] == 0x00010400u && !check_as_runtime_nonuniform(lib, false, true)) failures++;
    if (!check_workgroup_metadata(lib)) failures++;
    if (!check_as_context_literal(user, lib)) failures++;
    if (!check_spirv16_variant(user, lib)) failures++;

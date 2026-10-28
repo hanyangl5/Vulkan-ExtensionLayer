@@ -2,19 +2,15 @@
 // SPDX-License-Identifier: Apache-2.0
 #include "state_compiler.h"
 #include "typed_pipeline.h"
-#include "glsl_compiler.h"
 #include "cts_raytmax_intersection_fixture.h"
 #include <spirv-tools/libspirv.hpp>
-#include <spirv-tools/optimizer.hpp>
 #include <spirv/unified1/spirv.hpp>
 #include <vulkan/vulkan.h>
 #include <algorithm>
 #include <cstring>
-#include <fstream>
 #include <iostream>
 #include <map>
 #include <set>
-#include <sstream>
 #include <stdexcept>
 
 namespace {
@@ -36,56 +32,6 @@ struct PointerGPU : GPU {
     };
     VkPhysicalDevice physical{};
     std::vector<AppBuffer> resources;
-    bool trace = false;
-    bool fault_enabled = false;
-    void Trace(const std::string &stage) const {
-        if (trace) std::cout << "Private pointer diagnostic: " << stage << "\n" << std::flush;
-    }
-    void CaptureFault(VkResult result) const {
-        if (!trace || result != VK_ERROR_DEVICE_LOST) return;
-        if (!fault_enabled) {
-            Trace("VK_EXT_device_fault unavailable/not enabled; original DeviceLost remains");
-            return;
-        }
-        // The official API requires an already-lost device. Query counts
-        // before allocating matching arrays. Vendor binary capture is off.
-        // https://docs.vulkan.org/refpages/latest/refpages/source/vkGetDeviceFaultInfoEXT.html
-        auto query = reinterpret_cast<PFN_vkGetDeviceFaultInfoEXT>(vkGetDeviceProcAddr(device, "vkGetDeviceFaultInfoEXT"));
-        if (!query) {
-            Trace("enabled VK_EXT_device_fault entry point unavailable");
-            return;
-        }
-        VkDeviceFaultCountsEXT counts{VK_STRUCTURE_TYPE_DEVICE_FAULT_COUNTS_EXT};
-        const auto counted = query(device, &counts, nullptr);
-        Trace("vkGetDeviceFaultInfoEXT counts result=" + std::to_string(counted) +
-              " addresses=" + std::to_string(counts.addressInfoCount) + " vendor=" + std::to_string(counts.vendorInfoCount));
-        if (counted != VK_SUCCESS) return;
-        std::vector<VkDeviceFaultAddressInfoEXT> addresses(counts.addressInfoCount);
-        std::vector<VkDeviceFaultVendorInfoEXT> vendors(counts.vendorInfoCount);
-        VkDeviceFaultInfoEXT info{VK_STRUCTURE_TYPE_DEVICE_FAULT_INFO_EXT};
-        info.pAddressInfos = addresses.empty() ? nullptr : addresses.data();
-        info.pVendorInfos = vendors.empty() ? nullptr : vendors.data();
-        counts.vendorBinarySize = 0;
-        const auto captured = query(device, &counts, &info);
-        if (captured != VK_SUCCESS && captured != VK_INCOMPLETE) {
-            Trace("vkGetDeviceFaultInfoEXT data result=" + std::to_string(captured) + "; original DeviceLost remains");
-            return;
-        }
-        std::ostringstream dump;
-        dump << "VK_EXT_device_fault result=" << captured << " description=" << info.description << "\n";
-        for (size_t n = 0; n < std::min<size_t>(counts.addressInfoCount, addresses.size()); ++n) {
-            const auto &address = addresses[n];
-            dump << "address type=" << address.addressType << " reported=0x" << std::hex << address.reportedAddress
-                 << " precision=0x" << address.addressPrecision << std::dec << "\n";
-        }
-        for (size_t n = 0; n < std::min<size_t>(counts.vendorInfoCount, vendors.size()); ++n) {
-            const auto &vendor = vendors[n];
-            dump << "vendor description=" << vendor.description << " code=" << vendor.vendorFaultCode
-                 << " data=" << vendor.vendorFaultData << "\n";
-        }
-        std::cout << dump.str() << std::flush;
-        std::ofstream("typed-private-device-fault.txt", std::ios::app) << dump.str();
-    }
     void Allocate(uint32_t bytes, bool bda, VkBuffer &out_buffer, VkDeviceMemory &out_memory, uint32_t *&out_mapped) {
         VkBufferCreateInfo ci{VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO};
         ci.size = bytes;
@@ -115,8 +61,7 @@ struct PointerGPU : GPU {
         std::memset(out_mapped, 0xcd, bytes);
     }
     bool InitPointer(const std::vector<uint32_t> &code, uint32_t bytes, uint32_t resource_words, uint32_t descriptor_count,
-                     bool bda, uint32_t context_offset, bool independent_roots, bool diagnostic = false) {
-        trace = diagnostic;
+                     bool bda, uint32_t context_offset, bool independent_roots) {
         specialized_context = bda;
         VkApplicationInfo app{VK_STRUCTURE_TYPE_APPLICATION_INFO};
         app.apiVersion = VK_API_VERSION_1_3;
@@ -149,25 +94,9 @@ struct PointerGPU : GPU {
              properties.limits.maxComputeWorkGroupSize[0] < 16 || properties.limits.maxComputeWorkGroupInvocations < 16))
             return false;
         VkPhysicalDeviceVariablePointersFeatures pointers{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VARIABLE_POINTERS_FEATURES};
-        VkPhysicalDeviceFaultFeaturesEXT faults{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FAULT_FEATURES_EXT};
-        bool fault_extension = false;
-        if (trace) {
-            uint32_t extension_count = 0;
-            Check(vkEnumerateDeviceExtensionProperties(physical, nullptr, &extension_count, nullptr));
-            std::vector<VkExtensionProperties> extensions(extension_count);
-            Check(vkEnumerateDeviceExtensionProperties(physical, nullptr, &extension_count, extensions.data()));
-            for (const auto &extension : extensions)
-                fault_extension |= std::strcmp(extension.extensionName, VK_EXT_DEVICE_FAULT_EXTENSION_NAME) == 0;
-            if (fault_extension) pointers.pNext = &faults;
-        }
         VkPhysicalDeviceVulkan12Features v12{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES, &pointers};
         VkPhysicalDeviceFeatures2 available{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2, &v12};
         vkGetPhysicalDeviceFeatures2(physical, &available);
-        fault_enabled = fault_extension && faults.deviceFault;
-        if (trace)
-            Trace(std::string("VK_EXT_device_fault extension=") + (fault_extension ? "present" : "absent") +
-                  " feature=" + (faults.deviceFault ? "true" : "false") + " enabled=" + (fault_enabled ? "true" : "false") +
-                  "; deviceFaultVendorBinary disabled; no availability-based test skip");
         if (!available.features.shaderInt64 || !pointers.variablePointersStorageBuffer ||
             (independent_roots && !pointers.variablePointers) || (bda && !v12.bufferDeviceAddress))
             return false;
@@ -188,9 +117,6 @@ struct PointerGPU : GPU {
         pointers = {VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VARIABLE_POINTERS_FEATURES};
         pointers.variablePointersStorageBuffer = VK_TRUE;
         pointers.variablePointers = independent_roots;
-        faults = {VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FAULT_FEATURES_EXT};
-        faults.deviceFault = fault_enabled;
-        pointers.pNext = fault_enabled ? &faults : nullptr;
         v12 = {VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES, &pointers};
         v12.bufferDeviceAddress = bda;
         v12.shaderStorageBufferArrayNonUniformIndexing = descriptor_count > 1;
@@ -201,9 +127,6 @@ struct PointerGPU : GPU {
         dc.queueCreateInfoCount = 1;
         dc.pQueueCreateInfos = &qi;
         dc.pEnabledFeatures = &enabled;
-        const char *fault_name = VK_EXT_DEVICE_FAULT_EXTENSION_NAME;
-        dc.enabledExtensionCount = fault_enabled ? 1u : 0u;
-        dc.ppEnabledExtensionNames = fault_enabled ? &fault_name : nullptr;
         Check(vkCreateDevice(physical, &dc, nullptr, &device));
         vkGetDeviceQueue(device, family, 0, &queue);
         Allocate(bytes, bda, buffer, memory, mapped);
@@ -271,60 +194,11 @@ struct PointerGPU : GPU {
         cp.stage.pName = "main";
         cp.stage.pSpecializationInfo = bda ? &spec : nullptr;
         cp.layout = layout;
-        Trace("vkCreateComputePipelines begin");
-        const auto pipeline_result = vkCreateComputePipelines(device, VK_NULL_HANDLE, 1, &cp, nullptr, &pipeline);
-        Trace("vkCreateComputePipelines result=" + std::to_string(pipeline_result));
-        CaptureFault(pipeline_result);
-        Check(pipeline_result);
+        Check(vkCreateComputePipelines(device, VK_NULL_HANDLE, 1, &cp, nullptr, &pipeline));
         VkCommandPoolCreateInfo command_pool{VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO};
         command_pool.queueFamilyIndex = family;
         Check(vkCreateCommandPool(device, &command_pool, nullptr, &pool));
         return true;
-    }
-    void Dispatch(uint32_t phase, uint32_t limit, uint32_t workgroups) {
-        if (!trace) {
-            GPU::Dispatch(phase, limit, workgroups);
-            return;
-        }
-        Trace("record dispatch workgroups=" + std::to_string(workgroups));
-        VkCommandBufferAllocateInfo allocation{VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO};
-        allocation.commandPool = pool;
-        allocation.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-        allocation.commandBufferCount = 1;
-        VkCommandBuffer command;
-        Check(vkAllocateCommandBuffers(device, &allocation, &command));
-        VkCommandBufferBeginInfo begin{VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
-        Check(vkBeginCommandBuffer(command, &begin));
-        VkMemoryBarrier available{VK_STRUCTURE_TYPE_MEMORY_BARRIER};
-        available.srcAccessMask = VK_ACCESS_HOST_WRITE_BIT | VK_ACCESS_SHADER_WRITE_BIT;
-        available.dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;
-        vkCmdPipelineBarrier(command, VK_PIPELINE_STAGE_HOST_BIT | VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-                             VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 1, &available, 0, nullptr, 0, nullptr);
-        vkCmdBindPipeline(command, VK_PIPELINE_BIND_POINT_COMPUTE, pipeline);
-        vkCmdBindDescriptorSets(command, VK_PIPELINE_BIND_POINT_COMPUTE, layout, 0, 1, &set, 0, nullptr);
-        const uint32_t push[] = {phase, limit};
-        if (!specialized_context) vkCmdPushConstants(command, layout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(push), push);
-        vkCmdDispatch(command, workgroups, 1, 1);
-        VkMemoryBarrier visible{VK_STRUCTURE_TYPE_MEMORY_BARRIER};
-        visible.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
-        visible.dstAccessMask = VK_ACCESS_HOST_READ_BIT;
-        vkCmdPipelineBarrier(command, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_HOST_BIT, 0, 1, &visible, 0, nullptr,
-                             0, nullptr);
-        Check(vkEndCommandBuffer(command));
-        VkSubmitInfo submit{VK_STRUCTURE_TYPE_SUBMIT_INFO};
-        submit.commandBufferCount = 1;
-        submit.pCommandBuffers = &command;
-        Trace("vkQueueSubmit begin");
-        const auto submitted = vkQueueSubmit(queue, 1, &submit, VK_NULL_HANDLE);
-        Trace("vkQueueSubmit result=" + std::to_string(submitted));
-        CaptureFault(submitted);
-        Check(submitted);
-        Trace("vkQueueWaitIdle begin");
-        const auto waited = vkQueueWaitIdle(queue);
-        Trace("vkQueueWaitIdle result=" + std::to_string(waited));
-        CaptureFault(waited);
-        Check(waited);
-        vkFreeCommandBuffers(device, pool, 1, &command);
     }
     ~PointerGPU() {
         if (!device) return;
@@ -336,8 +210,6 @@ struct PointerGPU : GPU {
         }
     }
 };
-
-#include "state_private_pointer_gpu.h"
 
 // This is source SPIR-V, not a hand-written compute/state test. The compiler
 // must transform its actual CFG, helper call, Phi edges, arithmetic and memory
@@ -664,7 +536,7 @@ OpFunctionEnd
     }
     Require(logical_copies >= 5 && volatile_loads == 3, "Aggregate conversion lost or duplicated a volatile source read");
 }
-void PrivateFrameBounds() {
+void SourcePrivateFrameBounds() {
     const char *source = R"spv(
 OpCapability Shader
 OpCapability RayTracingKHR
@@ -848,15 +720,9 @@ OpFunctionEnd
     auto dynamic_source = Source(dynamic_descriptor);
     auto physical_program =
         CompileTypedPipelineStage(dynamic_source, "main", VK_SHADER_STAGE_INTERSECTION_BIT_KHR, nullptr, "snapshot_bda");
-    TypedContinuationCompileOptions private_options;
-    private_options.transport = TypedFrameTransport::PrivateArray;
-    private_options.private_frame_words = physical_program.frame_stride_words;
-    auto private_program = CompileTypedPipelineStage(dynamic_source, "main", VK_SHADER_STAGE_INTERSECTION_BIT_KHR, nullptr,
-                                                     "snapshot_private", private_options);
-    Require(physical_program.resource_snapshot_fields == 5 && private_program.resource_snapshot_fields == 5 &&
-                physical_program.frame_stride_bytes == private_program.frame_stride_bytes &&
-                physical_program.control_byte_offset == private_program.control_byte_offset,
-            "BDA and PrivateArray resource snapshots disagree on the checked stage-frame ABI");
+    Require(physical_program.resource_snapshot_fields == 5 && physical_program.resource_snapshot_bytes == 36 &&
+                physical_program.system_header_bytes == VEL_RT_SYSTEM_BYTES,
+            "BDA resource snapshots lost the typed selectors or system prefix");
     std::string crossing_pointer = atomic;
     Replace(crossing_pointer, "%prior = OpAtomicSMin", "OpBranch %next\n%next = OpLabel\n%prior = OpAtomicSMin");
     atomic_check(crossing_pointer, spv::ExecutionModelRayGenerationKHR, 2);
@@ -869,12 +735,7 @@ void ExactCtsImageAtomicStage() {
     source[1] = 0x00010400;
     Require(source_tools.Validate(source), "Exact CTS SPIR-V1.4 intersection source failed validation");
     auto physical = CompileTypedPipelineStage(source, "main", VK_SHADER_STAGE_INTERSECTION_BIT_KHR, nullptr, "cts_is_bda");
-    TypedContinuationCompileOptions options;
-    options.transport = TypedFrameTransport::PrivateArray;
-    options.private_frame_words = static_cast<uint32_t>(physical.frame_stride_bytes / 4);
-    auto private_array =
-        CompileTypedPipelineStage(source, "main", VK_SHADER_STAGE_INTERSECTION_BIT_KHR, nullptr, "cts_is_private", options);
-    for (const auto *program : {&physical, &private_array}) {
+    for (const auto *program : {&physical}) {
         spvtools::SpirvTools library_tools(SPV_ENV_UNIVERSAL_1_5);
         Require(library_tools.Validate(program->spirv), "Exact CTS image atomic stage library failed validation");
         uint32_t pointers = 0, atomics = 0;
@@ -1092,16 +953,9 @@ bool LogicalPointerSnapshots(bool execute, bool array_pointers = false) {
     Require(program.pointer_snapshot_values >= 5 && program.pointer_snapshot_bytes >= uint64_t(program.pointer_snapshot_values) * 4,
             "Pointer Phi/Select/helper arguments lack persistent typed identity snapshots");
     auto physical = CompileTypedPipelineStage(source, "main", VK_SHADER_STAGE_INTERSECTION_BIT_KHR, nullptr, "logical_pointer_bda");
-    TypedContinuationCompileOptions options;
-    options.transport = TypedFrameTransport::PrivateArray;
-    options.private_frame_words = physical.frame_stride_words;
-    auto private_array = CompileTypedPipelineStage(source, "main", VK_SHADER_STAGE_INTERSECTION_BIT_KHR, nullptr,
-                                                   "logical_pointer_private", options);
     Require(physical.pointer_snapshot_values == program.pointer_snapshot_values &&
-                physical.pointer_snapshot_bytes == program.pointer_snapshot_bytes &&
-                private_array.pointer_snapshot_bytes == physical.pointer_snapshot_bytes &&
-                private_array.frame_stride_bytes == physical.frame_stride_bytes,
-            "Logical pointer identity ABI differs across frame transports");
+                physical.pointer_snapshot_bytes == program.pointer_snapshot_bytes,
+            "Logical pointer identity ABI differs between SSBO and BDA frames");
     std::string wide_source(kPointerSource);
     Replace(wide_source, "OpCapability Shader", "OpCapability Shader\nOpCapability Int64");
     Replace(wide_source, "%float = OpTypeFloat 32", "%wide = OpTypeInt 64 1\n%float = OpTypeFloat 32");
@@ -1367,48 +1221,7 @@ std::string QualifiedPointerSource(bool module_private, bool descriptor_array, b
     return source;
 }
 
-enum class PrivatePointerDiagnostic { None, Original, FirstReport, ZeroFrame, Optimize, NoMemoryHints };
-std::string PrivatePointerScheduler(const TypedContinuationProgram &stage, bool independent_roots, bool descriptor_array,
-                                    uint32_t count, PrivatePointerDiagnostic diagnostic = PrivatePointerDiagnostic::None) {
-    std::ostringstream source;
-    source << "#version 460\n#extension GL_EXT_shader_explicit_arithmetic_types_int64 : require\n";
-    if (descriptor_array) source << "#extension GL_EXT_nonuniform_qualifier : require\n";
-    source << "layout(set=0,binding=1,std430)coherent buffer RawA{uint value[];}raw_a" << (descriptor_array ? "[3]" : "") << ";\n";
-    if (independent_roots)
-        source << "layout(set=0,binding=2,std430)coherent buffer RawB{uint value[];}raw_b" << (descriptor_array ? "[3]" : "")
-               << ";\n";
-    source << "layout(local_size_x=" << (descriptor_array ? count : 1)
-           << ")in;\nlayout(set=0,binding=0,std430)buffer Status{uint words[];}status;\n"
-           << "uint vel_rt_private_frames[" << stage.private_frame_words << "];\nvoid " << stage.step_export_name
-           << "(uint64_t frame){}\nvoid main(){uint id=gl_GlobalInvocationID.x;if(id>=" << count << "u)return;uint row=id*16u;\n";
-    const auto control = stage.control_word;
-    if (diagnostic == PrivatePointerDiagnostic::ZeroFrame)
-        source << "for(uint n=0;n<" << stage.private_frame_words << "u;++n)vel_rt_private_frames[n]=0u;\n";
-    source << "for(uint n=0;n<32u;++n)vel_rt_private_frames[" << control << "u+n]=0u;\n"
-           << "vel_rt_private_frames[" << VEL_RT_SYS_LAUNCH_ID / 4 << "]=id;\n"
-           << "vel_rt_private_frames[" << VEL_RT_SYS_LAUNCH_ID / 4 + 1 << "]=0u;\n"
-           << "vel_rt_private_frames[" << VEL_RT_SYS_LAUNCH_ID / 4 + 2 << "]=0u;\n"
-           << "for(uint round=0;round<" << (diagnostic == PrivatePointerDiagnostic::FirstReport ? 1 : 4) << "u;++round){"
-           << stage.step_export_name << "(0ul);\n"
-           << "if(round<3u){status.words[row+round*4u]=vel_rt_private_frames[" << control + 4
-           << "];status.words[row+round*4u+1u]=vel_rt_private_frames[" << control + 5
-           << "];status.words[row+round*4u+2u]=vel_rt_private_frames[" << control + 1
-           << "];status.words[row+round*4u+3u]=vel_rt_private_frames[" << control + 2 << "];\n"
-           << "uint element=id*4u+round;uint poison=0xabcd0000u+id*4u+round;\n";
-    const auto a = descriptor_array ? "raw_a[nonuniformEXT(id%3u)].value" : "raw_a.value";
-    const auto b = descriptor_array ? "raw_b[nonuniformEXT((id+1u)%3u)].value" : "raw_b.value";
-    if (independent_roots)
-        source << "if((id&1u)!=0u)" << b << "[128u+element*2u]=poison;else " << a << "[element]=poison;\n";
-    else
-        source << a << "[(id&1u)!=0u?128u+element*2u:element]=poison;\n";
-    source << "memoryBarrierBuffer();\nvel_rt_private_frames[" << control + 3 << "]=uint((id+round)%3u!=0u);vel_rt_private_frames["
-           << control + 2 << "]=1u;}}\nstatus.words[row+12u]=vel_rt_private_frames[" << control
-           << "];status.words[row+13u]=vel_rt_private_frames[" << control + 1 << "];status.words[row+14u]=vel_rt_private_frames["
-           << control + 2 << "];status.words[row+15u]=0x9132abcdu;}\n";
-    return source.str();
-}
-
-void CheckQualifiedPointerCode(const std::vector<uint32_t> &words, TypedFrameTransport transport, bool optimized_frame = false) {
+void CheckQualifiedPointerCode(const std::vector<uint32_t> &words, TypedFrameTransport transport) {
     std::map<uint32_t, uint32_t> storage, pointer_storage;
     uint32_t qualified_loads = 0, qualified_stores = 0, nonuniform_memory = 0;
     std::set<uint32_t> nonuniform;
@@ -1434,16 +1247,10 @@ void CheckQualifiedPointerCode(const std::vector<uint32_t> &words, TypedFrameTra
         const auto mask = words[p + mask_word];
         if (!(mask & (spv::MemoryAccessVolatileMask | spv::MemoryAccessNontemporalMask))) continue;
         const auto actual_storage = pointer_storage.at(pointer);
-        Require(actual_storage != spv::StorageClassFunction || optimized_frame,
-                "Source qualifiers leaked onto compiler Function scratch");
-        const auto frame_storage = transport == TypedFrameTransport::PrivateArray      ? spv::StorageClassPrivate
-                                   : transport == TypedFrameTransport::PhysicalAddress ? spv::StorageClassPhysicalStorageBuffer
-                                                                                       : spv::StorageClassStorageBuffer;
-        // The production optimizer can inline every step/codec call and move
-        // the invocation-private backing into main's Function storage. Its
-        // lifetime still covers all four scheduler steps in that invocation.
-        if (actual_storage == frame_storage ||
-            (optimized_frame && actual_storage == spv::StorageClassFunction && transport == TypedFrameTransport::PrivateArray)) {
+        Require(actual_storage != spv::StorageClassFunction, "Source qualifiers leaked onto compiler Function scratch");
+        const auto frame_storage = transport == TypedFrameTransport::PhysicalAddress ? spv::StorageClassPhysicalStorageBuffer
+                                                                                     : spv::StorageClassStorageBuffer;
+        if (actual_storage == frame_storage) {
             if (op == spv::OpLoad)
                 ++qualified_loads;
             else
@@ -1484,21 +1291,14 @@ OpEntryPoint RayGenerationKHR %main "main"
 %b = OpVariable %pointer Function
 OpCopyMemory %b %a )spv" + operands +
                                    "\nOpReturn\nOpFunctionEnd\n");
-        for (const auto transport :
-             {TypedFrameTransport::StorageBuffer, TypedFrameTransport::PhysicalAddress, TypedFrameTransport::PrivateArray}) {
+        for (const auto transport : {TypedFrameTransport::StorageBuffer, TypedFrameTransport::PhysicalAddress}) {
             TypedContinuationCompileOptions options;
             options.transport = transport;
-            if (transport == TypedFrameTransport::PrivateArray) {
-                options.emit_compute_entry = false;
-                options.step_export_name = "copy_masks";
-                options.private_frame_words = 1024;
-            }
             const auto program = CompileTypedContinuationSteps(source, "main", spv::ExecutionModelRayGenerationKHR, options);
             const auto &words = program.spirv;
             std::map<uint32_t, uint32_t> pointer_types, pointers, read_flags, write_flags;
-            const auto storage = transport == TypedFrameTransport::PrivateArray      ? spv::StorageClassPrivate
-                                 : transport == TypedFrameTransport::PhysicalAddress ? spv::StorageClassPhysicalStorageBuffer
-                                                                                     : spv::StorageClassStorageBuffer;
+            const auto storage = transport == TypedFrameTransport::PhysicalAddress ? spv::StorageClassPhysicalStorageBuffer
+                                                                                   : spv::StorageClassStorageBuffer;
             for (size_t p = 5; p < words.size(); p += words[p] >> 16)
                 if ((words[p] & 65535) == spv::OpTypePointer) pointer_types[words[p + 1]] = words[p + 2];
             uint32_t function = 0;
@@ -1536,27 +1336,14 @@ void PointerWrite(uint32_t *mapped, uint64_t offset, T value) {
 }
 
 bool QualifiedPointerMemory(bool execute, bool module_private, bool descriptor_array, TypedFrameTransport transport,
-                            bool independent_roots = true, PrivatePointerDiagnostic diagnostic = PrivatePointerDiagnostic::None) {
+                            bool independent_roots = true) {
     constexpr uint32_t count = 16, resource_words = 384;
     const auto input = Source(QualifiedPointerSource(module_private, descriptor_array, independent_roots));
     TypedContinuationCompileOptions options;
     options.transport = transport;
-    auto physical = CompileTypedPipelineStage(input, "main", VK_SHADER_STAGE_INTERSECTION_BIT_KHR, nullptr, "pointer_memory");
-    if (transport == TypedFrameTransport::PrivateArray) {
-        options.private_frame_words = physical.frame_stride_words;
-        physical =
-            CompileTypedPipelineStage(input, "main", VK_SHADER_STAGE_INTERSECTION_BIT_KHR, nullptr, "pointer_memory", options);
-    }
-    auto program = transport == TypedFrameTransport::PrivateArray
-                       ? physical
-                       : CompileTypedContinuationSteps(input, "main", spv::ExecutionModelIntersectionKHR, options);
-    const auto scheduler = transport == TypedFrameTransport::PrivateArray
-                               ? PrivatePointerScheduler(program, independent_roots, descriptor_array, count, diagnostic)
-                               : std::string();
-    auto binary = transport == TypedFrameTransport::PrivateArray
-                      ? LinkTypedPipelineProgram(CompileGLSL(scheduler, VK_SHADER_STAGE_COMPUTE_BIT), {program})
-                      : program.spirv;
-    if (descriptor_array && transport != TypedFrameTransport::PrivateArray) {
+    auto program = CompileTypedContinuationSteps(input, "main", spv::ExecutionModelIntersectionKHR, options);
+    auto binary = program.spirv;
+    if (descriptor_array) {
         bool changed = false;
         for (size_t p = 5; p < binary.size(); p += binary[p] >> 16)
             if ((binary[p] & 65535) == spv::OpExecutionMode && binary[p + 2] == spv::ExecutionModeLocalSize) {
@@ -1568,102 +1355,20 @@ bool QualifiedPointerMemory(bool execute, bool module_private, bool descriptor_a
     spvtools::SpirvTools tools(SPV_ENV_VULKAN_1_3);
     Require(tools.Validate(binary), "Actual qualified pointer GPU module failed validation");
     CheckQualifiedPointerCode(binary, transport);
-    if (diagnostic == PrivatePointerDiagnostic::Optimize) {
-        // Match BuildTypedRuntimeProgram's production cleanup, including its
-        // validator profile. This changes only the diagnostic module.
-        spvtools::Optimizer optimizer(SPV_ENV_VULKAN_1_3);
-        std::string error;
-        optimizer.SetMessageConsumer([&](spv_message_level_t, const char *, const spv_position_t &, const char *message) {
-            error += std::string(message) + "\n";
-        });
-        optimizer.RegisterPerformancePasses();
-        spvtools::ValidatorOptions validation;
-        validation.SetScalarBlockLayout(true);
-        spvtools::OptimizerOptions cleanup;
-        cleanup.set_validator_options(validation);
-        std::vector<uint32_t> optimized;
-        Require(optimizer.Run(binary.data(), binary.size(), &optimized, cleanup), "Diagnostic production cleanup failed: " + error);
-        std::cout << "Private pointer diagnostic D: production RegisterPerformancePasses, " << binary.size() << " -> "
-                  << optimized.size() << " SPIR-V words\n"
-                  << std::flush;
-        binary = std::move(optimized);
-        Require(tools.Validate(binary), "Optimized qualified pointer diagnostic failed validation");
-        CheckQualifiedPointerCode(binary, transport, true);
-    } else if (diagnostic == PrivatePointerDiagnostic::NoMemoryHints) {
-        uint32_t removed = 0;
-        for (size_t p = 5; p < binary.size(); p += binary[p] >> 16) {
-            const auto op = binary[p] & 65535, size = binary[p] >> 16;
-            const auto operand = op == spv::OpLoad ? 4u : op == spv::OpStore ? 3u : size;
-            if (operand < size) {
-                auto &mask = binary[p + operand];
-                if (mask & (spv::MemoryAccessVolatileMask | spv::MemoryAccessNontemporalMask)) ++removed;
-                mask &= ~(spv::MemoryAccessVolatileMask | spv::MemoryAccessNontemporalMask);
-            }
-        }
-        Require(removed, "Memory-hint diagnostic removed no operands");
-        std::cout << "Private pointer diagnostic E: disabled Volatile/Nontemporal on " << removed
-                  << " native instructions; diagnostic violates the original Volatile access contract\n"
-                  << std::flush;
-        Require(tools.Validate(binary), "Unqualified pointer diagnostic failed validation");
-    }
-    if (diagnostic != PrivatePointerDiagnostic::None) {
-        // Neither an optimizer nor a diagnostic may shrink the 8193-cell
-        // backing into a small substitute or silently change its capacity.
-        std::map<uint32_t, uint32_t> constants, arrays, private_pointers;
-        for (size_t p = 5; p < binary.size(); p += binary[p] >> 16) {
-            const auto op = binary[p] & 65535;
-            if (op == spv::OpConstant && (binary[p] >> 16) == 4) constants[binary[p + 2]] = binary[p + 3];
-            if (op == spv::OpTypeArray) arrays[binary[p + 1]] = binary[p + 3];
-            if (op == spv::OpTypePointer &&
-                (binary[p + 2] == spv::StorageClassPrivate ||
-                 (diagnostic == PrivatePointerDiagnostic::Optimize && binary[p + 2] == spv::StorageClassFunction)))
-                private_pointers[binary[p + 1]] = binary[p + 3];
-        }
-        bool same_capacity = false;
-        for (size_t p = 5; p < binary.size(); p += binary[p] >> 16)
-            if ((binary[p] & 65535) == spv::OpVariable &&
-                (binary[p + 3] == spv::StorageClassPrivate ||
-                 (diagnostic == PrivatePointerDiagnostic::Optimize && binary[p + 3] == spv::StorageClassFunction)) &&
-                private_pointers.count(binary[p + 1])) {
-                const auto type = private_pointers.at(binary[p + 1]);
-                same_capacity |= arrays.count(type) && constants.count(arrays.at(type)) &&
-                                 constants.at(arrays.at(type)) == program.private_frame_words;
-            }
-        Require(same_capacity, "Diagnostic lost the complete original Private frame capacity");
-        const auto suffix = diagnostic == PrivatePointerDiagnostic::Original      ? "a"
-                            : diagnostic == PrivatePointerDiagnostic::FirstReport ? "b"
-                            : diagnostic == PrivatePointerDiagnostic::ZeroFrame   ? "c"
-                            : diagnostic == PrivatePointerDiagnostic::Optimize    ? "d"
-                                                                                  : "e";
-        const auto stem = std::string("typed-private-diag-") + suffix;
-        std::ofstream(stem + ".glsl") << scheduler;
-        std::ofstream dumped(stem + ".spv", std::ios::binary);
-        dumped.write(reinterpret_cast<const char *>(binary.data()), binary.size() * sizeof(uint32_t));
-        Require(bool(dumped), "Cannot write diagnostic SPIR-V dump");
-        std::string assembly;
-        Require(tools.Disassemble(binary, &assembly, SPV_BINARY_TO_TEXT_OPTION_FRIENDLY_NAMES), "Cannot disassemble diagnostic");
-        std::ofstream(stem + ".spvasm") << assembly;
-        std::cout << "Private pointer diagnostic " << suffix << ": " << program.private_frame_words << " private words, "
-                  << program.frame_stride_bytes << " frame bytes, control word " << program.control_word << ", 8193 cells; dump "
-                  << stem << ".{glsl,spv,spvasm}\n"
-                  << std::flush;
-    }
     Require(program.frames.options.logical_pointer_words >= (descriptor_array ? 5u : 4u),
             "Pointer memory did not retain complete numeric descriptor/index identity");
     if (!execute) return true;
-    const bool private_array = transport == TypedFrameTransport::PrivateArray,
-               bda = transport != TypedFrameTransport::StorageBuffer;
-    const auto frame_bytes = private_array ? count * 16 * 4 : count * program.frame_stride_words * 4;
+    const bool bda = transport == TypedFrameTransport::PhysicalAddress;
+    const auto frame_bytes = count * program.frame_stride_words * 4;
     const auto context = (frame_bytes + 255u) & ~255u;
     PointerGPU gpu;
-    const char *name = private_array ? "PrivateArray" : bda ? "BDA" : "SSBO";
+    const char *name = bda ? "BDA" : "SSBO";
     std::cout << "Creating qualified " << name << " pointer memory: " << (module_private ? "Private" : "Function")
               << ", source roots=" << (independent_roots ? 2 : 1) << ", descriptors per root=" << (descriptor_array ? 3 : 1) << ", "
               << binary.size() << " SPIR-V words\n"
               << std::flush;
     const auto descriptors = descriptor_array ? 3u : 1u;
-    if (!gpu.InitPointer(binary, context + 64, resource_words, descriptors, bda, context, independent_roots,
-                         diagnostic != PrivatePointerDiagnostic::None)) {
+    if (!gpu.InitPointer(binary, context + 64, resource_words, descriptors, bda, context, independent_roots)) {
         std::cout << "Qualified pointer fixture skipped: Vulkan1.3/descriptor budget/shaderInt64/variablePointersStorageBuffer"
                   << (independent_roots ? "/variablePointers" : "") << (bda ? "/bufferDeviceAddress" : "")
                   << (descriptor_array ? "/storage-buffer dynamic and NonUniform descriptor-array indexing/16-lane compute subgroup"
@@ -1672,68 +1377,46 @@ bool QualifiedPointerMemory(bool execute, bool module_private, bool descriptor_a
         return false;
     }
     const auto workgroups = descriptor_array ? 1u : count;
-    const bool first_report = diagnostic == PrivatePointerDiagnostic::FirstReport;
     for (uint32_t activation = 0; activation < 2; ++activation) {
         for (uint32_t root = 0; root < gpu.resources.size(); ++root)
             for (uint32_t word = 0; word < resource_words; ++word) gpu.resources[root].mapped[word] = 1000 + root * 10000 + word;
-        if (private_array) {
-            std::fill_n(gpu.mapped, count * 16, 0xcdcdcdcdu);
+        if (bda) {
+            PointerWrite(gpu.mapped, context + VEL_RT_CTX_FRAMES_ADDRESS, gpu.address);
+            PointerWrite(gpu.mapped, context + VEL_RT_CTX_FRAME_STRIDE, program.frame_stride_bytes);
+            PointerWrite(gpu.mapped, context + VEL_RT_CTX_FRAME_COUNT, uint64_t(count));
+            PointerWrite(gpu.mapped, context + VEL_RT_CTX_FRAME_OFFSET, uint64_t(0));
+            PointerWrite(gpu.mapped, context + VEL_RT_CTX_FRAME_CAPACITY, uint64_t(frame_bytes));
+        }
+        for (uint32_t id = 0; id < count; ++id) {
+            auto *frame = gpu.mapped + id * program.frame_stride_words;
+            std::fill_n(frame + program.control_word, kTypedContinuationControlWords, 0);
+            if (bda) {
+                frame[VEL_RT_SYS_LAUNCH_ID / 4] = id;
+                frame[VEL_RT_SYS_LAUNCH_ID / 4 + 1] = frame[VEL_RT_SYS_LAUNCH_ID / 4 + 2] = 0;
+            }
+        }
+        for (uint32_t round = 0; round < 4; ++round) {
             gpu.Dispatch(0, 0, workgroups);
             for (uint32_t id = 0; id < count; ++id) {
-                const auto *row = gpu.mapped + id * 16;
-                for (uint32_t round = 0; round < (first_report ? 1u : 3u); ++round) {
-                    float distance;
-                    std::memcpy(&distance, row + round * 4, 4);
-                    Require(distance == float(round) + .5f && row[round * 4 + 1] == id + round && row[round * 4 + 2] == 2 &&
-                                row[round * 4 + 3] == 0,
-                            "PrivateArray GPU scheduler report order/arguments changed");
+                auto *control = gpu.mapped + id * program.frame_stride_words + program.control_word;
+                if (round == 3) {
+                    Require(control[0] == UINT32_MAX, "Qualified pointer memory did not finish");
+                    continue;
                 }
-                if (first_report)
-                    Require(row[12] != UINT32_MAX && row[13] == 2 && row[14] == 1 && row[15] == 0x9132abcdu,
-                            "PrivateArray first-report diagnostic did not stop with its original pending frame");
-                else
-                    Require(row[12] == UINT32_MAX && row[13] == 0 && row[14] == 0 && row[15] == 0x9132abcdu,
-                            "PrivateArray GPU scheduler did not complete its original private frame");
-            }
-        } else {
-            if (bda) {
-                PointerWrite(gpu.mapped, context + VEL_RT_CTX_FRAMES_ADDRESS, gpu.address);
-                PointerWrite(gpu.mapped, context + VEL_RT_CTX_FRAME_STRIDE, program.frame_stride_bytes);
-                PointerWrite(gpu.mapped, context + VEL_RT_CTX_FRAME_COUNT, uint64_t(count));
-                PointerWrite(gpu.mapped, context + VEL_RT_CTX_FRAME_OFFSET, uint64_t(0));
-                PointerWrite(gpu.mapped, context + VEL_RT_CTX_FRAME_CAPACITY, uint64_t(frame_bytes));
-            }
-            for (uint32_t id = 0; id < count; ++id) {
-                auto *frame = gpu.mapped + id * program.frame_stride_words;
-                std::fill_n(frame + program.control_word, kTypedContinuationControlWords, 0);
-                if (bda) {
-                    frame[VEL_RT_SYS_LAUNCH_ID / 4] = id;
-                    frame[VEL_RT_SYS_LAUNCH_ID / 4 + 1] = frame[VEL_RT_SYS_LAUNCH_ID / 4 + 2] = 0;
-                }
-            }
-            for (uint32_t round = 0; round < 4; ++round) {
-                gpu.Dispatch(0, 0, workgroups);
-                for (uint32_t id = 0; id < count; ++id) {
-                    auto *control = gpu.mapped + id * program.frame_stride_words + program.control_word;
-                    if (round == 3) {
-                        Require(control[0] == UINT32_MAX, "Qualified pointer memory did not finish");
-                        continue;
-                    }
-                    float distance;
-                    std::memcpy(&distance, control + 4, 4);
-                    Require(control[1] == 2 && control[2] == 0 && distance == float(round) + .5f && control[5] == id + round,
-                            "Qualified pointer report order/arguments changed");
-                    const auto descriptor = descriptor_array ? ((id & 1) ? (id + 1) % 3 : id % 3) : 0;
-                    const auto root = independent_roots ? (id & 1) * descriptors + descriptor : 0;
-                    const auto element = id * 4 + round;
-                    const auto word = (id & 1) ? 128 + element * 2 : element;
-                    // Change the resource after its pre-report copy/read.
-                    // Resumption must retain the old value, not replay a late
-                    // native load from this now-poisoned word.
-                    gpu.resources[root].mapped[word] = 0xabcd0000u + id * 4 + round;
-                    control[3] = (id + round) % 3 != 0;
-                    control[2] = 1;
-                }
+                float distance;
+                std::memcpy(&distance, control + 4, 4);
+                Require(control[1] == 2 && control[2] == 0 && distance == float(round) + .5f && control[5] == id + round,
+                        "Qualified pointer report order/arguments changed");
+                const auto descriptor = descriptor_array ? ((id & 1) ? (id + 1) % 3 : id % 3) : 0;
+                const auto root = independent_roots ? (id & 1) * descriptors + descriptor : 0;
+                const auto element = id * 4 + round;
+                const auto word = (id & 1) ? 128 + element * 2 : element;
+                // Change the resource after its pre-report copy/read.
+                // Resumption must retain the old value, not replay a late
+                // native load from this now-poisoned word.
+                gpu.resources[root].mapped[word] = 0xabcd0000u + id * 4 + round;
+                control[3] = (id + round) % 3 != 0;
+                control[2] = 1;
             }
         }
         for (uint32_t root = 0; root < gpu.resources.size(); ++root) {
@@ -1742,29 +1425,16 @@ bool QualifiedPointerMemory(bool execute, bool module_private, bool descriptor_a
             for (uint32_t id = 0; id < count; ++id) {
                 const auto descriptor = descriptor_array ? ((id & 1) ? (id + 1) % 3 : id % 3) : 0;
                 if (root != (independent_roots ? (id & 1) * descriptors + descriptor : 0)) continue;
-                for (uint32_t round = 0; round < (first_report ? 1u : 3u); ++round) {
+                for (uint32_t round = 0; round < 3u; ++round) {
                     const auto element = id * 4 + round;
                     const auto word = (id & 1) ? 128 + element * 2 : element;
-                    if (first_report)
-                        expected[word] = 0xabcd0000u + id * 4 + round;
-                    else
-                        expected[word] += round + 1 + ((id + round) % 3 != 0 ? 7 : 11);
+                    expected[word] += round + 1 + ((id + round) % 3 != 0 ? 7 : 11);
                 }
             }
             Require(std::equal(expected.begin(), expected.end(), gpu.resources[root].mapped),
                     std::string(name) + " qualified pointer identity/memory flags/descriptor snapshot corrupted root " +
                         std::to_string(root));
         }
-    }
-    if (diagnostic != PrivatePointerDiagnostic::None) {
-        std::cout << "Private pointer diagnostic completed; "
-                  << (first_report                                            ? "first-report path only"
-                      : diagnostic == PrivatePointerDiagnostic::ZeroFrame     ? "zero-initialized-frame control only"
-                      : diagnostic == PrivatePointerDiagnostic::Optimize      ? "production-optimized module control only"
-                      : diagnostic == PrivatePointerDiagnostic::NoMemoryHints ? "Volatile/Nontemporal-disabled control only"
-                                                                              : "original full path")
-                  << "; a control-case success does not establish the original transport case passed\n";
-        return true;
     }
     std::cout << "Qualified " << name << " pointer memory executed with " << (independent_roots ? gpu.resources.size() : 1)
               << " source VkBuffers, all " << gpu.resources.size() * resource_words
@@ -1773,15 +1443,12 @@ bool QualifiedPointerMemory(bool execute, bool module_private, bool descriptor_a
 }
 bool QualifiedPointerMatrix(bool execute, bool transport_only = false, bool enhanced_only = false) {
     if (!enhanced_only)
-        for (const auto transport : {TypedFrameTransport::PhysicalAddress, TypedFrameTransport::PrivateArray})
-            for (bool module_private : {false, true})
-                if (!QualifiedPointerMemory(execute, module_private, false, transport, false)) return false;
+        for (bool module_private : {false, true})
+            if (!QualifiedPointerMemory(execute, module_private, false, TypedFrameTransport::PhysicalAddress, false)) return false;
     if (transport_only) return true;
-    for (const auto transport :
-         {TypedFrameTransport::StorageBuffer, TypedFrameTransport::PhysicalAddress, TypedFrameTransport::PrivateArray})
+    for (const auto transport : {TypedFrameTransport::StorageBuffer, TypedFrameTransport::PhysicalAddress})
         if (!QualifiedPointerMemory(execute, false, false, transport)) return false;
-    for (const auto transport :
-         {TypedFrameTransport::StorageBuffer, TypedFrameTransport::PhysicalAddress, TypedFrameTransport::PrivateArray})
+    for (const auto transport : {TypedFrameTransport::StorageBuffer, TypedFrameTransport::PhysicalAddress})
         if (!QualifiedPointerMemory(execute, false, true, transport)) return false;
     return true;
 }
@@ -1849,14 +1516,9 @@ bool MutablePointerMemory(bool execute, bool module_private, bool stride_views =
     }
     const auto physical =
         CompileTypedPipelineStage(words, "main", VK_SHADER_STAGE_INTERSECTION_BIT_KHR, nullptr, "mutable_pointer_bda");
-    TypedContinuationCompileOptions options;
-    options.transport = TypedFrameTransport::PrivateArray;
-    options.private_frame_words = physical.frame_stride_words;
-    const auto private_array =
-        CompileTypedPipelineStage(words, "main", VK_SHADER_STAGE_INTERSECTION_BIT_KHR, nullptr, "mutable_pointer_private", options);
-    Require(physical.frame_stride_bytes == private_array.frame_stride_bytes &&
-                physical.pointer_snapshot_bytes == private_array.pointer_snapshot_bytes,
-            "Mutable pointer memory has inconsistent transport layout");
+    Require(
+        physical.pointer_snapshot_bytes == program.pointer_snapshot_bytes && physical.system_header_bytes == VEL_RT_SYSTEM_BYTES,
+        "Mutable pointer memory lost typed BDA identity backing");
     if (!execute) return true;
     constexpr uint32_t count = 16, array_size = 128;
     const auto output_words = array_size * (stride_views ? 3u : 2u);
@@ -1947,37 +1609,6 @@ int main(int argc, char **argv) {
         const bool pointer_only = argc == 2 && std::string(argv[1]) == "--pointer-only";
         const bool qualified_only = argc == 2 && std::string(argv[1]) == "--qualified-pointer-only";
         const bool transport_only = argc == 2 && std::string(argv[1]) == "--transport-pointer-only";
-        const bool qualified_nonprivate = argc == 2 && std::string(argv[1]) == "--qualified-pointer-nonprivate-only";
-        if (qualified_nonprivate) {
-            for (const auto transport : {TypedFrameTransport::StorageBuffer, TypedFrameTransport::PhysicalAddress})
-                for (const bool descriptor_array : {false, true})
-                    if (!QualifiedPointerMemory(true, false, descriptor_array, transport)) return 77;
-            return 0;
-        }
-        const bool diagnostic_compile = argc == 2 && std::string(argv[1]) == "--private-pointer-diag-compile-only";
-        const bool native_f = argc == 2 && std::string(argv[1]) == "--private-pointer-diag-f";
-        const bool native_g = argc == 2 && std::string(argv[1]) == "--private-pointer-diag-g";
-        const bool native_h = argc == 2 && std::string(argv[1]) == "--private-pointer-diag-h";
-        if (native_f || native_g || native_h) return NativePrivatePointerControl(true, native_g, native_h) ? 0 : 77;
-        const auto diagnostic = argc != 2                                            ? PrivatePointerDiagnostic::None
-                                : std::string(argv[1]) == "--private-pointer-diag-a" ? PrivatePointerDiagnostic::Original
-                                : std::string(argv[1]) == "--private-pointer-diag-b" ? PrivatePointerDiagnostic::FirstReport
-                                : std::string(argv[1]) == "--private-pointer-diag-c" ? PrivatePointerDiagnostic::ZeroFrame
-                                : std::string(argv[1]) == "--private-pointer-diag-d" ? PrivatePointerDiagnostic::Optimize
-                                : std::string(argv[1]) == "--private-pointer-diag-e" ? PrivatePointerDiagnostic::NoMemoryHints
-                                                                                     : PrivatePointerDiagnostic::None;
-        if (diagnostic_compile || diagnostic != PrivatePointerDiagnostic::None) {
-            for (const auto mode :
-                 {PrivatePointerDiagnostic::Original, PrivatePointerDiagnostic::FirstReport, PrivatePointerDiagnostic::ZeroFrame,
-                  PrivatePointerDiagnostic::Optimize, PrivatePointerDiagnostic::NoMemoryHints})
-                if ((diagnostic_compile || mode == diagnostic) &&
-                    !QualifiedPointerMemory(!diagnostic_compile, false, false, TypedFrameTransport::PrivateArray, false, mode))
-                    return 77;
-            if (diagnostic_compile)
-                for (const bool flags : {false, true}) Require(NativePrivatePointerControl(false, flags), "Native control skipped");
-            if (diagnostic_compile) Require(NativePrivatePointerControl(false, false, true), "Native logical control skipped");
-            return 0;
-        }
         Require(
             argc == 1 || compile_only || pointer_only || qualified_only || transport_only,
             "Usage: vel_rt_state_compiler_tests [--compile-only|--pointer-only|--qualified-pointer-only|--transport-pointer-only]");
@@ -1997,7 +1628,7 @@ int main(int argc, char **argv) {
         BoundariesAndSourcePreservation();
         LargeDescriptorResourceTypes();
         ResourceValueTypes();
-        PrivateFrameBounds();
+        SourcePrivateFrameBounds();
         OpaqueResourceBoundaries();
         ExactCtsImageAtomicStage();
         for (bool array_pointers : {false, true})
@@ -2045,16 +1676,8 @@ int main(int argc, char **argv) {
             if (module_private) {
                 auto physical = CompileTypedPipelineStage(Source(source), "main", VK_SHADER_STAGE_INTERSECTION_BIT_KHR, nullptr,
                                                           "private_globals_bda");
-                TypedContinuationCompileOptions private_options;
-                private_options.transport = TypedFrameTransport::PrivateArray;
-                private_options.private_frame_words = physical.frame_stride_words;
-                auto native_private = CompileTypedPipelineStage(Source(source), "main", VK_SHADER_STAGE_INTERSECTION_BIT_KHR,
-                                                                nullptr, "private_globals_private", private_options);
-                Require(physical.private_variables.size() == 2 && native_private.private_variables.size() == 2 &&
-                            physical.frame_stride_bytes == native_private.frame_stride_bytes &&
-                            physical.private_variables[0].offset == native_private.private_variables[0].offset &&
-                            physical.private_variables[1].offset == native_private.private_variables[1].offset,
-                        "BDA/PrivateArray module-Private state has inconsistent checked frame backing");
+                Require(physical.private_variables.size() == 2 && physical.system_header_bytes == VEL_RT_SYSTEM_BYTES,
+                        "Source module-Private storage lost its BDA backing");
             }
             std::string text;
             spvtools::SpirvTools tools(SPV_ENV_VULKAN_1_3);

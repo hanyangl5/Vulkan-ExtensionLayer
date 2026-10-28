@@ -11,7 +11,18 @@
 #include <stdbool.h>
 static bool capability_harness, advertised, maintenance6_mode, dynamic_layout, graphics_queue, shader_object_mode, derivatives_mode;
 static unsigned library_mode;
+/* 1: push writes, 2: update templates, 3: descriptor-buffer offsets. */
+static unsigned descriptor_mode;
+static bool separate_compute, descriptor_core;
+static bool debug_names_mode, vulkan11_mode;
+static bool private_data_mode, private_core, private_extension;
 #include <vulkan/vulkan.h>
+#if VK_USE_64_BIT_PTR_DEFINES
+#define OBJECT_HANDLE(object) ((uint64_t)(uintptr_t)(object))
+#else
+#define OBJECT_HANDLE(object) ((uint64_t)(object))
+#endif
+static uint32_t requested_api;
 static VkQueue second_queue;
 static PFN_vkCmdBindDescriptorSets2 bind2[2];
 static PFN_vkCmdPushConstants2 push2[2];
@@ -20,6 +31,26 @@ static const VkPipelineLayoutCreateInfo *inline_layout;
 static PFN_vkCreateShadersEXT create_shaders;
 static PFN_vkDestroyShaderEXT destroy_shader;
 static PFN_vkCmdBindShadersEXT bind_shaders;
+static PFN_vkSetDebugUtilsObjectNameEXT debug_name;
+static PFN_vkSetDebugUtilsObjectTagEXT debug_tag;
+static PFN_vkCreatePrivateDataSlot create_private_slot[2];
+static PFN_vkDestroyPrivateDataSlot destroy_private_slot[2];
+static PFN_vkSetPrivateData set_private_data[2];
+static PFN_vkGetPrivateData get_private_data[2];
+static VkPrivateDataSlot private_slot;
+static PFN_vkCmdPushDescriptorSetKHR push_descriptors[2];
+static PFN_vkCmdPushDescriptorSet2 push_descriptors2[2];
+static PFN_vkCmdPushDescriptorSetWithTemplateKHR push_template[2];
+static PFN_vkCmdPushDescriptorSetWithTemplate2 push_template2[2];
+static PFN_vkCmdBindDescriptorBuffersEXT bind_descriptor_buffers;
+static PFN_vkCmdSetDescriptorBufferOffsetsEXT descriptor_offsets;
+static PFN_vkCmdSetDescriptorBufferOffsets2EXT descriptor_offsets2;
+static VkDescriptorBufferInfo compute_output;
+static VkDescriptorBufferBindingInfoEXT descriptor_binding;
+static VkDeviceSize descriptor_record_stride;
+static const VkPipelineLayoutCreateInfo *compute_inline_layout;
+static VkPipelineLayout compute_public_layout;
+static unsigned descriptor_calls;
 static VkResult create_device(VkPhysicalDevice physical, const VkDeviceCreateInfo *info, const VkAllocationCallbacks *a,
                               VkDevice *out);
 static VkResult create_instance(const VkInstanceCreateInfo *info, const VkAllocationCallbacks *a, VkInstance *out);
@@ -33,18 +64,67 @@ static VkResult create_instance(const VkInstanceCreateInfo *info, const VkAlloca
 static VkResult create_instance(const VkInstanceCreateInfo *info, const VkAllocationCallbacks *a, VkInstance *out) {
     VkApplicationInfo app = *info->pApplicationInfo;
     VkInstanceCreateInfo local = *info;
-    if (maintenance6_mode)
+    if (vulkan11_mode)
+        app.apiVersion = VK_API_VERSION_1_1;
+    else if (maintenance6_mode || descriptor_mode)
         app.apiVersion = VK_API_VERSION_1_4;
     else if (shader_object_mode)
         app.apiVersion = VK_API_VERSION_1_3;
+    PFN_vkEnumerateInstanceVersion version = (void *)vkGetInstanceProcAddr(VK_NULL_HANDLE, "vkEnumerateInstanceVersion");
+    uint32_t loader_api = VK_API_VERSION_1_0;
+    if (version) CHECK(version(&loader_api));
+    if (vulkan11_mode && loader_api < VK_API_VERSION_1_1) {
+        printf("Vulkan1.1 application proof requires a Vulkan1.1 loader\n");
+        exit(77);
+    }
+    if (app.apiVersion > loader_api) app.apiVersion = loader_api;
+    requested_api = app.apiVersion;
     local.pApplicationInfo = &app;
-    return vkCreateInstance(&local, a, out);
+    const char **extensions = NULL;
+    if (debug_names_mode) {
+        uint32_t count = 0;
+        CHECK(vkEnumerateInstanceExtensionProperties(NULL, &count, NULL));
+        VkExtensionProperties *available = calloc(count ? count : 1, sizeof(*available));
+        if (!available) return VK_ERROR_OUT_OF_HOST_MEMORY;
+        CHECK(vkEnumerateInstanceExtensionProperties(NULL, &count, available));
+        bool found = false;
+        for (uint32_t i = 0; i < count; ++i) found |= !strcmp(available[i].extensionName, VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
+        free(available);
+        if (!found) {
+            printf("Virtual-object annotation proof requires debug-utils\n");
+            exit(77);
+        }
+        extensions = malloc(((size_t)info->enabledExtensionCount + 1) * sizeof(*extensions));
+        if (!extensions) return VK_ERROR_OUT_OF_HOST_MEMORY;
+        if (info->enabledExtensionCount)
+            memcpy(extensions, info->ppEnabledExtensionNames, info->enabledExtensionCount * sizeof(*extensions));
+        extensions[local.enabledExtensionCount++] = VK_EXT_DEBUG_UTILS_EXTENSION_NAME;
+        local.ppEnabledExtensionNames = extensions;
+    }
+    VkResult result = vkCreateInstance(&local, a, out);
+    free(extensions);
+    return result;
+}
+static bool device_extension(VkPhysicalDevice physical, const char *name) {
+    uint32_t count = 0;
+    CHECK(vkEnumerateDeviceExtensionProperties(physical, NULL, &count, NULL));
+    VkExtensionProperties *values = calloc(count ? count : 1, sizeof(*values));
+    if (!values) exit(1);
+    CHECK(vkEnumerateDeviceExtensionProperties(physical, NULL, &count, values));
+    bool found = false;
+    for (uint32_t i = 0; i < count; ++i) found |= !strcmp(values[i].extensionName, name);
+    free(values);
+    return found;
 }
 static VkResult create_device(VkPhysicalDevice physical, const VkDeviceCreateInfo *info, const VkAllocationCallbacks *a,
                               VkDevice *out) {
     VkPhysicalDeviceRayTracingPipelineFeaturesKHR supported = {
         .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_FEATURES_KHR};
-    VkPhysicalDeviceShaderObjectFeaturesEXT objects = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_OBJECT_FEATURES_EXT};
+    VkPhysicalDevicePrivateDataFeatures private_data = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PRIVATE_DATA_FEATURES};
+    VkPhysicalDeviceDescriptorBufferFeaturesEXT buffers = {
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_BUFFER_FEATURES_EXT, .pNext = &private_data};
+    VkPhysicalDeviceShaderObjectFeaturesEXT objects = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_OBJECT_FEATURES_EXT,
+                                                       .pNext = &buffers};
     VkPhysicalDeviceDynamicRenderingFeatures rendering = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DYNAMIC_RENDERING_FEATURES,
                                                           .pNext = &objects};
     VkPhysicalDevicePerStageDescriptorSetFeaturesNV per_stage = {
@@ -57,6 +137,15 @@ static VkResult create_device(VkPhysicalDevice physical, const VkDeviceCreateInf
     VkPhysicalDeviceFeatures2 features = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2, .pNext = &supported};
     PFN_vkGetPhysicalDeviceFeatures2 query = (void *)vkGetInstanceProcAddr(g_instance, "vkGetPhysicalDeviceFeatures2");
     query(physical, &features);
+    VkPhysicalDeviceProperties native_properties;
+    vkGetPhysicalDeviceProperties(physical, &native_properties);
+    descriptor_core = native_properties.apiVersion >= VK_API_VERSION_1_4 && requested_api >= VK_API_VERSION_1_4;
+    private_core = native_properties.apiVersion >= VK_API_VERSION_1_3 && requested_api >= VK_API_VERSION_1_3;
+    private_extension = private_data_mode && device_extension(physical, VK_EXT_PRIVATE_DATA_EXTENSION_NAME);
+    if (private_data_mode && (!private_data.privateData || (!private_core && !private_extension))) {
+        printf("Virtual-object private-data proof requires enabled native privateData support\n");
+        exit(77);
+    }
     advertised = supported.rayTracingPipeline != 0;
     if (!maintenance.maintenance4) {
         printf("Layout destruction/rebind proof requires maintenance4\n");
@@ -74,6 +163,15 @@ static VkResult create_device(VkPhysicalDevice physical, const VkDeviceCreateInf
         printf("Compute shader-object interoperation requires shaderObject and dynamicRendering\n");
         exit(77);
     }
+    if (descriptor_mode && !device_extension(physical, descriptor_mode == 3 ? VK_EXT_DESCRIPTOR_BUFFER_EXTENSION_NAME
+                                                                            : VK_KHR_PUSH_DESCRIPTOR_EXTENSION_NAME)) {
+        printf("Compute descriptor interoperation requires the requested native descriptor extension\n");
+        exit(77);
+    }
+    if (descriptor_mode == 3 && !buffers.descriptorBuffer) {
+        printf("Descriptor-buffer interoperation requires descriptorBuffer\n");
+        exit(77);
+    }
     dynamic_layout = maintenance6_mode && per_stage.dynamicPipelineLayout;
     VkDeviceCreateInfo local = *info;
     maintenance.pNext = (void *)info->pNext;
@@ -88,15 +186,28 @@ static VkResult create_device(VkPhysicalDevice physical, const VkDeviceCreateInf
     }
     local.pNext = &maintenance;
     if (shader_object_mode) {
+        objects.pNext = NULL;
         objects.pNext = maintenance.pNext;
         rendering.pNext = &objects;
         maintenance.pNext = &rendering;
+    }
+    if (descriptor_mode == 3) {
+        buffers =
+            (VkPhysicalDeviceDescriptorBufferFeaturesEXT){.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_BUFFER_FEATURES_EXT,
+                                                          .pNext = maintenance.pNext,
+                                                          .descriptorBuffer = VK_TRUE};
+        maintenance.pNext = &buffers;
+    }
+    if (private_data_mode) {
+        private_data.pNext = maintenance.pNext;
+        private_data.privateData = VK_TRUE;
+        maintenance.pNext = &private_data;
     }
     VkPhysicalDeviceRayTracingPipelineFeaturesKHR enabled = {
         .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_FEATURES_KHR,
         .pNext = &maintenance,
         .rayTracingPipeline = VK_TRUE};
-    const char **extensions = malloc((info->enabledExtensionCount + 6) * sizeof(*extensions));
+    const char **extensions = malloc((info->enabledExtensionCount + 10) * sizeof(*extensions));
     if (!extensions) return VK_ERROR_OUT_OF_HOST_MEMORY;
     memcpy(extensions, info->ppEnabledExtensionNames, info->enabledExtensionCount * sizeof(*extensions));
     extensions[local.enabledExtensionCount++] = VK_KHR_MAINTENANCE_4_EXTENSION_NAME;
@@ -104,6 +215,10 @@ static VkResult create_device(VkPhysicalDevice physical, const VkDeviceCreateInf
     if (dynamic_layout) extensions[local.enabledExtensionCount++] = VK_NV_PER_STAGE_DESCRIPTOR_SET_EXTENSION_NAME;
     if (shader_object_mode) extensions[local.enabledExtensionCount++] = VK_EXT_SHADER_OBJECT_EXTENSION_NAME;
     if (library_mode) extensions[local.enabledExtensionCount++] = VK_KHR_PIPELINE_LIBRARY_EXTENSION_NAME;
+    if (descriptor_mode)
+        extensions[local.enabledExtensionCount++] =
+            descriptor_mode == 3 ? VK_EXT_DESCRIPTOR_BUFFER_EXTENSION_NAME : VK_KHR_PUSH_DESCRIPTOR_EXTENSION_NAME;
+    if (private_extension) extensions[local.enabledExtensionCount++] = VK_EXT_PRIVATE_DATA_EXTENSION_NAME;
     local.ppEnabledExtensionNames = extensions;
     if (advertised) {
         extensions[local.enabledExtensionCount++] = VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME;
@@ -155,7 +270,7 @@ static void push_values(VkCommandBuffer command, VkPipelineLayout layout, VkShad
                                 .pValues = values};
     if (dynamic_layout && (sequence & 1)) {
         info.layout = VK_NULL_HANDLE;
-        info.pNext = inline_layout;
+        info.pNext = layout == compute_public_layout ? compute_inline_layout : inline_layout;
     }
     push2[(sequence >> 1) & 1](command, &info);
 }
@@ -240,20 +355,254 @@ static void memory_barrier(VkCommandBuffer cb, VkPipelineStageFlags src, VkAcces
     VkMemoryBarrier b = {.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER, .srcAccessMask = srcAccess, .dstAccessMask = dstAccess};
     vkCmdPipelineBarrier(cb, src, dst, 0, 1, &b, 0, NULL, 0, NULL);
 }
+static void clobber_input(void *data, size_t size) {
+    volatile uint8_t *bytes = data;
+    for (size_t i = 0; i < size; ++i) bytes[i] = 0xcd;
+}
+static void annotate_object(VkObjectType type, uint64_t handle, const char *name) {
+    if (debug_names_mode) {
+        const VkDebugUtilsObjectNameInfoEXT naming = {VK_STRUCTURE_TYPE_DEBUG_UTILS_OBJECT_NAME_INFO_EXT, NULL, type, handle, name};
+        CHECK(debug_name(g_dev, &naming));
+        unsigned char bytes[] = {0, 19, 255, 0, 37};
+        const VkDebugUtilsObjectTagInfoEXT tagging = {VK_STRUCTURE_TYPE_DEBUG_UTILS_OBJECT_TAG_INFO_EXT,
+                                                      NULL,
+                                                      type,
+                                                      handle,
+                                                      UINT64_C(0x7261797472616365),
+                                                      sizeof(bytes),
+                                                      bytes};
+        CHECK(debug_tag(g_dev, &tagging));
+        clobber_input(bytes, sizeof(bytes));
+    }
+    if (private_data_mode) {
+        uint64_t value = UINT64_MAX;
+        get_private_data[0](g_dev, type, handle, private_slot, &value);
+        REQUIRE(value == 0);
+        const uint64_t expected = UINT64_C(0xfedcba9876543210) ^ type;
+        CHECK(set_private_data[0](g_dev, type, handle, private_slot, expected));
+        get_private_data[1](g_dev, type, handle, private_slot, &value);
+        REQUIRE(value == expected);
+        CHECK(set_private_data[1](g_dev, type, handle, private_slot, expected ^ UINT64_C(0x1234567800000000)));
+        get_private_data[0](g_dev, type, handle, private_slot, &value);
+        REQUIRE(value == (expected ^ UINT64_C(0x1234567800000000)));
+        CHECK(set_private_data[0](g_dev, type, handle, private_slot, 0));
+        get_private_data[1](g_dev, type, handle, private_slot, &value);
+        REQUIRE(value == 0);
+        CHECK(set_private_data[1](g_dev, type, handle, private_slot, expected));
+    }
+}
+static void annotate_auxiliary_objects(void) {
+    if (!debug_names_mode && !private_data_mode) return;
+    VkQueryPool pool;
+    const VkQueryPoolCreateInfo info = {.sType = VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO,
+                                        .queryType = VK_QUERY_TYPE_ACCELERATION_STRUCTURE_COMPACTED_SIZE_KHR,
+                                        .queryCount = 1};
+    CHECK(vkCreateQueryPool(g_dev, &info, NULL, &pool));
+    annotate_object(VK_OBJECT_TYPE_QUERY_POOL, OBJECT_HANDLE(pool), "public compacted-size query pool");
+    vkDestroyQueryPool(g_dev, pool, NULL);
+    PFN_vkCreateDeferredOperationKHR create = (void *)vkGetDeviceProcAddr(g_dev, "vkCreateDeferredOperationKHR");
+    PFN_vkDestroyDeferredOperationKHR destroy = (void *)vkGetDeviceProcAddr(g_dev, "vkDestroyDeferredOperationKHR");
+    REQUIRE(create && destroy);
+    if (g_fail) return;
+    VkDeferredOperationKHR operation;
+    CHECK(create(g_dev, NULL, &operation));
+    annotate_object(VK_OBJECT_TYPE_DEFERRED_OPERATION_KHR, OBJECT_HANDLE(operation), "public deferred operation");
+    destroy(g_dev, operation, NULL);
+}
+static void bind_compute_descriptors(VkCommandBuffer command, VkPipelineLayout layout, VkPipelineLayout ordinary_layout,
+                                     VkDescriptorSet ordinary) {
+    if (!descriptor_mode) {
+        bind_sets(command, VK_PIPELINE_BIND_POINT_COMPUTE, layout, ordinary);
+        return;
+    }
+    // This ordinary set addresses the other output. It must be superseded by
+    // the later push/offset operation, including during private restoration.
+    bind_sets(command, VK_PIPELINE_BIND_POINT_COMPUTE, ordinary_layout, ordinary);
+    unsigned sequence = descriptor_calls++;
+    unsigned alias = sequence & 1;
+    bool use_inline = maintenance6_mode && dynamic_layout && (sequence & 1);
+    if (descriptor_mode == 3) {
+        bind_descriptor_buffers(command, 1, &descriptor_binding);
+        uint32_t index = 0;
+        VkDeviceSize offset = 0;
+        if (maintenance6_mode) {
+            VkSetDescriptorBufferOffsetsInfoEXT info = {.sType = VK_STRUCTURE_TYPE_SET_DESCRIPTOR_BUFFER_OFFSETS_INFO_EXT,
+                                                        .pNext = use_inline ? compute_inline_layout : NULL,
+                                                        .stageFlags = VK_SHADER_STAGE_COMPUTE_BIT,
+                                                        .layout = use_inline ? VK_NULL_HANDLE : layout,
+                                                        .setCount = 1,
+                                                        .pBufferIndices = &index,
+                                                        .pOffsets = &offset};
+            descriptor_offsets2(command, &info);
+        } else
+            descriptor_offsets(command, VK_PIPELINE_BIND_POINT_COMPUTE, layout, 0, 1, &index, &offset);
+        // Both the public replay journal and RTP's restore history must own
+        // these arrays after the caller clobbers them.
+        clobber_input(&offset, sizeof(offset));
+        clobber_input(&index, sizeof(index));
+    } else if (descriptor_mode == 2) {
+        struct template_payload {
+            uint64_t unused[3];
+            VkDescriptorBufferInfo value;
+        } payload = {{17, 29, 41}, compute_output};
+        VkDescriptorUpdateTemplateEntry entry = {.dstBinding = 0,
+                                                 .descriptorCount = 1,
+                                                 .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+                                                 .offset = offsetof(struct template_payload, value),
+                                                 .stride = sizeof(payload)};
+        VkDescriptorUpdateTemplateCreateInfo create = {.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_UPDATE_TEMPLATE_CREATE_INFO,
+                                                       .descriptorUpdateEntryCount = 1,
+                                                       .pDescriptorUpdateEntries = &entry,
+                                                       .templateType = VK_DESCRIPTOR_UPDATE_TEMPLATE_TYPE_PUSH_DESCRIPTORS_KHR,
+                                                       .pipelineBindPoint = VK_PIPELINE_BIND_POINT_COMPUTE,
+                                                       .pipelineLayout = layout,
+                                                       .set = 0};
+        VkDescriptorUpdateTemplate update;
+        CHECK(vkCreateDescriptorUpdateTemplate(g_dev, &create, NULL, &update));
+        annotate_object(VK_OBJECT_TYPE_DESCRIPTOR_UPDATE_TEMPLATE, OBJECT_HANDLE(update), "public descriptor template");
+        if (maintenance6_mode) {
+            VkPushDescriptorSetWithTemplateInfo info = {.sType = VK_STRUCTURE_TYPE_PUSH_DESCRIPTOR_SET_WITH_TEMPLATE_INFO,
+                                                        .pNext = use_inline ? compute_inline_layout : NULL,
+                                                        .descriptorUpdateTemplate = update,
+                                                        .layout = use_inline ? VK_NULL_HANDLE : layout,
+                                                        .set = 0,
+                                                        .pData = &payload};
+            push_template2[alias](command, &info);
+        } else
+            push_template[alias](command, update, layout, 0, &payload);
+        clobber_input(&payload, sizeof(payload));
+        // Replay must own the values independently of the caller's payload
+        // storage and the template handle, which is consumed while recording.
+        vkDestroyDescriptorUpdateTemplate(g_dev, update, NULL);
+    } else {
+        VkDescriptorBufferInfo value = compute_output;
+        VkWriteDescriptorSet write = {.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+                                      .dstBinding = 0,
+                                      .descriptorCount = 1,
+                                      .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+                                      .pBufferInfo = &value};
+        if (maintenance6_mode) {
+            VkPushDescriptorSetInfo info = {.sType = VK_STRUCTURE_TYPE_PUSH_DESCRIPTOR_SET_INFO,
+                                            .pNext = use_inline ? compute_inline_layout : NULL,
+                                            .stageFlags = VK_SHADER_STAGE_COMPUTE_BIT,
+                                            .layout = use_inline ? VK_NULL_HANDLE : layout,
+                                            .set = 0,
+                                            .descriptorWriteCount = 1,
+                                            .pDescriptorWrites = &write};
+            push_descriptors2[alias](command, &info);
+        } else
+            push_descriptors[alias](command, VK_PIPELINE_BIND_POINT_COMPUTE, layout, 0, 1, &write);
+        clobber_input(&value, sizeof(value));
+    }
+}
+#include "rtp_nested_fixture.h"
 int main(int argc, char **argv) {
+    if (argc == 5 && !strcmp(argv[4], "--nested-trace")) {
+        vulkan11_mode = true;
+        return run_nested_trace_fixture(argv[1], argv[2], argv[3]);
+    }
     capability_harness = argc == 6 && !strcmp(argv[5], "--capability-harness");
     maintenance6_mode = argc == 6 && !strcmp(argv[5], "--maintenance6");
     shader_object_mode = argc == 6 && !strcmp(argv[5], "--shader-object");
+    vulkan11_mode = argc == 6 && !strcmp(argv[5], "--vulkan11");
+    debug_names_mode = argc == 6 && !strcmp(argv[5], "--push-template-debug");
+    private_data_mode = argc == 6 && !strcmp(argv[5], "--push-template-private-data");
     derivatives_mode = argc == 6 && !strcmp(argv[5], "--derivatives");
     library_mode = argc == 6 && !strcmp(argv[5], "--libraries") ? 1 : argc == 6 && !strcmp(argv[5], "--library-stages") ? 2 : 0;
-    if (argc != 5 && !capability_harness && !maintenance6_mode && !shader_object_mode && !derivatives_mode && !library_mode) {
-        fprintf(stderr,
-                "usage: %s rgen.spv miss.spv chit.spv compute.spv "
-                "[--capability-harness|--maintenance6|--shader-object|--derivatives|--libraries|--library-stages]\n",
-                argv[0]);
+    if (argc == 6) {
+        if (!strcmp(argv[5], "--push-descriptors") || !strcmp(argv[5], "--push-descriptors-maintenance6")) descriptor_mode = 1;
+        if (!strcmp(argv[5], "--push-template") || !strcmp(argv[5], "--push-template-maintenance6")) descriptor_mode = 2;
+        if (debug_names_mode || private_data_mode) descriptor_mode = 2;
+        if (!strcmp(argv[5], "--descriptor-buffer") || !strcmp(argv[5], "--descriptor-buffer-maintenance6")) descriptor_mode = 3;
+        if (descriptor_mode && strstr(argv[5], "maintenance6")) maintenance6_mode = true;
+    }
+    separate_compute = shader_object_mode || descriptor_mode;
+    if (argc != 5 && !capability_harness && !maintenance6_mode && !shader_object_mode && !derivatives_mode && !library_mode &&
+        !descriptor_mode && !vulkan11_mode) {
+        fprintf(
+            stderr,
+            "usage: %s rgen.spv miss.spv chit.spv compute.spv "
+            "[--capability-harness|--maintenance6|--shader-object|--derivatives|--libraries|--library-stages|"
+            "--push-descriptors[-maintenance6]|--push-template[-maintenance6]|--push-template-debug|--push-template-private-data|"
+            "--descriptor-buffer[-maintenance6]|--vulkan11]\n",
+            argv[0]);
         return 1;
     }
+    if (vulkan11_mode) {
+        for (unsigned i = 1; i <= 4; ++i) {
+            size_t count;
+            uint32_t *code = read_spv(argv[i], &count);
+            bool compatible = count >= 5 && code[0] == 0x07230203 && code[1] == 0x00010400;
+            free(code);
+            if (!compatible) {
+                fprintf(stderr, "--vulkan11 requires separately compiled SPIR-V1.4 input: %s\n", argv[i]);
+                return 1;
+            }
+        }
+    }
     init_vulkan();
+    if (debug_names_mode) {
+        debug_name = (void *)vkGetDeviceProcAddr(g_dev, "vkSetDebugUtilsObjectNameEXT");
+        debug_tag = (void *)vkGetDeviceProcAddr(g_dev, "vkSetDebugUtilsObjectTagEXT");
+        REQUIRE(debug_name && debug_tag);
+    }
+    if (private_data_mode) {
+        create_private_slot[1] = private_extension ? (void *)vkGetDeviceProcAddr(g_dev, "vkCreatePrivateDataSlotEXT")
+                                                   : (void *)vkGetDeviceProcAddr(g_dev, "vkCreatePrivateDataSlot");
+        destroy_private_slot[1] = private_extension ? (void *)vkGetDeviceProcAddr(g_dev, "vkDestroyPrivateDataSlotEXT")
+                                                    : (void *)vkGetDeviceProcAddr(g_dev, "vkDestroyPrivateDataSlot");
+        set_private_data[1] = private_extension ? (void *)vkGetDeviceProcAddr(g_dev, "vkSetPrivateDataEXT")
+                                                : (void *)vkGetDeviceProcAddr(g_dev, "vkSetPrivateData");
+        get_private_data[1] = private_extension ? (void *)vkGetDeviceProcAddr(g_dev, "vkGetPrivateDataEXT")
+                                                : (void *)vkGetDeviceProcAddr(g_dev, "vkGetPrivateData");
+        create_private_slot[0] = private_core ? (PFN_vkCreatePrivateDataSlot)vkGetDeviceProcAddr(g_dev, "vkCreatePrivateDataSlot")
+                                              : create_private_slot[1];
+        destroy_private_slot[0] = private_core
+                                      ? (PFN_vkDestroyPrivateDataSlot)vkGetDeviceProcAddr(g_dev, "vkDestroyPrivateDataSlot")
+                                      : destroy_private_slot[1];
+        set_private_data[0] =
+            private_core ? (PFN_vkSetPrivateData)vkGetDeviceProcAddr(g_dev, "vkSetPrivateData") : set_private_data[1];
+        get_private_data[0] =
+            private_core ? (PFN_vkGetPrivateData)vkGetDeviceProcAddr(g_dev, "vkGetPrivateData") : get_private_data[1];
+        REQUIRE(create_private_slot[0] && create_private_slot[1] && destroy_private_slot[0] && destroy_private_slot[1] &&
+                set_private_data[0] && set_private_data[1] && get_private_data[0] && get_private_data[1]);
+        if (g_fail) return 1;
+        const VkPrivateDataSlotCreateInfo slot_info = {.sType = VK_STRUCTURE_TYPE_PRIVATE_DATA_SLOT_CREATE_INFO};
+        CHECK(create_private_slot[0](g_dev, &slot_info, NULL, &private_slot));
+    }
+    if (descriptor_mode == 1) {
+        push_descriptors[1] = (void *)vkGetDeviceProcAddr(g_dev, "vkCmdPushDescriptorSetKHR");
+        push_descriptors[0] = descriptor_core ? (PFN_vkCmdPushDescriptorSetKHR)vkGetDeviceProcAddr(g_dev, "vkCmdPushDescriptorSet")
+                                              : push_descriptors[1];
+        if (maintenance6_mode) {
+            push_descriptors2[1] = (void *)vkGetDeviceProcAddr(g_dev, "vkCmdPushDescriptorSet2KHR");
+            push_descriptors2[0] = descriptor_core
+                                       ? (PFN_vkCmdPushDescriptorSet2)vkGetDeviceProcAddr(g_dev, "vkCmdPushDescriptorSet2")
+                                       : push_descriptors2[1];
+            REQUIRE(push_descriptors2[0] && push_descriptors2[1]);
+        }
+        REQUIRE(push_descriptors[0] && push_descriptors[1]);
+    } else if (descriptor_mode == 2) {
+        push_template[1] = (void *)vkGetDeviceProcAddr(g_dev, "vkCmdPushDescriptorSetWithTemplateKHR");
+        push_template[0] = descriptor_core ? (PFN_vkCmdPushDescriptorSetWithTemplateKHR)vkGetDeviceProcAddr(
+                                                 g_dev, "vkCmdPushDescriptorSetWithTemplate")
+                                           : push_template[1];
+        if (maintenance6_mode) {
+            push_template2[1] = (void *)vkGetDeviceProcAddr(g_dev, "vkCmdPushDescriptorSetWithTemplate2KHR");
+            push_template2[0] = descriptor_core ? (PFN_vkCmdPushDescriptorSetWithTemplate2)vkGetDeviceProcAddr(
+                                                      g_dev, "vkCmdPushDescriptorSetWithTemplate2")
+                                                : push_template2[1];
+            REQUIRE(push_template2[0] && push_template2[1]);
+        }
+        REQUIRE(push_template[0] && push_template[1]);
+    } else if (descriptor_mode == 3) {
+        bind_descriptor_buffers = (void *)vkGetDeviceProcAddr(g_dev, "vkCmdBindDescriptorBuffersEXT");
+        descriptor_offsets = (void *)vkGetDeviceProcAddr(g_dev, "vkCmdSetDescriptorBufferOffsetsEXT");
+        descriptor_offsets2 = (void *)vkGetDeviceProcAddr(g_dev, "vkCmdSetDescriptorBufferOffsets2EXT");
+        REQUIRE(bind_descriptor_buffers && descriptor_offsets && (!maintenance6_mode || descriptor_offsets2));
+    }
+    if (g_fail) return 1;
+    annotate_auxiliary_objects();
     if (shader_object_mode) {
         create_shaders = (void *)vkGetDeviceProcAddr(g_dev, "vkCreateShadersEXT");
         destroy_shader = (void *)vkGetDeviceProcAddr(g_dev, "vkDestroyShaderEXT");
@@ -262,10 +611,11 @@ int main(int argc, char **argv) {
         if (g_fail) return 1;
     }
     if (maintenance6_mode) {
-        bind2[0] = (void *)vkGetDeviceProcAddr(g_dev, "vkCmdBindDescriptorSets2");
         bind2[1] = (void *)vkGetDeviceProcAddr(g_dev, "vkCmdBindDescriptorSets2KHR");
-        push2[0] = (void *)vkGetDeviceProcAddr(g_dev, "vkCmdPushConstants2");
+        bind2[0] =
+            descriptor_core ? (PFN_vkCmdBindDescriptorSets2)vkGetDeviceProcAddr(g_dev, "vkCmdBindDescriptorSets2") : bind2[1];
         push2[1] = (void *)vkGetDeviceProcAddr(g_dev, "vkCmdPushConstants2KHR");
+        push2[0] = descriptor_core ? (PFN_vkCmdPushConstants2)vkGetDeviceProcAddr(g_dev, "vkCmdPushConstants2") : push2[1];
         REQUIRE(bind2[0] && bind2[1] && push2[0] && push2[1]);
         if (g_fail) return 1;
     }
@@ -309,12 +659,17 @@ int main(int argc, char **argv) {
         .geometry.instances = {.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_INSTANCES_DATA_KHR,
                                .data.deviceAddress = instances.addr}};
     prepare(&tlas, VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR, &inst);
+    annotate_object(VK_OBJECT_TYPE_ACCELERATION_STRUCTURE_KHR, OBJECT_HANDLE(blas.handle), "public BLAS");
+    annotate_object(VK_OBJECT_TYPE_ACCELERATION_STRUCTURE_KHR, OBJECT_HANDLE(tlas.handle), "public TLAS");
     VkPhysicalDeviceProperties device_properties;
     vkGetPhysicalDeviceProperties(g_pdev, &device_properties);
     VkDeviceSize output_stride = device_properties.limits.minStorageBufferOffsetAlignment;
     if (output_stride < 8 * 16) output_stride = 8 * 16;
     output_stride = (8 * 16 + output_stride - 1) / output_stride * output_stride;
-    buf_create(output_stride + 8 * 16, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, host, &output);
+    buf_create(output_stride + 8 * 16,
+               VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | (descriptor_mode == 3 ? VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT : 0), host,
+               &output);
+    compute_output = (VkDescriptorBufferInfo){output.buf, 0, 8 * 16};
     buf_create(3 * 64, VK_BUFFER_USAGE_SHADER_BINDING_TABLE_BIT_KHR | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, host, &sbt);
     VkDescriptorSetLayoutBinding bindings[] = {
         {0, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, VK_SHADER_STAGE_RAYGEN_BIT_KHR | VK_SHADER_STAGE_COMPUTE_BIT, NULL},
@@ -374,16 +729,68 @@ int main(int argc, char **argv) {
     VkPipelineLayoutCreateInfo lci = {.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
                                       .setLayoutCount = layout_count,
                                       .pSetLayouts = layout_sets,
-                                      .pushConstantRangeCount = shader_object_mode ? 3 : 4,
+                                      .pushConstantRangeCount = separate_compute ? 3 : 4,
                                       .pPushConstantRanges = ranges};
     VkPipelineLayout layout;
     CHECK(vkCreatePipelineLayout(g_dev, &lci, NULL, &layout));
     VkPipelineLayout compute_layout = layout;
-    if (shader_object_mode) {
-        VkPipelineLayoutCreateInfo ordinary = lci;
+    VkDescriptorSetLayout compute_dsl = VK_NULL_HANDLE;
+    VkPipelineLayoutCreateInfo ordinary = lci;
+    if (separate_compute) {
         ordinary.pushConstantRangeCount = 1;
         ordinary.pPushConstantRanges = &ranges[3];
+        if (descriptor_mode) {
+            VkDescriptorSetLayoutBinding binding = {0, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, VK_SHADER_STAGE_COMPUTE_BIT, NULL};
+            VkDescriptorSetLayoutCreateInfo create = {.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
+                                                      .flags = descriptor_mode == 3
+                                                                   ? VK_DESCRIPTOR_SET_LAYOUT_CREATE_DESCRIPTOR_BUFFER_BIT_EXT
+                                                                   : VK_DESCRIPTOR_SET_LAYOUT_CREATE_PUSH_DESCRIPTOR_BIT_KHR,
+                                                      .bindingCount = 1,
+                                                      .pBindings = &binding};
+            CHECK(vkCreateDescriptorSetLayout(g_dev, &create, NULL, &compute_dsl));
+            ordinary.setLayoutCount = 1;
+            ordinary.pSetLayouts = &compute_dsl;
+        }
         CHECK(vkCreatePipelineLayout(g_dev, &ordinary, NULL, &compute_layout));
+    }
+    compute_public_layout = compute_layout;
+    compute_inline_layout = &ordinary;
+    struct gpu_buf descriptor_storage = {0};
+    if (descriptor_mode == 3) {
+        PFN_vkGetDescriptorSetLayoutSizeEXT layout_size = (void *)vkGetDeviceProcAddr(g_dev, "vkGetDescriptorSetLayoutSizeEXT");
+        PFN_vkGetDescriptorSetLayoutBindingOffsetEXT binding_offset =
+            (void *)vkGetDeviceProcAddr(g_dev, "vkGetDescriptorSetLayoutBindingOffsetEXT");
+        PFN_vkGetDescriptorEXT get_descriptor = (void *)vkGetDeviceProcAddr(g_dev, "vkGetDescriptorEXT");
+        REQUIRE(layout_size && binding_offset && get_descriptor);
+        if (g_fail) return 1;
+        VkPhysicalDeviceDescriptorBufferPropertiesEXT descriptor_properties = {
+            .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_BUFFER_PROPERTIES_EXT};
+        VkPhysicalDeviceProperties2 properties = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2,
+                                                  .pNext = &descriptor_properties};
+        vkGetPhysicalDeviceProperties2(g_pdev, &properties);
+        VkDeviceSize bytes, offset;
+        layout_size(g_dev, compute_dsl, &bytes);
+        binding_offset(g_dev, compute_dsl, 0, &offset);
+        VkDeviceSize alignment = descriptor_properties.descriptorBufferOffsetAlignment;
+        REQUIRE(alignment && bytes && descriptor_properties.storageBufferDescriptorSize);
+        if (g_fail) return 1;
+        descriptor_record_stride = (bytes + alignment - 1) / alignment * alignment;
+        buf_create(descriptor_record_stride * 2,
+                   VK_BUFFER_USAGE_RESOURCE_DESCRIPTOR_BUFFER_BIT_EXT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, host,
+                   &descriptor_storage);
+        descriptor_binding = (VkDescriptorBufferBindingInfoEXT){.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_BUFFER_BINDING_INFO_EXT,
+                                                                .address = descriptor_storage.addr,
+                                                                .usage = VK_BUFFER_USAGE_RESOURCE_DESCRIPTOR_BUFFER_BIT_EXT};
+        for (unsigned i = 0; i < 2; ++i) {
+            VkDescriptorAddressInfoEXT address = {.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_ADDRESS_INFO_EXT,
+                                                  .address = output.addr + i * output_stride,
+                                                  .range = 8 * 16};
+            VkDescriptorGetInfoEXT descriptor = {.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_GET_INFO_EXT,
+                                                 .type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+                                                 .data.pStorageBuffer = &address};
+            get_descriptor(g_dev, &descriptor, descriptor_properties.storageBufferDescriptorSize,
+                           (uint8_t *)descriptor_storage.mapped + i * descriptor_record_stride + offset);
+        }
     }
     inline_layout = &lci;
     VkShaderModule modules[4];
@@ -493,6 +900,7 @@ int main(int argc, char **argv) {
         CHECK(create(g_dev, VK_NULL_HANDLE, VK_NULL_HANDLE, 1, &rtci, NULL, &rt));
     }
     VkComputePipelineCreateInfo compute_info = {.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO,
+                                                .flags = descriptor_mode == 3 ? VK_PIPELINE_CREATE_DESCRIPTOR_BUFFER_BIT_EXT : 0,
                                                 .stage = {.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
                                                           .stage = VK_SHADER_STAGE_COMPUTE_BIT,
                                                           .module = modules[3],
@@ -517,7 +925,12 @@ int main(int argc, char **argv) {
         CHECK(create_shaders(g_dev, 1, &info, NULL, &compute_shader));
         free(code);
     }
-    for (unsigned i = 0; i < 4; ++i) vkDestroyShaderModule(g_dev, modules[i], NULL);
+    annotate_object(VK_OBJECT_TYPE_PIPELINE, OBJECT_HANDLE(rt), "public RTP pipeline");
+    annotate_object(VK_OBJECT_TYPE_PIPELINE, OBJECT_HANDLE(compute), "native compute pipeline");
+    for (unsigned i = 0; i < 4; ++i) {
+        annotate_object(VK_OBJECT_TYPE_SHADER_MODULE, OBJECT_HANDLE(modules[i]), "public shader module");
+        vkDestroyShaderModule(g_dev, modules[i], NULL);
+    }
     uint8_t handle_bytes[3 * 32];
     CHECK(handles(g_dev, rt, 0, 3, sizeof(handle_bytes), handle_bytes));
     for (unsigned i = 0; i < 3; ++i) memcpy((uint8_t *)sbt.mapped + i * 64, handle_bytes + i * 32, 32);
@@ -575,21 +988,20 @@ int main(int argc, char **argv) {
             bind_shaders(command, 1, &stage, iteration ? NULL : &compute_shader);
             if (iteration) vkCmdBindPipeline(command, VK_PIPELINE_BIND_POINT_COMPUTE, compute);
         }
-        bind_sets(command, VK_PIPELINE_BIND_POINT_COMPUTE, shader_object_mode ? compute_layout : layout, sets[0]);
+        bind_compute_descriptors(command, separate_compute ? compute_layout : layout, layout, sets[descriptor_mode ? 1 : 0]);
         uint32_t ordinary = 123 + iteration;
-        push_values(command, shader_object_mode ? compute_layout : layout, VK_SHADER_STAGE_COMPUTE_BIT, 4, 4, &ordinary);
+        push_values(command, separate_compute ? compute_layout : layout, VK_SHADER_STAGE_COMPUTE_BIT, 4, 4, &ordinary);
         vkCmdBindPipeline(command, VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR, rt);
         bind_sets(command, VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR, layout, sets[0]);
         uint32_t values[] = {3 + iteration, 7 + iteration, 11 + iteration};
         const uint32_t push_offsets[] = {0, 8, 12};
         for (unsigned i = 0; i < 3; ++i) {
-            push_values(command, layout, kinds[i] | (shader_object_mode ? 0 : VK_SHADER_STAGE_COMPUTE_BIT), push_offsets[i], 4,
+            push_values(command, layout, kinds[i] | (separate_compute ? 0 : VK_SHADER_STAGE_COMPUTE_BIT), push_offsets[i], 4,
                         &values[i]);
-            if (shader_object_mode)
-                push_values(command, compute_layout, VK_SHADER_STAGE_COMPUTE_BIT, push_offsets[i], 4, &values[i]);
+            if (separate_compute) push_values(command, compute_layout, VK_SHADER_STAGE_COMPUTE_BIT, push_offsets[i], 4, &values[i]);
         }
         const uint32_t tail = 91 + iteration;
-        push_values(command, shader_object_mode ? compute_layout : layout, VK_SHADER_STAGE_COMPUTE_BIT, 124, 4, &tail);
+        push_values(command, separate_compute ? compute_layout : layout, VK_SHADER_STAGE_COMPUTE_BIT, 124, 4, &tail);
         set_stack(command, (uint32_t)budget + iteration * 16);
         VkStridedDeviceAddressRegionKHR regions[] = {
             {sbt.addr, 64, 64}, {sbt.addr + 64, 64, 64}, {sbt.addr + 128, 64, 64}, {0, 0, 0}};
@@ -601,9 +1013,9 @@ int main(int argc, char **argv) {
         memory_barrier(command, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_ACCESS_SHADER_WRITE_BIT,
                        VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR, VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT);
         values[0] += 5;
-        push_values(command, layout, VK_SHADER_STAGE_RAYGEN_BIT_KHR | (shader_object_mode ? 0 : VK_SHADER_STAGE_COMPUTE_BIT), 0, 4,
+        push_values(command, layout, VK_SHADER_STAGE_RAYGEN_BIT_KHR | (separate_compute ? 0 : VK_SHADER_STAGE_COMPUTE_BIT), 0, 4,
                     &values[0]);
-        if (shader_object_mode) push_values(command, compute_layout, VK_SHADER_STAGE_COMPUTE_BIT, 0, 4, &values[0]);
+        if (separate_compute) push_values(command, compute_layout, VK_SHADER_STAGE_COMPUTE_BIT, 0, 4, &values[0]);
         bind_sets(command, VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR, layout, sets[1]);
         vkDestroyPipelineLayout(g_dev, layout, NULL);
         trace(command, &regions[0], &regions[1], &regions[2], &regions[3], 8, 1, 1);
@@ -647,8 +1059,8 @@ int main(int argc, char **argv) {
             const uint32_t values[] = {3 + target, 7 + target, 11 + target};
             const uint32_t offsets[] = {0, 8, 12};
             for (unsigned i = 0; i < 3; ++i)
-                push_values(concurrent[target], layout, kinds[i] | (shader_object_mode ? 0 : VK_SHADER_STAGE_COMPUTE_BIT),
-                            offsets[i], 4, &values[i]);
+                push_values(concurrent[target], layout, kinds[i] | (separate_compute ? 0 : VK_SHADER_STAGE_COMPUTE_BIT), offsets[i],
+                            4, &values[i]);
             set_stack(concurrent[target], (uint32_t)budget + 16);
             VkStridedDeviceAddressRegionKHR regions[] = {
                 {sbt.addr, 64, 64}, {sbt.addr + 64, 64, 64}, {sbt.addr + 128, 64, 64}, {0, 0, 0}};
@@ -690,13 +1102,28 @@ int main(int argc, char **argv) {
         vkFreeCommandBuffers(g_dev, g_pool, 2, concurrent);
         vkDestroyPipelineLayout(g_dev, layout, NULL);
     }
+    if (private_data_mode) {
+        const VkPrivateDataSlot previous = private_slot;
+        destroy_private_slot[0](g_dev, private_slot, NULL);
+        const VkPrivateDataSlotCreateInfo slot_info = {.sType = VK_STRUCTURE_TYPE_PRIVATE_DATA_SLOT_CREATE_INFO};
+        CHECK(create_private_slot[1](g_dev, &slot_info, NULL, &private_slot));
+        annotate_object(VK_OBJECT_TYPE_PIPELINE, OBJECT_HANDLE(rt), "RTP pipeline with replacement private slot");
+        annotate_object(VK_OBJECT_TYPE_PIPELINE, OBJECT_HANDLE(compute), "native compute with replacement private slot");
+        annotate_object(VK_OBJECT_TYPE_ACCELERATION_STRUCTURE_KHR, OBJECT_HANDLE(blas.handle),
+                        "BLAS with replacement private slot");
+        printf("Private-data slot numeric reuse observed=%u\n", previous == private_slot);
+        destroy_private_slot[1](g_dev, private_slot, NULL);
+        private_slot = VK_NULL_HANDLE;
+    }
     vkDestroyPipeline(g_dev, rt, NULL);
     for (unsigned i = 3; i-- > 0;)
         if (retained_libraries[i]) vkDestroyPipeline(g_dev, retained_libraries[i], NULL);
     if (derivative_indexed) vkDestroyPipeline(g_dev, derivative_indexed, NULL);
     vkDestroyPipeline(g_dev, compute, NULL);
     if (compute_shader) destroy_shader(g_dev, compute_shader, NULL);
-    if (shader_object_mode) vkDestroyPipelineLayout(g_dev, compute_layout, NULL);
+    if (separate_compute) vkDestroyPipelineLayout(g_dev, compute_layout, NULL);
+    if (compute_dsl) vkDestroyDescriptorSetLayout(g_dev, compute_dsl, NULL);
+    if (descriptor_mode == 3) buf_destroy(&descriptor_storage);
     vkDestroyDescriptorPool(g_dev, pool, NULL);
     vkDestroyDescriptorSetLayout(g_dev, dsl, NULL);
     vkDestroyDescriptorSetLayout(g_dev, empty_layout, NULL);
@@ -719,6 +1146,18 @@ int main(int argc, char **argv) {
     if (maintenance6_mode)
         printf("Maintenance6 core/KHR API aliases with dynamic layouts=%u: %s\n", dynamic_layout, g_fail ? "FAIL" : "PASS");
     if (shader_object_mode) printf("Compute shader object/RTP/pipeline state restoration: %s\n", g_fail ? "FAIL" : "PASS");
+    if (descriptor_mode)
+        printf(
+            "Compute descriptors mode=%u maintenance6=%u dynamic-layout=%u core-alias=%u; immediate Dispatch after Trace without "
+            "descriptor rebinding: %s\n",
+            descriptor_mode, maintenance6_mode, dynamic_layout, descriptor_core, g_fail ? "FAIL" : "PASS");
+    if (debug_names_mode)
+        printf("Debug-utils name/tag on virtual AS/RTP/shader/template/query/deferred and native compute objects: %s\n",
+               g_fail ? "FAIL" : "PASS");
+    if (private_data_mode)
+        printf("PrivateData on virtual AS/RTP/shader/template/query/deferred and native compute objects; native slots: %s\n",
+               g_fail ? "FAIL" : "PASS");
+    if (vulkan11_mode) printf("Vulkan1.1 application with genuine SPIR-V1.4 shader inputs: %s\n", g_fail ? "FAIL" : "PASS");
     if (derivatives_mode)
         printf("RTP base/index/handle derivatives, optimization flags and destroyed base before trace: %s\n",
                g_fail ? "FAIL" : "PASS");

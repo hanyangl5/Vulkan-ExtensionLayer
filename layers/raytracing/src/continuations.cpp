@@ -1,6 +1,7 @@
 // Copyright 2026 The Khronos Group Inc.
 // SPDX-License-Identifier: Apache-2.0
 #include "continuations.h"
+#include "spirv_environment.h"
 
 #include <spirv-tools/libspirv.hpp>
 #include <spirv/unified1/spirv.hpp>
@@ -191,7 +192,7 @@ FunctionContinuations AnalyzeFunction(const Module &m, Function &function) {
 Module ParseModule(const std::vector<uint32_t> &spirv) {
     std::string error;
     Module m;
-    auto context = spvContextCreate(SPV_ENV_VULKAN_1_3);
+    auto context = spvContextCreate(VulkanEnvironmentForSPIRV(spirv.size() > 1 ? spirv[1] : 0));
     spv_diagnostic diagnostic = nullptr;
     auto status = spvBinaryParse(context, &m, spirv.data(), spirv.size(), nullptr, ParseInstruction, &diagnostic);
     if (status != SPV_SUCCESS && diagnostic) error = diagnostic->error;
@@ -424,7 +425,7 @@ class FramePlanner {
 
 ContinuationAnalysis AnalyzeContinuations(const std::vector<uint32_t> &spirv, const std::string &entry, uint32_t execution_model) {
     std::string error;
-    spvtools::SpirvTools validator(SPV_ENV_VULKAN_1_3);
+    spvtools::SpirvTools validator(VulkanEnvironmentForSPIRV(spirv.size() > 1 ? spirv[1] : 0));
     validator.SetMessageConsumer([&](spv_message_level_t, const char *, const spv_position_t &where, const char *message) {
         error += std::to_string(where.index) + ": " + message + "\n";
     });

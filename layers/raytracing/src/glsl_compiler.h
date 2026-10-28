@@ -7,5 +7,6 @@
 #include <vulkan/vulkan.h>
 
 namespace vel::rt {
-std::vector<uint32_t> CompileGLSL(const std::string &source, VkShaderStageFlagBits stage);
+enum class GLSLTarget { Vulkan12, Vulkan11Spirv14 };
+std::vector<uint32_t> CompileGLSL(const std::string &source, VkShaderStageFlagBits stage, GLSLTarget target = GLSLTarget::Vulkan12);
 }  // namespace vel::rt

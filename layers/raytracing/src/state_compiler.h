@@ -68,7 +68,7 @@ struct TypedAccelerationStructureDescriptor {
     // The application binding/array selection is retained; pipeline layout
     // integration must translate descriptor type to STORAGE_BUFFER.
 };
-enum class TypedFrameTransport { StorageBuffer, PhysicalAddress, PrivateArray };
+enum class TypedFrameTransport { StorageBuffer, PhysicalAddress };
 struct TypedContinuationCompileOptions {
     TypedFrameTransport transport = TypedFrameTransport::StorageBuffer;
     uint32_t frame_descriptor_set = 0, frame_binding = 0;
@@ -76,9 +76,6 @@ struct TypedContinuationCompileOptions {
     // void step(uint64 frameBDA), rather than a compute entry point.
     bool emit_compute_entry = true;
     std::string step_export_name;
-    // PrivateArray libraries share one imported invocation-private uint array.
-    // The uint64 step parameter then denotes a byte offset, not a native BDA.
-    uint32_t private_frame_words = 0;
     // Standalone BDA wrapper only: specialization values supply the low/high
     // uint32 words of an immutable per-dispatch context address.
     uint32_t context_root_low_spec_id = 0, context_root_high_spec_id = 1;
@@ -111,7 +108,6 @@ struct TypedContinuationProgram {
     std::vector<TypedRequiredExecutionMode> required_execution_modes;
     TypedFrameTransport transport = TypedFrameTransport::StorageBuffer;
     std::string step_export_name;
-    uint32_t private_frame_words = 0;
     // BDA pool addressing/counts are uint64. The legacy max_invocations field
     // below constrains only the default SSBO wrapper. Each individual source
     // frame remains checked below4GiB; global pools have no such32-bit ceiling.
@@ -128,8 +124,7 @@ struct TypedContinuationProgram {
 // and control offsets include VEL_RT_SYSTEM_BYTES. Type member offsets remain
 // relative to their own value. Builtins read real fields from that system
 // prefix; push constants and shader records use the addresses stored there.
-// Library exports have no context/root globals and take frameBDA directly;
-// PrivateArray instead takes a uint64 byte offset into the shared Private array.
+// Library exports have no context/root globals and take frameBDA directly.
 // IgnoreIntersection/TerminateRay finish the stage with pending kinds4/5;
 // payload writes remain in backing and there is no resumed result to inject.
 // Actual source CFG lowering, independent of the legacy GLSL compiler. Each

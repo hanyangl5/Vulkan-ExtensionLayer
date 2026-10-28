@@ -176,6 +176,8 @@ vkrt_instance_dispatch_load(struct vkrt_instance_dispatch *t,
    VKRT_LOAD_I(EnumerateDeviceExtensionProperties);
    VKRT_LOAD_I(GetPhysicalDeviceProperties);
    VKRT_LOAD_I(GetPhysicalDeviceProperties2);
+   if (!t->GetPhysicalDeviceProperties2)
+       t->GetPhysicalDeviceProperties2 = (PFN_vkGetPhysicalDeviceProperties2)gipa(instance, "vkGetPhysicalDeviceProperties2KHR");
    VKRT_LOAD_I(GetPhysicalDeviceFeatures2);
    if (!t->GetPhysicalDeviceFeatures2)
       t->GetPhysicalDeviceFeatures2 = (PFN_vkGetPhysicalDeviceFeatures2)gipa(instance, "vkGetPhysicalDeviceFeatures2KHR");

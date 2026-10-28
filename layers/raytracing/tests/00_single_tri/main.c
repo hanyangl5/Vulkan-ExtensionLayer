@@ -367,7 +367,10 @@ run_ray(VkAccelerationStructureKHR tlas, const float origin[3],
 
     /* --- pipeline -------------------------------------------------- */
     size_t words = 0;
-    uint32_t *spv = read_spv("rq_test.comp.spv", &words);
+#ifndef VKRT_TEST_RQ_SHADER_PATH
+#define VKRT_TEST_RQ_SHADER_PATH "rq_test.comp.spv"
+#endif
+    uint32_t *spv = read_spv(VKRT_TEST_RQ_SHADER_PATH, &words);
     VkShaderModuleCreateInfo smci = {
         .sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO,
         .codeSize = words * 4,

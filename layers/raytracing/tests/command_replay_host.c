@@ -3,6 +3,7 @@
  * Standalone CPU test. Compile with vkrt_replay.c and generated include path.
  */
 #include "vkrt_replay.h"
+#include "vkrt_replay_capture_generated.h"
 #ifdef NDEBUG
 #undef NDEBUG
 #endif
@@ -17,7 +18,7 @@
 static const VkCommandBuffer source_command = HANDLE(VkCommandBuffer, 1);
 static const VkCommandBuffer target_command = HANDLE(VkCommandBuffer, 2);
 static struct vkrt_replay_context source_context, target_context;
-static unsigned record_calls, emit_calls, normalized, converted;
+static unsigned record_calls, emit_calls, normalized, converted, lookups;
 static VkPipelineLayout expected_layout;
 static VkPipelineLayout emit_layout = HANDLE(VkPipelineLayout, 300);
 static const void *original_array;
@@ -27,6 +28,7 @@ struct VkCudaLaunchInfoNV;
 static const void *expected_opaque_pointer;
 
 struct vkrt_replay_context *vkrt_replay_lookup_context(VkCommandBuffer command) {
+    ++lookups;
     return command == source_command ? &source_context : command == target_command ? &target_context : NULL;
 }
 static void called(VkCommandBuffer command) {
@@ -919,6 +921,64 @@ static void test_metadata_no_allocation(void) {
     assert(!state.live);
     source_context.journal = previous;
 }
+static void test_capture_only(void) {
+    reset();
+    struct vkrt_replay_context history = {.journal = vkrt_replay_journal_create(NULL, VK_SYSTEM_ALLOCATION_SCOPE_COMMAND),
+                                          .normalize_pipeline_layout = normalize_layout};
+    assert(history.journal && !history.resolve);
+    PFN_vkrt_capture_CmdPushDescriptorSetKHR capture = (void *)vkrt_replay_capture_proc("vkCmdPushDescriptorSetKHR");
+    assert(capture && !vkrt_replay_capture_proc(NULL) && !vkrt_replay_capture_proc("vkNotACommand"));
+    assert(capture(NULL, VK_PIPELINE_BIND_POINT_COMPUTE, HANDLE(VkPipelineLayout, 100), 0, 0, NULL) ==
+           VK_ERROR_INITIALIZATION_FAILED);
+    VkDescriptorBufferInfo buffer = {.buffer = HANDLE(VkBuffer, 20), .offset = 123, .range = 456};
+    VkAccelerationStructureKHR handles[] = {HANDLE(VkAccelerationStructureKHR, 88), HANDLE(VkAccelerationStructureKHR, 89)};
+    VkWriteDescriptorSetAccelerationStructureKHR acceleration = {
+        .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET_ACCELERATION_STRUCTURE_KHR,
+        .accelerationStructureCount = 2,
+        .pAccelerationStructures = handles};
+    VkWriteDescriptorSet writes[] = {{.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+                                      .descriptorCount = 1,
+                                      .descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+                                      .pBufferInfo = &buffer},
+                                     {.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+                                      .pNext = &acceleration,
+                                      .descriptorCount = 2,
+                                      .descriptorType = VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR}};
+    unsigned before = lookups;
+    assert(capture(&history, VK_PIPELINE_BIND_POINT_COMPUTE, HANDLE(VkPipelineLayout, 100), 0, 2, writes) == VK_SUCCESS);
+    assert(!record_calls && lookups == before && vkrt_replay_journal_count(history.journal) == 1);
+    buffer.offset = 0;
+    handles[1] = VK_NULL_HANDLE;
+    target_context.emit_pipeline_layout = convert_layout;
+    expected_layout = emit_layout;
+    replaying = true;
+    assert(vkrt_replay_emit(history.journal, target_command, resolve, NULL, NULL) == VK_SUCCESS);
+    replaying = false;
+    assert(emit_calls == 1 && normalized == 1 && converted == 1);
+    vkrt_replay_journal_reset(history.journal);
+    VkBaseInStructure unknown = {.sType = (VkStructureType)0x7ffffe00};
+    writes[0].pNext = &unknown;
+    assert(capture(&history, VK_PIPELINE_BIND_POINT_COMPUTE, HANDLE(VkPipelineLayout, 100), 0, 1, writes) ==
+           VK_ERROR_FEATURE_NOT_PRESENT);
+    before = lookups;
+    assert(capture(&history, VK_PIPELINE_BIND_POINT_COMPUTE, HANDLE(VkPipelineLayout, 100), 0, 1, (void *)(uintptr_t)1) ==
+           VK_ERROR_FEATURE_NOT_PRESENT);
+    assert(!record_calls && lookups == before);
+    vkrt_replay_journal_destroy(history.journal);
+    for (unsigned fail = 1; fail < 8; ++fail) {
+        struct allocation_state state = {.fail_after = fail};
+        VkAllocationCallbacks callbacks = {.pUserData = &state, .pfnAllocation = allocation, .pfnFree = release};
+        history =
+            (struct vkrt_replay_context){.journal = vkrt_replay_journal_create(&callbacks, VK_SYSTEM_ALLOCATION_SCOPE_COMMAND)};
+        assert(history.journal);
+        float constants[] = {1, 2, 3, 4};
+        PFN_vkrt_capture_CmdSetBlendConstants blend_capture = (void *)vkrt_replay_capture_proc("vkCmdSetBlendConstants");
+        VkResult status = blend_capture(&history, constants);
+        assert(status == VK_SUCCESS || status == VK_ERROR_OUT_OF_HOST_MEMORY);
+        vkrt_replay_journal_destroy(history.journal);
+        assert(!state.live);
+    }
+}
 static void test_oom(void) {
     vkrt_replay_journal_destroy(source_context.journal);
     source_context.journal = NULL;
@@ -967,10 +1027,11 @@ int main(void) {
     test_rejected_inputs();
     test_header_unavailable_commands();
     test_metadata_no_allocation();
+    test_capture_only();
     test_oom();
     puts(
         "command replay host: begin/chain/arrays/AS/descriptors/layout/children/stride/selector/stage facts/owned metadata/ABI "
-        "blockers/rejections/OOM "
+        "blockers/capture-only/rejections/OOM "
         "passed");
     return 0;
 }

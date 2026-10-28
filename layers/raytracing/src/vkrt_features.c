@@ -3,11 +3,79 @@
 #include "vkrt_chain.h"
 #include "vkrt_rt_capabilities.h"
 #include "vkrt_resource_profile.h"
+#include "vkrt_software_profile.h"
 
+struct backend_extension {
+    const char *name;
+    uint32_t promoted;
+    bool query_only;
+};
+static const struct backend_extension backend_extensions[] = {
+    {VK_KHR_16BIT_STORAGE_EXTENSION_NAME, VK_API_VERSION_1_1, false},
+    {VK_KHR_8BIT_STORAGE_EXTENSION_NAME, VK_API_VERSION_1_2, false},
+    {VK_KHR_SHADER_FLOAT16_INT8_EXTENSION_NAME, VK_API_VERSION_1_2, false},
+    {VK_EXT_SCALAR_BLOCK_LAYOUT_EXTENSION_NAME, VK_API_VERSION_1_2, false},
+    {VK_KHR_VULKAN_MEMORY_MODEL_EXTENSION_NAME, VK_API_VERSION_1_2, false},
+    {VK_KHR_BUFFER_DEVICE_ADDRESS_EXTENSION_NAME, VK_API_VERSION_1_2, false},
+    {VK_KHR_VARIABLE_POINTERS_EXTENSION_NAME, VK_API_VERSION_1_1, false},
+    {VK_EXT_DESCRIPTOR_INDEXING_EXTENSION_NAME, VK_API_VERSION_1_2, false},
+    {VK_EXT_HOST_QUERY_RESET_EXTENSION_NAME, VK_API_VERSION_1_2, true},
+    {VK_KHR_SHADER_ATOMIC_INT64_EXTENSION_NAME, VK_API_VERSION_1_2, true},
+    {VK_KHR_SPIRV_1_4_EXTENSION_NAME, VK_API_VERSION_1_2, false},
+    {VK_KHR_SHADER_FLOAT_CONTROLS_EXTENSION_NAME, VK_API_VERSION_1_2, false},
+};
+static VkResult native_extensions(struct vkrt_instance_data *inst, VkPhysicalDevice physical, VkExtensionProperties **output,
+                                  uint32_t *count) {
+    *output = NULL;
+    *count = 0;
+    if (!inst->vtable.EnumerateDeviceExtensionProperties) return VK_ERROR_INITIALIZATION_FAILED;
+    for (unsigned attempt = 0; attempt < 8; ++attempt) {
+        VkResult result = inst->vtable.EnumerateDeviceExtensionProperties(physical, NULL, count, NULL);
+        if (result != VK_SUCCESS) return result;
+        if ((uint64_t)*count > SIZE_MAX / sizeof(**output)) return VK_ERROR_OUT_OF_HOST_MEMORY;
+        uint32_t capacity = *count;
+        VkExtensionProperties *extensions = malloc((capacity ? (size_t)capacity : 1) * sizeof(*extensions));
+        if (!extensions) return VK_ERROR_OUT_OF_HOST_MEMORY;
+        result = inst->vtable.EnumerateDeviceExtensionProperties(physical, NULL, count, extensions);
+        if (result == VK_SUCCESS && *count <= capacity) {
+            *output = extensions;
+            return VK_SUCCESS;
+        }
+        free(extensions);
+        if (result != VK_INCOMPLETE) return result == VK_SUCCESS ? VK_ERROR_INITIALIZATION_FAILED : result;
+    }
+    return VK_ERROR_INITIALIZATION_FAILED;
+}
+static bool extension_present(const VkExtensionProperties *extensions, uint32_t count, const char *name) {
+    for (uint32_t i = 0; i < count; ++i)
+        if (!strcmp(extensions[i].extensionName, name)) return true;
+    return false;
+}
+static bool backend_aliases_available(struct vkrt_instance_data *inst, VkPhysicalDevice physical, bool queries) {
+    if (inst->api_version >= VK_API_VERSION_1_2) return true;
+    VkExtensionProperties *extensions;
+    uint32_t count;
+    if (native_extensions(inst, physical, &extensions, &count) != VK_SUCCESS) return false;
+    bool available = true;
+    for (size_t i = 0; i < VKRT_ARRAY_SIZE(backend_extensions); ++i) {
+        const struct backend_extension *required = &backend_extensions[i];
+        if ((required->query_only && !queries) || inst->api_version >= required->promoted) continue;
+        available &= extension_present(extensions, count, required->name);
+    }
+    free(extensions);
+    return available;
+}
 /* Base AS/RQ/RTP objects and shaders use the shared layer backend. Consume
  * their requests instead of enabling native RT on the downstream device. */
 static VkResult virtual_feature(const VkBaseInStructure *p, bool *remove, bool *uses_virtual_rt) {
     size_t offset, bytes;
+    if (*uses_virtual_rt && vkrt_virtual_object_feature_range(p->sType, &offset, &bytes)) {
+        for (size_t i = 0; i < bytes; i += sizeof(VkBool32)) {
+            VkBool32 enabled;
+            memcpy(&enabled, (const char *)p + offset + i, sizeof(enabled));
+            if (enabled) return VK_ERROR_FEATURE_NOT_PRESENT;
+        }
+    }
     *remove = vkrt_unsupported_rt_feature_range(p->sType, &offset, &bytes);
     if (*remove) {
         for (size_t i = 0; i < bytes; i += sizeof(VkBool32)) {
@@ -73,7 +141,7 @@ bool vkrt_device_uses_virtual_rt(const VkDeviceCreateInfo *info) {
 /* Ordinary devices and the CPU-only deferred dependency must not inherit the
  * GPU backend's prerequisites. Only remove consumed feature nodes/names. */
 static VkResult create_without_rt(PFN_vkCreateDevice create, VkPhysicalDevice physical, const VkDeviceCreateInfo *info,
-                                  const VkAllocationCallbacks *allocator, VkDevice *device) {
+                                  const VkAllocationCallbacks *allocator, VkDevice *device, bool consume_library) {
     const VkBaseInStructure *last = NULL;
     bool uses_rt = false;
     for (const VkBaseInStructure *p = info->pNext; p; p = p->pNext) {
@@ -119,7 +187,8 @@ static VkResult create_without_rt(PFN_vkCreateDevice create, VkPhysicalDevice ph
     local.ppEnabledExtensionNames = extensions;
     local.enabledExtensionCount = 0;
     for (uint32_t i = 0; i < info->enabledExtensionCount; ++i)
-        if (strcmp(info->ppEnabledExtensionNames[i], VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME))
+        if (strcmp(info->ppEnabledExtensionNames[i], VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME) &&
+            (!consume_library || strcmp(info->ppEnabledExtensionNames[i], VK_KHR_PIPELINE_LIBRARY_EXTENSION_NAME)))
             extensions[local.enabledExtensionCount++] = info->ppEnabledExtensionNames[i];
     result = create(physical, &local, allocator, device);
     free(extensions);
@@ -136,7 +205,7 @@ done:
  * device feature augmentation and the shader-binary compatibility domain; it
  * is not a claim that the complete public RT profile has been qualified. */
 static bool native_backend_capabilities(struct vkrt_instance_data *inst, VkPhysicalDevice physical, bool *query_backend) {
-    if (!inst) return false;
+    if (!inst || inst->api_version < VK_API_VERSION_1_1) return false;
     VkPhysicalDeviceBufferDeviceAddressFeatures bda = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_BUFFER_DEVICE_ADDRESS_FEATURES};
     VkPhysicalDeviceVulkanMemoryModelFeatures memory = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_MEMORY_MODEL_FEATURES,
                                                         .pNext = &bda};
@@ -192,12 +261,11 @@ static bool native_backend_capabilities(struct vkrt_instance_data *inst, VkPhysi
     const VkSubgroupFeatureFlags operations =
         VK_SUBGROUP_FEATURE_BASIC_BIT | VK_SUBGROUP_FEATURE_BALLOT_BIT | VK_SUBGROUP_FEATURE_SHUFFLE_BIT;
     const VkPhysicalDeviceLimits *limits = &properties2.properties.limits;
-    /* Every active builder and the linked production RTP program is SPIR-V
-     * 1.5. Injecting the older extension aliases does not make a native Vulkan
-     * 1.0/1.1 driver support that module version. Application API 1.0/1.1 on a
-     * native 1.2+ device still follows the alias path below. */
+    /* The native feature substrate remains Vulkan 1.2+. An application using
+     * 1.1 enables actual extension aliases, including SPIR-V 1.4 and float
+     * controls, for private modules compiled for that legal environment. */
     if (properties2.properties.apiVersion < VK_API_VERSION_1_2) {
-        VKRT_LOG_ERR("GPU BVH requires native Vulkan 1.2 for its SPIR-V 1.5 modules");
+        VKRT_LOG_ERR("GPU BVH requires native Vulkan 1.2 feature support");
         return false;
     }
     if (!(subgroup.supportedStages & VK_SHADER_STAGE_COMPUTE_BIT) || (subgroup.supportedOperations & operations) != operations ||
@@ -210,7 +278,7 @@ static bool native_backend_capabilities(struct vkrt_instance_data *inst, VkPhysi
         return false;
     }
 
-    return true;
+    return backend_aliases_available(inst, physical, false);
 }
 
 bool vkrt_native_backend_eligible(struct vkrt_instance_data *inst, VkPhysicalDevice physical) {
@@ -221,27 +289,36 @@ bool vkrt_native_backend_eligible(struct vkrt_instance_data *inst, VkPhysicalDev
 /* The public RT resource contract is stricter than the shader lowering
  * component used for the physical shader-binary UUID. Keep those predicates
  * separate: ordinary shader-object devices do not acquire an RT budget gate. */
-static bool virtual_rt_resource_profile(struct vkrt_instance_data *inst, VkPhysicalDevice physical,
-                                        struct vkrt_resource_profile *profile, bool *query_backend) {
+static bool virtual_rt_profile(struct vkrt_instance_data *inst, VkPhysicalDevice physical, struct vkrt_software_rt_profile *profile,
+                               bool *query_backend) {
     if (!physical || !profile || !query_backend) return false;
     struct vkrt_resource_profile local;
     bool queries = false;
     /* The public AS query types are mandatory RT functionality. Their current
      * backend needs private host reset and buffer int64 atomic support even
      * when the application does not request either feature itself. */
-    if (!native_backend_capabilities(inst, physical, &queries) || !queries ||
+    if (!native_backend_capabilities(inst, physical, &queries) || !queries || !backend_aliases_available(inst, physical, true) ||
         !vkrt_query_resource_profile(inst->vtable.GetPhysicalDeviceProperties2, inst->vtable.GetPhysicalDeviceFeatures2, physical,
                                      &local, NULL))
         return false;
-    *profile = local;
+    vkrt_software_rt_profile_init(&local, profile);
     *query_backend = queries;
     return true;
 }
 
 bool vkrt_virtual_rt_resource_profile(struct vkrt_instance_data *inst, VkPhysicalDevice physical,
                                       struct vkrt_resource_profile *profile) {
+    if (!profile) return false;
+    struct vkrt_software_rt_profile local;
     bool query_backend;
-    return virtual_rt_resource_profile(inst, physical, profile, &query_backend);
+    if (!virtual_rt_profile(inst, physical, &local, &query_backend)) return false;
+    *profile = local.resources;
+    return true;
+}
+
+bool vkrt_virtual_rt_profile(struct vkrt_instance_data *inst, VkPhysicalDevice physical, struct vkrt_software_rt_profile *profile) {
+    bool query_backend;
+    return virtual_rt_profile(inst, physical, profile, &query_backend);
 }
 
 bool vkrt_device_requests_shader_objects(const VkDeviceCreateInfo *info) {
@@ -267,6 +344,7 @@ VkResult vkrt_create_device_with_features(struct vkrt_instance_data *inst, VkPhy
     for (uint32_t i = 0; i < ci->enabledExtensionCount; ++i) {
         const char *name = ci->ppEnabledExtensionNames[i];
         if (vkrt_incompatible_device_extension(name)) return VK_ERROR_FEATURE_NOT_PRESENT;
+        if (uses_virtual_rt && vkrt_virtual_rt_incompatible_extension(name)) return VK_ERROR_FEATURE_NOT_PRESENT;
         uses_virtual_rt |= !strcmp(name, VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME) ||
                            !strcmp(name, VK_KHR_RAY_QUERY_EXTENSION_NAME) ||
                            !strcmp(name, VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME);
@@ -281,15 +359,31 @@ VkResult vkrt_create_device_with_features(struct vkrt_instance_data *inst, VkPhy
         if (check != VK_SUCCESS) return check;
         if (remove || augmented_feature(p->sType)) last_change = p;
     }
-    if (!uses_virtual_rt && !vkrt_device_requests_shader_objects(ci)) return create_without_rt(create, physical, ci, alloc, device);
+    bool consume_library = false;
+    for (uint32_t i = 0; i < ci->enabledExtensionCount; ++i) {
+        if (strcmp(ci->ppEnabledExtensionNames[i], VK_KHR_PIPELINE_LIBRARY_EXTENSION_NAME)) continue;
+        VkExtensionProperties *extensions;
+        uint32_t count;
+        VkResult result = native_extensions(inst, physical, &extensions, &count);
+        if (result != VK_SUCCESS) return result;
+        consume_library = !extension_present(extensions, count, VK_KHR_PIPELINE_LIBRARY_EXTENSION_NAME);
+        free(extensions);
+        if (consume_library && !uses_virtual_rt) {
+            struct vkrt_software_rt_profile profile;
+            if (!vkrt_virtual_rt_profile(inst, physical, &profile)) return VK_ERROR_EXTENSION_NOT_PRESENT;
+        }
+        break;
+    }
+    if (!uses_virtual_rt && !vkrt_device_requests_shader_objects(ci))
+        return create_without_rt(create, physical, ci, alloc, device, consume_library);
     const VkBaseInStructure *borrowed = last_change ? last_change->pNext : ci->pNext;
     bool query_backend = false;
-    struct vkrt_resource_profile resource_profile;
-    bool eligible = uses_virtual_rt ? virtual_rt_resource_profile(inst, physical, &resource_profile, &query_backend)
+    struct vkrt_software_rt_profile software_profile;
+    bool eligible = uses_virtual_rt ? virtual_rt_profile(inst, physical, &software_profile, &query_backend)
                                     : native_backend_capabilities(inst, physical, &query_backend);
     if (!eligible) {
         if (uses_virtual_rt) return VK_ERROR_FEATURE_NOT_PRESENT;
-        return create_without_rt(create, physical, ci, alloc, device);
+        return create_without_rt(create, physical, ci, alloc, device, consume_library);
     }
     query_backend &= uses_virtual_rt;
     VkPhysicalDeviceBufferDeviceAddressFeatures bda = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_BUFFER_DEVICE_ADDRESS_FEATURES};
@@ -437,13 +531,7 @@ VkResult vkrt_create_device_with_features(struct vkrt_instance_data *inst, VkPhy
     PREPEND(host_reset, has_host_reset || !query_backend);
     PREPEND(atomic64, has_atomic64 || !query_backend);
 #undef PREPEND
-    /* Extension aliases also cover applications that requested Vulkan 1.0/1.1. */
-    const char *required[] = {VK_KHR_16BIT_STORAGE_EXTENSION_NAME,       VK_KHR_8BIT_STORAGE_EXTENSION_NAME,
-                              VK_KHR_SHADER_FLOAT16_INT8_EXTENSION_NAME, VK_EXT_SCALAR_BLOCK_LAYOUT_EXTENSION_NAME,
-                              VK_KHR_VULKAN_MEMORY_MODEL_EXTENSION_NAME, VK_KHR_BUFFER_DEVICE_ADDRESS_EXTENSION_NAME,
-                              VK_KHR_VARIABLE_POINTERS_EXTENSION_NAME,   VK_EXT_DESCRIPTOR_INDEXING_EXTENSION_NAME,
-                              VK_EXT_HOST_QUERY_RESET_EXTENSION_NAME,    VK_KHR_SHADER_ATOMIC_INT64_EXTENSION_NAME};
-    size_t required_count = VKRT_ARRAY_SIZE(required) - (query_backend ? 0 : 2);
+    size_t required_count = VKRT_ARRAY_SIZE(backend_extensions);
     if (ci->enabledExtensionCount > UINT32_MAX - required_count ||
         (uint64_t)ci->enabledExtensionCount + required_count > SIZE_MAX / sizeof(const char *)) {
         result = VK_ERROR_OUT_OF_HOST_MEMORY;
@@ -459,7 +547,8 @@ VkResult vkrt_create_device_with_features(struct vkrt_instance_data *inst, VkPhy
         const char *name = ci->ppEnabledExtensionNames[i];
         if (!strcmp(name, VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME) || !strcmp(name, VK_KHR_RAY_QUERY_EXTENSION_NAME) ||
             !strcmp(name, VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME) ||
-            !strcmp(name, VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME))
+            !strcmp(name, VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME) ||
+            (consume_library && !strcmp(name, VK_KHR_PIPELINE_LIBRARY_EXTENSION_NAME)))
             continue;
         extensions[local.enabledExtensionCount++] = name;
     }
@@ -468,11 +557,13 @@ VkResult vkrt_create_device_with_features(struct vkrt_instance_data *inst, VkPhy
     for (size_t i = 0; i < required_count; ++i) {
         /* Do not require extension aliases when the application uses core
          * features: implementations may expose core 1.2 without those names. */
-        uint32_t promoted = i == 0 || i == 6 ? VK_API_VERSION_1_1 : VK_API_VERSION_1_2;
-        if (inst->api_version >= promoted && properties.apiVersion >= promoted) continue;
+        const struct backend_extension *required = &backend_extensions[i];
+        if ((required->query_only && !query_backend) ||
+            (inst->api_version >= required->promoted && properties.apiVersion >= required->promoted))
+            continue;
         bool found = false;
-        for (uint32_t j = 0; j < local.enabledExtensionCount; ++j) found |= strcmp(extensions[j], required[i]) == 0;
-        if (!found) extensions[local.enabledExtensionCount++] = required[i];
+        for (uint32_t j = 0; j < local.enabledExtensionCount; ++j) found |= strcmp(extensions[j], required->name) == 0;
+        if (!found) extensions[local.enabledExtensionCount++] = required->name;
     }
     local.ppEnabledExtensionNames = extensions;
     result = create(physical, &local, alloc, device);

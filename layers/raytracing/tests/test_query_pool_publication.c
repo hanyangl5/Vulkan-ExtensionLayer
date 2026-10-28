@@ -9,6 +9,7 @@ static void test_storage_release(struct vkrt_device_data *, struct vkrt_private_
 #undef vkrt_private_pool_release
 #include <stdatomic.h>
 #include <errno.h>
+#include <stddef.h>
 
 struct vkrt_global vkrt_global = VKRT_GLOBAL_INITIALIZER;
 VkResult vkrt_execution_collect(struct vkrt_device_data *dev, size_t *retired) {
@@ -138,10 +139,8 @@ static void native_wait_to_formatter_scope(void) {
     memset(&copy_scope, 0, sizeof(copy_scope));
     VkQueueFamilyProperties family = {.queueFlags = VK_QUEUE_COMPUTE_BIT, .timestampValidBits = 64};
     struct fixture_pool recording_pool = {.pool = HANDLE(VkCommandPool, 305), .family = 0};
-    struct vkrt_query_device queries = {.families = &family,
-                                        .family_count = 1,
-                                        .layout = HANDLE(VkPipelineLayout, 303),
-                                        .format = HANDLE(VkPipeline, 302)};
+    struct vkrt_query_device queries = {
+        .families = &family, .family_count = 1, .layout = HANDLE(VkPipelineLayout, 303), .format = HANDLE(VkPipeline, 302)};
     vkrt_mutex_init(&queries.lock);
     struct vkrt_device_data dev = {.queries = &queries, .max_build_dispatch_x = 1};
     pool_device = &dev;
@@ -519,6 +518,101 @@ static void admission_ordering(struct vkrt_device_data *dev, VkQueue queue, VkQu
     for (unsigned i = 0; i < 6; ++i) event_finish(events[i]);
 }
 
+struct query_debug_tracker {
+    struct vkrt_device_data *dev;
+    unsigned live, allocations, frees;
+};
+static VKAPI_ATTR void *VKAPI_CALL debug_query_allocate(void *user, size_t size, size_t alignment, VkSystemAllocationScope scope) {
+    struct query_debug_tracker *tracker = user;
+    CHECK(scope == VK_SYSTEM_ALLOCATION_SCOPE_DEVICE && alignment <= _Alignof(max_align_t));
+    CHECK(!vkrt_query_pool_owns(tracker->dev, UINT64_MAX));
+    void *memory = malloc(size);
+    if (memory) {
+        ++tracker->live;
+        ++tracker->allocations;
+    }
+    return memory;
+}
+static VKAPI_ATTR void VKAPI_CALL debug_query_free(void *user, void *memory) {
+    struct query_debug_tracker *tracker = user;
+    /* Reenter the typed registry while forget holds debug-lock. This would
+     * deadlock if DestroyQueryPool/device finish still held queries->lock. */
+    CHECK(!vkrt_query_pool_owns(tracker->dev, UINT64_MAX) && tracker->live);
+    --tracker->live;
+    ++tracker->frees;
+    free(memory);
+}
+static bool debug_query_owned(struct vkrt_device_data *dev, VkObjectType type, uint64_t handle) {
+    return type == VK_OBJECT_TYPE_QUERY_POOL && vkrt_query_pool_owns(dev, handle);
+}
+static VkQueryPool debug_query_record(struct vkrt_device_data *dev) {
+    /* Populate the real typed registry with host-only storage. The public GPU
+     * fixture separately exercises the full AS-query CreateQueryPool path. */
+    struct query_pool *pool = calloc(1, sizeof(*pool));
+    CHECK(pool != NULL);
+    if (!pool) return VK_NULL_HANDLE;
+    pool->magic = QUERY_POOL_MAGIC;
+    pool->dev = dev;
+    pool->type = VK_QUERY_TYPE_ACCELERATION_STRUCTURE_COMPACTED_SIZE_KHR;
+    pool->count = 1;
+    pool->slots = calloc(1, sizeof(*pool->slots));
+    CHECK(pool->slots != NULL);
+    vkrt_mutex_lock(&dev->queries->lock);
+    pool->next = dev->queries->pools;
+    dev->queries->pools = pool;
+    vkrt_map_object((uint64_t)(uintptr_t)pool, pool);
+    vkrt_mutex_unlock(&dev->queries->lock);
+    return (VkQueryPool)(uintptr_t)pool;
+}
+static void debug_query_annotations(struct vkrt_device_data *dev, VkQueryPool handle) {
+    PFN_vkSetDebugUtilsObjectNameEXT name = (void *)vkrt_debug_objects_proc("vkSetDebugUtilsObjectNameEXT");
+    PFN_vkSetDebugUtilsObjectTagEXT tag = (void *)vkrt_debug_objects_proc("vkSetDebugUtilsObjectTagEXT");
+    const VkDebugUtilsObjectNameInfoEXT info = {VK_STRUCTURE_TYPE_DEBUG_UTILS_OBJECT_NAME_INFO_EXT, NULL, VK_OBJECT_TYPE_QUERY_POOL,
+                                                (uint64_t)(uintptr_t)handle, "AS property query pool"};
+    const uint32_t data = 0x12345678;
+    const VkDebugUtilsObjectTagInfoEXT tagging = {VK_STRUCTURE_TYPE_DEBUG_UTILS_OBJECT_TAG_INFO_EXT,
+                                                  NULL,
+                                                  VK_OBJECT_TYPE_QUERY_POOL,
+                                                  (uint64_t)(uintptr_t)handle,
+                                                  7,
+                                                  sizeof(data),
+                                                  &data};
+    CHECK(name(dev->device, &info) == VK_SUCCESS && tag(dev->device, &tagging) == VK_SUCCESS);
+}
+static void debug_query_lifetime(void) {
+    struct vkrt_device_data dev = {.device = HANDLE(VkDevice, 901)};
+    dev.queries = calloc(1, sizeof(*dev.queries));
+    CHECK(dev.queries != NULL);
+    if (!dev.queries) return;
+    vkrt_mutex_init(&dev.queries->lock);
+    vkrt_map_object(VKRT_HKEY(dev.device), &dev);
+    struct query_debug_tracker tracker = {.dev = &dev};
+    VkAllocationCallbacks allocator = {.pUserData = &tracker, .pfnAllocation = debug_query_allocate, .pfnFree = debug_query_free};
+    CHECK(vkrt_debug_objects_init(&dev, &allocator, debug_query_owned) == VK_SUCCESS);
+    memset(&copy_scope, 0, sizeof(copy_scope));
+    copy_scope.active = true;
+    copy_scope.device = &dev;
+    copy_scope.phase = COPY_FINISHED;
+    CHECK(!vkrt_query_pool_owns(&dev, 0) && !vkrt_query_pool_owns(&dev, UINT64_MAX));
+    VkQueryPool pool = debug_query_record(&dev);
+    uint64_t handle = (uint64_t)(uintptr_t)pool;
+    CHECK(vkrt_query_pool_owns(&dev, handle));
+    CHECK(!vkrt_query_pool_owns(&dev, handle ^ (UINT64_C(1) << 63)));
+    struct vkrt_device_data foreign = {.device = HANDLE(VkDevice, 902), .queries = dev.queries};
+    CHECK(!vkrt_query_pool_owns(&foreign, handle));
+    debug_query_annotations(&dev, pool);
+    CHECK(tracker.live == 4);
+    DestroyQueryPool(dev.device, pool, NULL);
+    CHECK(!vkrt_query_pool_owns(&dev, handle) && tracker.live == 1);
+    for (unsigned i = 0; i < 2; ++i) debug_query_annotations(&dev, debug_query_record(&dev));
+    CHECK(tracker.live == 7);
+    vkrt_query_device_finish(&dev);
+    CHECK(!dev.queries && tracker.live == 1 && copy_scope.releases == 3);
+    vkrt_debug_objects_finish(&dev);
+    CHECK(!tracker.live && tracker.allocations == tracker.frees);
+    vkrt_unmap_object(VKRT_HKEY(dev.device));
+    copy_scope.active = false;
+}
 int main(void) {
     native_wait_to_formatter_scope();
     reset_native_copy_order();
@@ -713,6 +807,7 @@ int main(void) {
     rtp_child.has_virtual_queries = true;
     CHECK(!vkrt_query_record_children(&rtp_parent, 1, &rtp_child.cmd) && rtp_parent.record_result == VK_ERROR_FEATURE_NOT_PRESENT);
     vkrt_unmap_object(VKRT_HKEY(rtp_child.cmd));
+    debug_query_lifetime();
     vkrt_map_destroy(&vkrt_global.objects);
     if (!failures)
         printf(

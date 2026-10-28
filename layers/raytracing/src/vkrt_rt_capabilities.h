@@ -25,13 +25,62 @@ static inline bool vkrt_incompatible_device_extension(const char *name) {
            !strcmp(name, "VK_KHR_opacity_micromap") || !strcmp(name, "VK_NV_displacement_micromap") ||
            !strcmp(name, "VK_ARM_pipeline_opacity_micromap") || !strcmp(name, "VK_EXT_pipeline_library_group_handles") ||
            !strcmp(name, "VK_HUAWEI_invocation_mask") || !strcmp(name, "VK_AMDX_dense_geometry_format") ||
-           !strcmp(name, "VK_NV_cluster_acceleration_structure") || !strcmp(name, "VK_NV_partitioned_acceleration_structure") ||
-           !strcmp(name, VK_EXT_BUFFER_DEVICE_ADDRESS_EXTENSION_NAME);
+           !strcmp(name, "VK_NV_cluster_acceleration_structure") || !strcmp(name, "VK_NV_partitioned_acceleration_structure");
+}
+
+/* The legacy EXT address ABI cannot mix with the private core/KHR BDA
+ * backend. It remains a legal native-only device extension. Pipeline binary
+ * key queries likewise need a name gate because their feature may be false. */
+static inline bool vkrt_virtual_rt_incompatible_extension(const char *name) {
+    return !strcmp(name, VK_EXT_BUFFER_DEVICE_ADDRESS_EXTENSION_NAME) || !strcmp(name, VK_KHR_PIPELINE_BINARY_EXTENSION_NAME);
+}
+
+/* These optional interfaces consume shader/pipeline objects that the software
+ * RT backend owns. Hide them from its candidate profile without changing
+ * ordinary device admission. Enabling a name alone is harmless except for
+ * pipeline_binary: GetPipelineKey can consume modules without pipelineBinaries. */
+static inline bool vkrt_virtual_object_extension(const char *name) {
+    return !strcmp(name, VK_EXT_SHADER_MODULE_IDENTIFIER_EXTENSION_NAME) ||
+           !strcmp(name, VK_KHR_PIPELINE_EXECUTABLE_PROPERTIES_EXTENSION_NAME) ||
+           !strcmp(name, VK_EXT_PIPELINE_PROPERTIES_EXTENSION_NAME) || !strcmp(name, VK_KHR_PIPELINE_BINARY_EXTENSION_NAME) ||
+           !strcmp(name, VK_EXT_DEVICE_GENERATED_COMMANDS_EXTENSION_NAME) ||
+           !strcmp(name, VK_NV_DEVICE_GENERATED_COMMANDS_EXTENSION_NAME) ||
+           !strcmp(name, VK_NV_DEVICE_GENERATED_COMMANDS_COMPUTE_EXTENSION_NAME);
+}
+
+/* SDK357 has no promoted/core aliases for these structures. Do not mask their
+ * unrelated dependencies such as pipelineCreationCacheControl or maintenance5. */
+static inline bool vkrt_virtual_object_feature_range(VkStructureType type, size_t *offset, size_t *bytes) {
+#define RANGE(stype, ctype, first, last)                             \
+    case stype:                                                      \
+        *offset = offsetof(ctype, first);                            \
+        *bytes = offsetof(ctype, last) + sizeof(VkBool32) - *offset; \
+        return true
+    switch (type) {
+        RANGE(VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_MODULE_IDENTIFIER_FEATURES_EXT,
+              VkPhysicalDeviceShaderModuleIdentifierFeaturesEXT, shaderModuleIdentifier, shaderModuleIdentifier);
+        RANGE(VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PIPELINE_EXECUTABLE_PROPERTIES_FEATURES_KHR,
+              VkPhysicalDevicePipelineExecutablePropertiesFeaturesKHR, pipelineExecutableInfo, pipelineExecutableInfo);
+        RANGE(VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PIPELINE_PROPERTIES_FEATURES_EXT, VkPhysicalDevicePipelinePropertiesFeaturesEXT,
+              pipelinePropertiesIdentifier, pipelinePropertiesIdentifier);
+        RANGE(VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PIPELINE_BINARY_FEATURES_KHR, VkPhysicalDevicePipelineBinaryFeaturesKHR,
+              pipelineBinaries, pipelineBinaries);
+        RANGE(VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DEVICE_GENERATED_COMMANDS_FEATURES_EXT,
+              VkPhysicalDeviceDeviceGeneratedCommandsFeaturesEXT, deviceGeneratedCommands, dynamicGeneratedPipelineLayout);
+        RANGE(VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DEVICE_GENERATED_COMMANDS_FEATURES_NV,
+              VkPhysicalDeviceDeviceGeneratedCommandsFeaturesNV, deviceGeneratedCommands, deviceGeneratedCommands);
+        RANGE(VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DEVICE_GENERATED_COMMANDS_COMPUTE_FEATURES_NV,
+              VkPhysicalDeviceDeviceGeneratedCommandsComputeFeaturesNV, deviceGeneratedCompute,
+              deviceGeneratedComputeCaptureReplay);
+        default:
+            return false;
+    }
+#undef RANGE
 }
 
 /* Ranges contain only consecutive VkBool32 members, excluding pNext/padding.
- * Base AS/RQ/RTP native truth is retained; every unsupported optional RT bit is
- * reported false and rejected if explicitly requested at device creation. */
+ * Software profile selection supplies base AS/RQ/RTP truth; every unsupported
+ * optional RT bit is false and rejected if requested at device creation. */
 static inline bool vkrt_unsupported_rt_feature_range(VkStructureType type, size_t *offset, size_t *bytes) {
 #define RANGE(stype, ctype, first, last)                             \
     case stype:                                                      \

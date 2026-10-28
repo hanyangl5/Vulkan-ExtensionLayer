@@ -110,6 +110,22 @@ static VKAPI_ATTR void VKAPI_CALL driver_Properties(VkPhysicalDevice physical, V
     driver_Properties2(physical, &local);
     *properties = local.properties;
 }
+static VKAPI_ATTR void VKAPI_CALL driver_FormatProperties(VkPhysicalDevice physical, VkFormat format, VkFormatProperties *out) {
+    REQUIRE(physical == (VkPhysicalDevice)&native_physical && format == VK_FORMAT_R32G32B32_SFLOAT);
+    *out =
+        (VkFormatProperties){VK_FORMAT_FEATURE_BLIT_SRC_BIT, VK_FORMAT_FEATURE_STORAGE_IMAGE_BIT,
+                             VK_FORMAT_FEATURE_VERTEX_BUFFER_BIT | VK_FORMAT_FEATURE_ACCELERATION_STRUCTURE_VERTEX_BUFFER_BIT_KHR};
+}
+static VKAPI_ATTR void VKAPI_CALL driver_FormatProperties2(VkPhysicalDevice physical, VkFormat format, VkFormatProperties2 *out) {
+    driver_FormatProperties(physical, format, &out->formatProperties);
+    for (VkBaseOutStructure *p = out->pNext; p; p = p->pNext)
+        if (p->sType == VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_3) {
+            VkFormatProperties3 *flags = (void *)p;
+            flags->linearTilingFeatures = out->formatProperties.linearTilingFeatures;
+            flags->optimalTilingFeatures = out->formatProperties.optimalTilingFeatures;
+            flags->bufferFeatures = out->formatProperties.bufferFeatures | (UINT64_C(1) << 42);
+        }
+}
 static VKAPI_ATTR void VKAPI_CALL driver_CmdDispatch(VkCommandBuffer command, uint32_t x, uint32_t y, uint32_t z) {
     REQUIRE(command == (VkCommandBuffer)&native_command && x <= 17 && y <= 5 && z <= 11);
     ++native_dispatches;
@@ -166,6 +182,9 @@ static VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL driver_GIPA(VkInstance instance,
     if (!strcmp(name, "vkGetPhysicalDeviceFeatures2")) return (PFN_vkVoidFunction)driver_Features2;
     if (!strcmp(name, "vkGetPhysicalDeviceProperties2")) return (PFN_vkVoidFunction)driver_Properties2;
     if (!strcmp(name, "vkGetPhysicalDeviceProperties")) return (PFN_vkVoidFunction)driver_Properties;
+    if (!strcmp(name, "vkGetPhysicalDeviceFormatProperties")) return (PFN_vkVoidFunction)driver_FormatProperties;
+    if (!strcmp(name, "vkGetPhysicalDeviceFormatProperties2") || !strcmp(name, "vkGetPhysicalDeviceFormatProperties2KHR"))
+        return (PFN_vkVoidFunction)driver_FormatProperties2;
     if (!strcmp(name, "vkEnumerateDeviceExtensionProperties")) return (PFN_vkVoidFunction)driver_Extensions;
     return (PFN_vkVoidFunction)driver_unknown;
 }
@@ -432,9 +451,35 @@ int main(int argc, char **argv) {
         (PFN_vkGetPhysicalDeviceFeatures2)negotiation.pfnGetInstanceProcAddr(instance, "vkGetPhysicalDeviceFeatures2KHR");
     features2((VkPhysicalDevice)&native_physical, &features);
     REQUIRE(rq.rayQuery && features.features.shaderInt64);
+    const char *native_rt_names[] = {"vkBuildAccelerationStructuresKHR", "vkGetRayTracingCaptureReplayShaderGroupHandlesKHR",
+                                     "vkCmdTraceRaysKHR", "vkCmdTraceRaysIndirectKHR"};
+    for (unsigned i = 0; i < sizeof(native_rt_names) / sizeof(native_rt_names[0]); ++i)
+        REQUIRE(negotiation.pfnGetDeviceProcAddr(device, native_rt_names[i]) != NULL);
+    PFN_vkGetPhysicalDeviceFormatProperties formats =
+        (void *)negotiation.pfnGetInstanceProcAddr(instance, "vkGetPhysicalDeviceFormatProperties");
+    VkFormatProperties format;
+    formats((VkPhysicalDevice)&native_physical, VK_FORMAT_R32G32B32_SFLOAT, &format);
+    REQUIRE(format.bufferFeatures & VK_FORMAT_FEATURE_ACCELERATION_STRUCTURE_VERTEX_BUFFER_BIT_KHR);
     guard_mask_discovery = 1;
     features2((VkPhysicalDevice)&native_physical, &features);
     REQUIRE(!rq.rayQuery && features.features.shaderInt64);
+    for (unsigned i = 0; i < sizeof(native_rt_names) / sizeof(native_rt_names[0]); ++i) {
+        REQUIRE(negotiation.pfnGetDeviceProcAddr(device, native_rt_names[i]) == NULL);
+        REQUIRE(negotiation.pfnGetInstanceProcAddr(instance, native_rt_names[i]) == NULL);
+    }
+    formats((VkPhysicalDevice)&native_physical, VK_FORMAT_R32G32B32_SFLOAT, &format);
+    REQUIRE(format.bufferFeatures == VK_FORMAT_FEATURE_VERTEX_BUFFER_BIT &&
+            format.linearTilingFeatures == VK_FORMAT_FEATURE_BLIT_SRC_BIT &&
+            format.optimalTilingFeatures == VK_FORMAT_FEATURE_STORAGE_IMAGE_BIT);
+    const char *format_names[] = {"vkGetPhysicalDeviceFormatProperties2", "vkGetPhysicalDeviceFormatProperties2KHR"};
+    for (unsigned i = 0; i < 2; ++i) {
+        VkFormatProperties3 flags = {.sType = VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_3};
+        VkFormatProperties2 format2 = {.sType = VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2, .pNext = &flags};
+        ((PFN_vkGetPhysicalDeviceFormatProperties2)negotiation.pfnGetInstanceProcAddr(instance, format_names[i]))(
+            (VkPhysicalDevice)&native_physical, VK_FORMAT_R32G32B32_SFLOAT, &format2);
+        REQUIRE(!memcmp(&format, &format2.formatProperties, sizeof(format)) && format2.pNext == &flags &&
+                flags.bufferFeatures == (VK_FORMAT_FEATURE_VERTEX_BUFFER_BIT | (UINT64_C(1) << 42)));
+    }
     VkPhysicalDeviceRayTracingPipelinePropertiesKHR properties_rt = {
         .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_PROPERTIES_KHR};
     VkPhysicalDeviceProperties2 properties = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2, .pNext = &properties_rt};

@@ -34,6 +34,29 @@ Keep fallback source, shaders, shared BVH4 components and tests together under
 runtime implementations after extracting any shared dependencies still in use.
 Keep pinned upstream source and historical validation records as provenance.
 
+### Compatibility and test scope
+
+The user clarified on 2026-10-28 that incompatibility with some newer optional
+extensions is acceptable, and that every test need not pass. The required
+delivery remains the mandatory AS/RQ/RTP baseline on qualifying devices.
+Ordinary descriptor-based applications, reported mandatory limits, shared AS
+semantics and their required synchronization/lifetimes remain in scope.
+
+Newer optional mechanisms may be excluded individually through documented
+capability masks or explicit device/operation admission checks. Do not advertise
+an unsupported optional feature or forward virtual objects into an incompatible
+native entry point. Record the excluded extension or combination and its reason;
+additional interoperability is follow-up work rather than a requirement to
+implement every native extension visible on the development GPU.
+
+Use representative external CTS and targeted regressions to establish the
+supported behavior. Retain passed, failed, unsupported, skipped and unrun cases
+with reasons. Separate mandatory implementation defects from declared optional
+incompatibilities, fixture errors and driver/environment qualification. Complete
+test-suite or CTS all-pass is not a delivery criterion; evidence must still match
+the mandatory behavior claimed as implemented. No formal conformance claim follows
+from a passing slice.
+
 ## Architecture decisions
 
 | Module | Selected route |
@@ -116,8 +139,9 @@ fallback. The concrete mechanism is an M0 proof obligation.
   creation, dispatch lookup, and required dependency behavior consistently.
 - Strip emulated RT extension names, feature structures, buffer usages, stages,
   access masks, and capabilities before calling a driver that lacks them.
-- Preserve unrelated enabled features and `pNext` chains, application allocator
-  behavior, command state, threading, object lifetimes, and valid feature interactions.
+- Preserve compatible unrelated enabled features and `pNext` chains, application
+  allocator behavior, command state, threading and object lifetimes. Named newer
+  optional-extension incompatibilities follow the scope above.
 - Never forward virtual AS/pipeline tokens to native RT entry points. An unsupported
   experimental path must fail explicitly rather than execute a logging-only stub.
 - Provide mandatory deferred-host-operation behavior for synchronous completion
@@ -198,8 +222,9 @@ waits as an architectural requirement.
 
 Optional capture/replay, indirect commands, descriptor-buffer and shader-object
 interactions, position fetch, and additional RT extensions require explicit
-capability entries and tests where exposed. Do not silently forward an incompatible
-path merely because the base driver supports an unrelated extension.
+capability entries and tests where exposed. They may be declared unsupported
+within this delivery. Do not silently forward an incompatible path merely because
+the base driver supports an unrelated extension.
 
 ## Milestones and exit criteria
 

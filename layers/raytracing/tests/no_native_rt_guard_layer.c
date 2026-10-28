@@ -138,6 +138,7 @@ static int guard_record(const char *event, const char *kind, const char *detail)
             : guard_mask_discovery      ? "mask-discovery"
                                         : "execution-only",
             guard_checked_calls, guard_rejected_calls, guard_device_creates, guard_shader_definitions);
+    if (guard_mask_discovery) fprintf(file, ",\"discovery_mask_version\":1");
     if (guard_force_dispatch_limits)
         fprintf(file,
                 ",\"dispatch_limits\":[%u,%u,%u],\"dispatches\":%" PRIu64 ",\"multidimensional_dispatches\":%" PRIu64
@@ -392,6 +393,30 @@ static VKAPI_ATTR void VKAPI_CALL guard_GetPhysicalDeviceProperties(VkPhysicalDe
         data.gipa ? (PFN_vkGetPhysicalDeviceProperties)data.gipa(data.instance, "vkGetPhysicalDeviceProperties") : NULL;
     if (next) next(physical, properties);
     guard_clamp_dispatch_limits(properties);
+}
+
+static VKAPI_ATTR void VKAPI_CALL guard_GetPhysicalDeviceFormatProperties(VkPhysicalDevice physical, VkFormat format,
+                                                                          VkFormatProperties *properties) {
+    struct guard_dispatch data = guard_find(physical, 0);
+    PFN_vkGetPhysicalDeviceFormatProperties next =
+        data.gipa ? (PFN_vkGetPhysicalDeviceFormatProperties)data.gipa(data.instance, "vkGetPhysicalDeviceFormatProperties") : NULL;
+    if (next) next(physical, format, properties);
+    if (guard_mask_discovery) properties->bufferFeatures &= ~VK_FORMAT_FEATURE_ACCELERATION_STRUCTURE_VERTEX_BUFFER_BIT_KHR;
+}
+static VKAPI_ATTR void VKAPI_CALL guard_GetPhysicalDeviceFormatProperties2(VkPhysicalDevice physical, VkFormat format,
+                                                                           VkFormatProperties2 *properties) {
+    struct guard_dispatch data = guard_find(physical, 0);
+    PFN_vkGetPhysicalDeviceFormatProperties2 next =
+        data.gipa ? (PFN_vkGetPhysicalDeviceFormatProperties2)data.gipa(data.instance, "vkGetPhysicalDeviceFormatProperties2")
+                  : NULL;
+    if (!next && data.gipa)
+        next = (PFN_vkGetPhysicalDeviceFormatProperties2)data.gipa(data.instance, "vkGetPhysicalDeviceFormatProperties2KHR");
+    if (next) next(physical, format, properties);
+    if (!guard_mask_discovery) return;
+    properties->formatProperties.bufferFeatures &= ~VK_FORMAT_FEATURE_ACCELERATION_STRUCTURE_VERTEX_BUFFER_BIT_KHR;
+    for (VkBaseOutStructure *p = properties->pNext; p; p = p->pNext)
+        if (p->sType == VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_3)
+            ((VkFormatProperties3 *)p)->bufferFeatures &= ~VK_FORMAT_FEATURE_2_ACCELERATION_STRUCTURE_VERTEX_BUFFER_BIT_KHR;
 }
 
 static void guard_check_dispatch(VkCommandBuffer command, const uint32_t base[3], const uint32_t groups[3], const char *name) {
@@ -862,6 +887,8 @@ static PFN_vkVoidFunction guard_proc(const char *name) {
     ENTRY(GetPhysicalDeviceFeatures2);
     ENTRY(GetPhysicalDeviceProperties2);
     ENTRY(GetPhysicalDeviceProperties);
+    ENTRY(GetPhysicalDeviceFormatProperties);
+    ENTRY(GetPhysicalDeviceFormatProperties2);
     ENTRY(EnumerateDeviceExtensionProperties);
     ENTRY(CreateShaderModule);
     ENTRY(CreateShadersEXT);
@@ -903,6 +930,8 @@ static PFN_vkVoidFunction guard_proc(const char *name) {
 #undef ENTRY
     if (!strcmp(name, "vkGetPhysicalDeviceFeatures2KHR")) return (PFN_vkVoidFunction)guard_GetPhysicalDeviceFeatures2;
     if (!strcmp(name, "vkGetPhysicalDeviceProperties2KHR")) return (PFN_vkVoidFunction)guard_GetPhysicalDeviceProperties2;
+    if (!strcmp(name, "vkGetPhysicalDeviceFormatProperties2KHR"))
+        return (PFN_vkVoidFunction)guard_GetPhysicalDeviceFormatProperties2;
     if (!strcmp(name, "vkCmdDispatchBaseKHR")) return (PFN_vkVoidFunction)guard_CmdDispatchBase;
     if (!strcmp(name, "vkCmdPipelineBarrier2KHR")) return (PFN_vkVoidFunction)guard_CmdPipelineBarrier2;
     if (!strcmp(name, "vkQueueSubmit2KHR")) return (PFN_vkVoidFunction)guard_QueueSubmit2;
@@ -922,6 +951,9 @@ static PFN_vkVoidFunction guard_proc(const char *name) {
 }
 
 static VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL guard_GetInstanceProcAddr(VkInstance instance, const char *name) {
+    /* A no-RT ICD supplies no RT symbols. Keep execution-only mode's rejecting
+     * call shims, while masked discovery also proves software GPA ownership. */
+    if (guard_mask_discovery && name && guard_native_proc(name)) return NULL;
     PFN_vkVoidFunction intercept = guard_proc(name);
     if (intercept) return intercept;
     struct guard_dispatch data = guard_find(instance, 0);
@@ -929,12 +961,18 @@ static VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL guard_GetInstanceProcAddr(VkInst
 }
 
 static VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL guard_GetDeviceProcAddr(VkDevice device, const char *name) {
+    /* A no-RT ICD supplies no RT symbols. Keep execution-only mode's rejecting
+     * call shims, while masked discovery also proves software GPA ownership. */
+    if (guard_mask_discovery && name && guard_native_proc(name)) return NULL;
     PFN_vkVoidFunction intercept = guard_proc(name);
     if (intercept) return intercept;
     return guard_device_proc(device, name);
 }
 
 static VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL guard_GetPhysicalDeviceProcAddr(VkInstance instance, const char *name) {
+    /* A no-RT ICD supplies no RT symbols. Keep execution-only mode's rejecting
+     * call shims, while masked discovery also proves software GPA ownership. */
+    if (guard_mask_discovery && name && guard_native_proc(name)) return NULL;
     PFN_vkVoidFunction intercept = guard_proc(name);
     if (intercept) return intercept;
     struct guard_dispatch data = guard_find(instance, 0);

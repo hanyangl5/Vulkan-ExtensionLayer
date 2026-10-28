@@ -142,6 +142,112 @@ unsigned arena_attempts = 0, context_attempts = 0;
 std::vector<uint32_t> dispatches;
 std::vector<std::array<uint64_t, 2>> trace_pushes;
 std::vector<VkBufferMemoryBarrier> trace_barriers;
+struct DescriptorEvent {
+    std::string kind;
+    VkPipelineLayout layout{};
+    std::vector<uint64_t> values;
+    bool operator==(const DescriptorEvent &other) const {
+        return kind == other.kind && layout == other.layout && values == other.values;
+    }
+};
+bool descriptor_history_test = false;
+std::vector<DescriptorEvent> descriptor_events;
+std::vector<VkDescriptorBufferBindingInfoEXT> native_descriptor_buffers;
+std::map<std::pair<VkPipelineBindPoint, uint32_t>, std::pair<uint32_t, VkDeviceSize>> native_descriptor_offsets;
+std::set<std::pair<VkPipelineBindPoint, uint32_t>> native_embedded_samplers;
+VKAPI_ATTR void VKAPI_CALL NativeDescriptorBuffers(VkCommandBuffer c, uint32_t count,
+                                                   const VkDescriptorBufferBindingInfoEXT *infos) {
+    CHECK(c == command && count && infos);
+    native_descriptor_buffers.assign(infos, infos + count);
+    // Vulkan's global BindDescriptorBuffers invalidates offsets at both native
+    // bind points; preserving only compute offsets cannot restore later Draw.
+    native_descriptor_offsets.clear();
+    DescriptorEvent event{"buffers", VK_NULL_HANDLE, {count}};
+    for (uint32_t i = 0; i < count; ++i) {
+        CHECK(infos[i].sType == VK_STRUCTURE_TYPE_DESCRIPTOR_BUFFER_BINDING_INFO_EXT && !infos[i].pNext);
+        event.values.insert(event.values.end(), {infos[i].address, infos[i].usage});
+    }
+    if (descriptor_history_test) descriptor_events.push_back(std::move(event));
+}
+VKAPI_ATTR void VKAPI_CALL NativePush(VkCommandBuffer c, VkPipelineBindPoint point, VkPipelineLayout layout, uint32_t set,
+                                      uint32_t count, const VkWriteDescriptorSet *writes) {
+    CHECK(c == command && point == VK_PIPELINE_BIND_POINT_COMPUTE && layouts.count(layout));
+    DescriptorEvent event{"push", layout, {uint64_t(point), set, count}};
+    for (uint32_t n = 0; n < count; ++n) {
+        const auto &w = writes[n];
+        CHECK(w.sType == VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET && !w.pNext &&
+              w.descriptorType == VK_DESCRIPTOR_TYPE_STORAGE_BUFFER && w.pBufferInfo);
+        event.values.insert(event.values.end(), {w.dstBinding, w.dstArrayElement, uint64_t(w.descriptorType), w.descriptorCount});
+        for (uint32_t i = 0; i < w.descriptorCount; ++i)
+            event.values.insert(event.values.end(),
+                                {VKRT_HKEY(w.pBufferInfo[i].buffer), w.pBufferInfo[i].offset, w.pBufferInfo[i].range});
+    }
+    if (descriptor_history_test) descriptor_events.push_back(std::move(event));
+}
+VKAPI_ATTR void VKAPI_CALL NativePush2(VkCommandBuffer c, const VkPushDescriptorSetInfo *info) {
+    CHECK(info && !info->pNext && info->stageFlags == VK_SHADER_STAGE_COMPUTE_BIT);
+    NativePush(c, VK_PIPELINE_BIND_POINT_COMPUTE, info->layout, info->set, info->descriptorWriteCount, info->pDescriptorWrites);
+}
+VKAPI_ATTR void VKAPI_CALL NativeOffsets(VkCommandBuffer c, VkPipelineBindPoint point, VkPipelineLayout layout, uint32_t first,
+                                         uint32_t count, const uint32_t *indices, const VkDeviceSize *offsets) {
+    CHECK(c == command && (point == VK_PIPELINE_BIND_POINT_COMPUTE || point == VK_PIPELINE_BIND_POINT_GRAPHICS) &&
+          layouts.count(layout));
+    DescriptorEvent event{"offsets", layout, {uint64_t(point), first, count}};
+    for (uint32_t n = 0; n < count; ++n) {
+        CHECK(indices[n] < native_descriptor_buffers.size());
+        native_descriptor_offsets[{point, first + n}] = {indices[n], offsets[n]};
+        event.values.insert(event.values.end(), {indices[n], offsets[n]});
+    }
+    if (descriptor_history_test) descriptor_events.push_back(std::move(event));
+}
+VKAPI_ATTR void VKAPI_CALL NativeOffsets2(VkCommandBuffer c, const VkSetDescriptorBufferOffsetsInfoEXT *info) {
+    CHECK(info && !info->pNext);
+    const bool all = info->stageFlags == VK_SHADER_STAGE_ALL;
+    if (all || (info->stageFlags & VK_SHADER_STAGE_COMPUTE_BIT))
+        NativeOffsets(c, VK_PIPELINE_BIND_POINT_COMPUTE, info->layout, info->firstSet, info->setCount, info->pBufferIndices,
+                      info->pOffsets);
+    if (all || (info->stageFlags & VK_SHADER_STAGE_FRAGMENT_BIT))
+        NativeOffsets(c, VK_PIPELINE_BIND_POINT_GRAPHICS, info->layout, info->firstSet, info->setCount, info->pBufferIndices,
+                      info->pOffsets);
+}
+VKAPI_ATTR void VKAPI_CALL NativeSamplers(VkCommandBuffer c, VkPipelineBindPoint point, VkPipelineLayout layout, uint32_t set) {
+    CHECK(c == command && (point == VK_PIPELINE_BIND_POINT_COMPUTE || point == VK_PIPELINE_BIND_POINT_GRAPHICS) &&
+          layouts.count(layout));
+    native_embedded_samplers.insert({point, set});
+    if (descriptor_history_test) descriptor_events.push_back({"samplers", layout, {uint64_t(point), set}});
+}
+VKAPI_ATTR void VKAPI_CALL NativeSamplers2(VkCommandBuffer c, const VkBindDescriptorBufferEmbeddedSamplersInfoEXT *info) {
+    CHECK(info && !info->pNext);
+    const bool all = info->stageFlags == VK_SHADER_STAGE_ALL;
+    if (all || (info->stageFlags & VK_SHADER_STAGE_COMPUTE_BIT))
+        NativeSamplers(c, VK_PIPELINE_BIND_POINT_COMPUTE, info->layout, info->set);
+    if (all || (info->stageFlags & VK_SHADER_STAGE_FRAGMENT_BIT))
+        NativeSamplers(c, VK_PIPELINE_BIND_POINT_GRAPHICS, info->layout, info->set);
+}
+void NativeDrawDescriptorOracle() {
+    const auto found = native_descriptor_offsets.find({VK_PIPELINE_BIND_POINT_GRAPHICS, 0});
+    CHECK(found != native_descriptor_offsets.end());
+    if (found != native_descriptor_offsets.end()) {
+        const auto [index, offset] = found->second;
+        CHECK(index < native_descriptor_buffers.size());
+        if (index < native_descriptor_buffers.size())
+            CHECK(native_descriptor_buffers[index].address + offset == UINT64_C(0xc00060040));
+    }
+    CHECK(native_embedded_samplers.count({VK_PIPELINE_BIND_POINT_GRAPHICS, 0}) == 1);
+}
+VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL NativeProc(VkDevice d, const char *name) {
+    CHECK(d == device);
+    if (!std::strcmp(name, "vkCmdBindDescriptorBuffersEXT")) return (PFN_vkVoidFunction)NativeDescriptorBuffers;
+    if (!std::strcmp(name, "vkCmdPushDescriptorSet") || !std::strcmp(name, "vkCmdPushDescriptorSetKHR"))
+        return (PFN_vkVoidFunction)NativePush;
+    if (!std::strcmp(name, "vkCmdPushDescriptorSet2") || !std::strcmp(name, "vkCmdPushDescriptorSet2KHR"))
+        return (PFN_vkVoidFunction)NativePush2;
+    if (!std::strcmp(name, "vkCmdSetDescriptorBufferOffsetsEXT")) return (PFN_vkVoidFunction)NativeOffsets;
+    if (!std::strcmp(name, "vkCmdSetDescriptorBufferOffsets2EXT")) return (PFN_vkVoidFunction)NativeOffsets2;
+    if (!std::strcmp(name, "vkCmdBindDescriptorBufferEmbeddedSamplersEXT")) return (PFN_vkVoidFunction)NativeSamplers;
+    if (!std::strcmp(name, "vkCmdBindDescriptorBufferEmbeddedSamplers2EXT")) return (PFN_vkVoidFunction)NativeSamplers2;
+    return nullptr;
+}
 VKAPI_ATTR void VKAPI_CALL BindNativeCompute(VkCommandBuffer c, VkPipelineBindPoint point, VkPipeline pipeline) {
     CHECK(c == command && point == VK_PIPELINE_BIND_POINT_COMPUTE && native_pipelines.count(pipeline));
 }
@@ -155,6 +261,7 @@ VKAPI_ATTR void VKAPI_CALL TracePush(VkCommandBuffer c, VkPipelineLayout layout,
 VKAPI_ATTR void VKAPI_CALL TraceDispatch(VkCommandBuffer c, uint32_t x, uint32_t y, uint32_t z) {
     CHECK(c == command && x && y == 1 && z == 1);
     dispatches.push_back(x);
+    if (descriptor_history_test) descriptor_events.push_back({"dispatch", VK_NULL_HANDLE, {x}});
 }
 VKAPI_ATTR void VKAPI_CALL TraceBarrier(VkCommandBuffer c, VkPipelineStageFlags source, VkPipelineStageFlags target,
                                         VkDependencyFlags flags, uint32_t memory_count, const VkMemoryBarrier *, uint32_t count,
@@ -279,6 +386,14 @@ VKAPI_ATTR void VKAPI_CALL Bind2(VkCommandBuffer c, const VkBindDescriptorSetsIn
     observed = *info;
     observed_sets.assign(info->pDescriptorSets, info->pDescriptorSets + info->descriptorSetCount);
     observed_offsets.assign(info->pDynamicOffsets, info->pDynamicOffsets + info->dynamicOffsetCount);
+    if (descriptor_history_test) {
+        DescriptorEvent event{"sets",
+                              info->layout,
+                              {VK_PIPELINE_BIND_POINT_COMPUTE, info->firstSet, info->descriptorSetCount, info->dynamicOffsetCount}};
+        for (uint32_t n = 0; n < info->descriptorSetCount; ++n) event.values.push_back(VKRT_HKEY(info->pDescriptorSets[n]));
+        for (uint32_t n = 0; n < info->dynamicOffsetCount; ++n) event.values.push_back(info->pDynamicOffsets[n]);
+        descriptor_events.push_back(std::move(event));
+    }
 }
 VKAPI_ATTR void VKAPI_CALL BindLegacy(VkCommandBuffer c, VkPipelineBindPoint point, VkPipelineLayout layout, uint32_t first,
                                       uint32_t count, const VkDescriptorSet *sets, uint32_t dynamic_count,
@@ -298,6 +413,189 @@ void Reset() {
     vkrt_rtp_reset_command(&cb);
     CHECK(layouts.empty());
     cb.record_result = VK_SUCCESS;
+}
+std::vector<DescriptorEvent> InstallDescriptorHistory() {
+    auto make = (PFN_vkCreatePipelineLayout)vkrt_rtp_proc("vkCreatePipelineLayout");
+    auto destroy = (PFN_vkDestroyPipelineLayout)vkrt_rtp_proc("vkDestroyPipelineLayout");
+    std::array<VkPipelineLayout, 6> identity{}, native{};
+    for (uint32_t n = 0; n < identity.size(); ++n) {
+        const auto set = Handle<VkDescriptorSetLayout>(4000 + n);
+        VkSampler samplers[] = {Handle<VkSampler>(4100), Handle<VkSampler>(4101)};
+        VkDescriptorSetLayoutBinding binding{0,
+                                             n == 0             ? VK_DESCRIPTOR_TYPE_STORAGE_BUFFER_DYNAMIC
+                                             : n == 3 || n == 5 ? VK_DESCRIPTOR_TYPE_SAMPLER
+                                                                : VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+                                             2,
+                                             VkShaderStageFlags(n < 4 ? VK_SHADER_STAGE_COMPUTE_BIT : VK_SHADER_STAGE_FRAGMENT_BIT),
+                                             n == 3 || n == 5 ? samplers : nullptr};
+        VkDescriptorSetLayoutCreateInfo definition{VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO};
+        definition.flags = n == 1   ? VK_DESCRIPTOR_SET_LAYOUT_CREATE_PUSH_DESCRIPTOR_BIT_KHR
+                           : n >= 2 ? VK_DESCRIPTOR_SET_LAYOUT_CREATE_DESCRIPTOR_BUFFER_BIT_EXT
+                                    : 0;
+        if (n == 3 || n == 5) definition.flags |= VK_DESCRIPTOR_SET_LAYOUT_CREATE_EMBEDDED_IMMUTABLE_SAMPLERS_BIT_EXT;
+        definition.bindingCount = 1;
+        definition.pBindings = &binding;
+        CHECK(vkrt_rtp_track_descriptor_layout(&dev, set, &definition) == VK_SUCCESS);
+        VkPushConstantRange push{VK_SHADER_STAGE_COMPUTE_BIT, 0, 256};
+        VkPipelineLayoutCreateInfo ci{VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO};
+        ci.setLayoutCount = 1;
+        ci.pSetLayouts = &set;
+        ci.pushConstantRangeCount = n < 4 ? 1 : 0;
+        ci.pPushConstantRanges = &push;
+        VkPipelineLayout layout{};
+        CHECK(make(device, &ci, nullptr, &layout) == VK_SUCCESS);
+        native[n] = vkrt_rtp_native_layout(&dev, layout);
+        CHECK(vkrt_rtp_replay_layout_capture(&cb, layout, &identity[n]) == VK_SUCCESS && identity[n]);
+        // Replay must retain the immutable original definition after both
+        // public objects and their caller-owned creation inputs disappear.
+        destroy(device, layout, nullptr);
+        vkrt_rtp_forget_descriptor_layout(&dev, set);
+        std::memset(&binding, 0xa5, sizeof(binding));
+        std::memset(samplers, 0xa5, sizeof(samplers));
+    }
+    auto bind = (PFN_vkCmdBindDescriptorSets)vkrt_rtp_proc("vkCmdBindDescriptorSets");
+    auto buffers = (PFN_vkCmdBindDescriptorBuffersEXT)vkrt_rtp_proc("vkCmdBindDescriptorBuffersEXT");
+    auto bind2 = (PFN_vkCmdBindDescriptorSets2KHR)vkrt_rtp_proc("vkCmdBindDescriptorSets2KHR");
+    auto push = (PFN_vkCmdPushDescriptorSetKHR)vkrt_rtp_proc("vkCmdPushDescriptorSetKHR");
+    auto push2 = (PFN_vkCmdPushDescriptorSet2KHR)vkrt_rtp_proc("vkCmdPushDescriptorSet2KHR");
+    auto offsets = (PFN_vkCmdSetDescriptorBufferOffsetsEXT)vkrt_rtp_proc("vkCmdSetDescriptorBufferOffsetsEXT");
+    auto offsets2 = (PFN_vkCmdSetDescriptorBufferOffsets2EXT)vkrt_rtp_proc("vkCmdSetDescriptorBufferOffsets2EXT");
+    auto samplers = (PFN_vkCmdBindDescriptorBufferEmbeddedSamplersEXT)vkrt_rtp_proc("vkCmdBindDescriptorBufferEmbeddedSamplersEXT");
+    auto samplers2 =
+        (PFN_vkCmdBindDescriptorBufferEmbeddedSamplers2EXT)vkrt_rtp_proc("vkCmdBindDescriptorBufferEmbeddedSamplers2EXT");
+    CHECK(bind && buffers && bind2 && push && push2 && offsets && offsets2 && samplers && samplers2);
+    expected_stages = VK_SHADER_STAGE_COMPUTE_BIT;
+    descriptor_history_test = true;
+    descriptor_events.clear();
+    VkDescriptorBufferBindingInfoEXT infos[8]{};
+    DescriptorEvent expected_buffers{"buffers", VK_NULL_HANDLE, {8}};
+    for (uint32_t i = 0; i < 8; ++i) {
+        infos[i] = {VK_STRUCTURE_TYPE_DESCRIPTOR_BUFFER_BINDING_INFO_EXT, nullptr, UINT64_C(0x800000000) + i * UINT64_C(0x10000),
+                    VK_BUFFER_USAGE_RESOURCE_DESCRIPTOR_BUFFER_BIT_EXT};
+        expected_buffers.values.insert(expected_buffers.values.end(), {UINT64_C(0x800000000) + i * UINT64_C(0x10000),
+                                                                       VK_BUFFER_USAGE_RESOURCE_DESCRIPTOR_BUFFER_BIT_EXT});
+    }
+    buffers(command, 8, infos);
+    std::memset(infos, 0xa5, sizeof(infos));
+    for (uint32_t round = 0; round < 2; ++round) {
+        VkDescriptorSet sets[] = {Handle<VkDescriptorSet>(501 + round)};
+        uint32_t dynamic[] = {256 + 512 * round, 512 + 512 * round};
+        VkBindDescriptorSetsInfo binding{VK_STRUCTURE_TYPE_BIND_DESCRIPTOR_SETS_INFO};
+        binding.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+        binding.layout = identity[0];
+        binding.descriptorSetCount = 1;
+        binding.pDescriptorSets = sets;
+        binding.dynamicOffsetCount = 2;
+        binding.pDynamicOffsets = dynamic;
+        if (round)
+            bind2(command, &binding);
+        else
+            bind(command, VK_PIPELINE_BIND_POINT_COMPUTE, identity[0], 0, 1, sets, 2, dynamic);
+        std::memset(sets, 0xa5, sizeof(sets));
+        std::memset(dynamic, 0xa5, sizeof(dynamic));
+        std::memset(&binding, 0xa5, sizeof(binding));
+        VkDescriptorBufferInfo buffers[] = {{Handle<VkBuffer>(601 + 2 * round), 16 + 64 * round, 32 + 64 * round},
+                                            {Handle<VkBuffer>(602 + 2 * round), 48 + 64 * round, 64 + 64 * round}};
+        VkWriteDescriptorSet write{VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};
+        write.descriptorCount = 2;
+        write.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+        write.pBufferInfo = buffers;
+        VkPushDescriptorSetInfo pushing{VK_STRUCTURE_TYPE_PUSH_DESCRIPTOR_SET_INFO};
+        pushing.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+        pushing.layout = identity[1];
+        pushing.descriptorWriteCount = 1;
+        pushing.pDescriptorWrites = &write;
+        if (round)
+            push2(command, &pushing);
+        else
+            push(command, VK_PIPELINE_BIND_POINT_COMPUTE, identity[1], 0, 1, &write);
+        std::memset(buffers, 0xa5, sizeof(buffers));
+        std::memset(&write, 0xa5, sizeof(write));
+        std::memset(&pushing, 0xa5, sizeof(pushing));
+        uint32_t indices[] = {3 + 4 * round};
+        VkDeviceSize values[] = {0x100000010ull * (round + 1)};
+        VkSetDescriptorBufferOffsetsInfoEXT setting{VK_STRUCTURE_TYPE_SET_DESCRIPTOR_BUFFER_OFFSETS_INFO_EXT};
+        setting.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+        setting.layout = identity[2];
+        setting.setCount = 1;
+        setting.pBufferIndices = indices;
+        setting.pOffsets = values;
+        if (round)
+            offsets2(command, &setting);
+        else
+            offsets(command, VK_PIPELINE_BIND_POINT_COMPUTE, identity[2], 0, 1, indices, values);
+        std::memset(indices, 0xa5, sizeof(indices));
+        std::memset(values, 0xa5, sizeof(values));
+        std::memset(&setting, 0xa5, sizeof(setting));
+        VkBindDescriptorBufferEmbeddedSamplersInfoEXT embedding{
+            VK_STRUCTURE_TYPE_BIND_DESCRIPTOR_BUFFER_EMBEDDED_SAMPLERS_INFO_EXT};
+        embedding.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+        embedding.layout = identity[3];
+        if (round)
+            samplers2(command, &embedding);
+        else
+            samplers(command, VK_PIPELINE_BIND_POINT_COMPUTE, identity[3], 0);
+        std::memset(&embedding, 0xa5, sizeof(embedding));
+    }
+    uint32_t graphics_index = 5;
+    VkDeviceSize graphics_offset = UINT64_C(0x300000030);
+    offsets(command, VK_PIPELINE_BIND_POINT_GRAPHICS, identity[4], 0, 1, &graphics_index, &graphics_offset);
+    samplers(command, VK_PIPELINE_BIND_POINT_GRAPHICS, identity[5], 0);
+    // /2 ALL affects both native bind points. Preserve its flags in the real
+    // capture schema so graphics cannot silently retain the older values.
+    graphics_index = 6;
+    graphics_offset = UINT64_C(0x400000040);
+    VkSetDescriptorBufferOffsetsInfoEXT all_offsets{VK_STRUCTURE_TYPE_SET_DESCRIPTOR_BUFFER_OFFSETS_INFO_EXT};
+    all_offsets.stageFlags = VK_SHADER_STAGE_ALL;
+    all_offsets.layout = identity[4];
+    all_offsets.setCount = 1;
+    all_offsets.pBufferIndices = &graphics_index;
+    all_offsets.pOffsets = &graphics_offset;
+    offsets2(command, &all_offsets);
+    VkBindDescriptorBufferEmbeddedSamplersInfoEXT all_samplers{VK_STRUCTURE_TYPE_BIND_DESCRIPTOR_BUFFER_EMBEDDED_SAMPLERS_INFO_EXT};
+    all_samplers.stageFlags = VK_SHADER_STAGE_ALL;
+    all_samplers.layout = identity[5];
+    samplers2(command, &all_samplers);
+    std::memset(&all_offsets, 0xa5, sizeof(all_offsets));
+    std::memset(&all_samplers, 0xa5, sizeof(all_samplers));
+    graphics_index = UINT32_MAX;
+    graphics_offset = UINT64_MAX;
+    // Literal expectations are independent of the captured payload and native
+    // observations. In particular, old classic bindings cannot move past the
+    // newer push/offset commands when restoring application compute state.
+    std::vector<DescriptorEvent> expected = {
+        expected_buffers,
+        {"sets", native[0], {VK_PIPELINE_BIND_POINT_COMPUTE, 0, 1, 2, 501, 256, 512}},
+        {"push",
+         native[1],
+         {VK_PIPELINE_BIND_POINT_COMPUTE, 0, 1, 0, 0, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 2, 601, 16, 32, 602, 48, 64}},
+        {"offsets", native[2], {VK_PIPELINE_BIND_POINT_COMPUTE, 0, 1, 3, 0x100000010ull}},
+        {"samplers", native[3], {VK_PIPELINE_BIND_POINT_COMPUTE, 0}},
+        {"sets", native[0], {VK_PIPELINE_BIND_POINT_COMPUTE, 0, 1, 2, 502, 768, 1024}},
+        {"push",
+         native[1],
+         {VK_PIPELINE_BIND_POINT_COMPUTE, 0, 1, 0, 0, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 2, 603, 80, 96, 604, 112, 128}},
+        {"offsets", native[2], {VK_PIPELINE_BIND_POINT_COMPUTE, 0, 1, 7, 0x200000020ull}},
+        {"samplers", native[3], {VK_PIPELINE_BIND_POINT_COMPUTE, 0}},
+        {"offsets", native[4], {VK_PIPELINE_BIND_POINT_GRAPHICS, 0, 1, 5, UINT64_C(0x300000030)}},
+        {"samplers", native[5], {VK_PIPELINE_BIND_POINT_GRAPHICS, 0}},
+        {"offsets", native[4], {VK_PIPELINE_BIND_POINT_COMPUTE, 0, 1, 6, UINT64_C(0x400000040)}},
+        {"offsets", native[4], {VK_PIPELINE_BIND_POINT_GRAPHICS, 0, 1, 6, UINT64_C(0x400000040)}},
+        {"samplers", native[5], {VK_PIPELINE_BIND_POINT_COMPUTE, 0}},
+        {"samplers", native[5], {VK_PIPELINE_BIND_POINT_GRAPHICS, 0}},
+    };
+    CHECK(cb.record_result == VK_SUCCESS && descriptor_events == expected);
+    NativeDrawDescriptorOracle();
+    descriptor_events.clear();
+    return expected;
+}
+void CheckDescriptorRestore(const std::vector<DescriptorEvent> &history, std::initializer_list<uint32_t> tiles) {
+    std::vector<DescriptorEvent> expected;
+    for (auto count : tiles) expected.push_back({"dispatch", VK_NULL_HANDLE, {count}});
+    expected.insert(expected.end(), history.begin(), history.end());
+    CHECK(descriptor_events == expected);
+    NativeDrawDescriptorOracle();
+    descriptor_events.clear();
 }
 void PipelineDerivatives() {
     auto make_layout = (PFN_vkCreatePipelineLayout)vkrt_rtp_proc("vkCreatePipelineLayout");
@@ -482,12 +780,15 @@ OpFunctionEnd
     CHECK(cb.record_result == VK_SUCCESS && cb.has_rtp_execution && leases.empty() && context_attempts == prior_contexts &&
           arena_attempts == prior_arenas && dispatches.empty());
     cb.replaying = true;
+    const auto prior_forwarded = forwarded;
+    const auto descriptor_history = InstallDescriptorHistory();
     const uint64_t stride = (2u << 20) + 16;
     arena_ceiling = stride * 2;
     trace(command, &raygen, &empty, &empty, &empty, 5, 1, 1);
     CHECK(cb.record_result == VK_SUCCESS && native_creates == compiled && arena_attempts == prior_arenas + 2 &&
           context_attempts == prior_contexts + 1 && leases.size() == 2);
     CHECK(dispatches == std::vector<uint32_t>({2, 2, 1}) && trace_pushes.size() == 3 && trace_barriers.size() == 3);
+    CheckDescriptorRestore(descriptor_history, {2, 2, 1});
     const uint64_t root = trace_pushes.empty() ? 0 : trace_pushes[0][0];
     for (size_t n = 0; n < trace_pushes.size(); ++n) CHECK(trace_pushes[n][0] == root && trace_pushes[n][1] == n * 2);
     for (const auto &[identity, lease] : leases) {
@@ -513,6 +814,8 @@ OpFunctionEnd
     stack(command, (64u << 20) + 1);
     trace(command, &raygen, &empty, &empty, &empty, 1, 1, 1);
     CHECK(cb.record_result == VK_SUCCESS && native_creates == compiled && leases.size() == 4 && trace_pushes.back()[0] != root);
+    CheckDescriptorRestore(descriptor_history, {1});
+    CHECK(forwarded == prior_forwarded + 6);
     bool complete_large_arena = false;
     for (const auto &[identity, lease] : leases) {
         (void)identity;
@@ -523,10 +826,13 @@ OpFunctionEnd
     arena_ceiling = 0;
     trace(command, &raygen, &empty, &empty, &empty, 1, 1, 1);
     CHECK(cb.record_result == VK_ERROR_OUT_OF_DEVICE_MEMORY && leases.size() == live && native_creates == compiled);
+    CHECK(descriptor_events.empty());
     cb.record_result = VK_SUCCESS;
     arena_ceiling = UINT64_MAX;
     vkrt_rtp_reset_command(&cb);
     cb.replaying = cb.has_rtp_execution = false;
+    descriptor_history_test = false;
+    forwarded = prior_forwarded;
     CHECK(leases.empty());
     dispatches.clear();
     trace_pushes.clear();
@@ -736,6 +1042,68 @@ unsigned NativeReferences() {
     for (auto &entry : layouts) result += entry.second.references;
     return result;
 }
+void DescriptorHistoryAllocationFailures(CallbackOwner &allocator) {
+    auto make = (PFN_vkCreatePipelineLayout)vkrt_rtp_proc("vkCreatePipelineLayout");
+    auto destroy = (PFN_vkDestroyPipelineLayout)vkrt_rtp_proc("vkDestroyPipelineLayout");
+    auto push = (PFN_vkCmdPushDescriptorSetKHR)vkrt_rtp_proc("vkCmdPushDescriptorSetKHR");
+    const auto set = Handle<VkDescriptorSetLayout>(90001);
+    VkDescriptorSetLayoutBinding binding{0, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 2, VK_SHADER_STAGE_COMPUTE_BIT, nullptr};
+    VkDescriptorSetLayoutCreateInfo definition{VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO};
+    definition.flags = VK_DESCRIPTOR_SET_LAYOUT_CREATE_PUSH_DESCRIPTOR_BIT_KHR;
+    definition.bindingCount = 1;
+    definition.pBindings = &binding;
+    CHECK(vkrt_rtp_track_descriptor_layout(&dev, set, &definition) == VK_SUCCESS);
+    VkPipelineLayoutCreateInfo ci{VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO};
+    ci.setLayoutCount = 1;
+    ci.pSetLayouts = &set;
+    const VkDescriptorBufferInfo buffers[] = {{Handle<VkBuffer>(9100), 16, 32}, {Handle<VkBuffer>(9101), 48, 64}};
+    VkWriteDescriptorSet write{VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};
+    write.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+    write.descriptorCount = 2;
+    write.pBufferInfo = buffers;
+    const auto saved = Snapshot(write);
+    bool succeeded = false;
+    unsigned failures_seen = 0;
+    for (unsigned allowance = 0; allowance < 32 && !succeeded; ++allowance) {
+        const unsigned prior_allocations = allocator.allocations, prior_frees = allocator.frees;
+        VkPipelineLayout layout{}, identity{};
+        CHECK(make(device, &ci, nullptr, &layout) == VK_SUCCESS);
+        const auto native = vkrt_rtp_native_layout(&dev, layout);
+        CHECK(vkrt_rtp_replay_layout_capture(&cb, layout, &identity) == VK_SUCCESS);
+        destroy(device, layout, nullptr);
+        descriptor_history_test = true;
+        descriptor_events.clear();
+        cb.replaying = true;
+        allocator.budget = allowance;
+        push(command, VK_PIPELINE_BIND_POINT_COMPUTE, identity, 0, 1, &write);
+        allocator.budget = -1;
+        succeeded = cb.record_result == VK_SUCCESS;
+        if (succeeded) {
+            const std::vector<DescriptorEvent> expected = {
+                {"push",
+                 native,
+                 {VK_PIPELINE_BIND_POINT_COMPUTE, 0, 1, 0, 0, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 2, 9100, 16, 32, 9101, 48, 64}}};
+            CHECK(descriptor_events == expected);
+        } else {
+            CHECK(cb.record_result == VK_ERROR_OUT_OF_HOST_MEMORY && descriptor_events.empty());
+            ++failures_seen;
+        }
+        // A failed nested-copy transaction owns neither borrowed input nor a
+        // native command. Reset must free the journal, all successful partial
+        // allocations, and the last retained layout using its DEVICE owner.
+        vkrt_rtp_reset_command(&cb);
+        cb.replaying = false;
+        cb.record_result = VK_SUCCESS;
+        descriptor_history_test = false;
+        descriptor_events.clear();
+        CHECK(!NativeReferences() && allocator.allocations - prior_allocations == allocator.frees - prior_frees);
+        CHECK(!std::memcmp(&write, saved.data(), sizeof(write)));
+    }
+    CHECK(succeeded && failures_seen >= 4);
+    vkrt_rtp_forget_descriptor_layout(&dev, set);
+    std::printf("Compute descriptor history: owned nested payload, ordered repeated restore, allocation failures %u\n",
+                failures_seen);
+}
 void PipelineLayoutAliases() {
     CHECK(!dev.rtp && layouts.empty() && callback_allocations.empty());
     auto make = (PFN_vkCreatePipelineLayout)vkrt_rtp_proc("vkCreatePipelineLayout");
@@ -754,6 +1122,7 @@ void PipelineLayoutAliases() {
     ci.pushConstantRangeCount = 1;
     ci.pPushConstantRanges = &push;
     const auto saved = Snapshot(ci);
+    DescriptorHistoryAllocationFailures(device_owner);
     for (bool all_alias : {false, true}) {
         CallbackOwner first, second;
         auto a = Callbacks(first), b = Callbacks(second);
@@ -922,6 +1291,38 @@ extern "C" bool vkrt_deferred_valid(vkrt_device_data *data, VkDeferredOperationK
     CHECK(data == &dev);
     return !value;
 }
+extern "C" vkrt_replay_context *vkrt_replay_lookup_context(VkCommandBuffer command_buffer) {
+    auto *state = VKRT_FIND(vkrt_cmd_buffer_data, command_buffer);
+    if (!state) return nullptr;
+    state->replay.user = state;
+    state->replay.resolve = [](void *, const char *name) {
+        auto call = vkrt_rtp_proc(name);
+        return call ? call : NativeProc(device, name);
+    };
+    state->replay.normalize_pipeline_layout = [](void *user, VkPipelineLayout source, VkPipelineLayout *stable) {
+        if (!source) {
+            *stable = VK_NULL_HANDLE;
+            return VK_SUCCESS;
+        }
+        return vkrt_rtp_replay_layout_capture(static_cast<vkrt_cmd_buffer_data *>(user), source, stable);
+    };
+    state->replay.emit_pipeline_layout = [](void *user, const char *name, VkPipelineLayout identity, VkPipelineLayout *forward) {
+        *forward = identity;
+        if (!identity) return VK_SUCCESS;
+        // Mirror the command adapter's distinction: translating RTP hooks must
+        // receive the retained semantic identity; other consumers get an ICD
+        // handle. The real replay library invokes this callback, not a mock.
+        for (const char *translating :
+             {"vkCmdBindDescriptorSets", "vkCmdBindDescriptorSets2", "vkCmdBindDescriptorSets2KHR", "vkCmdPushConstants",
+              "vkCmdPushConstants2", "vkCmdPushConstants2KHR", "vkCmdPushDescriptorSet", "vkCmdPushDescriptorSetKHR",
+              "vkCmdPushDescriptorSet2", "vkCmdPushDescriptorSet2KHR", "vkCmdSetDescriptorBufferOffsetsEXT",
+              "vkCmdSetDescriptorBufferOffsets2EXT", "vkCmdBindDescriptorBufferEmbeddedSamplersEXT",
+              "vkCmdBindDescriptorBufferEmbeddedSamplers2EXT"})
+            if (!std::strcmp(name, translating)) return VK_SUCCESS;
+        return vkrt_rtp_replay_layout_native(static_cast<vkrt_cmd_buffer_data *>(user), identity, forward);
+    };
+    return &state->replay;
+}
 int main() {
     instance.vtable.GetPhysicalDeviceProperties = Properties;
     dev.device = device;
@@ -939,6 +1340,7 @@ int main() {
     dev.vtable.CmdPushConstants = TracePush;
     dev.vtable.CmdDispatch = TraceDispatch;
     dev.vtable.CmdPipelineBarrier = TraceBarrier;
+    dev.vtable.GetDeviceProcAddr = NativeProc;
     cb.cmd = command;
     cb.device_data = &dev;
     vkrt_map_object(VKRT_HKEY(device), &dev);

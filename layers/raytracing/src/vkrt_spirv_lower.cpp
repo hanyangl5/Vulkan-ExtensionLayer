@@ -1280,11 +1280,14 @@ int vkrt_spirv_lower_with_context(const uint32_t *user_words, size_t user_word_c
     }
 
     /* ---- 2. Link ---------------------------------------------------- */
-    // Vulkan 1.2 admits SPIR-V through 1.5; Vulkan 1.3 also admits 1.6.
-    // Keep the original validation semantics for <=1.5 modules and retain
-    // both input versions rather than rewriting a legal 1.6 source header.
+    // Private traversal is genuine SPIR-V 1.4. Link 1.4 application modules
+    // in Vulkan 1.1 + VK_KHR_spirv_1_4; preserve the existing 1.5/1.6 source
+    // paths and both input versions rather than rewriting any module header.
     // Version alone does not enable optional features such as LocalSizeId.
-    const spv_target_env environment = std::max(user[1], lib[1]) > 0x00010500u ? SPV_ENV_VULKAN_1_3 : SPV_ENV_VULKAN_1_2;
+    const auto version = std::max(user[1], lib[1]);
+    const spv_target_env environment = version <= 0x00010400u   ? SPV_ENV_VULKAN_1_1_SPIRV_1_4
+                                       : version <= 0x00010500u ? SPV_ENV_VULKAN_1_2
+                                                                : SPV_ENV_VULKAN_1_3;
     spvtools::Context ctx(environment);
     std::string link_diag;
     ctx.SetMessageConsumer([&](spv_message_level_t, const char *, const spv_position_t &, const char *message) {

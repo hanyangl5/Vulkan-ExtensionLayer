@@ -495,7 +495,15 @@ void CPUChecks(const TypedContinuationProgram &caller, const TypedContinuationPr
                     Invocation(caller, spv::StorageClassCallableDataKHR).size,
             "Application debug names altered the typed ABI");
     auto scheduler = CompileGLSL(Scheduler(caller, callee), VK_SHADER_STAGE_COMPUTE_BIT);
-    CheckNative(LinkTypedPipelineProgram(scheduler, {caller, callee}));
+    const auto linked = LinkTypedPipelineProgram(scheduler, {caller, callee});
+    Require(linked.at(1) == std::max({scheduler.at(1), caller.spirv.at(1), callee.spirv.at(1)}),
+            "Typed linking changed a higher-version application module");
+    CheckNative(linked);
+    const auto private_scheduler = CompileGLSL(Scheduler(caller, callee), VK_SHADER_STAGE_COMPUTE_BIT, GLSLTarget::Vulkan11Spirv14);
+    const auto mixed = LinkTypedPipelineProgram(private_scheduler, {caller, callee});
+    Require(private_scheduler.at(1) == 0x00010400u && mixed.at(1) == caller.spirv.at(1),
+            "Private SPIR-V 1.4 scheduler changed a higher-version application stage");
+    CheckNative(mixed);
     CheckNative(LinkTypedPipelineProgram(scheduler, {stripped, callee}));
     auto aggregate_copies = CompileTypedPipelineStage(WithShaderCallMemoryBarriers(WithAggregateIdentityCopies(Caller())), "main",
                                                       VK_SHADER_STAGE_RAYGEN_BIT_KHR, nullptr, "vel_rt_stage_0");
@@ -639,11 +647,16 @@ bool GPUExecution(const VkSpecializationInfo *info, bool strip_names) {
 }
 }  // namespace
 
-int main() {
+int main(int argc, char **argv) {
     try {
+        const bool compile_only = argc == 2 && std::string(argv[1]) == "--compile-only";
+        Require(argc == 1 || compile_only, "Unknown typed pipeline test argument");
         auto caller = CompileTypedPipelineStage(Caller(), "main", VK_SHADER_STAGE_RAYGEN_BIT_KHR, nullptr, "vel_rt_stage_0");
         auto callee = CompileTypedPipelineStage(Callee(), "main", VK_SHADER_STAGE_CALLABLE_BIT_KHR, nullptr, "vel_rt_stage_1");
+        Require(caller.spirv.at(1) == Caller().at(1) && callee.spirv.at(1) == Callee().at(1),
+                "Typed stage compilation changed a higher-version application module");
         CPUChecks(caller, callee);
+        if (compile_only) return 0;
         if (!GPUExecution(nullptr, false) || !GPUExecution(&specialization, true)) return 77;
         return 0;
     } catch (const std::exception &error) {

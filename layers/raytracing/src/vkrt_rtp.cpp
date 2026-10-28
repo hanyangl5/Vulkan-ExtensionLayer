@@ -7,9 +7,11 @@ extern "C" {
 #include "vkrt_as_registry.h"
 #include "vkrt_deferred.h"
 #include "vkrt_rtp.h"
+#include "vkrt_debug_objects.h"
 }
 #include "typed_runtime.h"
 #include "rtp_launch_plan.h"
+#include "vkrt_replay_capture_generated.h"
 #include <spirv/unified1/spirv.hpp>
 #include <algorithm>
 #include <atomic>
@@ -190,6 +192,9 @@ struct Binding {
     std::vector<uint32_t> offsets;
     std::vector<bool> live;
 };
+struct JournalDeleter {
+    void operator()(vkrt_replay_journal *journal) const { vkrt_replay_journal_destroy(journal); }
+};
 struct Packet {
     vkrt_device_data *dev;
     vkrt_private_slice context{}, arena{};
@@ -219,6 +224,11 @@ struct vkrt_rtp_state {
 struct vkrt_rtp_command {
     std::shared_ptr<Pipeline> bound;
     std::vector<Binding> rt_bindings, compute_bindings;
+    // Buffer bindings are global and rebinding them invalidates offsets at
+    // every bind point. Restore the complete native descriptor history in
+    // order, including graphics state needed by a later draw.
+    std::unique_ptr<vkrt_replay_journal, JournalDeleter> descriptors;
+    bool restoring_descriptors = false;
     std::vector<std::shared_ptr<Layout>> retained_layouts;
     std::unordered_map<uint64_t, std::shared_ptr<Layout>> replay_layouts;
     std::map<uint32_t, std::vector<uint8_t>> pushes;
@@ -237,6 +247,40 @@ vkrt_device_data *Device(VkDevice d) {
 vkrt_rtp_command &State(vkrt_cmd_buffer_data *cb) {
     if (!cb->rtp) cb->rtp = new vkrt_rtp_command;
     return *cb->rtp;
+}
+template <class F>
+F Native(vkrt_device_data *dev, const char *name, const char *alias = nullptr) {
+    Need(dev->vtable.GetDeviceProcAddr != nullptr);
+    auto proc = dev->vtable.GetDeviceProcAddr(dev->device, name);
+    if (!proc && alias) proc = dev->vtable.GetDeviceProcAddr(dev->device, alias);
+    Need(proc != nullptr);
+    return reinterpret_cast<F>(proc);
+}
+template <class F>
+void RecordDescriptor(vkrt_cmd_buffer_data *cb, F record) {
+    if (!cb->device_data->rtp || !cb->replaying) return;
+    auto &state = State(cb);
+    if (state.restoring_descriptors) return;
+    if (!state.descriptors) {
+        const auto &allocator = cb->device_data->rtp->allocator;
+        state.descriptors.reset(
+            vkrt_replay_journal_create(allocator.custom ? &allocator.callbacks : nullptr, VK_SYSTEM_ALLOCATION_SCOPE_DEVICE));
+        if (!state.descriptors) throw std::bad_alloc();
+    }
+    // Inputs already name this recording's retained layout identities. Reuse
+    // the generic schema for all pointer-valued descriptor data and pNexts.
+    vkrt_replay_context context{};
+    context.journal = state.descriptors.get();
+    Check(record(&context));
+}
+void RecordSets(vkrt_cmd_buffer_data *cb, VkPipelineBindPoint point, VkPipelineLayout layout, uint32_t first, uint32_t count,
+                const VkDescriptorSet *sets, uint32_t dynamic_count, const uint32_t *offsets) {
+    RecordDescriptor(cb, [&](vkrt_replay_context *context) {
+        auto capture =
+            reinterpret_cast<PFN_vkrt_capture_CmdBindDescriptorSets>(vkrt_replay_capture_proc("vkCmdBindDescriptorSets"));
+        Need(capture != nullptr);
+        return capture(context, point, layout, first, count, sets, dynamic_count, offsets);
+    });
 }
 std::shared_ptr<Layout> FindLayout(vkrt_device_data *d, VkPipelineLayout h) {
     if (!d->rtp) return {};
@@ -688,9 +732,10 @@ VKAPI_ATTR void VKAPI_CALL DestroyPipeline(VkDevice device, VkPipeline h, const 
                 d->rtp->pipelines.erase(i);
             }
         }
-        if (token)
+        if (token) {
+            vkrt_debug_object_forget(d, VK_OBJECT_TYPE_PIPELINE, VKRT_HKEY(h));
             FreeToken(token);
-        else if (h)
+        } else if (h)
             d->vtable.DestroyPipeline(device, h, a);
         return VK_SUCCESS;
     });
@@ -736,6 +781,7 @@ void CaptureBindings(vkrt_cmd_buffer_data *cb, VkPipelineBindPoint point, const 
                      const uint32_t *offsets) {
     if (!cb->device_data->rtp || (point != VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR && point != VK_PIPELINE_BIND_POINT_COMPUTE))
         return;
+    if (State(cb).restoring_descriptors) return;
     Binding binding;
     binding.owner = owner;
     binding.native = native;
@@ -761,6 +807,8 @@ VKAPI_ATTR void VKAPI_CALL CmdBindDescriptorSets(VkCommandBuffer command, VkPipe
         if (cb->replaying) Need(owner != nullptr);
         VkPipelineLayout native = owner ? owner->native : layout;
         CaptureBindings(cb, point, owner, native, first, count, sets, dynamic_count, offsets);
+        if (point != VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR)
+            RecordSets(cb, point, layout, first, count, sets, dynamic_count, offsets);
         if (point != VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR)
             d->vtable.CmdBindDescriptorSets(command, point, native, first, count, sets, dynamic_count, offsets);
         return VK_SUCCESS;
@@ -814,7 +862,257 @@ VKAPI_ATTR void VKAPI_CALL CmdBindDescriptorSets2(VkCommandBuffer command, const
         native.stageFlags = all ? VK_SHADER_STAGE_ALL : info->stageFlags & ~rt_bits;
         native.layout = owner->native;
         native.pNext = nullptr;
-        if (native.stageFlags) d->vtable.CmdBindDescriptorSets2(command, &native);
+        if (native.stageFlags) {
+            auto identity = layout;
+            if (temporary.handle && cb->replaying) Check(vkrt_rtp_replay_layout_capture(cb, temporary.handle, &identity));
+            auto saved = native;
+            saved.layout = identity;
+            RecordDescriptor(cb, [&](vkrt_replay_context *context) {
+                auto capture =
+                    reinterpret_cast<PFN_vkrt_capture_CmdBindDescriptorSets2>(vkrt_replay_capture_proc("vkCmdBindDescriptorSets2"));
+                Need(capture != nullptr);
+                return capture(context, &saved);
+            });
+            d->vtable.CmdBindDescriptorSets2(command, &native);
+        }
+        return VK_SUCCESS;
+    });
+    if (result != VK_SUCCESS) cb->record_result = result;
+}
+struct DescriptorLayoutUse {
+    vkrt_cmd_buffer_data *cb;
+    VkPipelineLayout temporary{}, identity{}, native{};
+    std::shared_ptr<Layout> owner;
+    DescriptorLayoutUse(vkrt_cmd_buffer_data *command, VkPipelineLayout layout, const void *next = nullptr) : cb(command) {
+        const VkPipelineLayoutCreateInfo *inline_layout = nullptr;
+        for (auto p = static_cast<const VkBaseInStructure *>(next); p; p = p->pNext) {
+            Need(p->sType == VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO && !inline_layout);
+            inline_layout = reinterpret_cast<const VkPipelineLayoutCreateInfo *>(p);
+        }
+        identity = layout;
+        if (!identity) {
+            Need(inline_layout != nullptr);
+            auto ci = *inline_layout;
+            ci.pNext = nullptr;
+            Check(CreatePipelineLayout(cb->device_data->device, &ci, nullptr, &temporary));
+            identity = temporary;
+            // A constructor failure must still release its temporary public
+            // handle; the recorded native layout is retained independently.
+            auto result = Guard([&] {
+                if (cb->replaying) Check(vkrt_rtp_replay_layout_capture(cb, temporary, &identity));
+                owner = cb->replaying ? FindCommandLayout(cb, identity) : FindLayout(cb->device_data, temporary);
+                Need(owner != nullptr);
+                if (!State(cb).restoring_descriptors) State(cb).retained_layouts.push_back(owner);
+                return VK_SUCCESS;
+            });
+            if (result != VK_SUCCESS) {
+                DestroyPipelineLayout(cb->device_data->device, temporary, nullptr);
+                temporary = VK_NULL_HANDLE;
+                Check(result);
+            }
+        } else
+            owner = FindCommandLayout(cb, identity);
+        Need(owner != nullptr);
+        native = owner->native;
+        if (!temporary && !State(cb).restoring_descriptors) State(cb).retained_layouts.push_back(owner);
+    }
+    ~DescriptorLayoutUse() {
+        if (temporary) DestroyPipelineLayout(cb->device_data->device, temporary, nullptr);
+    }
+};
+void RecordPush(vkrt_cmd_buffer_data *cb, VkPipelineBindPoint point, VkPipelineLayout layout, uint32_t set, uint32_t count,
+                const VkWriteDescriptorSet *writes) {
+    RecordDescriptor(cb, [&](vkrt_replay_context *context) {
+        auto capture =
+            reinterpret_cast<PFN_vkrt_capture_CmdPushDescriptorSetKHR>(vkrt_replay_capture_proc("vkCmdPushDescriptorSetKHR"));
+        Need(capture != nullptr);
+        return capture(context, point, layout, set, count, writes);
+    });
+}
+VKAPI_ATTR void VKAPI_CALL CmdPushDescriptorSet(VkCommandBuffer command, VkPipelineBindPoint point, VkPipelineLayout layout,
+                                                uint32_t set, uint32_t count, const VkWriteDescriptorSet *writes) {
+    auto cb = VKRT_FIND(vkrt_cmd_buffer_data, command);
+    if (!cb || cb->record_result != VK_SUCCESS) return;
+    auto result = Guard([&] {
+        auto d = cb->device_data;
+        auto call = Native<PFN_vkCmdPushDescriptorSetKHR>(d, "vkCmdPushDescriptorSet", "vkCmdPushDescriptorSetKHR");
+        if (!d->rtp) {
+            call(command, point, layout, set, count, writes);
+            return VK_SUCCESS;
+        }
+        Need(point != VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR);
+        DescriptorLayoutUse use(cb, layout);
+        RecordPush(cb, point, use.identity, set, count, writes);
+        call(command, point, use.native, set, count, writes);
+        return VK_SUCCESS;
+    });
+    if (result != VK_SUCCESS) cb->record_result = result;
+}
+VKAPI_ATTR void VKAPI_CALL CmdPushDescriptorSet2(VkCommandBuffer command, const VkPushDescriptorSetInfo *info) {
+    auto cb = VKRT_FIND(vkrt_cmd_buffer_data, command);
+    if (!cb || cb->record_result != VK_SUCCESS) return;
+    auto result = Guard([&] {
+        auto d = cb->device_data;
+        auto call = Native<PFN_vkCmdPushDescriptorSet2>(d, "vkCmdPushDescriptorSet2", "vkCmdPushDescriptorSet2KHR");
+        if (!d->rtp) {
+            call(command, info);
+            return VK_SUCCESS;
+        }
+        Need(info != nullptr);
+        bool all = info->stageFlags == VK_SHADER_STAGE_ALL;
+        Need(all || !(info->stageFlags & rt_bits));
+        DescriptorLayoutUse use(cb, info->layout, info->pNext);
+        auto saved = *info;
+        saved.layout = use.identity;
+        saved.pNext = nullptr;
+        RecordDescriptor(cb, [&](vkrt_replay_context *context) {
+            auto capture =
+                reinterpret_cast<PFN_vkrt_capture_CmdPushDescriptorSet2>(vkrt_replay_capture_proc("vkCmdPushDescriptorSet2"));
+            Need(capture != nullptr);
+            return capture(context, &saved);
+        });
+        auto native = *info;
+        native.pNext = nullptr;
+        native.layout = use.native;
+        call(command, &native);
+        return VK_SUCCESS;
+    });
+    if (result != VK_SUCCESS) cb->record_result = result;
+}
+VKAPI_ATTR void VKAPI_CALL CmdBindDescriptorBuffersEXT(VkCommandBuffer command, uint32_t count,
+                                                       const VkDescriptorBufferBindingInfoEXT *bindings) {
+    auto cb = VKRT_FIND(vkrt_cmd_buffer_data, command);
+    if (!cb || cb->record_result != VK_SUCCESS) return;
+    auto result = Guard([&] {
+        auto d = cb->device_data;
+        auto call = Native<PFN_vkCmdBindDescriptorBuffersEXT>(d, "vkCmdBindDescriptorBuffersEXT");
+        RecordDescriptor(cb, [&](vkrt_replay_context *context) {
+            auto capture = reinterpret_cast<PFN_vkrt_capture_CmdBindDescriptorBuffersEXT>(
+                vkrt_replay_capture_proc("vkCmdBindDescriptorBuffersEXT"));
+            Need(capture != nullptr);
+            return capture(context, count, bindings);
+        });
+        call(command, count, bindings);
+        return VK_SUCCESS;
+    });
+    if (result != VK_SUCCESS) cb->record_result = result;
+}
+void RecordOffsets(vkrt_cmd_buffer_data *cb, VkPipelineBindPoint point, VkPipelineLayout layout, uint32_t first, uint32_t count,
+                   const uint32_t *indices, const VkDeviceSize *offsets) {
+    RecordDescriptor(cb, [&](vkrt_replay_context *context) {
+        auto capture = reinterpret_cast<PFN_vkrt_capture_CmdSetDescriptorBufferOffsetsEXT>(
+            vkrt_replay_capture_proc("vkCmdSetDescriptorBufferOffsetsEXT"));
+        Need(capture != nullptr);
+        return capture(context, point, layout, first, count, indices, offsets);
+    });
+}
+VKAPI_ATTR void VKAPI_CALL CmdSetDescriptorBufferOffsetsEXT(VkCommandBuffer command, VkPipelineBindPoint point,
+                                                            VkPipelineLayout layout, uint32_t first, uint32_t count,
+                                                            const uint32_t *indices, const VkDeviceSize *offsets) {
+    auto cb = VKRT_FIND(vkrt_cmd_buffer_data, command);
+    if (!cb || cb->record_result != VK_SUCCESS) return;
+    auto result = Guard([&] {
+        auto d = cb->device_data;
+        auto call = Native<PFN_vkCmdSetDescriptorBufferOffsetsEXT>(d, "vkCmdSetDescriptorBufferOffsetsEXT");
+        if (!d->rtp) {
+            call(command, point, layout, first, count, indices, offsets);
+            return VK_SUCCESS;
+        }
+        Need(point != VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR);
+        DescriptorLayoutUse use(cb, layout);
+        RecordOffsets(cb, point, use.identity, first, count, indices, offsets);
+        call(command, point, use.native, first, count, indices, offsets);
+        return VK_SUCCESS;
+    });
+    if (result != VK_SUCCESS) cb->record_result = result;
+}
+VKAPI_ATTR void VKAPI_CALL CmdSetDescriptorBufferOffsets2EXT(VkCommandBuffer command,
+                                                             const VkSetDescriptorBufferOffsetsInfoEXT *info) {
+    auto cb = VKRT_FIND(vkrt_cmd_buffer_data, command);
+    if (!cb || cb->record_result != VK_SUCCESS) return;
+    auto result = Guard([&] {
+        auto d = cb->device_data;
+        auto call = Native<PFN_vkCmdSetDescriptorBufferOffsets2EXT>(d, "vkCmdSetDescriptorBufferOffsets2EXT");
+        if (!d->rtp) {
+            call(command, info);
+            return VK_SUCCESS;
+        }
+        Need(info != nullptr);
+        bool all = info->stageFlags == VK_SHADER_STAGE_ALL;
+        Need(all || !(info->stageFlags & rt_bits));
+        DescriptorLayoutUse use(cb, info->layout, info->pNext);
+        auto saved = *info;
+        saved.layout = use.identity;
+        saved.pNext = nullptr;
+        RecordDescriptor(cb, [&](vkrt_replay_context *context) {
+            auto capture = reinterpret_cast<PFN_vkrt_capture_CmdSetDescriptorBufferOffsets2EXT>(
+                vkrt_replay_capture_proc("vkCmdSetDescriptorBufferOffsets2EXT"));
+            Need(capture != nullptr);
+            return capture(context, &saved);
+        });
+        auto native = *info;
+        native.pNext = nullptr;
+        native.layout = use.native;
+        call(command, &native);
+        return VK_SUCCESS;
+    });
+    if (result != VK_SUCCESS) cb->record_result = result;
+}
+void RecordSamplers(vkrt_cmd_buffer_data *cb, VkPipelineBindPoint point, VkPipelineLayout layout, uint32_t set) {
+    RecordDescriptor(cb, [&](vkrt_replay_context *context) {
+        auto capture = reinterpret_cast<PFN_vkrt_capture_CmdBindDescriptorBufferEmbeddedSamplersEXT>(
+            vkrt_replay_capture_proc("vkCmdBindDescriptorBufferEmbeddedSamplersEXT"));
+        Need(capture != nullptr);
+        return capture(context, point, layout, set);
+    });
+}
+VKAPI_ATTR void VKAPI_CALL CmdBindDescriptorBufferEmbeddedSamplersEXT(VkCommandBuffer command, VkPipelineBindPoint point,
+                                                                      VkPipelineLayout layout, uint32_t set) {
+    auto cb = VKRT_FIND(vkrt_cmd_buffer_data, command);
+    if (!cb || cb->record_result != VK_SUCCESS) return;
+    auto result = Guard([&] {
+        auto d = cb->device_data;
+        auto call = Native<PFN_vkCmdBindDescriptorBufferEmbeddedSamplersEXT>(d, "vkCmdBindDescriptorBufferEmbeddedSamplersEXT");
+        if (!d->rtp) {
+            call(command, point, layout, set);
+            return VK_SUCCESS;
+        }
+        Need(point != VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR);
+        DescriptorLayoutUse use(cb, layout);
+        RecordSamplers(cb, point, use.identity, set);
+        call(command, point, use.native, set);
+        return VK_SUCCESS;
+    });
+    if (result != VK_SUCCESS) cb->record_result = result;
+}
+VKAPI_ATTR void VKAPI_CALL CmdBindDescriptorBufferEmbeddedSamplers2EXT(VkCommandBuffer command,
+                                                                       const VkBindDescriptorBufferEmbeddedSamplersInfoEXT *info) {
+    auto cb = VKRT_FIND(vkrt_cmd_buffer_data, command);
+    if (!cb || cb->record_result != VK_SUCCESS) return;
+    auto result = Guard([&] {
+        auto d = cb->device_data;
+        auto call = Native<PFN_vkCmdBindDescriptorBufferEmbeddedSamplers2EXT>(d, "vkCmdBindDescriptorBufferEmbeddedSamplers2EXT");
+        if (!d->rtp) {
+            call(command, info);
+            return VK_SUCCESS;
+        }
+        Need(info != nullptr);
+        bool all = info->stageFlags == VK_SHADER_STAGE_ALL;
+        Need(all || !(info->stageFlags & rt_bits));
+        DescriptorLayoutUse use(cb, info->layout, info->pNext);
+        auto saved = *info;
+        saved.layout = use.identity;
+        saved.pNext = nullptr;
+        RecordDescriptor(cb, [&](vkrt_replay_context *context) {
+            auto capture = reinterpret_cast<PFN_vkrt_capture_CmdBindDescriptorBufferEmbeddedSamplers2EXT>(
+                vkrt_replay_capture_proc("vkCmdBindDescriptorBufferEmbeddedSamplers2EXT"));
+            Need(capture != nullptr);
+            return capture(context, &saved);
+        });
+        auto native = *info;
+        native.pNext = nullptr;
+        native.layout = use.native;
+        call(command, &native);
         return VK_SUCCESS;
     });
     if (result != VK_SUCCESS) cb->record_result = result;
@@ -939,7 +1237,17 @@ VKAPI_ATTR void VKAPI_CALL CmdTraceRaysKHR(VkCommandBuffer command, const VkStri
             base += count;  // count <= invocations - base by the checked planner.
         }
         vkrt_replay_compute_binding(cb);
-        for (const auto &b : state.compute_bindings) Bind(d, command, b);
+        if (state.descriptors) {
+            struct RestoreGuard {
+                bool &value;
+                explicit RestoreGuard(bool &v) : value(v) { value = true; }
+                ~RestoreGuard() { value = false; }
+            } restoring(state.restoring_descriptors);
+            Check(vkrt_replay_emit(
+                state.descriptors.get(), command, [](void *, const char *name) { return vkrt_rtp_proc(name); }, cb, nullptr));
+            Check(cb->record_result);
+        } else
+            for (const auto &b : state.compute_bindings) Bind(d, command, b);
         vkrt_replay_push_constants(cb);
         return VK_SUCCESS;
     });
@@ -970,8 +1278,14 @@ extern "C" VkResult vkrt_rtp_init(vkrt_device_data *dev, const VkAllocationCallb
 extern "C" void vkrt_rtp_finish(vkrt_device_data *dev) {
     if (!dev->rtp) return;
     auto s = dev->rtp;
-    for (auto p : s->pipelines) FreeToken(p.second);
-    for (auto p : s->shaders) FreeToken(p.second);
+    for (auto p : s->pipelines) {
+        vkrt_debug_object_forget(dev, VK_OBJECT_TYPE_PIPELINE, p.first);
+        FreeToken(p.second);
+    }
+    for (auto p : s->shaders) {
+        vkrt_debug_object_forget(dev, VK_OBJECT_TYPE_SHADER_MODULE, p.first);
+        FreeToken(p.second);
+    }
     for (auto &p : s->layouts) {
         for (auto token = p.second.tokens; token;) {
             auto next = token->next;
@@ -1111,8 +1425,18 @@ extern "C" bool vkrt_rtp_destroy_shader(vkrt_device_data *dev, VkShaderModule h)
         }
         return VK_SUCCESS;
     });
-    if (token) FreeToken(token);
+    if (token) {
+        vkrt_debug_object_forget(dev, VK_OBJECT_TYPE_SHADER_MODULE, VKRT_HKEY(h));
+        FreeToken(token);
+    }
     return token != nullptr || status != VK_SUCCESS;
+}
+extern "C" bool vkrt_rtp_debug_owns(vkrt_device_data *dev, VkObjectType type, uint64_t handle) {
+    if (!dev || !dev->rtp) return false;
+    std::lock_guard<std::mutex> lock(dev->rtp->lock);
+    if (type == VK_OBJECT_TYPE_PIPELINE) return dev->rtp->pipelines.count(handle) != 0;
+    if (type == VK_OBJECT_TYPE_SHADER_MODULE) return dev->rtp->shaders.count(handle) != 0;
+    return false;
 }
 extern "C" void vkrt_rtp_reset_command(vkrt_cmd_buffer_data *cb) {
     delete cb->rtp;
@@ -1221,6 +1545,15 @@ extern "C" PFN_vkVoidFunction vkrt_rtp_proc(const char *name) {
     ENTRY(CmdBindDescriptorSets);
     ENTRY(CmdBindDescriptorSets2);
     if (!std::strcmp(name, "vkCmdBindDescriptorSets2KHR")) return (PFN_vkVoidFunction)CmdBindDescriptorSets2;
+    ENTRY(CmdPushDescriptorSet);
+    if (!std::strcmp(name, "vkCmdPushDescriptorSetKHR")) return (PFN_vkVoidFunction)CmdPushDescriptorSet;
+    ENTRY(CmdPushDescriptorSet2);
+    if (!std::strcmp(name, "vkCmdPushDescriptorSet2KHR")) return (PFN_vkVoidFunction)CmdPushDescriptorSet2;
+    ENTRY(CmdBindDescriptorBuffersEXT);
+    ENTRY(CmdSetDescriptorBufferOffsetsEXT);
+    ENTRY(CmdSetDescriptorBufferOffsets2EXT);
+    ENTRY(CmdBindDescriptorBufferEmbeddedSamplersEXT);
+    ENTRY(CmdBindDescriptorBufferEmbeddedSamplers2EXT);
     ENTRY(CmdSetRayTracingPipelineStackSizeKHR);
     ENTRY(CmdTraceRaysKHR);
 #undef ENTRY

@@ -29,10 +29,8 @@ struct ContinuationFrameCodecs {
     // owns %<prefix>memory, a uint StorageBuffer runtime array at set/binding
     // in default mode. In physical mode memory is empty and base_type is
     // uint64; word access uses PhysicalStorageBuffer pointers with Aligned4.
-    // A private_frame_words budget instead imports vel_rt_private_frames, a
-    // per-invocation Private uint array; uint64 bases are byte offsets into it.
     // It contains no entry point, RT capability, source names, or source code.
-    std::string capabilities, annotations, declarations, functions;
+    std::string capabilities, extensions, annotations, declarations, functions;
     std::string word_type, bool_type, void_type, memory, word_pointer_type, word_pair_type, base_type, step_signature;
     std::vector<ContinuationTypeCodec> types;
     std::vector<ContinuationSuspensionCodec> suspensions;

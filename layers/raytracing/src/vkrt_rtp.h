@@ -12,6 +12,7 @@ struct vkrt_rtp_state;
 struct vkrt_rtp_command;
 VkResult vkrt_rtp_init(struct vkrt_device_data *dev, const VkAllocationCallbacks *allocator);
 void vkrt_rtp_finish(struct vkrt_device_data *dev);
+bool vkrt_rtp_debug_owns(struct vkrt_device_data *dev, VkObjectType type, uint64_t handle);
 VkResult vkrt_rtp_track_descriptor_layout(struct vkrt_device_data *dev, VkDescriptorSetLayout layout,
                                           const VkDescriptorSetLayoutCreateInfo *info);
 void vkrt_rtp_forget_descriptor_layout(struct vkrt_device_data *dev, VkDescriptorSetLayout layout);

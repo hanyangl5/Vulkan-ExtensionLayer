@@ -4,7 +4,6 @@
 /* C/GLSL-compatible offsets in the immutable per-vkCmdTraceRays context.
  * All addresses, sizes, counts and SBT strides are little-endian uint64.
  * Production BDA mode uses independent mutable pool slices per execution.
- * PrivateArray component mode ignores pool/bytes and requires its linked budget.
  * LaunchBase selects the first flattened ray; production can override it with
  * the second uint64 in its independent 16-byte native compute push range. */
 #define VEL_RT_RUNTIME_MAGIC 0x52545056u

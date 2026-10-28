@@ -5,6 +5,11 @@
 #include "vkrt_execution_replay.h"
 
 struct vkrt_global vkrt_global = VKRT_GLOBAL_INITIALIZER;
+VkResult vkrt_descriptor_template_capture(struct vkrt_replay_context *context, const VkPushDescriptorSetWithTemplateInfo *info) {
+    (void)context;
+    (void)info;
+    return VK_ERROR_FEATURE_NOT_PRESENT;
+}
 VkResult vkrt_query_command_reset(struct vkrt_cmd_buffer_data *cb) {
     (void)cb;
     return VK_SUCCESS;

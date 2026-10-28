@@ -14,8 +14,9 @@ This page records the executable RTP prototype and its limitations at baseline `
 
 Current typed RTP development is integrated into
 `VK_LAYER_VKRT_SOFTWARE_RAY_QUERY`, sharing its Mesa/BVH4 AS backend. Its
-invocation-private continuation scheduler, public RTP API, GPU SBT and selected
-external CTS evidence are recorded in the [current checkpoint](rt_cts_typed_runtime_2026-10-26.md).
+continuation scheduler uses execution-owned BDA arenas. Its public RTP API, GPU
+SBT, software discovery and selected external CTS evidence are recorded in the
+[current checkpoint](rt_software_discovery_2026-10-28.md).
 The baseline limitations below describe the older
 `VK_LAYER_HANYANG_ray_tracing_fallback` executable; they are retained as history.
 

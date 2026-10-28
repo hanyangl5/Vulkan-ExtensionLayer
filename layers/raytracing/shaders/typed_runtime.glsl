@@ -17,9 +17,6 @@ layout(constant_id = 0) const uint rt_context_low = 0u;
 layout(constant_id = 1) const uint rt_context_high = 0u;
 #endif
 layout(buffer_reference, std430, buffer_reference_align = 4) buffer RtWords { uint w[]; };
-#ifdef RT_PRIVATE_WORDS
-uint vel_rt_private_frames[RT_PRIVATE_WORDS];
-#endif
 uint64_t rt_ctx, rt_arena, rt_limit, rt_cursor, rt_top;
 uint rt_error;
 uvec3 rt_launch, rt_launch_size;
@@ -27,20 +24,8 @@ uvec3 rt_launch, rt_launch_size;
 uint rt_p(uint64_t p) { return RtWords(p).w[0]; }
 void rt_pw(uint64_t p, uint v) { RtWords(p).w[0] = v; }
 uint64_t rt_p64(uint64_t p) { return uint64_t(rt_p(p)) | (uint64_t(rt_p(p + 4ul)) << 32); }
-uint rt_u(uint64_t p) {
-#ifdef RT_PRIVATE_WORDS
-    return vel_rt_private_frames[uint(p / 4ul)];
-#else
-    return rt_p(p);
-#endif
-}
-void rt_w(uint64_t p, uint v) {
-#ifdef RT_PRIVATE_WORDS
-    vel_rt_private_frames[uint(p / 4ul)] = v;
-#else
-    rt_pw(p, v);
-#endif
-}
+uint rt_u(uint64_t p) { return rt_p(p); }
+void rt_w(uint64_t p, uint v) { rt_pw(p, v); }
 uint64_t rt_u64(uint64_t p) { return uint64_t(rt_u(p)) | (uint64_t(rt_u(p + 4ul)) << 32); }
 void rt_w64(uint64_t p, uint64_t v) {
     rt_w(p, uint(v));
@@ -584,13 +569,6 @@ void main() {
             rt_launch = uvec3(uint(ray % uint64_t(rt_launch_size.x)),
                               uint((ray / uint64_t(rt_launch_size.x)) % uint64_t(rt_launch_size.y)), uint(ray / xy));
     }
-#ifdef RT_PRIVATE_WORDS
-    if (rt_p64(rt_ctx + 24ul) != uint64_t(RT_PRIVATE_WORDS) * 4ul || rt_p64(rt_ctx + 176ul) != rt_pipeline_id)
-        rt_fail(VEL_RT_STATUS_CONTEXT);
-    rt_arena = 16ul;
-    rt_cursor = 16ul;
-    rt_limit = uint64_t(RT_PRIVATE_WORDS) * 4ul;
-#else
     uint64_t pool = rt_p64(rt_ctx + 8ul), capacity = rt_p64(rt_ctx + 16ul), stride = rt_p64(rt_ctx + 24ul), offset;
     if (pool == 0ul || (pool & 15ul) != 0ul || (stride & 15ul) != 0ul || !rt_product(localIndex, stride, offset) ||
         offset > capacity || stride > capacity - offset || offset > ~0ul - pool || stride > ~0ul - (pool + offset) ||
@@ -599,7 +577,6 @@ void main() {
     rt_arena = pool + offset;
     rt_cursor = rt_arena;
     rt_limit = rt_arena + stride;
-#endif
     if (rt_error == 0u) {
         uint stage;
         uint64_t record;

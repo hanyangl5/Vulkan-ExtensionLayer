@@ -92,6 +92,14 @@ passing result. GPU execution requires the backend's actual compute, subgroup,
 BDA, integer/storage, scalar-layout, memory-model, and descriptor prerequisites.
 Physical no-RT and cross-vendor qualification remain open.
 
+The software discovery candidate reports base AS/RQ/RTP from its compute and
+resource prerequisites, independently of native RT advertisement. Applications
+must request Vulkan 1.1 or later; the backend currently requires native Vulkan
+1.2 and available private dependencies. Private shaders use genuine SPIR-V 1.4.
+Complete queue/group/protected and resource qualification remains open. Newer
+optional object interfaces may be explicitly excluded, and every test need not
+pass; see the [compatibility checkpoint](../../docs/rt_software_discovery_2026-10-28.md).
+
 External CTS is part of development validation. The repository's
 [`run_rt_cts.py`](../../scripts/run_rt_cts.py) records exact cases, executable and
 layer hashes, QPA results, and failures. Use the case lists and commands in the
@@ -112,7 +120,8 @@ physical roots, and publication lifetime.
 Ray Query lowers supported typed SPIR-V operations to traversal in the consuming
 shader stage. Canonical RTP links all six RT stages into a compute scheduler with
 GPU SBT selection, nested traces and callables, invocation-private continuation
-storage, descriptor-backed opaque provenance, and cached native stack variants.
+storage in execution-owned BDA arenas, descriptor-backed opaque provenance, and
+one cached native variant per pipeline with execution-time stack budgets.
 The adapter restores application compute pipeline, descriptor, push, and
 shader-object state after internal work. Shader-object binaries retain source,
 specialization and complete linked-group state. Ordinary groups transport their
@@ -124,6 +133,8 @@ and actual GPU evidence; complete optional-feature compatibility remains open.
 Evidence records retain the tested revision, device, commands, failures, and
 scope:
 
+- [Software discovery, SPIR-V 1.4 and compatibility gates](../../docs/rt_software_discovery_2026-10-28.md).
+- [Execution-owned RTP arenas](../../docs/rtp_execution_arenas_2026-10-28.md).
 - [Shared typed runtime and initial external CTS](../../docs/rt_cts_typed_runtime_2026-10-26.md).
 - [Opaque resource provenance across suspension](../../docs/rt_opaque_provenance_2026-10-26.md).
 - [External control flow, private state, nonuniform arguments, and barriers](../../docs/rt_cts_controlflow_2026-10-26.md).

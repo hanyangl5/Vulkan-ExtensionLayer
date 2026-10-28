@@ -12,6 +12,14 @@ This file is the repository progress checkpoint. GitHub Issues are disabled in
 this repository. It records project work; it does not activate a hosted execution
 service or imply that an external scheduler is running.
 
+The user clarified on 2026-10-28 that some newer optional-extension
+incompatibilities are acceptable and that all tests need not pass. Subsequent
+work prioritizes the mandatory AS/RQ/RTP baseline; known newer-feature exclusions
+must be explicit. CTS/regression outcomes remain categorized evidence, with no
+requirement to make unrelated optional suites all pass. See the goal's
+[compatibility and test scope](ray_tracing_fallback_goal.md#compatibility-and-test-scope).
+The latest slice is the [software discovery and compatibility checkpoint](rt_software_discovery_2026-10-28.md).
+
 Source is consolidated under `layers/raytracing`: production C/C++ and ABI
 headers in `src`, all production GPU code in `shaders`, fixtures/oracles in
 `tests`, documentation and pinned references in `docs`, and build support in
@@ -64,6 +72,8 @@ the final layout, passing build/local checks and the 16-case external CTS rechec
 - [x] Add SDK-derived owned command capture and independently tested logical-stage planning components.
 - [x] Execute fresh primary/secondary AS-query recordings with independent payloads, overlapping submissions and completion retirement.
 - [x] Replace production RTP PrivateArray frames with tiled, execution-owned BDA arenas and generic primary/secondary replay.
+- [x] Retire obsolete destination PrivateArray code, retain source Private semantics, and compile the private backend as genuine SPIR-V 1.4.
+- [x] Unify software discovery/device/resource planning and verify masked public selection/execution with bounded optional compatibility gates.
 - [ ] M0: complete all capability, no-native-RT, resource ABI, and continuation proofs.
 - [ ] M1: integrate Mesa builders, GPU BVH4 encoding/refit, and shared AS objects.
 - [ ] M2: complete Ray Query lowering and state semantics.
@@ -78,7 +88,7 @@ Component checkmarks do not complete M0/M1/M2 or the full goal.
 | Component | Implemented and tested | Remaining boundary |
 | --- | --- | --- |
 | [Portable BVH4 components](../layers/raytracing/docs/BVH4.md) | Checked reference/CPU adapter; generic BDA hierarchy encoder; direct default Mesa GPU IR adaptation/record emission with compact active leaves, full flags and explicit TLAS relocation; actual LBVH build-to-encode and two-to-four-child GPU collapse, followed by topology-preserving UPDATE/refit | Broader builder variants/large construction IDs, numerical qualification and full object/resource qualification |
-| Typed continuation frames | Typed CFG/continuations; BDA and invocation-private library backing; builtin/push/record state; specialization, linked six-stage scheduler/shared traversal; traditional descriptor-backed opaque provenance; logical StorageBuffer pointer snapshots, supported PtrAccessChain loops and typed Function/Private pointer memory | Remaining pointer arithmetic/memory variants, multi-root/NonUniform execution qualification, actual large aggregate values, conflicting per-stage FP modes and complete resource qualification |
+| Typed continuation frames | Typed CFG/continuations; execution-owned BDA backing; builtin/push/record state; specialization, linked six-stage scheduler/shared traversal; traditional descriptor-backed opaque provenance; logical StorageBuffer pointer snapshots, supported PtrAccessChain loops and typed Function/Private pointer memory | Remaining pointer arithmetic/memory variants, multi-root/NonUniform execution qualification, actual large aggregate values, conflicting per-stage FP modes and complete resource qualification |
 | RQ host translation | Consume AS/RQ device requirements; translate resource/synchronization masks and explicit RT buffer queries; lifetime-owned AS address cells with allocator/flush/failure handling and enabled-queue-family sharing; private SSBO indexing/variable-pointer prerequisites | Complete emulation capability/limit reporting on no-RT ICDs, future unknown buffer chains, full-layout descriptor transport and private allocation budgets |
 | AS operations and host dependency | GPU CLONE/COMPACT, serialization/UUID/BLAS relocation, topology-preserving UPDATE/refit; public property pools with per-execution primary/secondary replay, payload/native completion acquisition and reuse/reset/free publication; synchronous deferred operations; owned command-capture and logical-stage planning components | Native logical-stage executor, remaining replay schemas and native-query interaction, true shrinking compaction, refit performance and full resource budgets |
 | RQ compiler compatibility | Actual per-query AS roots from scalar/array descriptors and integer conversions; helper/value/Phi flow; direct/grouped NonUniform propagation; preserve application workgroup/specialization metadata and remove native RT declarations | Full resource-limit transparency, complete opcode/stage coverage and full shared traversal qualification |
@@ -693,24 +703,50 @@ known source gaps without GPU reproducers in this checkpoint. Destination
 PrivateArray diagnostic code is now unused by production and can be retired
 without deleting source Private semantics or historical failure evidence.
 
+## 2026-10-28 software discovery and compatibility checkpoint
+
+One software feature/property/resource profile now drives AS/RQ/RTP discovery
+and device creation without native RT capability truth. The profile supplies
+builder-supported AS vertex formats, pipeline-library enumeration, public
+entry points for disabled optional commands, genuine private SPIR-V 1.4
+modules and Vulkan 1.1 backend extension aliases. Destination PrivateArray
+and its unused diagnostics are retired while source Private semantics remain.
+
+Native pool buffer/allocation size preflight, owned push/template replay,
+global descriptor-buffer restoration and six-class debug/PrivateData object
+metadata are implemented. Seven newer optional object interfaces have explicit
+discovery/feature/device gates rather than new virtual adapters. Ordinary
+native-only EXT_BDA device creation is preserved. These changes follow the
+user's narrower optional compatibility scope.
+
+The [checkpoint](rt_software_discovery_2026-10-28.md) and
+[manifest](rt_software_discovery_2026-10-28.json) separate the preliminary
+masked 12-run GPU/50-case CTS snapshot from final-source validation, retain
+the actual descriptor-buffer VUID failure and its repair, and state the
+remaining qualifications. The software discovery candidate has public masked
+execution evidence; complete queue/group/protected qualification and physical
+no-RT validation remain open. No M0-M5 milestone is marked complete.
+Unified offline checks passed 46/46, selected GPU runs 30/30, and the final
+formatted DLL's external CTS slice 13/13 with 27302 native-boundary checks and
+zero rejections/validation markers. The preliminary 50-case observation is a
+different frozen DLL and overlaps the thirteen cases; it is not 63 unique cases.
+
 ## Next work
 
-Execution-owned BDA RTP arenas and generic replay now have production GPU
-observations, alongside the existing per-execution query implementation. The
-next slice closes native resource-size and compute descriptor-state gaps,
-retires the obsolete destination PrivateArray transport, and expands external
-qualification. This does not complete arbitrary command replay or logical-stage
-submission semantics. Complete synchronization, the no-RT profile and
-large-construction qualification proceed in parallel before enabling complete
-no-RT discovery. These are planned exit checks, not implemented-feature claims.
+Execution-owned BDA RTP arenas, generic replay and the software discovery
+candidate have public observations. Next work prioritizes mandatory queue and
+query qualification, complete resource budgets and remaining compiler/build
+semantics. Newer optional consumers can remain explicitly unsupported; complete
+optional interoperability and an all-green test suite are not requirements.
+The following are exit checks, not implemented-feature claims.
 
 | Priority | Deliverable | Evidence needed before closing it |
 | --- | --- | --- |
-| 1 | Complete RTP resource/state qualification and retire obsolete destination transport | Native maxBufferSize/allocation preflight; push-descriptor and descriptor-buffer compute state reproducers/restoration; preserve source Private semantics and retained failures while deleting unused destination PrivateArray diagnostics; broader public execution/CTS coverage |
+| 1 | Complete mandatory query/queue qualification | Remove the extra timestamp requirement for valid compute queues with timestampValidBits=0; qualify protected execution, multi-device groups and pool-specific native query scopes; align discovery/admission with the actual supported substrate |
 | Parallel M4 | Complete logical-stage synchronization semantics | Source semaphore/barrier/event/ownership scopes, native-query interactions and qualified queues/groups. Query COPY uses the proved native bridge. CPU schedules and early-signal timing alone establish neither a correctness failure nor a requirement for a general queue worker |
-| Parallel M0/M1 | Complete no-RT discovery, resource and construction contract | One shared software feature/property/device-create profile, mandatory query prerequisites, complete resource budgets, qualification of production indexed construction and XYZ dispatch, masked-discovery public execution, then physical no-RT qualification |
+| Parallel M0/M1 | Complete no-RT resource and construction contract | Extend the shared software candidate profile to complete resource budgets and queue qualification; qualify production indexed construction and XYZ dispatch, then physical no-RT execution |
 | Parallel compiler | Remaining typed compiler memory/resource semantics | Access operands and source memory-model rules, multiple real descriptor roots and NonUniform arrays, large values and execution modes, with independent GPU oracles in the production BDA transport and applicable component transports |
-| Replay integration | Remaining command schemas and native-query interactions | Inline-layout/template retention, complete entrypoint admission, mixed native scopes, state preservation and simultaneous public execution qualification; existing explicit restrictions are not final support |
+| Replay integration | Remaining mandatory command schemas and native-query interactions | Mixed native scopes, full state preservation and simultaneous public execution qualification; optional transports/consumers may keep documented restrictions |
 | Final qualification | Complete mandatory behavior and platform matrix | Requirement-to-evidence mapping, broader AS/RQ/RTP CTS, targeted original failures, builder/count/numerical cases, cross-vendor physical no-RT and POSIX runs |
 
 The preceding large-PrivateArray production failure has a BDA replacement;
@@ -719,14 +755,15 @@ compute share a physical stage while source scopes differ. Complete mapping
 still requires proof, but no mandatory forward-progress counterexample currently
 establishes that a queue worker is the only solution. The query acquire bridge
 closes its specific narrow-wait gap. Passing the execution-only native-RT guard
-does not close no-RT discovery, because that mode retains native discovery for
-CTS selection.
+does not establish no-RT discovery, because that mode retains native discovery
+for CTS selection. The new mask-version-1 mode separately proves masked
+selection/execution on this GPU; it still does not qualify physical no-RT GPUs.
 
 The [no-RT qualification audit](rt_no_rt_qualification_gates_2026-10-28.md)
 identifies discovery/property gaps and qualification gates at its audited
-baseline. The new indexed construction and mandatory-query prerequisite fixes
-supersede those particular source findings. Complete software discovery and
-M0/M1 qualification remain open.
+baseline. Indexed construction, mandatory-query feature prerequisites and the
+shared software profile supersede those particular source findings. Complete
+queue/resource and M0/M1 qualification remain open.
 
 Detailed remaining work, grouped by subsystem rather than priority:
 
@@ -735,8 +772,9 @@ Detailed remaining work, grouped by subsystem rather than priority:
    same-buffer differences are now implemented and tested. Complete one
    capability/device/object translation path for genuinely no-RT
    drivers. Device stripping and buffer/barrier/submit/event/timestamp/render-pass
-   masks and synchronous deferred operations are now tested; truthful no-RT base
-   discovery/limits remain open. Known buffer-requirement/external-buffer query
+   masks and synchronous deferred operations are now tested; the software base
+   profile exists, with full substrate qualification still open. Known
+   buffer-requirement/external-buffer query
    paths now have host and actual public GPU evidence.
 2. Extend value-preserving RQ lowering beyond the now-passing AS array/helper
    CTS slice and the now-integrated shared BVH4 representation to complete
@@ -750,18 +788,18 @@ Detailed remaining work, grouped by subsystem rather than priority:
    traditional descriptor-backed opaque values now cross suspension. Qualify the
    new logical StorageBuffer pointer Phi/Select/helper route with
    multiple descriptor roots and real descriptor-array NonUniform execution
-   beyond the passing SSBO/BDA matrix; qualify the production BDA replacement
-   for the historical PrivateArray device loss, retire its unused destination
-   path, and complete remaining pointer arithmetic/memory variants, mutable opaque encodings
-   and the full argument/return ABI. Complete descriptor disturbance, push-descriptor
-   and descriptor-buffer interoperability, and pipeline option/API coverage before
-   claiming the full typed-continuation M0 proof. Cached native pipelines now
+   beyond the passing SSBO/BDA matrix; the production BDA replacement and
+   destination PrivateArray retirement are now complete component changes.
+   Complete remaining pointer arithmetic/memory variants, mutable opaque encodings
+   and the full argument/return ABI. Complete mandatory descriptor disturbance
+   and pipeline option/API coverage before claiming the full typed-continuation
+   M0 proof. Cached native pipelines now
    use a separate internal context-push layout with public state replay.
    Shader-object binary imports now preserve original descriptor/sampler/push
-   interfaces and pass the null/different-layout CTS cases. Complete compatibility
-   when original RQ peers require unrelated optional features absent on the
-   destination; qualify unknown extension chains and the complete compiler
-   environment before claiming general binary compatibility.
+   interfaces and pass the null/different-layout CTS cases. Restrict claims to
+   supported optional peers and explicitly exclude unsupported combinations;
+   qualify unknown extension chains and the compiler environment before claiming
+   general binary compatibility.
 4. Extend the now-shared RQ/RTP builder, BVH4 traversal and AS object model.
    Four-child GPU collapse and topology-preserving refit execute in production.
    The production IR v3/XYZ changes remove the old 4-GiB byte-offset
@@ -774,8 +812,10 @@ Detailed remaining work, grouped by subsystem rather than priority:
    acquisition execute selected external CTS. Complete native synchronization
    scopes, remaining command schemas, native query interaction and queue/device
    qualification. The current query backend still requires compute queues with
-   timestamp support; graphics-only query copying and multi-device groups need
-   a qualified implementation or a truthful exposed contract.
+   timestamp support; valid timestamp-zero compute queues and multi-device
+   groups need a qualified implementation or a truthful exposed contract.
+   Generic reset/copy queue flags do not alone establish a legal AS-pool case
+   on graphics/video-only families; query-type family restrictions also apply.
    Preserve source wait scopes rather than imposing whole-submit waits. The
    early startup crash has recurred; investigate it while retaining all original
    failures and recheck evidence. Do not count skips as passes.
@@ -783,7 +823,8 @@ Detailed remaining work, grouped by subsystem rather than priority:
    on physical no-RT GPUs and POSIX. SSBO dynamic/nonuniform indexing and
    variablePointersStorageBuffer and compatible coherent resolver memory are
    now explicit private prerequisites. Active builder subgroup/float controls,
-   workgroup bounds and native Vulkan 1.2 are checked;
-   legacy Vulkan 1.0 extension-dependency coverage remains unqualified.
+   workgroup bounds and native Vulkan 1.2 are checked. Vulkan 1.1 application
+   aliases have a shared admission path and public evidence; applications below
+   Vulkan 1.1 are outside the current software candidate profile.
 
 Follow the goal's [iteration and stop policy](ray_tracing_fallback_goal.md#iteration-and-stop-policy).

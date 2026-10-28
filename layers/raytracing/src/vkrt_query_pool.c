@@ -8,6 +8,7 @@
 #include "vkrt_execution_replay.h"
 #include "vkrt_queries.h"
 #include "vkrt_as_registry.h"
+#include "vkrt_debug_objects.h"
 #include "vkrt_as_query.spv.h"
 #include "vkrt_query_format.spv.h"
 #include "vkrt_query_publish.spv.h"
@@ -95,6 +96,19 @@ static bool as_type(VkQueryType type) {
 static struct query_pool *find_pool(VkQueryPool handle) {
     struct query_pool *pool = VKRT_FIND(struct query_pool, handle);
     return pool && pool->magic == QUERY_POOL_MAGIC ? pool : NULL;
+}
+bool vkrt_query_pool_owns(struct vkrt_device_data *dev, uint64_t handle) {
+    if (!dev || !dev->queries || !handle) return false;
+    struct vkrt_query_device *state = dev->queries;
+    vkrt_mutex_lock(&state->lock);
+    bool owned = false;
+    for (const struct query_pool *pool = state->pools; pool; pool = pool->next)
+        if ((uint64_t)(uintptr_t)pool == handle && pool->dev == dev) {
+            owned = true;
+            break;
+        }
+    vkrt_mutex_unlock(&state->lock);
+    return owned;
 }
 static const VkAllocationCallbacks *pool_allocator(struct query_pool *pool) {
     return pool->has_allocator ? &pool->allocator : NULL;
@@ -421,6 +435,7 @@ static VKAPI_ATTR void VKAPI_CALL DestroyQueryPool(VkDevice device, VkQueryPool 
     if (*link) *link = pool->next;
     vkrt_unmap_object(VKRT_HKEY(handle));
     vkrt_mutex_unlock(&dev->queries->lock);
+    vkrt_debug_object_forget(dev, VK_OBJECT_TYPE_QUERY_POOL, (uint64_t)(uintptr_t)pool);
     destroy_buffer(dev, &pool->storage);
     if (pool->has_allocator)
         pool->allocator.pfnFree(pool->allocator.pUserData, pool->slots);
@@ -739,6 +754,9 @@ void vkrt_query_submit_result(struct vkrt_device_data *dev, const struct vkrt_qu
 void vkrt_query_device_finish(struct vkrt_device_data *dev) {
     struct vkrt_query_device *q = dev->queries;
     if (!q) return;
+    /* DestroyQueryPool releases q->lock before forgetting debug annotations;
+     * an annotation lookup takes debug-lock then q->lock. Never nest them in
+     * the opposite order while draining the device's externally synced list. */
     while (q->pools) DestroyQueryPool(dev->device, (VkQueryPool)(uintptr_t)q->pools, pool_allocator(q->pools));
     while (q->queues) {
         struct query_queue *next = q->queues->next;
