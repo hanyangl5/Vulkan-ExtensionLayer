@@ -1,0 +1,11 @@
+// Copyright 2026 The Khronos Group Inc.
+// SPDX-License-Identifier: Apache-2.0
+#pragma once
+namespace vel::rt {
+inline constexpr const char kTypedRuntimeBody[] = R"velrt(@TYPED_RUNTIME_SOURCE@)velrt";
+inline constexpr const char kTypedRuntimeBvh4[] = R"velrt(@TYPED_RUNTIME_BVH4_SOURCE@)velrt";
+inline constexpr const char kTypedRuntimeAddress[] = R"velrt(@TYPED_RUNTIME_ADDRESS_SOURCE@)velrt";
+inline constexpr const char kTypedRuntimeTraversal[] = R"velrt(@TYPED_RUNTIME_TRAVERSAL_SOURCE@)velrt";
+inline constexpr const char kTypedRuntimeAbi[] = R"velrt(@TYPED_RUNTIME_ABI_SOURCE@)velrt";
+inline constexpr const char kTypedRuntimeSystem[] = R"velrt(@TYPED_RUNTIME_SYSTEM_SOURCE@)velrt";
+}  // namespace vel::rt

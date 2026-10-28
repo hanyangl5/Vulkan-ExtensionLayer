@@ -1,0 +1,80 @@
+/* SPDX-License-Identifier: MIT
+ *
+ * sw_ray_query_library.comp - builds sw_ray_query.spv.
+ *
+ * sw_ray_query.glsl is a pure function library with no entry point, but
+ * glslc requires a compute entry point. This file provides a dummy one
+ * so the traversal body is compiled to SPIR-V; vkrt_spirv_lower.cpp
+ * strips the entry point (and main's body) before spvtools::Link merges
+ * the library into the user's shader module.
+ *
+ * Build (from layers/raytracing; normally via CMakeLists.txt):
+ *   glslc -fshader-stage=compute --target-env=vulkan1.2 -O
+ *         -I src -I shaders
+ *         shaders/sw_ray_query_library.comp
+ *         -o sw_ray_query.spv
+ */
+
+#version 460
+
+#include "sw_ray_query.glsl"
+
+layout(local_size_x = 1, local_size_y = 1, local_size_z = 1) in;
+
+/* Dummy entry point.
+ *
+ * It MUST reference the sw_* surface: glslang dead-code-eliminates any
+ * function not reachable from main, which would leave the library with
+ * no sw_ray_query_proceed at all. The calls below are all under a
+ * uniform-false guard so they cost nothing, and the lowerer strips this
+ * whole entry point before spvtools::Link merges the library in.
+ */
+layout(constant_id = 0) const uint kKeepAlive = 0;
+
+void
+main()
+{
+   if (kKeepAlive != 0) {
+      sw_ray_query_state q;
+      q.as_address   = 0ul;
+      q.ray_flags    = 0u;
+      q.cull_mask    = 0u;
+      q.ray.origin   = vec3(0.0);
+      q.ray.direction= vec3(0.0, 0.0, 1.0);
+      q.tmin         = 0.0;
+      q.tclosest     = 1.0;
+      sw_ray_query_initialize(q);
+      bool more = sw_ray_query_proceed(q);
+      sw_ray_query_confirm(q);
+      q.gen_thit = 0.5;
+      sw_ray_query_generate_intersection(q);
+      sw_ray_query_terminate(q);
+
+      q.want_committed = more ? 1u : 0u;
+      uint  t    = sw_get_intersection_type(q);
+      float d    = sw_get_intersection_t(q);
+      vec2  b    = sw_get_intersection_barycentrics(q);
+      int   p    = sw_get_intersection_primitive_index(q);
+      int   g    = sw_get_intersection_geometry_index(q);
+      int   i    = sw_get_intersection_instance_id(q);
+      int   c    = sw_get_intersection_instance_custom_index(q);
+      uint  sbt  = sw_get_intersection_instance_sbt_offset(q);
+      bool  f    = sw_get_intersection_front_face(q);
+      bool  a    = sw_get_intersection_candidate_aabb_opaque(q);
+      uint  k    = sw_get_intersection_hit_kind(q);
+      vec3  o    = sw_get_world_ray_origin(q);
+      vec3  dir  = sw_get_world_ray_direction(q);
+      vec3 obj_o = sw_get_object_ray_origin(q);
+      vec3 obj_d = sw_get_object_ray_direction(q);
+      mat4x3 otw = sw_get_object_to_world(q);
+      mat4x3 wto = sw_get_world_to_object(q);
+      float tmin = sw_get_ray_tmin(q);
+      uint  fl   = sw_get_ray_flags(q);
+
+      /* Fold the results so nothing is optimised away. */
+      q.tlas_next += uint(t) + uint(d) + uint(b.x) + uint(p) + uint(g) +
+                      uint(i) + uint(c) + uint(sbt) + uint(f) + uint(a) + uint(k) +
+                      uint(o.x) + uint(dir.x) + uint(tmin) + uint(fl);
+      q.tlas_next += uint(obj_o.x + obj_d.x + otw[0].x + wto[0].x);
+   }
+}

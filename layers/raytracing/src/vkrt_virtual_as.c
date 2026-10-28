@@ -1,0 +1,188 @@
+/* SPDX-License-Identifier: MIT
+ *
+ * A virtual AS is a layer-owned handle backed by ordinary shared-BVH4 storage.
+ * Its descriptor cell contains the opaque public value resolved before access.
+ */
+#include "vkrt_layer.h"
+#include "vkrt_build_layout.h"
+#include "vkrt_as_registry.h"
+
+VkResult vkrt_device_queue_families_init(struct vkrt_device_data *dev, const VkDeviceCreateInfo *ci,
+                                         const VkAllocationCallbacks *allocator) {
+    if (ci->queueCreateInfoCount && !ci->pQueueCreateInfos) return VK_ERROR_INITIALIZATION_FAILED;
+    /* Capture the device allocation owner even for maintenance9 zero-queue
+     * devices; other device-lifetime caches use this immutable copy too. */
+    if (allocator) {
+        dev->queue_families_have_allocator = true;
+        dev->queue_families_allocator = *allocator;
+    }
+    uint32_t count = 0;
+    for (uint32_t i = 0; i < ci->queueCreateInfoCount; ++i) {
+        bool seen = false;
+        for (uint32_t j = 0; j < i; ++j)
+            seen |= ci->pQueueCreateInfos[i].queueFamilyIndex == ci->pQueueCreateInfos[j].queueFamilyIndex;
+        if (!seen) ++count;
+    }
+    if (!count) return VK_SUCCESS;
+#if SIZE_MAX <= UINT32_MAX
+    if (count > SIZE_MAX / sizeof(uint32_t)) return VK_ERROR_OUT_OF_HOST_MEMORY;
+#endif
+    size_t size = (size_t)count * sizeof(uint32_t);
+    uint32_t *families =
+        allocator ? allocator->pfnAllocation(allocator->pUserData, size, _Alignof(uint32_t), VK_SYSTEM_ALLOCATION_SCOPE_DEVICE)
+                  : malloc(size);
+    if (!families) return VK_ERROR_OUT_OF_HOST_MEMORY;
+    uint32_t cursor = 0;
+    for (uint32_t i = 0; i < ci->queueCreateInfoCount; ++i) {
+        uint32_t family = ci->pQueueCreateInfos[i].queueFamilyIndex;
+        bool seen = false;
+        for (uint32_t j = 0; j < cursor; ++j) seen |= families[j] == family;
+        if (!seen) families[cursor++] = family;
+    }
+    dev->queue_family_count = count;
+    dev->queue_families = families;
+    return VK_SUCCESS;
+}
+
+void vkrt_device_queue_families_finish(struct vkrt_device_data *dev) {
+    if (dev->queue_families) {
+        if (dev->queue_families_have_allocator) {
+            const VkAllocationCallbacks *allocator = &dev->queue_families_allocator;
+            allocator->pfnFree(allocator->pUserData, dev->queue_families);
+        } else {
+            free(dev->queue_families);
+        }
+    }
+    dev->queue_families = NULL;
+    dev->queue_family_count = 0;
+    dev->queue_families_have_allocator = false;
+}
+
+static const VkAllocationCallbacks *as_allocator(const struct vkrt_virtual_as *as) {
+    return as->has_allocator ? &as->allocator : NULL;
+}
+
+static void free_virtual_as(struct vkrt_device_data *dev, struct vkrt_virtual_as *as) {
+    const VkAllocationCallbacks *allocator = as_allocator(as);
+    vkrt_as_registry_release(dev, as->registry_entry);
+#ifndef _WIN32
+    pthread_mutex_destroy(&as->address_lock);
+#endif
+    if (allocator) {
+        /* The callbacks themselves live in the record being freed. */
+        VkAllocationCallbacks copy = *allocator;
+        copy.pfnFree(copy.pUserData, as);
+    } else {
+        free(as);
+    }
+}
+
+VkResult vkrt_create_virtual_as(struct vkrt_device_data *dev, const VkAccelerationStructureCreateInfoKHR *ci,
+                                const VkAllocationCallbacks *allocator, VkAccelerationStructureKHR *out_as) {
+    *out_as = VK_NULL_HANDLE;
+    struct vkrt_virtual_as *as = allocator
+                                     ? allocator->pfnAllocation(allocator->pUserData, sizeof(*as), _Alignof(struct vkrt_virtual_as),
+                                                                VK_SYSTEM_ALLOCATION_SCOPE_OBJECT)
+                                     : malloc(sizeof(*as));
+    if (!as) return VK_ERROR_OUT_OF_HOST_MEMORY;
+    memset(as, 0, sizeof(*as));
+#ifdef _WIN32
+    vkrt_mutex_init(&as->address_lock);
+#else
+    if (pthread_mutex_init(&as->address_lock, NULL)) {
+        if (allocator)
+            allocator->pfnFree(allocator->pUserData, as);
+        else
+            free(as);
+        return VK_ERROR_OUT_OF_HOST_MEMORY;
+    }
+#endif
+    if (allocator) {
+        as->has_allocator = true;
+        as->allocator = *allocator;
+    }
+    as->type = ci->type;
+    as->owner = dev->device;
+    as->backing_buffer = ci->buffer;
+    as->offset = ci->offset;
+    as->size = ci->size;
+    if (ci->deviceAddress || (ci->createFlags & VK_ACCELERATION_STRUCTURE_CREATE_DEVICE_ADDRESS_CAPTURE_REPLAY_BIT_KHR)) {
+        free_virtual_as(dev, as);
+        return VK_ERROR_FEATURE_NOT_PRESENT;
+    }
+
+    /* Allocate here so failures can be returned. The AS backing buffer need
+     * not be bound at creation: do not query its device address. */
+    VkResult result = vkrt_as_registry_acquire(dev, ci->buffer, ci->offset, &as->registry_entry, &as->public_address);
+    if (result == VK_SUCCESS) as->address_cell = *vkrt_as_registry_descriptor(as->registry_entry);
+    if (result != VK_SUCCESS) {
+        free_virtual_as(dev, as);
+        return result;
+    }
+    VkAccelerationStructureKHR token = (VkAccelerationStructureKHR)(uintptr_t)as;
+    vkrt_map_object(VKRT_HKEY(token), as);
+    if (VKRT_FIND(struct vkrt_virtual_as, token) != as) {
+        free_virtual_as(dev, as);
+        return VK_ERROR_OUT_OF_HOST_MEMORY;
+    }
+    *out_as = token;
+    return VK_SUCCESS;
+}
+
+void vkrt_destroy_virtual_as(struct vkrt_device_data *dev, VkAccelerationStructureKHR handle) {
+    if (handle == VK_NULL_HANDLE) return;
+    struct vkrt_virtual_as *as = VKRT_FIND(struct vkrt_virtual_as, handle);
+    if (!as || as->owner != dev->device) {
+        VKRT_LOG_WARN("destroy_virtual_as: unknown or foreign handle %p", (void *)handle);
+        return;
+    }
+    /* The application must complete all uses, including GPU descriptor
+     * reads, before destroying the AS. */
+    vkrt_unmap_object(VKRT_HKEY(handle));
+    free_virtual_as(dev, as);
+}
+
+void vkrt_as_build_sizes(struct vkrt_device_data *dev, const VkAccelerationStructureBuildGeometryInfoKHR *pBuildInfo,
+                         const uint32_t *pMaxPrimitiveCounts, VkAccelerationStructureBuildSizesInfoKHR *pSizeInfo) {
+    struct vkrt_build_layout l = vkrt_build_layout(pBuildInfo, pMaxPrimitiveCounts, NULL);
+    pSizeInfo->accelerationStructureSize = l.as_size;
+    pSizeInfo->buildScratchSize = l.scratch_size;
+    /* UPDATE currently rebuilds the same non-shrinking BVH4 representation.
+     * It needs the full builder scratch, including Mesa IR and encoding maps.
+     * Revisit this contract if COMPACT ever produces a smaller representation. */
+    pSizeInfo->updateScratchSize = (pBuildInfo->flags & VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_UPDATE_BIT_KHR) ? l.scratch_size : 0;
+}
+
+VkDeviceAddress vkrt_as_backing_address(struct vkrt_device_data *dev, VkAccelerationStructureKHR handle) {
+    struct vkrt_virtual_as *as = VKRT_FIND(struct vkrt_virtual_as, handle);
+    if (!as || as->owner != dev->device) {
+        VKRT_LOG_WARN("as_device_address: unknown or foreign handle %p", (void *)handle);
+        return 0;
+    }
+
+    /* Resolve the real storage after binding. Public AS values in descriptor
+     * cells never change; only the preallocated coherent radix leaf publishes
+     * a physical address, with no fallible allocation/flush in this path.
+     * Construction requires a Build/Copy targeting this AS object; creating
+     * a new view of old bytes does not construct it. Future Copy entry points
+     * must also call this helper before their destination can be used. */
+    vkrt_mutex_lock(&as->address_lock);
+    VkDeviceAddress address = as->header_address;
+    if (!address && dev->vtable.GetBufferDeviceAddress && as->backing_buffer) {
+        VkBufferDeviceAddressInfo info = {.sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO, .buffer = as->backing_buffer};
+        VkDeviceAddress base = dev->vtable.GetBufferDeviceAddress(dev->device, &info);
+        if (base && as->offset <= UINT64_MAX - base) {
+            address = base + as->offset;
+            address = vkrt_as_registry_publish(dev, as->registry_entry, address);
+            if (address) as->header_address = address;
+        }
+    }
+    vkrt_mutex_unlock(&as->address_lock);
+    return address;
+}
+
+VkDeviceAddress vkrt_as_device_address(struct vkrt_device_data *dev, VkAccelerationStructureKHR handle) {
+    if (!vkrt_as_backing_address(dev, handle)) return 0;
+    struct vkrt_virtual_as *as = VKRT_FIND(struct vkrt_virtual_as, handle);
+    return as->public_address;
+}

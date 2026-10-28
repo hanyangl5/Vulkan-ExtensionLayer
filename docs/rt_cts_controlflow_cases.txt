@@ -1,0 +1,52 @@
+# External CTS d18e4c68543103371715845cd914c71e5859963e.
+# Same exact selection for canonical and native control; retain every result.
+# All ten complex-flow shapes across Callable, TraceRay and ReportIntersection.
+dEQP-VK.ray_tracing_pipeline.complexcontrolflow.if.execute_callable.rgen
+dEQP-VK.ray_tracing_pipeline.complexcontrolflow.if.trace_ray.chit
+dEQP-VK.ray_tracing_pipeline.complexcontrolflow.if.report_intersection.sect
+dEQP-VK.ray_tracing_pipeline.complexcontrolflow.loop.execute_callable.rgen
+dEQP-VK.ray_tracing_pipeline.complexcontrolflow.loop.trace_ray.chit
+dEQP-VK.ray_tracing_pipeline.complexcontrolflow.loop.report_intersection.sect
+dEQP-VK.ray_tracing_pipeline.complexcontrolflow.switch.execute_callable.rgen
+dEQP-VK.ray_tracing_pipeline.complexcontrolflow.switch.trace_ray.chit
+dEQP-VK.ray_tracing_pipeline.complexcontrolflow.switch.report_intersection.sect
+dEQP-VK.ray_tracing_pipeline.complexcontrolflow.loop_double_call.execute_callable.rgen
+dEQP-VK.ray_tracing_pipeline.complexcontrolflow.loop_double_call.trace_ray.chit
+dEQP-VK.ray_tracing_pipeline.complexcontrolflow.loop_double_call.report_intersection.sect
+dEQP-VK.ray_tracing_pipeline.complexcontrolflow.loop_double_call_sparse.execute_callable.rgen
+dEQP-VK.ray_tracing_pipeline.complexcontrolflow.loop_double_call_sparse.trace_ray.chit
+dEQP-VK.ray_tracing_pipeline.complexcontrolflow.loop_double_call_sparse.report_intersection.sect
+dEQP-VK.ray_tracing_pipeline.complexcontrolflow.nested_loop.execute_callable.rgen
+dEQP-VK.ray_tracing_pipeline.complexcontrolflow.nested_loop.trace_ray.chit
+dEQP-VK.ray_tracing_pipeline.complexcontrolflow.nested_loop.report_intersection.sect
+dEQP-VK.ray_tracing_pipeline.complexcontrolflow.nested_loop_loop_before.execute_callable.rgen
+dEQP-VK.ray_tracing_pipeline.complexcontrolflow.nested_loop_loop_before.trace_ray.chit
+dEQP-VK.ray_tracing_pipeline.complexcontrolflow.nested_loop_loop_before.report_intersection.sect
+dEQP-VK.ray_tracing_pipeline.complexcontrolflow.nested_loop_loop_after.execute_callable.rgen
+dEQP-VK.ray_tracing_pipeline.complexcontrolflow.nested_loop_loop_after.trace_ray.chit
+dEQP-VK.ray_tracing_pipeline.complexcontrolflow.nested_loop_loop_after.report_intersection.sect
+dEQP-VK.ray_tracing_pipeline.complexcontrolflow.function_call.execute_callable.rgen
+dEQP-VK.ray_tracing_pipeline.complexcontrolflow.function_call.trace_ray.chit
+dEQP-VK.ray_tracing_pipeline.complexcontrolflow.function_call.report_intersection.sect
+dEQP-VK.ray_tracing_pipeline.complexcontrolflow.nested_function_call.execute_callable.rgen
+dEQP-VK.ray_tracing_pipeline.complexcontrolflow.nested_function_call.trace_ray.chit
+dEQP-VK.ray_tracing_pipeline.complexcontrolflow.nested_function_call.report_intersection.sect
+# SSBO-driven TraceRay arguments and helper parameters (AS pointer and bare value).
+dEQP-VK.ray_tracing_pipeline.non_uniform_args.chit_2_types_1
+dEQP-VK.ray_tracing_pipeline.non_uniform_args.chit_4_types_3
+dEQP-VK.ray_tracing_pipeline.non_uniform_args.miss_cause_2
+dEQP-VK.ray_tracing_pipeline.non_uniform_args.miss_cause_6
+dEQP-VK.ray_tracing_pipeline.acceleration_structures.function_argument.traditional_structures.gpu_built
+# Additional descriptor-pointer identities through real suspension.
+dEQP-VK.ray_tracing_pipeline.data_spill.execute_callable.ptr_combined
+dEQP-VK.ray_tracing_pipeline.data_spill.trace_ray.ptr_combined
+dEQP-VK.ray_tracing_pipeline.data_spill.report_intersection.ptr_sampler
+# Resource barriers across RT/ordinary compute/fragment/transfer stages.
+dEQP-VK.ray_tracing_pipeline.barrier.ssbo.memory_barrier.from_rgen_to_comp
+dEQP-VK.ray_tracing_pipeline.barrier.ssbo.memory_barrier.from_comp_to_chit
+dEQP-VK.ray_tracing_pipeline.barrier.ssbo.memory_barrier.from_call_to_rgen
+dEQP-VK.ray_tracing_pipeline.barrier.ssbo.memory_barrier.from_isec_to_ahit
+dEQP-VK.ray_tracing_pipeline.barrier.ssbo.specific_barrier.from_comp_to_rgen
+dEQP-VK.ray_tracing_pipeline.barrier.ssbo.specific_barrier.from_chit_to_comp
+dEQP-VK.ray_tracing_pipeline.barrier.simg.memory_barrier.from_rgen_to_frag
+dEQP-VK.ray_tracing_pipeline.barrier.simg.specific_barrier.from_xfer_to_miss

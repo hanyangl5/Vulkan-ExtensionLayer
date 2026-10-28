@@ -1,0 +1,779 @@
+{
+  "copyright": "Copyright (c) 2026 The Khronos Group Inc.",
+  "SPDX-License-Identifier": "MIT",
+  "schema_version": 1,
+  "generated_at_utc": "2026-10-26T14:41:49.292159+00:00",
+  "source_base_commit": "0902dfb",
+  "scope": "Shader-object FORMAT3/source-interface bridge worktree evidence. Component progress only; not complete RT conformance.",
+  "path_base": "Repository root for relative paths; raw CTS/SDK paths remain absolute.",
+  "aggregation_policy": "Each run is a distinct immutable snapshot/control. Do not sum runs as distinct passing cases or apply an older snapshot result to a later DLL.",
+  "environment": {
+    "observed_devices": [
+      {
+        "name": "NVIDIA GeForce RTX 3080",
+        "vendor_id": "0x10de",
+        "device_id": "0x2216"
+      }
+    ],
+    "validation": {
+      "sdk": "1.4.357.0",
+      "library": {
+        "path": "C:/VulkanSDK/1.4.357.0/Bin/VkLayer_khronos_validation.dll",
+        "sha256": "9725ce7a9225f42f8961c433dacae4cc8fae3a16e95ef1d0a7c7e8bc09132c40"
+      },
+      "manifest": {
+        "path": "C:/VulkanSDK/1.4.357.0/Bin/VkLayer_khronos_validation.json",
+        "sha256": "20d3ef44fe96aa41fceefab2308892f9d4b346d23eebfe8b5e1690715f23f472"
+      }
+    },
+    "physical_no_rt_qualification": {
+      "status": "unqualified",
+      "reason": "These runs used RTX3080; software-rt mode does not establish behavior on a physical device lacking native RT."
+    }
+  },
+  "case_sets": {
+    "binary_extended_129": {
+      "path": "docs/rt_cts_shader_binary_extended_cases.txt",
+      "sha256": "ff50e09a5c41d89b7b44eb5940b8b39e64e8c0cee4d4e12568fdcc46c9afa705",
+      "count": 129
+    },
+    "binary_execution_8": {
+      "path": "docs/rt_cts_shader_binary_execution_cases.txt",
+      "sha256": "e94f321eb4db52e822c36018332ef74753f4d368dd478e752b314450d357c82e",
+      "count": 8
+    },
+    "rt_regression_59": {
+      "count": 59,
+      "composition": "Ordered 56 cases from the repository document followed by these three RTP cases.",
+      "base": {
+        "path": "docs/rt_cts_copy_checkpoint_cases.txt",
+        "sha256": "1ee2733744222ff4c80622aabe82b0b9d73593def9253b3e33ee973ad8f08585",
+        "count": 56
+      },
+      "append": [
+        "dEQP-VK.ray_tracing_pipeline.builtin.launchidext.rgen_1_1_1",
+        "dEQP-VK.ray_tracing_pipeline.complexcontrolflow.if.report_intersection.sect",
+        "dEQP-VK.ray_tracing_pipeline.data_spill.execute_callable.image"
+      ],
+      "raw_generated_list": {
+        "path": "build-source-layout/shader-format3-rt-regression-cases.txt",
+        "sha256": "4b8cd7c7df7ca4fc41b6f9f8adf70cc7a3f2ce391f80a4c48d27deff85b84a11"
+      }
+    },
+    "final_checkpoint_15": {
+      "count": 15,
+      "cases": [
+        "dEQP-VK.pipeline.shader_object_linked_binary.push_constant.graphics_pipeline.count_1_shader_vert_frag",
+        "dEQP-VK.pipeline.shader_object_linked_binary.spec_constant.graphics.fragment.basic.bool",
+        "dEQP-VK.pipeline.shader_object_linked_binary.descriptor_limits.fragment_shader.sampled_images_10",
+        "dEQP-VK.pipeline.shader_object_linked_binary.early_destroy.cache_destroy_layout",
+        "dEQP-VK.pipeline.shader_object_unlinked_binary.push_constant.graphics_pipeline.count_1_shader_vert_frag",
+        "dEQP-VK.pipeline.shader_object_unlinked_binary.spec_constant.graphics.fragment.basic.bool",
+        "dEQP-VK.pipeline.shader_object_unlinked_binary.descriptor_limits.fragment_shader.sampled_images_10",
+        "dEQP-VK.pipeline.shader_object_unlinked_binary.early_destroy.cache_destroy_layout",
+        "dEQP-VK.shader_object.binary.query.comp.unlinked.shader_from_binary_different_layout",
+        "dEQP-VK.shader_object.binary.query.comp.unlinked.shader_from_binary_null_layout",
+        "dEQP-VK.shader_object.create.all.fail",
+        "dEQP-VK.shader_object.create.all_with_mesh.fail",
+        "dEQP-VK.ray_tracing_pipeline.builtin.launchidext.rgen_1_1_1",
+        "dEQP-VK.ray_tracing_pipeline.complexcontrolflow.if.report_intersection.sect",
+        "dEQP-VK.ray_tracing_pipeline.data_spill.execute_callable.image"
+      ],
+      "sha256": "ede0c56679f406c77f9e3664fa01a393319f2e336cc528dfe25fe5372d866e18",
+      "composition": "Eight tracked binary execution cases, four original failures, three RTP regressions; overlaps earlier selections."
+    }
+  },
+  "runs": [
+    {
+      "id": "shader-binary-extended-0902dfb",
+      "state": "completed",
+      "mode": "software-rt",
+      "counts": {
+        "pass": 125,
+        "fail": 4,
+        "notSupported": 0,
+        "crash": 0,
+        "timeout": 0,
+        "noresult": 0
+      },
+      "started_at_utc": "2026-10-26T06:48:03.605455+00:00",
+      "finished_at_utc": "2026-10-26T06:51:42.997429+00:00",
+      "cts_sha256": "8cf824c598181ef43ccd74d67acce89c9cc6fc47029a164440f0b0ea74af0380",
+      "cts_revision_declared": "d18e4c68543103371715845cd914c71e5859963e",
+      "layer_revision_declared": "0902dfb",
+      "case_set": "binary_extended_129",
+      "case_list_sha256": "ff50e09a5c41d89b7b44eb5940b8b39e64e8c0cee4d4e12568fdcc46c9afa705",
+      "raw_summary": {
+        "path": "build-rt-cts-evidence/shader-binary-extended-0902dfb/summary.json",
+        "sha256": "93e9edbfe30902d4084040fbbb2039a7d56fa252964dabce8d7f41b67d1c90a8"
+      },
+      "layer_snapshot": {
+        "library": {
+          "path": "build-rt-cts-evidence/shader-binary-extended-0902dfb/layer_snapshot/VkLayer_VKRT_SOFTWARE_RAY_QUERY.dll",
+          "sha256": "560d4f98108dd27b848429b79d89ce8d9b35381ec580ada861f81a162f79e0c3"
+        },
+        "manifest": {
+          "path": "build-rt-cts-evidence/shader-binary-extended-0902dfb/layer_snapshot/VkLayer_VKRT_SOFTWARE_RAY_QUERY.json",
+          "sha256": "3c2d94113fd73b13c6d56b1d727ee098f96d2257ea609d17b2544a239838a0ca"
+        },
+        "scope": "manifest_and_layer_library"
+      },
+      "nonpass": [
+        {
+          "case": "dEQP-VK.shader_object.binary.query.comp.unlinked.shader_from_binary_different_layout",
+          "status": "fail",
+          "result": "InternalError",
+          "reason": "10 API usage errors found",
+          "exit_code": 1,
+          "qpa": {
+            "path": "build-rt-cts-evidence/shader-binary-extended-0902dfb/0036-shader_from_binary_different_layout-cee9539f50.qpa",
+            "sha256": "3a5cd5e56f518a185fc6aeba1eb1c420cc0acda396fc71a98122fe0fd70ccd08"
+          },
+          "stdout": {
+            "path": "build-rt-cts-evidence/shader-binary-extended-0902dfb/0036-shader_from_binary_different_layout-cee9539f50.stdout.txt",
+            "sha256": "7e1b23255a348a055301a424c7cc0cb3a35ebfce4961b1b1ef2c4f7589d180c2"
+          }
+        },
+        {
+          "case": "dEQP-VK.shader_object.binary.query.comp.unlinked.shader_from_binary_null_layout",
+          "status": "fail",
+          "result": "InternalError",
+          "reason": "10 API usage errors found",
+          "exit_code": 1,
+          "qpa": {
+            "path": "build-rt-cts-evidence/shader-binary-extended-0902dfb/0037-shader_from_binary_null_layout-b6acc34ef8.qpa",
+            "sha256": "d2c8519257c2c40ba02e8b8f3f0cb81a70e92ffe6705bf95bf196f74b0c5cb12"
+          },
+          "stdout": {
+            "path": "build-rt-cts-evidence/shader-binary-extended-0902dfb/0037-shader_from_binary_null_layout-b6acc34ef8.stdout.txt",
+            "sha256": "5c90b6986056eb0816906a5823b75593f9906ea3a2efd926cedb7fe14b47191e"
+          }
+        },
+        {
+          "case": "dEQP-VK.shader_object.create.all.fail",
+          "status": "fail",
+          "result": "Fail",
+          "reason": "Fail",
+          "exit_code": 1,
+          "qpa": {
+            "path": "build-rt-cts-evidence/shader-binary-extended-0902dfb/0108-fail-870fa31da7.qpa",
+            "sha256": "9d8f805bce6b0776dc603ee63e5e77d5e8c6934aede095623f0edbab507681a9"
+          },
+          "stdout": {
+            "path": "build-rt-cts-evidence/shader-binary-extended-0902dfb/0108-fail-870fa31da7.stdout.txt",
+            "sha256": "a59519fb7fd9524d7f5d75093bf191de9d3f80ad9f484abe7403ce018a3e39ac"
+          }
+        },
+        {
+          "case": "dEQP-VK.shader_object.create.all_with_mesh.fail",
+          "status": "fail",
+          "result": "Fail",
+          "reason": "Fail",
+          "exit_code": 1,
+          "qpa": {
+            "path": "build-rt-cts-evidence/shader-binary-extended-0902dfb/0110-fail-863d0e879c.qpa",
+            "sha256": "46fb507afea82cc50a44c3379487b157039f6654208224116a862e77da94dad7"
+          },
+          "stdout": {
+            "path": "build-rt-cts-evidence/shader-binary-extended-0902dfb/0110-fail-863d0e879c.stdout.txt",
+            "sha256": "42219bb797f3238249c3f4c14eea9e9ff08830ff4c3319a99fe4c42d25fa8a00"
+          }
+        }
+      ]
+    },
+    {
+      "id": "shader-binary-extended-native",
+      "state": "completed",
+      "mode": "native",
+      "counts": {
+        "pass": 129,
+        "fail": 0,
+        "notSupported": 0,
+        "crash": 0,
+        "timeout": 0,
+        "noresult": 0
+      },
+      "started_at_utc": "2026-10-26T06:48:25.513089+00:00",
+      "finished_at_utc": "2026-10-26T06:50:31.709503+00:00",
+      "cts_sha256": "8cf824c598181ef43ccd74d67acce89c9cc6fc47029a164440f0b0ea74af0380",
+      "cts_revision_declared": "d18e4c68543103371715845cd914c71e5859963e",
+      "layer_revision_declared": null,
+      "case_set": "binary_extended_129",
+      "case_list_sha256": "ff50e09a5c41d89b7b44eb5940b8b39e64e8c0cee4d4e12568fdcc46c9afa705",
+      "raw_summary": {
+        "path": "build-rt-cts-evidence/shader-binary-extended-native/summary.json",
+        "sha256": "550ce0671d6a9eed96ad7462bceacc230260e48fd2f86a9318033fe1951e1887"
+      },
+      "layer_snapshot": null,
+      "nonpass": []
+    },
+    {
+      "id": "shader-binary-extended-v2-first",
+      "state": "completed",
+      "mode": "software-rt",
+      "counts": {
+        "pass": 129,
+        "fail": 0,
+        "notSupported": 0,
+        "crash": 0,
+        "timeout": 0,
+        "noresult": 0
+      },
+      "started_at_utc": "2026-10-26T08:00:56.628462+00:00",
+      "finished_at_utc": "2026-10-26T08:04:39.117401+00:00",
+      "cts_sha256": "8cf824c598181ef43ccd74d67acce89c9cc6fc47029a164440f0b0ea74af0380",
+      "cts_revision_declared": "d18e4c68543103371715845cd914c71e5859963e",
+      "layer_revision_declared": "FORMAT2-fullgroup-nativebinary-bridge-first",
+      "case_set": "binary_extended_129",
+      "case_list_sha256": "ff50e09a5c41d89b7b44eb5940b8b39e64e8c0cee4d4e12568fdcc46c9afa705",
+      "raw_summary": {
+        "path": "build-rt-cts-evidence/shader-binary-extended-v2-first/summary.json",
+        "sha256": "0680ac0703a24049fbfc1d70ef253b2a26ac33dbb93ae7277ade05a9a9e0584e"
+      },
+      "layer_snapshot": {
+        "library": {
+          "path": "build-rt-cts-evidence/shader-binary-extended-v2-first/layer_snapshot/VkLayer_VKRT_SOFTWARE_RAY_QUERY.dll",
+          "sha256": "beb24834b4e02f183b7de3ebbcc627e2a6e6843a2274973fbf89c051de5d14e7"
+        },
+        "manifest": {
+          "path": "build-rt-cts-evidence/shader-binary-extended-v2-first/layer_snapshot/VkLayer_VKRT_SOFTWARE_RAY_QUERY.json",
+          "sha256": "c00e706acef93d9bc0556df53257c66f7661c782982ff1b81d5dca9ddb0f4a34"
+        },
+        "scope": "manifest_and_layer_library"
+      },
+      "nonpass": [],
+      "diagnostics": {
+        "raw_summary": {
+          "path": "build-rt-cts-evidence/shader-binary-extended-v2-first/diagnostics-summary.json",
+          "sha256": "0e541c6cb62f90a7aee6be8834aa9f2c1099ef2ab46a55045893b3525bcb7777"
+        },
+        "error_cases": [],
+        "warning_cases": []
+      }
+    },
+    {
+      "id": "shader-binary-extended-format3-final",
+      "state": "completed",
+      "mode": "software-rt",
+      "counts": {
+        "pass": 129,
+        "fail": 0,
+        "notSupported": 0,
+        "crash": 0,
+        "timeout": 0,
+        "noresult": 0
+      },
+      "started_at_utc": "2026-10-26T13:07:38.286024+00:00",
+      "finished_at_utc": "2026-10-26T13:11:27.016347+00:00",
+      "cts_sha256": "8cf824c598181ef43ccd74d67acce89c9cc6fc47029a164440f0b0ea74af0380",
+      "cts_revision_declared": "d18e4c68543103371715845cd914c71e5859963e",
+      "layer_revision_declared": "worktree-after-0902dfb-format3-final",
+      "case_set": "binary_extended_129",
+      "case_list_sha256": "ff50e09a5c41d89b7b44eb5940b8b39e64e8c0cee4d4e12568fdcc46c9afa705",
+      "raw_summary": {
+        "path": "build-rt-cts-evidence/shader-binary-extended-format3-final/summary.json",
+        "sha256": "1fd32110b06ebe65c6e426bb0258062da396e9395f4333a736d908e2b1917bcd"
+      },
+      "layer_snapshot": {
+        "library": {
+          "path": "build-rt-cts-evidence/shader-binary-extended-format3-final/layer_snapshot/VkLayer_VKRT_SOFTWARE_RAY_QUERY.dll",
+          "sha256": "2247327289901ea3dfa8b40c52dfb0cb79fed640836f44e1e7db44094ada94bb"
+        },
+        "manifest": {
+          "path": "build-rt-cts-evidence/shader-binary-extended-format3-final/layer_snapshot/VkLayer_VKRT_SOFTWARE_RAY_QUERY.json",
+          "sha256": "8811cf6bd8eefff2f9fea4d6e07e7ddab27abce6d5bbcc02061c749266bf66f1"
+        },
+        "scope": "manifest_and_layer_library"
+      },
+      "nonpass": [],
+      "diagnostics": {
+        "raw_summary": {
+          "path": "build-rt-cts-evidence/shader-binary-extended-format3-final/diagnostics-summary.json",
+          "sha256": "5bef4f1b3db01531b0f8b601264611cd3a02038d12f576a49520f1da620bda52"
+        },
+        "case_count": 129,
+        "dll_sha256": "2247327289901ea3dfa8b40c52dfb0cb79fed640836f44e1e7db44094ada94bb",
+        "error_cases": [],
+        "warning_cases": [],
+        "scope": "VUID/SYNC-HAZARD and validation/performance diagnostics in all QPA/stdout; loader GENERAL warnings retained in raw logs"
+      }
+    },
+    {
+      "id": "shader-binary-execution-native-v2",
+      "state": "completed",
+      "mode": "native",
+      "counts": {
+        "pass": 8,
+        "fail": 0,
+        "notSupported": 0,
+        "crash": 0,
+        "timeout": 0,
+        "noresult": 0
+      },
+      "started_at_utc": "2026-10-26T08:06:11.528771+00:00",
+      "finished_at_utc": "2026-10-26T08:06:18.752125+00:00",
+      "cts_sha256": "8cf824c598181ef43ccd74d67acce89c9cc6fc47029a164440f0b0ea74af0380",
+      "cts_revision_declared": "d18e4c68543103371715845cd914c71e5859963e",
+      "layer_revision_declared": "worktree-after-0902dfb-format2",
+      "case_set": "binary_execution_8",
+      "case_list_sha256": "e94f321eb4db52e822c36018332ef74753f4d368dd478e752b314450d357c82e",
+      "raw_summary": {
+        "path": "build-rt-cts-evidence/shader-binary-execution-native-v2/summary.json",
+        "sha256": "3a932617fd8e9f328e025ea247cdf7cf9cae648351406939208f420137fe2461"
+      },
+      "layer_snapshot": null,
+      "nonpass": []
+    },
+    {
+      "id": "shader-binary-execution-software-rt-v2",
+      "state": "completed",
+      "mode": "software-rt",
+      "counts": {
+        "pass": 8,
+        "fail": 0,
+        "notSupported": 0,
+        "crash": 0,
+        "timeout": 0,
+        "noresult": 0
+      },
+      "started_at_utc": "2026-10-26T08:06:11.550566+00:00",
+      "finished_at_utc": "2026-10-26T08:06:22.110488+00:00",
+      "cts_sha256": "8cf824c598181ef43ccd74d67acce89c9cc6fc47029a164440f0b0ea74af0380",
+      "cts_revision_declared": "d18e4c68543103371715845cd914c71e5859963e",
+      "layer_revision_declared": "worktree-after-0902dfb-format2",
+      "case_set": "binary_execution_8",
+      "case_list_sha256": "e94f321eb4db52e822c36018332ef74753f4d368dd478e752b314450d357c82e",
+      "raw_summary": {
+        "path": "build-rt-cts-evidence/shader-binary-execution-software-rt-v2/summary.json",
+        "sha256": "e3364bf2b644429c58a59a5b91fe7d88c1c001c8c13d4eb6e6384c98ce3835d3"
+      },
+      "layer_snapshot": {
+        "library": {
+          "path": "build-rt-cts-evidence/shader-binary-execution-software-rt-v2/layer_snapshot/VkLayer_VKRT_SOFTWARE_RAY_QUERY.dll",
+          "sha256": "6dede3f6eafeda92c44f7b0cde14558fe9819355d099d6935a4e5d2636fe4c30"
+        },
+        "manifest": {
+          "path": "build-rt-cts-evidence/shader-binary-execution-software-rt-v2/layer_snapshot/VkLayer_VKRT_SOFTWARE_RAY_QUERY.json",
+          "sha256": "c9cba042cef1f1bbc1a6d313f67f425bf617744a5a0e2cb483423c34e17f5ca7"
+        },
+        "scope": "manifest_and_layer_library"
+      },
+      "nonpass": []
+    },
+    {
+      "id": "shader-format3-rt-regression",
+      "state": "completed",
+      "mode": "software-rt",
+      "counts": {
+        "pass": 59,
+        "fail": 0,
+        "notSupported": 0,
+        "crash": 0,
+        "timeout": 0,
+        "noresult": 0
+      },
+      "started_at_utc": "2026-10-26T13:16:15.989682+00:00",
+      "finished_at_utc": "2026-10-26T13:18:14.858221+00:00",
+      "cts_sha256": "8cf824c598181ef43ccd74d67acce89c9cc6fc47029a164440f0b0ea74af0380",
+      "cts_revision_declared": "d18e4c68543103371715845cd914c71e5859963e",
+      "layer_revision_declared": "worktree-after-0902dfb-format3",
+      "case_set": "rt_regression_59",
+      "case_list_sha256": "4b8cd7c7df7ca4fc41b6f9f8adf70cc7a3f2ce391f80a4c48d27deff85b84a11",
+      "raw_summary": {
+        "path": "build-rt-cts-evidence/shader-format3-rt-regression/summary.json",
+        "sha256": "4f30727d53596cb710adffc01014bbb0e7653bb537b95e1ecc4d733fb5dea084"
+      },
+      "layer_snapshot": {
+        "library": {
+          "path": "build-rt-cts-evidence/shader-format3-rt-regression/layer_snapshot/VkLayer_VKRT_SOFTWARE_RAY_QUERY.dll",
+          "sha256": "47d88f55a7bf04b593dd7e9278d0b07ff47c004cf5ec0993287f221b7ab0955a"
+        },
+        "manifest": {
+          "path": "build-rt-cts-evidence/shader-format3-rt-regression/layer_snapshot/VkLayer_VKRT_SOFTWARE_RAY_QUERY.json",
+          "sha256": "90b7eb8fa0d06bf36b82e0702bcceb8fd5886d65b8ce46e73efbd857ac6364e0"
+        },
+        "scope": "manifest_and_layer_library"
+      },
+      "nonpass": [],
+      "diagnostics": {
+        "raw_summary": {
+          "path": "build-rt-cts-evidence/shader-format3-rt-regression/diagnostics-summary.json",
+          "sha256": "bf2936c5cd94ad71130efc33eedb8cfddda7f3e186b3f79f0f7952356590595d"
+        },
+        "case_count": 59,
+        "dll_sha256": "47d88f55a7bf04b593dd7e9278d0b07ff47c004cf5ec0993287f221b7ab0955a",
+        "matched_diagnostics": [],
+        "scope": "VUID/SYNC-HAZARD and validation/performance diagnostics in all QPA/stdout excluding command-line session metadata; loader GENERAL messages retained in raw logs"
+      }
+    },
+    {
+      "state": "completed",
+      "mode": "software-rt",
+      "counts": {
+        "pass": 15,
+        "fail": 0,
+        "notSupported": 0,
+        "crash": 0,
+        "timeout": 0,
+        "noresult": 0
+      },
+      "started_at_utc": "2026-10-26T14:27:23.226672+00:00",
+      "finished_at_utc": "2026-10-26T14:27:58.111112+00:00",
+      "cts_sha256": "8cf824c598181ef43ccd74d67acce89c9cc6fc47029a164440f0b0ea74af0380",
+      "cts_revision_declared": "d18e4c68543103371715845cd914c71e5859963e",
+      "layer_revision_declared": "worktree-after-0902dfb-interface-alias-final",
+      "case_list_sha256": "ede0c56679f406c77f9e3664fa01a393319f2e336cc528dfe25fe5372d866e18",
+      "id": "shader-format3-final-checkpoint",
+      "case_set": "final_checkpoint_15",
+      "raw_summary": {
+        "path": "build-rt-cts-evidence/shader-format3-final-checkpoint/summary.json",
+        "sha256": "301b7dc82f0027f2dd3c5c03d52666e60feccd6e166c18aefb1f0e0c45ad5a0f"
+      },
+      "layer_snapshot": {
+        "library": {
+          "path": "build-rt-cts-evidence/shader-format3-final-checkpoint/layer_snapshot/VkLayer_VKRT_SOFTWARE_RAY_QUERY.dll",
+          "sha256": "6f4b74877bc853d2956a524717075178c191e3b920b619566847c1809d5014e7"
+        },
+        "manifest": {
+          "path": "build-rt-cts-evidence/shader-format3-final-checkpoint/layer_snapshot/VkLayer_VKRT_SOFTWARE_RAY_QUERY.json",
+          "sha256": "4fb7d3fa6e474a9238dc5a1dd7973abe68010d6ccc654841ba2f022317a61e25"
+        }
+      },
+      "nonpass": [],
+      "diagnostics": {
+        "path": "build-rt-cts-evidence/shader-format3-final-checkpoint/diagnostics-summary.json",
+        "sha256": "80ce84068d06256b22ef3a144611490ee91a85c4d93f666b5b7ac2fb1dbb8bad"
+      }
+    },
+    {
+      "state": "completed",
+      "mode": "software-rt",
+      "counts": {
+        "pass": 15,
+        "fail": 0,
+        "notSupported": 0,
+        "crash": 0,
+        "timeout": 0,
+        "noresult": 0
+      },
+      "started_at_utc": "2026-10-26T14:37:16.569962+00:00",
+      "finished_at_utc": "2026-10-26T14:37:51.588896+00:00",
+      "cts_sha256": "8cf824c598181ef43ccd74d67acce89c9cc6fc47029a164440f0b0ea74af0380",
+      "cts_revision_declared": "d18e4c68543103371715845cd914c71e5859963e",
+      "layer_revision_declared": "worktree-after-0902dfb-linked-prefix-final",
+      "case_list_sha256": "ede0c56679f406c77f9e3664fa01a393319f2e336cc528dfe25fe5372d866e18",
+      "id": "shader-format3-linked-prefix-final",
+      "case_set": "final_checkpoint_15",
+      "raw_summary": {
+        "path": "build-rt-cts-evidence/shader-format3-linked-prefix-final/summary.json",
+        "sha256": "645569f2a0ea1830e7ccfeeeb5edd3b0d0b6a9653365e144434248ded6bc82b2"
+      },
+      "layer_snapshot": {
+        "library": {
+          "path": "build-rt-cts-evidence/shader-format3-linked-prefix-final/layer_snapshot/VkLayer_VKRT_SOFTWARE_RAY_QUERY.dll",
+          "sha256": "0ce6d6ef9d5dc5e5ecca85c68cf4a6e5be14c207f3072cbe393286bd06c67249"
+        },
+        "manifest": {
+          "path": "build-rt-cts-evidence/shader-format3-linked-prefix-final/layer_snapshot/VkLayer_VKRT_SOFTWARE_RAY_QUERY.json",
+          "sha256": "e56a8699c391cdc2082270da8e7d94d84856490a4209c1838d0bd54f52cae74b"
+        }
+      },
+      "nonpass": [],
+      "diagnostics": {
+        "path": "build-rt-cts-evidence/shader-format3-linked-prefix-final/diagnostics-summary.json",
+        "sha256": "8de26bd6eb1b1baa9e7cc3d486a4bb3b58e9d0d3214e2bc20638ae9669981188"
+      }
+    }
+  ],
+  "local_checks": [
+    {
+      "id": "main_offline_25",
+      "build_directory": "build-raytracing-unified",
+      "counts": {
+        "pass": 25,
+        "fail": 0
+      },
+      "tests": [
+        "vkrt.command_state",
+        "vkrt.memory_queries",
+        "vkrt.query_pool_publication",
+        "vkrt.shader_objects",
+        "vkrt.shader_interface",
+        "vkrt.resource_profile",
+        "vkrt.descriptor_layout",
+        "vkrt.rtp_bindings",
+        "vkrt.device_features",
+        "vkrt.discovery",
+        "vkrt.registry_concurrency",
+        "vkrt.ir_builder_contract",
+        "vkrt.cpu_bvh4",
+        "vkrt.bvh4_build_layout",
+        "vkrt.host_translation",
+        "vkrt.as_address_cells",
+        "vkrt.as_registry",
+        "vkrt.deferred",
+        "vkrt.as_copy_host",
+        "vkrt.as_serialization_host",
+        "vkrt.spirv_ids",
+        "vkrt.spirv_lower",
+        "vkrt.spirv_lower.sbt_offset",
+        "ray_tracing_fallback_continuation_analysis",
+        "ray_tracing_fallback_pinned_sources"
+      ],
+      "log": {
+        "path": "build-source-layout/shader-format3-main-offline.log",
+        "sha256": "964662d777c634c71a38bd60cc283b88ce4128d903ccf80184d406aed573ae19"
+      },
+      "dll_binding": "Log-only record; no contemporaneous DLL hash is inferred from a mutable build directory."
+    },
+    {
+      "id": "main_integration_14",
+      "build_directory": "build-raytracing-unified",
+      "counts": {
+        "pass": 14,
+        "fail": 0
+      },
+      "tests": [
+        "vkrt.rtp_api.software",
+        "vkrt.shader_objects",
+        "vkrt.shader_interface",
+        "vkrt.shader_binary_immutable.software",
+        "vkrt.shader_binary_immutable.native",
+        "vkrt.shader_object_rq.spirv16.software",
+        "vkrt.shader_object_rq.spirv16.native",
+        "vkrt.query_pool_gpu",
+        "vkrt.shader_object_rq.software",
+        "vkrt.shader_object_rq.native",
+        "vkrt.shader_binary_profiles.software",
+        "vkrt.shader_binary_profiles.native",
+        "vkrt.rtp_api.maintenance6",
+        "vkrt.rtp_api.shader_object"
+      ],
+      "log": {
+        "path": "build-source-layout/shader-format3-integration-gpu.log",
+        "sha256": "4be3d8ccf02297a9e0e6c7f04874b473c5607b29f0c6c83ec55119cb4aefab17"
+      },
+      "dll_binding": "Log-only record; no contemporaneous DLL hash is inferred from a mutable build directory."
+    },
+    {
+      "id": "main_focused_5",
+      "build_directory": "build-raytracing-unified",
+      "counts": {
+        "pass": 5,
+        "fail": 0
+      },
+      "tests": [
+        "vkrt.shader_objects",
+        "vkrt.shader_interface",
+        "vkrt.shader_binary_immutable.software",
+        "vkrt.shader_object_rq.spirv16.software",
+        "vkrt.shader_binary_profiles.software"
+      ],
+      "log": {
+        "path": "build-source-layout/shader-format3-final-main-focused.log",
+        "sha256": "88740a2aac8294426094127a5eda773580d84adcd2d38143461cd2d98e68a4af"
+      },
+      "dll_binding": "Log-only record; no contemporaneous DLL hash is inferred from a mutable build directory."
+    },
+    {
+      "id": "separate_host_lowerer_4",
+      "build_directory": "build-rq-binary-v2",
+      "counts": {
+        "pass": 4,
+        "fail": 0
+      },
+      "tests": [
+        "vkrt.shader_objects",
+        "vkrt.shader_interface",
+        "vkrt.spirv_lower",
+        "vkrt.spirv_lower.sbt_offset"
+      ],
+      "log": {
+        "path": "build-source-layout/shader-format3-final-host.log",
+        "sha256": "df56a82837ccbfc613cc82cc553db36f37ea1ccf537652000b6042646777621f"
+      },
+      "dll_binding": "Log-only record; no contemporaneous DLL hash is inferred from a mutable build directory."
+    },
+    {
+      "id": "separate_gpu_both_validation_orders_8",
+      "build_directory": "build-rq-binary-v2",
+      "counts": {
+        "pass": 8,
+        "fail": 0
+      },
+      "dll_sha256": "2247327289901ea3dfa8b40c52dfb0cb79fed640836f44e1e7db44094ada94bb",
+      "validation_sdk": "1.4.357.0",
+      "synchronization_validation": true,
+      "raw_summary": {
+        "path": "build-source-layout/shader-format3-final-gpu-summary.json",
+        "sha256": "c11fbb8093c5b9b74b5e2179f0fdda5e8e43c879cf0dad0f9550e995738e3263"
+      },
+      "tests": [
+        {
+          "name": "rq",
+          "validation_order": "above",
+          "exit_code": 0,
+          "validation_diagnostics": 0,
+          "log": {
+            "path": "build-source-layout/shader-format3-final-rq-above.log",
+            "sha256": "2812b12823de6b9bee9e48a2ef3eea6f17adc5e30ddaf08d77a8699c6b784e68"
+          }
+        },
+        {
+          "name": "rq-spirv16",
+          "validation_order": "above",
+          "exit_code": 0,
+          "validation_diagnostics": 0,
+          "log": {
+            "path": "build-source-layout/shader-format3-final-rq-spirv16-above.log",
+            "sha256": "52332155693d33578794a295de37f4ecdb6f56eb234fc2f1b4f60ccc1ab28124"
+          }
+        },
+        {
+          "name": "profiles",
+          "validation_order": "above",
+          "exit_code": 0,
+          "validation_diagnostics": 0,
+          "log": {
+            "path": "build-source-layout/shader-format3-final-profiles-above.log",
+            "sha256": "71abfc42dc22be8dcdffea02c785ea7de931314ca99d007f5a9d27f1251abdb7"
+          }
+        },
+        {
+          "name": "immutable",
+          "validation_order": "above",
+          "exit_code": 0,
+          "validation_diagnostics": 0,
+          "log": {
+            "path": "build-source-layout/shader-format3-final-immutable-above.log",
+            "sha256": "60933505986ca0501b6386c03bbd5d9df430781b7e7ee582237c4e3499b74fac"
+          }
+        },
+        {
+          "name": "rq",
+          "validation_order": "below",
+          "exit_code": 0,
+          "validation_diagnostics": 0,
+          "log": {
+            "path": "build-source-layout/shader-format3-final-rq-below.log",
+            "sha256": "cf2449551d5ba26e6c16a72f4644fe7b9abb97cbd39b7225977c495b2f441443"
+          }
+        },
+        {
+          "name": "rq-spirv16",
+          "validation_order": "below",
+          "exit_code": 0,
+          "validation_diagnostics": 0,
+          "log": {
+            "path": "build-source-layout/shader-format3-final-rq-spirv16-below.log",
+            "sha256": "7a75e2ba1c2de5552cd3d256fcaa5c2fc34ebb05403a79873947b056a9a65fcf"
+          }
+        },
+        {
+          "name": "profiles",
+          "validation_order": "below",
+          "exit_code": 0,
+          "validation_diagnostics": 0,
+          "log": {
+            "path": "build-source-layout/shader-format3-final-profiles-below.log",
+            "sha256": "75070259f66b55ce34837c0e3196164234a74451f46a70502df9f9b2f35f3442"
+          }
+        },
+        {
+          "name": "immutable",
+          "validation_order": "below",
+          "exit_code": 0,
+          "validation_diagnostics": 0,
+          "log": {
+            "path": "build-source-layout/shader-format3-final-immutable-below.log",
+            "sha256": "5c3d305254e164a864d8907671ab548b5e959696846c2e97ea1dafa7c39d222d"
+          }
+        }
+      ]
+    },
+    {
+      "id": "before_linked_prefix_offline",
+      "counts": {
+        "pass": 25,
+        "fail": 0
+      },
+      "log": {
+        "path": "build-source-layout/shader-format3-checkpoint-offline.log",
+        "sha256": "81a2dbe04cac929865fbc8880d270a996a165f89c4fa4caf3865ba53d7c89737"
+      },
+      "layer_dll_sha256": "6f4b74877bc853d2956a524717075178c191e3b920b619566847c1809d5014e7",
+      "note": "DLL binding applies to layer-consuming GPU tests; offline tests are separately linked executables."
+    },
+    {
+      "id": "before_linked_prefix_gpu",
+      "counts": {
+        "pass": 7,
+        "fail": 0
+      },
+      "log": {
+        "path": "build-source-layout/shader-format3-checkpoint-gpu.log",
+        "sha256": "cb825581e8daa78d35f3200f5756125884e6cbbfd75d4fda2e58a0d85265282c"
+      },
+      "layer_dll_sha256": "6f4b74877bc853d2956a524717075178c191e3b920b619566847c1809d5014e7",
+      "note": "DLL binding applies to layer-consuming GPU tests; offline tests are separately linked executables."
+    },
+    {
+      "id": "final_offline",
+      "counts": {
+        "pass": 25,
+        "fail": 0
+      },
+      "log": {
+        "path": "build-source-layout/shader-format3-linked-prefix-final-offline.log",
+        "sha256": "3d0bba96958069a44abe229be366406854a3bddeb077b565dc31c994086fc0e7"
+      },
+      "layer_dll_sha256": "0ce6d6ef9d5dc5e5ecca85c68cf4a6e5be14c207f3072cbe393286bd06c67249",
+      "note": "DLL binding applies to layer-consuming GPU tests; offline tests are separately linked executables."
+    },
+    {
+      "id": "final_gpu",
+      "counts": {
+        "pass": 2,
+        "fail": 0
+      },
+      "log": {
+        "path": "build-source-layout/shader-format3-linked-prefix-final-gpu.log",
+        "sha256": "9a685d9ad19ec0f6a4519ab83e10618e5a63a6377b0877e026d5f385ee4a1c4e"
+      },
+      "layer_dll_sha256": "0ce6d6ef9d5dc5e5ecca85c68cf4a6e5be14c207f3072cbe393286bd06c67249",
+      "note": "DLL binding applies to layer-consuming GPU tests; offline tests are separately linked executables."
+    }
+  ],
+  "known_qualification_boundaries": [
+    "Other extension capabilities and per-operation/storage-class requirements remain incomplete qualification work.",
+    "Optional full-subgroup/workgroup-required-size reconstruction profiles fail explicitly; no complete binary portability claim.",
+    "Original RQ peers/interfaces can require destination-disabled features. Full compiler environment, source/extension semantics, format-feature eligibility and proxy identity for distinct public definitions sharing a translated native handle remain incomplete."
+  ],
+  "final_checkpoint": {
+    "run_id": "shader-format3-linked-prefix-final",
+    "layer_dll_sha256": "0ce6d6ef9d5dc5e5ecca85c68cf4a6e5be14c207f3072cbe393286bd06c67249",
+    "offline_check": "final_offline",
+    "gpu_check": "final_gpu",
+    "main_build": {
+      "path": "build-source-layout/shader-format3-linked-prefix-final-build.log",
+      "sha256": "26ea55c9f89df9c19e03b81f8215f417eedbf1fb03c4d5b53d0594ba4c9d946b"
+    },
+    "parent_build": {
+      "path": "build-source-layout/shader-format3-linked-prefix-final-top-level.log",
+      "sha256": "c1d30f28bf470bdbbb6b0546ae996dadbc20e29d4611db11a0f90397e5aad378"
+    },
+    "linked_prefix_host_run": {
+      "path": "build-source-layout/shader-linked-prefix-run.log",
+      "sha256": "53a0d1ba4b82a6d1e1866abf416c213ec3f8e923e271709e927089358f908f98"
+    },
+    "pipeline_layout_alias_host_run": {
+      "path": "build-source-layout/rtp-pipeline-layout-alias-run.log",
+      "sha256": "c67233b405e727ae24c97533a45341ce35cdcf0fc1e3374c4967bac5225d4e7a"
+    },
+    "interface_host_run": {
+      "path": "build-rt-cts-evidence/cleanup-query/shader-interface.txt",
+      "sha256": "0693e63e995d877aacadb1fd6489a6fe25b5ad01f8ebfc3a9548d40bbd30d01c"
+    }
+  },
+  "final_checkpoint_note": "The final follow-up preserves independent prefixes and rejects linked topology as one failure unit when truncation would violate 08409. Earlier CTS/GPU snapshots remain distinct and are not rebound to this DLL."
+}

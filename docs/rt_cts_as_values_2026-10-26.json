@@ -1,0 +1,2676 @@
+{
+  "schema_version": 1,
+  "generated_at_utc": "2026-10-25T21:49:16.557141+00:00",
+  "scope": "AS-value RQ checkpoint and executable typed frame component, incomplete full AS/RQ/RTP goal",
+  "source_base_commit": "4494570",
+  "note": "Builds use the worktree after the base commit; layer revision labels are declared labels. Snapshotted DLL/manifest and all available raw logs have exact hashes. Historical failures remain separate.",
+  "final_runs": [
+    {
+      "schema_version": 1,
+      "started_at_utc": "2026-10-25T21:43:41.164802+00:00",
+      "state": "completed",
+      "mode": "native",
+      "cts": "D:\\Codes\\VK-GL-CTS\\build\\external\\vulkancts\\modules\\vulkan\\Release\\deqp-vk.exe",
+      "cts_sha256": "8cf824c598181ef43ccd74d67acce89c9cc6fc47029a164440f0b0ea74af0380",
+      "cts_binary_size": 63076864,
+      "cts_revision_declared": "d18e4c68543103371715845cd914c71e5859963e",
+      "resource_archive": "D:\\Codes\\VK-GL-CTS\\external\\vulkancts\\data",
+      "case_list": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\rq-as-values-full-cases.txt",
+      "case_list_sha256": "72c9b075e6eaf3aa6202273f2592939160592f7440236f4dc71c8635cc2ec83f",
+      "selected_cases": [
+        "dEQP-VK.ray_query.builtin.flow.comp.triangles",
+        "dEQP-VK.ray_query.builtin.flow.comp.aabbs",
+        "dEQP-VK.ray_query.builtin.flow.frag.triangles",
+        "dEQP-VK.ray_query.builtin.flow.vert.triangles",
+        "dEQP-VK.ray_query.builtin.intersectiont.comp.triangles",
+        "dEQP-VK.ray_query.builtin.instancecustomindex.comp.triangles",
+        "dEQP-VK.ray_query.builtin.getintersectioninstanceshaderbindingtablerecordoffsetCommitted.comp.triangles",
+        "dEQP-VK.ray_query.builtin.getintersectioncandidateaabbopaque.comp.aabbs",
+        "dEQP-VK.ray_query.ray_flags.compute_shader.opacity.aabbs.cullopaque",
+        "dEQP-VK.ray_query.ray_flags.compute_shader.opacity.aabbs.noopaque",
+        "dEQP-VK.ray_query.acceleration_structures.empty.traditional_structures.compute_shader.gpu_built.index_none.inactive_triangles",
+        "dEQP-VK.ray_query.acceleration_structures.empty.traditional_structures.compute_shader.gpu_built.index_none.no_primitives_top",
+        "dEQP-VK.ray_query.advanced.using_wrapper_function.comp.triangles",
+        "dEQP-VK.ray_query.acceleration_structures.dynamic_indexing.traditional_structures.dynamic_indexing",
+        "dEQP-VK.ray_query.acceleration_structures.function_argument.traditional_structures.gpu_built",
+        "dEQP-VK.ray_query.multiple_ray_queries.compute_shader",
+        "dEQP-VK.ray_query.multiple_ray_queries.fragment_shader",
+        "dEQP-VK.ray_query.misc.dynamic_indexing",
+        "dEQP-VK.ray_query.misc.dynamic_indexing_use_first",
+        "dEQP-VK.ray_query.misc.dynamic_indexing_inbounds",
+        "dEQP-VK.ray_query.misc.shared_memory_consistency"
+      ],
+      "layer": null,
+      "validation": {
+        "manifest": "C:\\VulkanSDK\\1.4.357.0\\Bin\\VkLayer_khronos_validation.json",
+        "manifest_sha256": "20d3ef44fe96aa41fceefab2308892f9d4b346d23eebfe8b5e1690715f23f472",
+        "library": "C:\\VulkanSDK\\1.4.357.0\\Bin\\VkLayer_khronos_validation.dll",
+        "library_sha256": "9725ce7a9225f42f8961c433dacae4cc8fae3a16e95ef1d0a7c7e8bc09132c40",
+        "scope": "original SDK installation, hashed but not copied"
+      },
+      "layer_revision_declared": "worktree-after-4494570-workgroupfix",
+      "device_info": {
+        "source": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\device-summary.txt",
+        "snapshot": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\native-as-values-final-validation-01\\device_info.txt",
+        "sha256": "09457ba45ef35d3d5dd67ca7102ddadd89ea4c48686e2040c4a45ae29c885904",
+        "note": "User-supplied device report, not independently validated by this runner."
+      },
+      "environment": {
+        "overrides": {
+          "VK_LOADER_LAYERS_DISABLE": "~implicit~",
+          "VK_LAYER_PATH": "C:\\VulkanSDK\\1.4.357.0\\Bin"
+        },
+        "unset_inherited": {},
+        "effective_driver_environment": {
+          "PATH": "C:\\Users\\hylu\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\native\\powershell;C:\\Users\\hylu\\.codex\\tmp\\arg0-windows\\codex-arg0crdVkg;C:\\Users\\hylu\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\native\\libheif\\libheif\\bin;C:\\Users\\hylu\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\native\\jxrlib\\jxrlib\\bin;C:\\Users\\hylu\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\native\\poppler\\Library\\bin;C:\\Users\\hylu\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\bin\\override;C:\\Program Files\\Microsoft MPI\\Bin\\;C:\\VulkanSDK\\1.4.357.0\\Bin;C:\\Program Files (x86)\\Razer Chroma SDK\\bin;C:\\Program Files\\Razer Chroma SDK\\bin;C:\\Program Files\\Meta Horizon\\Support\\oculus-runtime;C:\\Program Files\\NVIDIA GPU Computing Toolkit\\CUDA\\v13.1\\bin\\x64;C:\\Program Files\\NVIDIA GPU Computing Toolkit\\CUDA\\v13.1\\bin;C:\\Program Files (x86)\\ShadowBot;C:\\VulkanSDK\\1.3.239.0\\Bin;C:\\Windows\\system32;C:\\Windows;C:\\Windows\\System32\\Wbem;C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\;C:\\Windows\\System32\\OpenSSH\\;C:\\FILES\\cmake-3.23.0-rc4-windows-x86_64\\bin;C:\\Program Files\\dotnet\\;C:\\FILES\\vcpkg;C:\\Program Files (x86)\\NVIDIA Corporation\\PhysX\\Common;C:\\WINDOWS\\system32;C:\\WINDOWS;C:\\WINDOWS\\System32\\Wbem;C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\;C:\\WINDOWS\\System32\\OpenSSH\\;C:\\Program Files\\NVIDIA Corporation\\NVIDIA app\\NvDLISR;C:\\Program Files\\LLVM\\bin;C:\\Program Files\\PowerShell\\7-preview\\preview;C:\\WINDOWS\\system32;C:\\WINDOWS;C:\\WINDOWS\\System32\\Wbem;C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\;C:\\WINDOWS\\System32\\OpenSSH\\;C:\\Program Files (x86)\\Windows Kits\\10\\Windows Performance Toolkit\\;C:\\Program Files\\doxygen\\bin;C:\\Program Files (x86)\\dotnet\\;C:\\Users\\hylu\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\native\\powershell;C:\\WINDOWS\\system32\\config\\systemprofile\\AppData\\Local\\Microsoft\\WindowsApps;C:\\Program Files (x86)\\Razer\\ChromaBroadcast\\bin;C:\\Program Files\\Razer\\ChromaBroadcast\\bin;C:\\Users\\hylu\\.local\\bin;C:\\Program Files\\Arm\\Mali Developer Tools\\Mali Offline Compiler v6.4.0\\;C:\\Users\\hylu\\AppData\\Local\\Microsoft\\WindowsApps;C:\\FILES\\Microsoft VS Code\\bin;C:\\Users\\hylu\\.dotnet\\tools;C:\\FILES\\aria2-1.36.0-win-64bit-build1\\aria2-1.36.0-win-64bit-build1;C:\\FILES\\RadeonDeveloperToolSuite-2023-02-15-1051\\RadeonDeveloperToolSuite-2023-02-15-1051;C:\\FILES\\ninja-win;C:\\Users\\hylu\\AppData\\Local\\Android\\Sdk\\platform-tools;C:\\Users\\hylu\\AppData\\Local\\Android\\Sdk\\tools;C:\\Users\\hylu\\AppData\\Local\\Andro;D:\\Codes\\fgit;C:\\Users\\hylu\\.dotnet\\tools;C:\\Users\\hylu\\AppData\\Local\\Microsoft\\WinGet\\Links;D:\\conda\\Scripts;C:\\Users\\hylu\\AppData\\Roaming\\npm;D:\\platform-tools-latest-windows\\platform-tools;C:\\Users\\hylu\\AppData\\Local\\Microsoft\\WinGet\\Packages\\yt-dlp.FFmpeg_Microsoft.Winget.Source_8wekyb3d8bbwe\\ffmpeg-N-120424-g03b9180fe3-win64-gpl/bin;D:\\UEAndroidDEV\\5.6\\sdk\\platform-tools;C:\\Users\\hylu\\AppData\\Local\\Microsoft\\WindowsApps;C:\\Program Files\\Graphviz\\bin;C:\\Program Files\\KTX-Software\\bin;C:\\Users\\hylu\\.codex\\vendor_imports\\renderdoc-mcp\\bin;C:\\Program Files\\Git\\cmd;C:\\Program Files\\Neovim\\bin;C:\\Program Files\\nodejs\\;C:\\Program Files\\NVIDIA Corporation\\Nsight Compute 2026.3.1\\;C:\\FILES\\xmake;C:\\Users\\hylu\\.cargo\\bin;C:\\Users\\hylu\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\bin\\fallback;C:\\Users\\hylu\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\node\\bin;C:\\Users\\hylu\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\native\\git\\cmd;C:\\Users\\hylu\\AppData\\Local\\OpenAI\\Codex\\bin\\c602dfdab3808440;C:\\Users\\hylu\\AppData\\Local\\OpenAI\\Codex\\bin\\2993767bd1dfb009",
+          "VK_SDK_PATH": "C:\\VulkanSDK\\1.4.357.0",
+          "VK_LOADER_LAYERS_DISABLE": "~implicit~",
+          "VK_LAYER_PATH": "C:\\VulkanSDK\\1.4.357.0\\Bin"
+        }
+      },
+      "timeout_seconds": 60.0,
+      "cases": [
+        {
+          "case": "dEQP-VK.ray_query.builtin.flow.comp.triangles",
+          "status": "pass",
+          "result": "Pass",
+          "reason": "Pass",
+          "exit_code": 0,
+          "elapsed_seconds": 1.578,
+          "command": [
+            "D:\\Codes\\VK-GL-CTS\\build\\external\\vulkancts\\modules\\vulkan\\Release\\deqp-vk.exe",
+            "--deqp-case=dEQP-VK.ray_query.builtin.flow.comp.triangles",
+            "--deqp-visibility=hidden",
+            "--deqp-archive-dir=D:\\Codes\\VK-GL-CTS\\external\\vulkancts\\data",
+            "--deqp-shadercache=disable",
+            "--deqp-watchdog=enable",
+            "--deqp-crashhandler=enable",
+            "--deqp-watchdog-total-time-limit=60",
+            "--deqp-watchdog-interval-time-limit=30",
+            "--deqp-log-filename=D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\native-as-values-final-validation-01\\0001-triangles-41109dcf4b.qpa",
+            "--deqp-vk-validation=enable",
+            "--deqp-vk-print-validation-errors"
+          ],
+          "cwd": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\native-as-values-final-validation-01",
+          "stdout": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\native-as-values-final-validation-01\\0001-triangles-41109dcf4b.stdout.txt",
+          "qpa": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\native-as-values-final-validation-01\\0001-triangles-41109dcf4b.qpa",
+          "session_info": {
+            "releaseName": "vulkan-cts-1.4.7.0-103-gd18e4c68543103371715845cd914c71e5859963e",
+            "releaseId": "0xd18e4c68",
+            "targetName": "\"Default\"",
+            "logFormatVersion": "\"0.3.4\"",
+            "vendorID": "0x10de",
+            "deviceID": "0x2216",
+            "deviceName": "NVIDIA GeForce RTX 3080",
+            "commandLineParameters": "\"--deqp-case=dEQP-VK.ray_query.builtin.flow.comp.triangles --deqp-visibility=hidden --deqp-archive-dir=D:\\Codes\\VK-GL-CTS\\external\\vulkancts\\data --deqp-shadercache=disable --deqp-watchdog=enable --deqp-crashhandler=enable --deqp-watchdog-total-time-limit=60 --deqp-watchdog-interval-time-limit=30 --deqp-log-filename=D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\native-as-values-final-validation-01\\0001-triangles-41109dcf4b.qpa --deqp-vk-validation=enable --deqp-vk-print-validation-errors\""
+          },
+          "raw_sha256": {
+            "stdout": "e145dcc5fbbc0551f30714408ea0314f7ae9718ec65e1eb5763fe42115f52beb",
+            "qpa": "46d9a37a0af9cedd1086f286f3cf348fca99db39bf8cae637513280182f312d2"
+          }
+        },
+        {
+          "case": "dEQP-VK.ray_query.builtin.flow.comp.aabbs",
+          "status": "pass",
+          "result": "Pass",
+          "reason": "Pass",
+          "exit_code": 0,
+          "elapsed_seconds": 1.75,
+          "command": [
+            "D:\\Codes\\VK-GL-CTS\\build\\external\\vulkancts\\modules\\vulkan\\Release\\deqp-vk.exe",
+            "--deqp-case=dEQP-VK.ray_query.builtin.flow.comp.aabbs",
+            "--deqp-visibility=hidden",
+            "--deqp-archive-dir=D:\\Codes\\VK-GL-CTS\\external\\vulkancts\\data",
+            "--deqp-shadercache=disable",
+            "--deqp-watchdog=enable",
+            "--deqp-crashhandler=enable",
+            "--deqp-watchdog-total-time-limit=60",
+            "--deqp-watchdog-interval-time-limit=30",
+            "--deqp-log-filename=D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\native-as-values-final-validation-01\\0002-aabbs-610b16a3b8.qpa",
+            "--deqp-vk-validation=enable",
+            "--deqp-vk-print-validation-errors"
+          ],
+          "cwd": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\native-as-values-final-validation-01",
+          "stdout": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\native-as-values-final-validation-01\\0002-aabbs-610b16a3b8.stdout.txt",
+          "qpa": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\native-as-values-final-validation-01\\0002-aabbs-610b16a3b8.qpa",
+          "session_info": {
+            "releaseName": "vulkan-cts-1.4.7.0-103-gd18e4c68543103371715845cd914c71e5859963e",
+            "releaseId": "0xd18e4c68",
+            "targetName": "\"Default\"",
+            "logFormatVersion": "\"0.3.4\"",
+            "vendorID": "0x10de",
+            "deviceID": "0x2216",
+            "deviceName": "NVIDIA GeForce RTX 3080",
+            "commandLineParameters": "\"--deqp-case=dEQP-VK.ray_query.builtin.flow.comp.aabbs --deqp-visibility=hidden --deqp-archive-dir=D:\\Codes\\VK-GL-CTS\\external\\vulkancts\\data --deqp-shadercache=disable --deqp-watchdog=enable --deqp-crashhandler=enable --deqp-watchdog-total-time-limit=60 --deqp-watchdog-interval-time-limit=30 --deqp-log-filename=D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\native-as-values-final-validation-01\\0002-aabbs-610b16a3b8.qpa --deqp-vk-validation=enable --deqp-vk-print-validation-errors\""
+          },
+          "raw_sha256": {
+            "stdout": "262cf842e672c4151bafa2644966b6474ee014cd1643126840355179ca04d442",
+            "qpa": "a8a29f396339f176a9aad23f9ba89e355b562f6d6f82a6c651e972031097962f"
+          }
+        },
+        {
+          "case": "dEQP-VK.ray_query.builtin.flow.frag.triangles",
+          "status": "pass",
+          "result": "Pass",
+          "reason": "Pass",
+          "exit_code": 0,
+          "elapsed_seconds": 1.594,
+          "command": [
+            "D:\\Codes\\VK-GL-CTS\\build\\external\\vulkancts\\modules\\vulkan\\Release\\deqp-vk.exe",
+            "--deqp-case=dEQP-VK.ray_query.builtin.flow.frag.triangles",
+            "--deqp-visibility=hidden",
+            "--deqp-archive-dir=D:\\Codes\\VK-GL-CTS\\external\\vulkancts\\data",
+            "--deqp-shadercache=disable",
+            "--deqp-watchdog=enable",
+            "--deqp-crashhandler=enable",
+            "--deqp-watchdog-total-time-limit=60",
+            "--deqp-watchdog-interval-time-limit=30",
+            "--deqp-log-filename=D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\native-as-values-final-validation-01\\0003-triangles-308ca58ace.qpa",
+            "--deqp-vk-validation=enable",
+            "--deqp-vk-print-validation-errors"
+          ],
+          "cwd": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\native-as-values-final-validation-01",
+          "stdout": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\native-as-values-final-validation-01\\0003-triangles-308ca58ace.stdout.txt",
+          "qpa": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\native-as-values-final-validation-01\\0003-triangles-308ca58ace.qpa",
+          "session_info": {
+            "releaseName": "vulkan-cts-1.4.7.0-103-gd18e4c68543103371715845cd914c71e5859963e",
+            "releaseId": "0xd18e4c68",
+            "targetName": "\"Default\"",
+            "logFormatVersion": "\"0.3.4\"",
+            "vendorID": "0x10de",
+            "deviceID": "0x2216",
+            "deviceName": "NVIDIA GeForce RTX 3080",
+            "commandLineParameters": "\"--deqp-case=dEQP-VK.ray_query.builtin.flow.frag.triangles --deqp-visibility=hidden --deqp-archive-dir=D:\\Codes\\VK-GL-CTS\\external\\vulkancts\\data --deqp-shadercache=disable --deqp-watchdog=enable --deqp-crashhandler=enable --deqp-watchdog-total-time-limit=60 --deqp-watchdog-interval-time-limit=30 --deqp-log-filename=D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\native-as-values-final-validation-01\\0003-triangles-308ca58ace.qpa --deqp-vk-validation=enable --deqp-vk-print-validation-errors\""
+          },
+          "raw_sha256": {
+            "stdout": "50921f42ba434c250e54a92b8e7da4edb42beb8b598d8e0dbbd03d7097d1036f",
+            "qpa": "f2e67cfaf5680c5c4b61fa200863a1d7a5189a42913c50d8b3582f85be029798"
+          }
+        },
+        {
+          "case": "dEQP-VK.ray_query.builtin.flow.vert.triangles",
+          "status": "pass",
+          "result": "Pass",
+          "reason": "Pass",
+          "exit_code": 0,
+          "elapsed_seconds": 1.359,
+          "command": [
+            "D:\\Codes\\VK-GL-CTS\\build\\external\\vulkancts\\modules\\vulkan\\Release\\deqp-vk.exe",
+            "--deqp-case=dEQP-VK.ray_query.builtin.flow.vert.triangles",
+            "--deqp-visibility=hidden",
+            "--deqp-archive-dir=D:\\Codes\\VK-GL-CTS\\external\\vulkancts\\data",
+            "--deqp-shadercache=disable",
+            "--deqp-watchdog=enable",
+            "--deqp-crashhandler=enable",
+            "--deqp-watchdog-total-time-limit=60",
+            "--deqp-watchdog-interval-time-limit=30",
+            "--deqp-log-filename=D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\native-as-values-final-validation-01\\0004-triangles-c5c116f61a.qpa",
+            "--deqp-vk-validation=enable",
+            "--deqp-vk-print-validation-errors"
+          ],
+          "cwd": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\native-as-values-final-validation-01",
+          "stdout": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\native-as-values-final-validation-01\\0004-triangles-c5c116f61a.stdout.txt",
+          "qpa": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\native-as-values-final-validation-01\\0004-triangles-c5c116f61a.qpa",
+          "session_info": {
+            "releaseName": "vulkan-cts-1.4.7.0-103-gd18e4c68543103371715845cd914c71e5859963e",
+            "releaseId": "0xd18e4c68",
+            "targetName": "\"Default\"",
+            "logFormatVersion": "\"0.3.4\"",
+            "vendorID": "0x10de",
+            "deviceID": "0x2216",
+            "deviceName": "NVIDIA GeForce RTX 3080",
+            "commandLineParameters": "\"--deqp-case=dEQP-VK.ray_query.builtin.flow.vert.triangles --deqp-visibility=hidden --deqp-archive-dir=D:\\Codes\\VK-GL-CTS\\external\\vulkancts\\data --deqp-shadercache=disable --deqp-watchdog=enable --deqp-crashhandler=enable --deqp-watchdog-total-time-limit=60 --deqp-watchdog-interval-time-limit=30 --deqp-log-filename=D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\native-as-values-final-validation-01\\0004-triangles-c5c116f61a.qpa --deqp-vk-validation=enable --deqp-vk-print-validation-errors\""
+          },
+          "raw_sha256": {
+            "stdout": "6edfca69c2c55623df6f0c002b9bc35ed6eb02923775fb2cfe9432e2aca4c4d2",
+            "qpa": "f55189ff257adab82230644019211913805ab33a2db048bd73333605445eab40"
+          }
+        },
+        {
+          "case": "dEQP-VK.ray_query.builtin.intersectiont.comp.triangles",
+          "status": "pass",
+          "result": "Pass",
+          "reason": "Pass",
+          "exit_code": 0,
+          "elapsed_seconds": 1.391,
+          "command": [
+            "D:\\Codes\\VK-GL-CTS\\build\\external\\vulkancts\\modules\\vulkan\\Release\\deqp-vk.exe",
+            "--deqp-case=dEQP-VK.ray_query.builtin.intersectiont.comp.triangles",
+            "--deqp-visibility=hidden",
+            "--deqp-archive-dir=D:\\Codes\\VK-GL-CTS\\external\\vulkancts\\data",
+            "--deqp-shadercache=disable",
+            "--deqp-watchdog=enable",
+            "--deqp-crashhandler=enable",
+            "--deqp-watchdog-total-time-limit=60",
+            "--deqp-watchdog-interval-time-limit=30",
+            "--deqp-log-filename=D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\native-as-values-final-validation-01\\0005-triangles-d943811f08.qpa",
+            "--deqp-vk-validation=enable",
+            "--deqp-vk-print-validation-errors"
+          ],
+          "cwd": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\native-as-values-final-validation-01",
+          "stdout": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\native-as-values-final-validation-01\\0005-triangles-d943811f08.stdout.txt",
+          "qpa": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\native-as-values-final-validation-01\\0005-triangles-d943811f08.qpa",
+          "session_info": {
+            "releaseName": "vulkan-cts-1.4.7.0-103-gd18e4c68543103371715845cd914c71e5859963e",
+            "releaseId": "0xd18e4c68",
+            "targetName": "\"Default\"",
+            "logFormatVersion": "\"0.3.4\"",
+            "vendorID": "0x10de",
+            "deviceID": "0x2216",
+            "deviceName": "NVIDIA GeForce RTX 3080",
+            "commandLineParameters": "\"--deqp-case=dEQP-VK.ray_query.builtin.intersectiont.comp.triangles --deqp-visibility=hidden --deqp-archive-dir=D:\\Codes\\VK-GL-CTS\\external\\vulkancts\\data --deqp-shadercache=disable --deqp-watchdog=enable --deqp-crashhandler=enable --deqp-watchdog-total-time-limit=60 --deqp-watchdog-interval-time-limit=30 --deqp-log-filename=D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\native-as-values-final-validation-01\\0005-triangles-d943811f08.qpa --deqp-vk-validation=enable --deqp-vk-print-validation-errors\""
+          },
+          "raw_sha256": {
+            "stdout": "62cd35607262f94816c82b9b08b2b6137f7c5d394b372a321611889d984d079f",
+            "qpa": "8f95d68ad75bae0cc9aa1808b27448357ceaad24608c7d47da905c39d265e542"
+          }
+        },
+        {
+          "case": "dEQP-VK.ray_query.builtin.instancecustomindex.comp.triangles",
+          "status": "pass",
+          "result": "Pass",
+          "reason": "Pass",
+          "exit_code": 0,
+          "elapsed_seconds": 1.407,
+          "command": [
+            "D:\\Codes\\VK-GL-CTS\\build\\external\\vulkancts\\modules\\vulkan\\Release\\deqp-vk.exe",
+            "--deqp-case=dEQP-VK.ray_query.builtin.instancecustomindex.comp.triangles",
+            "--deqp-visibility=hidden",
+            "--deqp-archive-dir=D:\\Codes\\VK-GL-CTS\\external\\vulkancts\\data",
+            "--deqp-shadercache=disable",
+            "--deqp-watchdog=enable",
+            "--deqp-crashhandler=enable",
+            "--deqp-watchdog-total-time-limit=60",
+            "--deqp-watchdog-interval-time-limit=30",
+            "--deqp-log-filename=D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\native-as-values-final-validation-01\\0006-triangles-02d0498de4.qpa",
+            "--deqp-vk-validation=enable",
+            "--deqp-vk-print-validation-errors"
+          ],
+          "cwd": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\native-as-values-final-validation-01",
+          "stdout": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\native-as-values-final-validation-01\\0006-triangles-02d0498de4.stdout.txt",
+          "qpa": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\native-as-values-final-validation-01\\0006-triangles-02d0498de4.qpa",
+          "session_info": {
+            "releaseName": "vulkan-cts-1.4.7.0-103-gd18e4c68543103371715845cd914c71e5859963e",
+            "releaseId": "0xd18e4c68",
+            "targetName": "\"Default\"",
+            "logFormatVersion": "\"0.3.4\"",
+            "vendorID": "0x10de",
+            "deviceID": "0x2216",
+            "deviceName": "NVIDIA GeForce RTX 3080",
+            "commandLineParameters": "\"--deqp-case=dEQP-VK.ray_query.builtin.instancecustomindex.comp.triangles --deqp-visibility=hidden --deqp-archive-dir=D:\\Codes\\VK-GL-CTS\\external\\vulkancts\\data --deqp-shadercache=disable --deqp-watchdog=enable --deqp-crashhandler=enable --deqp-watchdog-total-time-limit=60 --deqp-watchdog-interval-time-limit=30 --deqp-log-filename=D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\native-as-values-final-validation-01\\0006-triangles-02d0498de4.qpa --deqp-vk-validation=enable --deqp-vk-print-validation-errors\""
+          },
+          "raw_sha256": {
+            "stdout": "e4e2783dc491e04c184e4f9ae1b00d19f5b147637cb46a89bd271ddc7027db71",
+            "qpa": "293b24c466acdda5c71013e5095dafe3d28a485d459c0f46064e144780022be9"
+          }
+        },
+        {
+          "case": "dEQP-VK.ray_query.builtin.getintersectioninstanceshaderbindingtablerecordoffsetCommitted.comp.triangles",
+          "status": "pass",
+          "result": "Pass",
+          "reason": "Pass",
+          "exit_code": 0,
+          "elapsed_seconds": 1.375,
+          "command": [
+            "D:\\Codes\\VK-GL-CTS\\build\\external\\vulkancts\\modules\\vulkan\\Release\\deqp-vk.exe",
+            "--deqp-case=dEQP-VK.ray_query.builtin.getintersectioninstanceshaderbindingtablerecordoffsetCommitted.comp.triangles",
+            "--deqp-visibility=hidden",
+            "--deqp-archive-dir=D:\\Codes\\VK-GL-CTS\\external\\vulkancts\\data",
+            "--deqp-shadercache=disable",
+            "--deqp-watchdog=enable",
+            "--deqp-crashhandler=enable",
+            "--deqp-watchdog-total-time-limit=60",
+            "--deqp-watchdog-interval-time-limit=30",
+            "--deqp-log-filename=D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\native-as-values-final-validation-01\\0007-triangles-f890856c83.qpa",
+            "--deqp-vk-validation=enable",
+            "--deqp-vk-print-validation-errors"
+          ],
+          "cwd": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\native-as-values-final-validation-01",
+          "stdout": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\native-as-values-final-validation-01\\0007-triangles-f890856c83.stdout.txt",
+          "qpa": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\native-as-values-final-validation-01\\0007-triangles-f890856c83.qpa",
+          "session_info": {
+            "releaseName": "vulkan-cts-1.4.7.0-103-gd18e4c68543103371715845cd914c71e5859963e",
+            "releaseId": "0xd18e4c68",
+            "targetName": "\"Default\"",
+            "logFormatVersion": "\"0.3.4\"",
+            "vendorID": "0x10de",
+            "deviceID": "0x2216",
+            "deviceName": "NVIDIA GeForce RTX 3080",
+            "commandLineParameters": "\"--deqp-case=dEQP-VK.ray_query.builtin.getintersectioninstanceshaderbindingtablerecordoffsetCommitted.comp.triangles --deqp-visibility=hidden --deqp-archive-dir=D:\\Codes\\VK-GL-CTS\\external\\vulkancts\\data --deqp-shadercache=disable --deqp-watchdog=enable --deqp-crashhandler=enable --deqp-watchdog-total-time-limit=60 --deqp-watchdog-interval-time-limit=30 --deqp-log-filename=D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\native-as-values-final-validation-01\\0007-triangles-f890856c83.qpa --deqp-vk-validation=enable --deqp-vk-print-validation-errors\""
+          },
+          "raw_sha256": {
+            "stdout": "342a647f5c76ab3b282d91a077da99014cc3772168711b85b9f2ab0947b08fb2",
+            "qpa": "42e240dadd00ebc977c3fd51e5d39bd8e0d09732f4f90ddbb9b420de1c346ada"
+          }
+        },
+        {
+          "case": "dEQP-VK.ray_query.builtin.getintersectioncandidateaabbopaque.comp.aabbs",
+          "status": "pass",
+          "result": "Pass",
+          "reason": "Pass",
+          "exit_code": 0,
+          "elapsed_seconds": 1.219,
+          "command": [
+            "D:\\Codes\\VK-GL-CTS\\build\\external\\vulkancts\\modules\\vulkan\\Release\\deqp-vk.exe",
+            "--deqp-case=dEQP-VK.ray_query.builtin.getintersectioncandidateaabbopaque.comp.aabbs",
+            "--deqp-visibility=hidden",
+            "--deqp-archive-dir=D:\\Codes\\VK-GL-CTS\\external\\vulkancts\\data",
+            "--deqp-shadercache=disable",
+            "--deqp-watchdog=enable",
+            "--deqp-crashhandler=enable",
+            "--deqp-watchdog-total-time-limit=60",
+            "--deqp-watchdog-interval-time-limit=30",
+            "--deqp-log-filename=D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\native-as-values-final-validation-01\\0008-aabbs-714429f9e2.qpa",
+            "--deqp-vk-validation=enable",
+            "--deqp-vk-print-validation-errors"
+          ],
+          "cwd": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\native-as-values-final-validation-01",
+          "stdout": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\native-as-values-final-validation-01\\0008-aabbs-714429f9e2.stdout.txt",
+          "qpa": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\native-as-values-final-validation-01\\0008-aabbs-714429f9e2.qpa",
+          "session_info": {
+            "releaseName": "vulkan-cts-1.4.7.0-103-gd18e4c68543103371715845cd914c71e5859963e",
+            "releaseId": "0xd18e4c68",
+            "targetName": "\"Default\"",
+            "logFormatVersion": "\"0.3.4\"",
+            "vendorID": "0x10de",
+            "deviceID": "0x2216",
+            "deviceName": "NVIDIA GeForce RTX 3080",
+            "commandLineParameters": "\"--deqp-case=dEQP-VK.ray_query.builtin.getintersectioncandidateaabbopaque.comp.aabbs --deqp-visibility=hidden --deqp-archive-dir=D:\\Codes\\VK-GL-CTS\\external\\vulkancts\\data --deqp-shadercache=disable --deqp-watchdog=enable --deqp-crashhandler=enable --deqp-watchdog-total-time-limit=60 --deqp-watchdog-interval-time-limit=30 --deqp-log-filename=D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\native-as-values-final-validation-01\\0008-aabbs-714429f9e2.qpa --deqp-vk-validation=enable --deqp-vk-print-validation-errors\""
+          },
+          "raw_sha256": {
+            "stdout": "ffe080713762a3d1ff7fe6cbe0d5ed70431b21013133462acd51c93c0b977d14",
+            "qpa": "b119b3b0f54d80bf0063507eebea01a12da6f50930f71271695264d69075a0f0"
+          }
+        },
+        {
+          "case": "dEQP-VK.ray_query.ray_flags.compute_shader.opacity.aabbs.cullopaque",
+          "status": "pass",
+          "result": "Pass",
+          "reason": "Pass",
+          "exit_code": 0,
+          "elapsed_seconds": 1.422,
+          "command": [
+            "D:\\Codes\\VK-GL-CTS\\build\\external\\vulkancts\\modules\\vulkan\\Release\\deqp-vk.exe",
+            "--deqp-case=dEQP-VK.ray_query.ray_flags.compute_shader.opacity.aabbs.cullopaque",
+            "--deqp-visibility=hidden",
+            "--deqp-archive-dir=D:\\Codes\\VK-GL-CTS\\external\\vulkancts\\data",
+            "--deqp-shadercache=disable",
+            "--deqp-watchdog=enable",
+            "--deqp-crashhandler=enable",
+            "--deqp-watchdog-total-time-limit=60",
+            "--deqp-watchdog-interval-time-limit=30",
+            "--deqp-log-filename=D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\native-as-values-final-validation-01\\0009-cullopaque-3ed449f004.qpa",
+            "--deqp-vk-validation=enable",
+            "--deqp-vk-print-validation-errors"
+          ],
+          "cwd": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\native-as-values-final-validation-01",
+          "stdout": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\native-as-values-final-validation-01\\0009-cullopaque-3ed449f004.stdout.txt",
+          "qpa": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\native-as-values-final-validation-01\\0009-cullopaque-3ed449f004.qpa",
+          "session_info": {
+            "releaseName": "vulkan-cts-1.4.7.0-103-gd18e4c68543103371715845cd914c71e5859963e",
+            "releaseId": "0xd18e4c68",
+            "targetName": "\"Default\"",
+            "logFormatVersion": "\"0.3.4\"",
+            "vendorID": "0x10de",
+            "deviceID": "0x2216",
+            "deviceName": "NVIDIA GeForce RTX 3080",
+            "commandLineParameters": "\"--deqp-case=dEQP-VK.ray_query.ray_flags.compute_shader.opacity.aabbs.cullopaque --deqp-visibility=hidden --deqp-archive-dir=D:\\Codes\\VK-GL-CTS\\external\\vulkancts\\data --deqp-shadercache=disable --deqp-watchdog=enable --deqp-crashhandler=enable --deqp-watchdog-total-time-limit=60 --deqp-watchdog-interval-time-limit=30 --deqp-log-filename=D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\native-as-values-final-validation-01\\0009-cullopaque-3ed449f004.qpa --deqp-vk-validation=enable --deqp-vk-print-validation-errors\""
+          },
+          "raw_sha256": {
+            "stdout": "52f8c3c1d51dff0226620fbbbf87702350648a89888901875cd9ece1fb8eccc9",
+            "qpa": "84045bc25b608ee5c2dfb0294809e1849847cfcb3173f8b4faf767f3e97ce246"
+          }
+        },
+        {
+          "case": "dEQP-VK.ray_query.ray_flags.compute_shader.opacity.aabbs.noopaque",
+          "status": "pass",
+          "result": "Pass",
+          "reason": "Pass",
+          "exit_code": 0,
+          "elapsed_seconds": 1.5,
+          "command": [
+            "D:\\Codes\\VK-GL-CTS\\build\\external\\vulkancts\\modules\\vulkan\\Release\\deqp-vk.exe",
+            "--deqp-case=dEQP-VK.ray_query.ray_flags.compute_shader.opacity.aabbs.noopaque",
+            "--deqp-visibility=hidden",
+            "--deqp-archive-dir=D:\\Codes\\VK-GL-CTS\\external\\vulkancts\\data",
+            "--deqp-shadercache=disable",
+            "--deqp-watchdog=enable",
+            "--deqp-crashhandler=enable",
+            "--deqp-watchdog-total-time-limit=60",
+            "--deqp-watchdog-interval-time-limit=30",
+            "--deqp-log-filename=D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\native-as-values-final-validation-01\\0010-noopaque-0cf54c9686.qpa",
+            "--deqp-vk-validation=enable",
+            "--deqp-vk-print-validation-errors"
+          ],
+          "cwd": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\native-as-values-final-validation-01",
+          "stdout": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\native-as-values-final-validation-01\\0010-noopaque-0cf54c9686.stdout.txt",
+          "qpa": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\native-as-values-final-validation-01\\0010-noopaque-0cf54c9686.qpa",
+          "session_info": {
+            "releaseName": "vulkan-cts-1.4.7.0-103-gd18e4c68543103371715845cd914c71e5859963e",
+            "releaseId": "0xd18e4c68",
+            "targetName": "\"Default\"",
+            "logFormatVersion": "\"0.3.4\"",
+            "vendorID": "0x10de",
+            "deviceID": "0x2216",
+            "deviceName": "NVIDIA GeForce RTX 3080",
+            "commandLineParameters": "\"--deqp-case=dEQP-VK.ray_query.ray_flags.compute_shader.opacity.aabbs.noopaque --deqp-visibility=hidden --deqp-archive-dir=D:\\Codes\\VK-GL-CTS\\external\\vulkancts\\data --deqp-shadercache=disable --deqp-watchdog=enable --deqp-crashhandler=enable --deqp-watchdog-total-time-limit=60 --deqp-watchdog-interval-time-limit=30 --deqp-log-filename=D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\native-as-values-final-validation-01\\0010-noopaque-0cf54c9686.qpa --deqp-vk-validation=enable --deqp-vk-print-validation-errors\""
+          },
+          "raw_sha256": {
+            "stdout": "3a021a51fe65c5041b2c202beb904e8234dc28b92c2fb6f34abe35c5f2449363",
+            "qpa": "c403b05e5e19ed58d947c759a41c7d7767035a4ae2c074a8d540b4a7e8d3768a"
+          }
+        },
+        {
+          "case": "dEQP-VK.ray_query.acceleration_structures.empty.traditional_structures.compute_shader.gpu_built.index_none.inactive_triangles",
+          "status": "pass",
+          "result": "Pass",
+          "reason": "Pass",
+          "exit_code": 0,
+          "elapsed_seconds": 1.375,
+          "command": [
+            "D:\\Codes\\VK-GL-CTS\\build\\external\\vulkancts\\modules\\vulkan\\Release\\deqp-vk.exe",
+            "--deqp-case=dEQP-VK.ray_query.acceleration_structures.empty.traditional_structures.compute_shader.gpu_built.index_none.inactive_triangles",
+            "--deqp-visibility=hidden",
+            "--deqp-archive-dir=D:\\Codes\\VK-GL-CTS\\external\\vulkancts\\data",
+            "--deqp-shadercache=disable",
+            "--deqp-watchdog=enable",
+            "--deqp-crashhandler=enable",
+            "--deqp-watchdog-total-time-limit=60",
+            "--deqp-watchdog-interval-time-limit=30",
+            "--deqp-log-filename=D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\native-as-values-final-validation-01\\0011-inactive_triangles-19dd0bf009.qpa",
+            "--deqp-vk-validation=enable",
+            "--deqp-vk-print-validation-errors"
+          ],
+          "cwd": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\native-as-values-final-validation-01",
+          "stdout": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\native-as-values-final-validation-01\\0011-inactive_triangles-19dd0bf009.stdout.txt",
+          "qpa": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\native-as-values-final-validation-01\\0011-inactive_triangles-19dd0bf009.qpa",
+          "session_info": {
+            "releaseName": "vulkan-cts-1.4.7.0-103-gd18e4c68543103371715845cd914c71e5859963e",
+            "releaseId": "0xd18e4c68",
+            "targetName": "\"Default\"",
+            "logFormatVersion": "\"0.3.4\"",
+            "vendorID": "0x10de",
+            "deviceID": "0x2216",
+            "deviceName": "NVIDIA GeForce RTX 3080",
+            "commandLineParameters": "\"--deqp-case=dEQP-VK.ray_query.acceleration_structures.empty.traditional_structures.compute_shader.gpu_built.index_none.inactive_triangles --deqp-visibility=hidden --deqp-archive-dir=D:\\Codes\\VK-GL-CTS\\external\\vulkancts\\data --deqp-shadercache=disable --deqp-watchdog=enable --deqp-crashhandler=enable --deqp-watchdog-total-time-limit=60 --deqp-watchdog-interval-time-limit=30 --deqp-log-filename=D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\native-as-values-final-validation-01\\0011-inactive_triangles-19dd0bf009.qpa --deqp-vk-validation=enable --deqp-vk-print-validation-errors\""
+          },
+          "raw_sha256": {
+            "stdout": "02a563e60f84aab2b7e0acd70b822d965ee5a7dde97e8965d6240d796d5790c1",
+            "qpa": "f3abda876cb9b7777d261c930af09e3341a36a4ed8e4af53b64ddc37bff9b04d"
+          }
+        },
+        {
+          "case": "dEQP-VK.ray_query.acceleration_structures.empty.traditional_structures.compute_shader.gpu_built.index_none.no_primitives_top",
+          "status": "pass",
+          "result": "Pass",
+          "reason": "Pass",
+          "exit_code": 0,
+          "elapsed_seconds": 1.343,
+          "command": [
+            "D:\\Codes\\VK-GL-CTS\\build\\external\\vulkancts\\modules\\vulkan\\Release\\deqp-vk.exe",
+            "--deqp-case=dEQP-VK.ray_query.acceleration_structures.empty.traditional_structures.compute_shader.gpu_built.index_none.no_primitives_top",
+            "--deqp-visibility=hidden",
+            "--deqp-archive-dir=D:\\Codes\\VK-GL-CTS\\external\\vulkancts\\data",
+            "--deqp-shadercache=disable",
+            "--deqp-watchdog=enable",
+            "--deqp-crashhandler=enable",
+            "--deqp-watchdog-total-time-limit=60",
+            "--deqp-watchdog-interval-time-limit=30",
+            "--deqp-log-filename=D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\native-as-values-final-validation-01\\0012-no_primitives_top-368e913283.qpa",
+            "--deqp-vk-validation=enable",
+            "--deqp-vk-print-validation-errors"
+          ],
+          "cwd": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\native-as-values-final-validation-01",
+          "stdout": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\native-as-values-final-validation-01\\0012-no_primitives_top-368e913283.stdout.txt",
+          "qpa": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\native-as-values-final-validation-01\\0012-no_primitives_top-368e913283.qpa",
+          "session_info": {
+            "releaseName": "vulkan-cts-1.4.7.0-103-gd18e4c68543103371715845cd914c71e5859963e",
+            "releaseId": "0xd18e4c68",
+            "targetName": "\"Default\"",
+            "logFormatVersion": "\"0.3.4\"",
+            "vendorID": "0x10de",
+            "deviceID": "0x2216",
+            "deviceName": "NVIDIA GeForce RTX 3080",
+            "commandLineParameters": "\"--deqp-case=dEQP-VK.ray_query.acceleration_structures.empty.traditional_structures.compute_shader.gpu_built.index_none.no_primitives_top --deqp-visibility=hidden --deqp-archive-dir=D:\\Codes\\VK-GL-CTS\\external\\vulkancts\\data --deqp-shadercache=disable --deqp-watchdog=enable --deqp-crashhandler=enable --deqp-watchdog-total-time-limit=60 --deqp-watchdog-interval-time-limit=30 --deqp-log-filename=D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\native-as-values-final-validation-01\\0012-no_primitives_top-368e913283.qpa --deqp-vk-validation=enable --deqp-vk-print-validation-errors\""
+          },
+          "raw_sha256": {
+            "stdout": "c6e71500d64715456d208897f0023f668c06ac89eb1a8b7b0b3aafcc0db53ca6",
+            "qpa": "6eace582b8f9b0b52544196b72129c66f86a23dd750ce2c4abf7c5ed3e4415ec"
+          }
+        },
+        {
+          "case": "dEQP-VK.ray_query.advanced.using_wrapper_function.comp.triangles",
+          "status": "pass",
+          "result": "Pass",
+          "reason": "Pass",
+          "exit_code": 0,
+          "elapsed_seconds": 1.141,
+          "command": [
+            "D:\\Codes\\VK-GL-CTS\\build\\external\\vulkancts\\modules\\vulkan\\Release\\deqp-vk.exe",
+            "--deqp-case=dEQP-VK.ray_query.advanced.using_wrapper_function.comp.triangles",
+            "--deqp-visibility=hidden",
+            "--deqp-archive-dir=D:\\Codes\\VK-GL-CTS\\external\\vulkancts\\data",
+            "--deqp-shadercache=disable",
+            "--deqp-watchdog=enable",
+            "--deqp-crashhandler=enable",
+            "--deqp-watchdog-total-time-limit=60",
+            "--deqp-watchdog-interval-time-limit=30",
+            "--deqp-log-filename=D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\native-as-values-final-validation-01\\0013-triangles-a00623ea19.qpa",
+            "--deqp-vk-validation=enable",
+            "--deqp-vk-print-validation-errors"
+          ],
+          "cwd": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\native-as-values-final-validation-01",
+          "stdout": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\native-as-values-final-validation-01\\0013-triangles-a00623ea19.stdout.txt",
+          "qpa": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\native-as-values-final-validation-01\\0013-triangles-a00623ea19.qpa",
+          "session_info": {
+            "releaseName": "vulkan-cts-1.4.7.0-103-gd18e4c68543103371715845cd914c71e5859963e",
+            "releaseId": "0xd18e4c68",
+            "targetName": "\"Default\"",
+            "logFormatVersion": "\"0.3.4\"",
+            "vendorID": "0x10de",
+            "deviceID": "0x2216",
+            "deviceName": "NVIDIA GeForce RTX 3080",
+            "commandLineParameters": "\"--deqp-case=dEQP-VK.ray_query.advanced.using_wrapper_function.comp.triangles --deqp-visibility=hidden --deqp-archive-dir=D:\\Codes\\VK-GL-CTS\\external\\vulkancts\\data --deqp-shadercache=disable --deqp-watchdog=enable --deqp-crashhandler=enable --deqp-watchdog-total-time-limit=60 --deqp-watchdog-interval-time-limit=30 --deqp-log-filename=D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\native-as-values-final-validation-01\\0013-triangles-a00623ea19.qpa --deqp-vk-validation=enable --deqp-vk-print-validation-errors\""
+          },
+          "raw_sha256": {
+            "stdout": "0cfe3810fb4d1de0bdd74ce8bc4dd412f56ac7ec483e6a256741d220ca442d71",
+            "qpa": "f1a0c0e12d4ca39ce203aee43878ec90dd6d85ae038d9a249ae5210d92a601e1"
+          }
+        },
+        {
+          "case": "dEQP-VK.ray_query.acceleration_structures.dynamic_indexing.traditional_structures.dynamic_indexing",
+          "status": "pass",
+          "result": "Pass",
+          "reason": "Pass",
+          "exit_code": 0,
+          "elapsed_seconds": 1.656,
+          "command": [
+            "D:\\Codes\\VK-GL-CTS\\build\\external\\vulkancts\\modules\\vulkan\\Release\\deqp-vk.exe",
+            "--deqp-case=dEQP-VK.ray_query.acceleration_structures.dynamic_indexing.traditional_structures.dynamic_indexing",
+            "--deqp-visibility=hidden",
+            "--deqp-archive-dir=D:\\Codes\\VK-GL-CTS\\external\\vulkancts\\data",
+            "--deqp-shadercache=disable",
+            "--deqp-watchdog=enable",
+            "--deqp-crashhandler=enable",
+            "--deqp-watchdog-total-time-limit=60",
+            "--deqp-watchdog-interval-time-limit=30",
+            "--deqp-log-filename=D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\native-as-values-final-validation-01\\0014-dynamic_indexing-409fe91b9c.qpa",
+            "--deqp-vk-validation=enable",
+            "--deqp-vk-print-validation-errors"
+          ],
+          "cwd": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\native-as-values-final-validation-01",
+          "stdout": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\native-as-values-final-validation-01\\0014-dynamic_indexing-409fe91b9c.stdout.txt",
+          "qpa": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\native-as-values-final-validation-01\\0014-dynamic_indexing-409fe91b9c.qpa",
+          "session_info": {
+            "releaseName": "vulkan-cts-1.4.7.0-103-gd18e4c68543103371715845cd914c71e5859963e",
+            "releaseId": "0xd18e4c68",
+            "targetName": "\"Default\"",
+            "logFormatVersion": "\"0.3.4\"",
+            "vendorID": "0x10de",
+            "deviceID": "0x2216",
+            "deviceName": "NVIDIA GeForce RTX 3080",
+            "commandLineParameters": "\"--deqp-case=dEQP-VK.ray_query.acceleration_structures.dynamic_indexing.traditional_structures.dynamic_indexing --deqp-visibility=hidden --deqp-archive-dir=D:\\Codes\\VK-GL-CTS\\external\\vulkancts\\data --deqp-shadercache=disable --deqp-watchdog=enable --deqp-crashhandler=enable --deqp-watchdog-total-time-limit=60 --deqp-watchdog-interval-time-limit=30 --deqp-log-filename=D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\native-as-values-final-validation-01\\0014-dynamic_indexing-409fe91b9c.qpa --deqp-vk-validation=enable --deqp-vk-print-validation-errors\""
+          },
+          "raw_sha256": {
+            "stdout": "240c21e85529659edf6daf52063129bb0eaf9ff76aa533e9f19fc1811a0793cb",
+            "qpa": "e89942cd1632a3043fd15f8f8786f233a1f46f33ccec248c8b0a29d5c45fb61e"
+          }
+        },
+        {
+          "case": "dEQP-VK.ray_query.acceleration_structures.function_argument.traditional_structures.gpu_built",
+          "status": "pass",
+          "result": "Pass",
+          "reason": "Pass",
+          "exit_code": 0,
+          "elapsed_seconds": 1.281,
+          "command": [
+            "D:\\Codes\\VK-GL-CTS\\build\\external\\vulkancts\\modules\\vulkan\\Release\\deqp-vk.exe",
+            "--deqp-case=dEQP-VK.ray_query.acceleration_structures.function_argument.traditional_structures.gpu_built",
+            "--deqp-visibility=hidden",
+            "--deqp-archive-dir=D:\\Codes\\VK-GL-CTS\\external\\vulkancts\\data",
+            "--deqp-shadercache=disable",
+            "--deqp-watchdog=enable",
+            "--deqp-crashhandler=enable",
+            "--deqp-watchdog-total-time-limit=60",
+            "--deqp-watchdog-interval-time-limit=30",
+            "--deqp-log-filename=D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\native-as-values-final-validation-01\\0015-gpu_built-c1da2891a9.qpa",
+            "--deqp-vk-validation=enable",
+            "--deqp-vk-print-validation-errors"
+          ],
+          "cwd": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\native-as-values-final-validation-01",
+          "stdout": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\native-as-values-final-validation-01\\0015-gpu_built-c1da2891a9.stdout.txt",
+          "qpa": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\native-as-values-final-validation-01\\0015-gpu_built-c1da2891a9.qpa",
+          "session_info": {
+            "releaseName": "vulkan-cts-1.4.7.0-103-gd18e4c68543103371715845cd914c71e5859963e",
+            "releaseId": "0xd18e4c68",
+            "targetName": "\"Default\"",
+            "logFormatVersion": "\"0.3.4\"",
+            "vendorID": "0x10de",
+            "deviceID": "0x2216",
+            "deviceName": "NVIDIA GeForce RTX 3080",
+            "commandLineParameters": "\"--deqp-case=dEQP-VK.ray_query.acceleration_structures.function_argument.traditional_structures.gpu_built --deqp-visibility=hidden --deqp-archive-dir=D:\\Codes\\VK-GL-CTS\\external\\vulkancts\\data --deqp-shadercache=disable --deqp-watchdog=enable --deqp-crashhandler=enable --deqp-watchdog-total-time-limit=60 --deqp-watchdog-interval-time-limit=30 --deqp-log-filename=D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\native-as-values-final-validation-01\\0015-gpu_built-c1da2891a9.qpa --deqp-vk-validation=enable --deqp-vk-print-validation-errors\""
+          },
+          "raw_sha256": {
+            "stdout": "16ac2cb509ce14252987ca4c35638eee9a3828e3946e9b528b8e0375321a1d74",
+            "qpa": "46399ccfcc6b2ca8f5802208e2fef84ab1f9a7e3a59883cc02f5074bd2f40227"
+          }
+        },
+        {
+          "case": "dEQP-VK.ray_query.multiple_ray_queries.compute_shader",
+          "status": "pass",
+          "result": "Pass",
+          "reason": "pass",
+          "exit_code": 0,
+          "elapsed_seconds": 1.36,
+          "command": [
+            "D:\\Codes\\VK-GL-CTS\\build\\external\\vulkancts\\modules\\vulkan\\Release\\deqp-vk.exe",
+            "--deqp-case=dEQP-VK.ray_query.multiple_ray_queries.compute_shader",
+            "--deqp-visibility=hidden",
+            "--deqp-archive-dir=D:\\Codes\\VK-GL-CTS\\external\\vulkancts\\data",
+            "--deqp-shadercache=disable",
+            "--deqp-watchdog=enable",
+            "--deqp-crashhandler=enable",
+            "--deqp-watchdog-total-time-limit=60",
+            "--deqp-watchdog-interval-time-limit=30",
+            "--deqp-log-filename=D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\native-as-values-final-validation-01\\0016-compute_shader-9e006a52bf.qpa",
+            "--deqp-vk-validation=enable",
+            "--deqp-vk-print-validation-errors"
+          ],
+          "cwd": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\native-as-values-final-validation-01",
+          "stdout": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\native-as-values-final-validation-01\\0016-compute_shader-9e006a52bf.stdout.txt",
+          "qpa": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\native-as-values-final-validation-01\\0016-compute_shader-9e006a52bf.qpa",
+          "session_info": {
+            "releaseName": "vulkan-cts-1.4.7.0-103-gd18e4c68543103371715845cd914c71e5859963e",
+            "releaseId": "0xd18e4c68",
+            "targetName": "\"Default\"",
+            "logFormatVersion": "\"0.3.4\"",
+            "vendorID": "0x10de",
+            "deviceID": "0x2216",
+            "deviceName": "NVIDIA GeForce RTX 3080",
+            "commandLineParameters": "\"--deqp-case=dEQP-VK.ray_query.multiple_ray_queries.compute_shader --deqp-visibility=hidden --deqp-archive-dir=D:\\Codes\\VK-GL-CTS\\external\\vulkancts\\data --deqp-shadercache=disable --deqp-watchdog=enable --deqp-crashhandler=enable --deqp-watchdog-total-time-limit=60 --deqp-watchdog-interval-time-limit=30 --deqp-log-filename=D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\native-as-values-final-validation-01\\0016-compute_shader-9e006a52bf.qpa --deqp-vk-validation=enable --deqp-vk-print-validation-errors\""
+          },
+          "raw_sha256": {
+            "stdout": "7ff62fec9f221a4235ab77e888384cef9214008005f5eb5fdeabd11f5db6f8d9",
+            "qpa": "74c3404bb8b4efcdf49823a8e41e77a43203915e5d7b82f3b003b65e2d8c27f4"
+          }
+        },
+        {
+          "case": "dEQP-VK.ray_query.multiple_ray_queries.fragment_shader",
+          "status": "pass",
+          "result": "Pass",
+          "reason": "pass",
+          "exit_code": 0,
+          "elapsed_seconds": 1.344,
+          "command": [
+            "D:\\Codes\\VK-GL-CTS\\build\\external\\vulkancts\\modules\\vulkan\\Release\\deqp-vk.exe",
+            "--deqp-case=dEQP-VK.ray_query.multiple_ray_queries.fragment_shader",
+            "--deqp-visibility=hidden",
+            "--deqp-archive-dir=D:\\Codes\\VK-GL-CTS\\external\\vulkancts\\data",
+            "--deqp-shadercache=disable",
+            "--deqp-watchdog=enable",
+            "--deqp-crashhandler=enable",
+            "--deqp-watchdog-total-time-limit=60",
+            "--deqp-watchdog-interval-time-limit=30",
+            "--deqp-log-filename=D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\native-as-values-final-validation-01\\0017-fragment_shader-3ab5d9b180.qpa",
+            "--deqp-vk-validation=enable",
+            "--deqp-vk-print-validation-errors"
+          ],
+          "cwd": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\native-as-values-final-validation-01",
+          "stdout": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\native-as-values-final-validation-01\\0017-fragment_shader-3ab5d9b180.stdout.txt",
+          "qpa": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\native-as-values-final-validation-01\\0017-fragment_shader-3ab5d9b180.qpa",
+          "session_info": {
+            "releaseName": "vulkan-cts-1.4.7.0-103-gd18e4c68543103371715845cd914c71e5859963e",
+            "releaseId": "0xd18e4c68",
+            "targetName": "\"Default\"",
+            "logFormatVersion": "\"0.3.4\"",
+            "vendorID": "0x10de",
+            "deviceID": "0x2216",
+            "deviceName": "NVIDIA GeForce RTX 3080",
+            "commandLineParameters": "\"--deqp-case=dEQP-VK.ray_query.multiple_ray_queries.fragment_shader --deqp-visibility=hidden --deqp-archive-dir=D:\\Codes\\VK-GL-CTS\\external\\vulkancts\\data --deqp-shadercache=disable --deqp-watchdog=enable --deqp-crashhandler=enable --deqp-watchdog-total-time-limit=60 --deqp-watchdog-interval-time-limit=30 --deqp-log-filename=D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\native-as-values-final-validation-01\\0017-fragment_shader-3ab5d9b180.qpa --deqp-vk-validation=enable --deqp-vk-print-validation-errors\""
+          },
+          "raw_sha256": {
+            "stdout": "9c2297db25f4621a68e0fdec597fbe426e1a74db22ef7f2530cf1dbc800d75e4",
+            "qpa": "2245518d06511bc070c19872931c3d0b23e3e5790b5919a44f8f90946ba02ec7"
+          }
+        },
+        {
+          "case": "dEQP-VK.ray_query.misc.dynamic_indexing",
+          "status": "pass",
+          "result": "Pass",
+          "reason": "Pass",
+          "exit_code": 0,
+          "elapsed_seconds": 1.656,
+          "command": [
+            "D:\\Codes\\VK-GL-CTS\\build\\external\\vulkancts\\modules\\vulkan\\Release\\deqp-vk.exe",
+            "--deqp-case=dEQP-VK.ray_query.misc.dynamic_indexing",
+            "--deqp-visibility=hidden",
+            "--deqp-archive-dir=D:\\Codes\\VK-GL-CTS\\external\\vulkancts\\data",
+            "--deqp-shadercache=disable",
+            "--deqp-watchdog=enable",
+            "--deqp-crashhandler=enable",
+            "--deqp-watchdog-total-time-limit=60",
+            "--deqp-watchdog-interval-time-limit=30",
+            "--deqp-log-filename=D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\native-as-values-final-validation-01\\0018-dynamic_indexing-dd91c393d7.qpa",
+            "--deqp-vk-validation=enable",
+            "--deqp-vk-print-validation-errors"
+          ],
+          "cwd": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\native-as-values-final-validation-01",
+          "stdout": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\native-as-values-final-validation-01\\0018-dynamic_indexing-dd91c393d7.stdout.txt",
+          "qpa": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\native-as-values-final-validation-01\\0018-dynamic_indexing-dd91c393d7.qpa",
+          "session_info": {
+            "releaseName": "vulkan-cts-1.4.7.0-103-gd18e4c68543103371715845cd914c71e5859963e",
+            "releaseId": "0xd18e4c68",
+            "targetName": "\"Default\"",
+            "logFormatVersion": "\"0.3.4\"",
+            "vendorID": "0x10de",
+            "deviceID": "0x2216",
+            "deviceName": "NVIDIA GeForce RTX 3080",
+            "commandLineParameters": "\"--deqp-case=dEQP-VK.ray_query.misc.dynamic_indexing --deqp-visibility=hidden --deqp-archive-dir=D:\\Codes\\VK-GL-CTS\\external\\vulkancts\\data --deqp-shadercache=disable --deqp-watchdog=enable --deqp-crashhandler=enable --deqp-watchdog-total-time-limit=60 --deqp-watchdog-interval-time-limit=30 --deqp-log-filename=D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\native-as-values-final-validation-01\\0018-dynamic_indexing-dd91c393d7.qpa --deqp-vk-validation=enable --deqp-vk-print-validation-errors\""
+          },
+          "raw_sha256": {
+            "stdout": "dfa2eaf465a6fdfad7e1ef73f4b1dc2ff3ac4318efb2cfee13cc9352f9dd009b",
+            "qpa": "df34534cd26c317ddcf6f19281ab82b7ea983f46182d7d39a0a135e2599f6c33"
+          }
+        },
+        {
+          "case": "dEQP-VK.ray_query.misc.dynamic_indexing_use_first",
+          "status": "pass",
+          "result": "Pass",
+          "reason": "Pass",
+          "exit_code": 0,
+          "elapsed_seconds": 1.484,
+          "command": [
+            "D:\\Codes\\VK-GL-CTS\\build\\external\\vulkancts\\modules\\vulkan\\Release\\deqp-vk.exe",
+            "--deqp-case=dEQP-VK.ray_query.misc.dynamic_indexing_use_first",
+            "--deqp-visibility=hidden",
+            "--deqp-archive-dir=D:\\Codes\\VK-GL-CTS\\external\\vulkancts\\data",
+            "--deqp-shadercache=disable",
+            "--deqp-watchdog=enable",
+            "--deqp-crashhandler=enable",
+            "--deqp-watchdog-total-time-limit=60",
+            "--deqp-watchdog-interval-time-limit=30",
+            "--deqp-log-filename=D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\native-as-values-final-validation-01\\0019-dynamic_indexing_use_first-4332e09d71.qpa",
+            "--deqp-vk-validation=enable",
+            "--deqp-vk-print-validation-errors"
+          ],
+          "cwd": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\native-as-values-final-validation-01",
+          "stdout": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\native-as-values-final-validation-01\\0019-dynamic_indexing_use_first-4332e09d71.stdout.txt",
+          "qpa": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\native-as-values-final-validation-01\\0019-dynamic_indexing_use_first-4332e09d71.qpa",
+          "session_info": {
+            "releaseName": "vulkan-cts-1.4.7.0-103-gd18e4c68543103371715845cd914c71e5859963e",
+            "releaseId": "0xd18e4c68",
+            "targetName": "\"Default\"",
+            "logFormatVersion": "\"0.3.4\"",
+            "vendorID": "0x10de",
+            "deviceID": "0x2216",
+            "deviceName": "NVIDIA GeForce RTX 3080",
+            "commandLineParameters": "\"--deqp-case=dEQP-VK.ray_query.misc.dynamic_indexing_use_first --deqp-visibility=hidden --deqp-archive-dir=D:\\Codes\\VK-GL-CTS\\external\\vulkancts\\data --deqp-shadercache=disable --deqp-watchdog=enable --deqp-crashhandler=enable --deqp-watchdog-total-time-limit=60 --deqp-watchdog-interval-time-limit=30 --deqp-log-filename=D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\native-as-values-final-validation-01\\0019-dynamic_indexing_use_first-4332e09d71.qpa --deqp-vk-validation=enable --deqp-vk-print-validation-errors\""
+          },
+          "raw_sha256": {
+            "stdout": "092e17085bc704224ba3365b2b5423dd85286f57093183f750fc64fd86a61952",
+            "qpa": "6560370b3c7e1b1141cf8bd6f580f549254c1a4f7f265786aca96fa829c41eb0"
+          }
+        },
+        {
+          "case": "dEQP-VK.ray_query.misc.dynamic_indexing_inbounds",
+          "status": "pass",
+          "result": "Pass",
+          "reason": "Pass",
+          "exit_code": 0,
+          "elapsed_seconds": 1.515,
+          "command": [
+            "D:\\Codes\\VK-GL-CTS\\build\\external\\vulkancts\\modules\\vulkan\\Release\\deqp-vk.exe",
+            "--deqp-case=dEQP-VK.ray_query.misc.dynamic_indexing_inbounds",
+            "--deqp-visibility=hidden",
+            "--deqp-archive-dir=D:\\Codes\\VK-GL-CTS\\external\\vulkancts\\data",
+            "--deqp-shadercache=disable",
+            "--deqp-watchdog=enable",
+            "--deqp-crashhandler=enable",
+            "--deqp-watchdog-total-time-limit=60",
+            "--deqp-watchdog-interval-time-limit=30",
+            "--deqp-log-filename=D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\native-as-values-final-validation-01\\0020-dynamic_indexing_inbounds-d1d296b353.qpa",
+            "--deqp-vk-validation=enable",
+            "--deqp-vk-print-validation-errors"
+          ],
+          "cwd": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\native-as-values-final-validation-01",
+          "stdout": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\native-as-values-final-validation-01\\0020-dynamic_indexing_inbounds-d1d296b353.stdout.txt",
+          "qpa": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\native-as-values-final-validation-01\\0020-dynamic_indexing_inbounds-d1d296b353.qpa",
+          "session_info": {
+            "releaseName": "vulkan-cts-1.4.7.0-103-gd18e4c68543103371715845cd914c71e5859963e",
+            "releaseId": "0xd18e4c68",
+            "targetName": "\"Default\"",
+            "logFormatVersion": "\"0.3.4\"",
+            "vendorID": "0x10de",
+            "deviceID": "0x2216",
+            "deviceName": "NVIDIA GeForce RTX 3080",
+            "commandLineParameters": "\"--deqp-case=dEQP-VK.ray_query.misc.dynamic_indexing_inbounds --deqp-visibility=hidden --deqp-archive-dir=D:\\Codes\\VK-GL-CTS\\external\\vulkancts\\data --deqp-shadercache=disable --deqp-watchdog=enable --deqp-crashhandler=enable --deqp-watchdog-total-time-limit=60 --deqp-watchdog-interval-time-limit=30 --deqp-log-filename=D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\native-as-values-final-validation-01\\0020-dynamic_indexing_inbounds-d1d296b353.qpa --deqp-vk-validation=enable --deqp-vk-print-validation-errors\""
+          },
+          "raw_sha256": {
+            "stdout": "021ce7ad03abf11c389b36b9e4864d2f39ae9236913ebc8edd6ab04f4ab0e4f4",
+            "qpa": "9dc90453e286bae52daa889ca4e07c557e2f37aef243a7594fb3b5906d1794c2"
+          }
+        },
+        {
+          "case": "dEQP-VK.ray_query.misc.shared_memory_consistency",
+          "status": "pass",
+          "result": "Pass",
+          "reason": "Pass",
+          "exit_code": 0,
+          "elapsed_seconds": 1.25,
+          "command": [
+            "D:\\Codes\\VK-GL-CTS\\build\\external\\vulkancts\\modules\\vulkan\\Release\\deqp-vk.exe",
+            "--deqp-case=dEQP-VK.ray_query.misc.shared_memory_consistency",
+            "--deqp-visibility=hidden",
+            "--deqp-archive-dir=D:\\Codes\\VK-GL-CTS\\external\\vulkancts\\data",
+            "--deqp-shadercache=disable",
+            "--deqp-watchdog=enable",
+            "--deqp-crashhandler=enable",
+            "--deqp-watchdog-total-time-limit=60",
+            "--deqp-watchdog-interval-time-limit=30",
+            "--deqp-log-filename=D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\native-as-values-final-validation-01\\0021-shared_memory_consistency-9a7d3e409b.qpa",
+            "--deqp-vk-validation=enable",
+            "--deqp-vk-print-validation-errors"
+          ],
+          "cwd": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\native-as-values-final-validation-01",
+          "stdout": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\native-as-values-final-validation-01\\0021-shared_memory_consistency-9a7d3e409b.stdout.txt",
+          "qpa": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\native-as-values-final-validation-01\\0021-shared_memory_consistency-9a7d3e409b.qpa",
+          "session_info": {
+            "releaseName": "vulkan-cts-1.4.7.0-103-gd18e4c68543103371715845cd914c71e5859963e",
+            "releaseId": "0xd18e4c68",
+            "targetName": "\"Default\"",
+            "logFormatVersion": "\"0.3.4\"",
+            "vendorID": "0x10de",
+            "deviceID": "0x2216",
+            "deviceName": "NVIDIA GeForce RTX 3080",
+            "commandLineParameters": "\"--deqp-case=dEQP-VK.ray_query.misc.shared_memory_consistency --deqp-visibility=hidden --deqp-archive-dir=D:\\Codes\\VK-GL-CTS\\external\\vulkancts\\data --deqp-shadercache=disable --deqp-watchdog=enable --deqp-crashhandler=enable --deqp-watchdog-total-time-limit=60 --deqp-watchdog-interval-time-limit=30 --deqp-log-filename=D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\native-as-values-final-validation-01\\0021-shared_memory_consistency-9a7d3e409b.qpa --deqp-vk-validation=enable --deqp-vk-print-validation-errors\""
+          },
+          "raw_sha256": {
+            "stdout": "5d2d4f1af4e4cbc729dfe34015f27a2fcf7096406c7a7a5eb10eac807c350be5",
+            "qpa": "484ebfe657d365989c14bc4a78d2d2a2371868678e7f4bbad74d6edf4720017b"
+          }
+        }
+      ],
+      "note": "Each case is isolated. NotSupported/noresult/crash/timeout are not passes; this slice is not conformance.",
+      "counts": {
+        "pass": 21,
+        "fail": 0,
+        "notSupported": 0,
+        "crash": 0,
+        "timeout": 0,
+        "noresult": 0
+      },
+      "updated_at_utc": "2026-10-25T21:44:11.422484+00:00",
+      "finished_at_utc": "2026-10-25T21:44:11.422484+00:00",
+      "evidence_run": "native-as-values-final-validation-01",
+      "summary_path": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\native-as-values-final-validation-01\\summary.json",
+      "summary_sha256": "b0caefa5c2d457e9caac8d8d8e3803bc5b283991af2cb4963e468cad9aa1c8f8",
+      "stdout_validation_error_cases": []
+    },
+    {
+      "schema_version": 1,
+      "started_at_utc": "2026-10-25T21:45:40.975927+00:00",
+      "state": "completed",
+      "mode": "ray-query",
+      "cts": "D:\\Codes\\VK-GL-CTS\\build\\external\\vulkancts\\modules\\vulkan\\Release\\deqp-vk.exe",
+      "cts_sha256": "8cf824c598181ef43ccd74d67acce89c9cc6fc47029a164440f0b0ea74af0380",
+      "cts_binary_size": 63076864,
+      "cts_revision_declared": "d18e4c68543103371715845cd914c71e5859963e",
+      "resource_archive": "D:\\Codes\\VK-GL-CTS\\external\\vulkancts\\data",
+      "case_list": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\rq-as-values-full-cases.txt",
+      "case_list_sha256": "72c9b075e6eaf3aa6202273f2592939160592f7440236f4dc71c8635cc2ec83f",
+      "selected_cases": [
+        "dEQP-VK.ray_query.builtin.flow.comp.triangles",
+        "dEQP-VK.ray_query.builtin.flow.comp.aabbs",
+        "dEQP-VK.ray_query.builtin.flow.frag.triangles",
+        "dEQP-VK.ray_query.builtin.flow.vert.triangles",
+        "dEQP-VK.ray_query.builtin.intersectiont.comp.triangles",
+        "dEQP-VK.ray_query.builtin.instancecustomindex.comp.triangles",
+        "dEQP-VK.ray_query.builtin.getintersectioninstanceshaderbindingtablerecordoffsetCommitted.comp.triangles",
+        "dEQP-VK.ray_query.builtin.getintersectioncandidateaabbopaque.comp.aabbs",
+        "dEQP-VK.ray_query.ray_flags.compute_shader.opacity.aabbs.cullopaque",
+        "dEQP-VK.ray_query.ray_flags.compute_shader.opacity.aabbs.noopaque",
+        "dEQP-VK.ray_query.acceleration_structures.empty.traditional_structures.compute_shader.gpu_built.index_none.inactive_triangles",
+        "dEQP-VK.ray_query.acceleration_structures.empty.traditional_structures.compute_shader.gpu_built.index_none.no_primitives_top",
+        "dEQP-VK.ray_query.advanced.using_wrapper_function.comp.triangles",
+        "dEQP-VK.ray_query.acceleration_structures.dynamic_indexing.traditional_structures.dynamic_indexing",
+        "dEQP-VK.ray_query.acceleration_structures.function_argument.traditional_structures.gpu_built",
+        "dEQP-VK.ray_query.multiple_ray_queries.compute_shader",
+        "dEQP-VK.ray_query.multiple_ray_queries.fragment_shader",
+        "dEQP-VK.ray_query.misc.dynamic_indexing",
+        "dEQP-VK.ray_query.misc.dynamic_indexing_use_first",
+        "dEQP-VK.ray_query.misc.dynamic_indexing_inbounds",
+        "dEQP-VK.ray_query.misc.shared_memory_consistency"
+      ],
+      "layer": {
+        "name": "VK_LAYER_VKRT_SOFTWARE_RAY_QUERY",
+        "source_manifest": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rq-goal\\layers\\VkLayer_VKRT_SOFTWARE_RAY_QUERY.json",
+        "source_manifest_sha256": "6ac41421257867794a0d5d40d719fb539abb52952571a23d9e4c9c9196b707ab",
+        "source_library": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rq-goal\\VkLayer_VKRT_SOFTWARE_RAY_QUERY.dll",
+        "snapshot_manifest": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\rq-as-values-final-validation-02\\layer_snapshot\\VkLayer_VKRT_SOFTWARE_RAY_QUERY.json",
+        "snapshot_manifest_sha256": "e6717e3192c7dda7b21c5fde8cc5d2d495407ebc9e523b01a884f9dfb1a15019",
+        "snapshot_library": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\rq-as-values-final-validation-02\\layer_snapshot\\VkLayer_VKRT_SOFTWARE_RAY_QUERY.dll",
+        "library_sha256": "7b65e7d30f5863bfef56fbb8108874212891820c59d032840f56cb792b9c6b69",
+        "snapshot_scope": "manifest_and_layer_library"
+      },
+      "validation": {
+        "manifest": "C:\\VulkanSDK\\1.4.357.0\\Bin\\VkLayer_khronos_validation.json",
+        "manifest_sha256": "20d3ef44fe96aa41fceefab2308892f9d4b346d23eebfe8b5e1690715f23f472",
+        "library": "C:\\VulkanSDK\\1.4.357.0\\Bin\\VkLayer_khronos_validation.dll",
+        "library_sha256": "9725ce7a9225f42f8961c433dacae4cc8fae3a16e95ef1d0a7c7e8bc09132c40",
+        "scope": "original SDK installation, hashed but not copied"
+      },
+      "layer_revision_declared": "worktree-after-4494570-final-lifecycle",
+      "device_info": {
+        "source": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\device-summary.txt",
+        "snapshot": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\rq-as-values-final-validation-02\\device_info.txt",
+        "sha256": "09457ba45ef35d3d5dd67ca7102ddadd89ea4c48686e2040c4a45ae29c885904",
+        "note": "User-supplied device report, not independently validated by this runner."
+      },
+      "environment": {
+        "overrides": {
+          "VK_LOADER_LAYERS_DISABLE": "~implicit~",
+          "VK_INSTANCE_LAYERS": "VK_LAYER_VKRT_SOFTWARE_RAY_QUERY",
+          "VK_LAYER_PATH": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\rq-as-values-final-validation-02\\layer_snapshot;C:\\VulkanSDK\\1.4.357.0\\Bin",
+          "ENABLE_VKRT_SOFTWARE_RAY_QUERY": "1"
+        },
+        "unset_inherited": {},
+        "effective_driver_environment": {
+          "PATH": "C:\\Users\\hylu\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\native\\powershell;C:\\Users\\hylu\\.codex\\tmp\\arg0-windows\\codex-arg0crdVkg;C:\\Users\\hylu\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\native\\libheif\\libheif\\bin;C:\\Users\\hylu\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\native\\jxrlib\\jxrlib\\bin;C:\\Users\\hylu\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\native\\poppler\\Library\\bin;C:\\Users\\hylu\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\bin\\override;C:\\Program Files\\Microsoft MPI\\Bin\\;C:\\VulkanSDK\\1.4.357.0\\Bin;C:\\Program Files (x86)\\Razer Chroma SDK\\bin;C:\\Program Files\\Razer Chroma SDK\\bin;C:\\Program Files\\Meta Horizon\\Support\\oculus-runtime;C:\\Program Files\\NVIDIA GPU Computing Toolkit\\CUDA\\v13.1\\bin\\x64;C:\\Program Files\\NVIDIA GPU Computing Toolkit\\CUDA\\v13.1\\bin;C:\\Program Files (x86)\\ShadowBot;C:\\VulkanSDK\\1.3.239.0\\Bin;C:\\Windows\\system32;C:\\Windows;C:\\Windows\\System32\\Wbem;C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\;C:\\Windows\\System32\\OpenSSH\\;C:\\FILES\\cmake-3.23.0-rc4-windows-x86_64\\bin;C:\\Program Files\\dotnet\\;C:\\FILES\\vcpkg;C:\\Program Files (x86)\\NVIDIA Corporation\\PhysX\\Common;C:\\WINDOWS\\system32;C:\\WINDOWS;C:\\WINDOWS\\System32\\Wbem;C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\;C:\\WINDOWS\\System32\\OpenSSH\\;C:\\Program Files\\NVIDIA Corporation\\NVIDIA app\\NvDLISR;C:\\Program Files\\LLVM\\bin;C:\\Program Files\\PowerShell\\7-preview\\preview;C:\\WINDOWS\\system32;C:\\WINDOWS;C:\\WINDOWS\\System32\\Wbem;C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\;C:\\WINDOWS\\System32\\OpenSSH\\;C:\\Program Files (x86)\\Windows Kits\\10\\Windows Performance Toolkit\\;C:\\Program Files\\doxygen\\bin;C:\\Program Files (x86)\\dotnet\\;C:\\Users\\hylu\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\native\\powershell;C:\\WINDOWS\\system32\\config\\systemprofile\\AppData\\Local\\Microsoft\\WindowsApps;C:\\Program Files (x86)\\Razer\\ChromaBroadcast\\bin;C:\\Program Files\\Razer\\ChromaBroadcast\\bin;C:\\Users\\hylu\\.local\\bin;C:\\Program Files\\Arm\\Mali Developer Tools\\Mali Offline Compiler v6.4.0\\;C:\\Users\\hylu\\AppData\\Local\\Microsoft\\WindowsApps;C:\\FILES\\Microsoft VS Code\\bin;C:\\Users\\hylu\\.dotnet\\tools;C:\\FILES\\aria2-1.36.0-win-64bit-build1\\aria2-1.36.0-win-64bit-build1;C:\\FILES\\RadeonDeveloperToolSuite-2023-02-15-1051\\RadeonDeveloperToolSuite-2023-02-15-1051;C:\\FILES\\ninja-win;C:\\Users\\hylu\\AppData\\Local\\Android\\Sdk\\platform-tools;C:\\Users\\hylu\\AppData\\Local\\Android\\Sdk\\tools;C:\\Users\\hylu\\AppData\\Local\\Andro;D:\\Codes\\fgit;C:\\Users\\hylu\\.dotnet\\tools;C:\\Users\\hylu\\AppData\\Local\\Microsoft\\WinGet\\Links;D:\\conda\\Scripts;C:\\Users\\hylu\\AppData\\Roaming\\npm;D:\\platform-tools-latest-windows\\platform-tools;C:\\Users\\hylu\\AppData\\Local\\Microsoft\\WinGet\\Packages\\yt-dlp.FFmpeg_Microsoft.Winget.Source_8wekyb3d8bbwe\\ffmpeg-N-120424-g03b9180fe3-win64-gpl/bin;D:\\UEAndroidDEV\\5.6\\sdk\\platform-tools;C:\\Users\\hylu\\AppData\\Local\\Microsoft\\WindowsApps;C:\\Program Files\\Graphviz\\bin;C:\\Program Files\\KTX-Software\\bin;C:\\Users\\hylu\\.codex\\vendor_imports\\renderdoc-mcp\\bin;C:\\Program Files\\Git\\cmd;C:\\Program Files\\Neovim\\bin;C:\\Program Files\\nodejs\\;C:\\Program Files\\NVIDIA Corporation\\Nsight Compute 2026.3.1\\;C:\\FILES\\xmake;C:\\Users\\hylu\\.cargo\\bin;C:\\Users\\hylu\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\bin\\fallback;C:\\Users\\hylu\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\node\\bin;C:\\Users\\hylu\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\native\\git\\cmd;C:\\Users\\hylu\\AppData\\Local\\OpenAI\\Codex\\bin\\c602dfdab3808440;C:\\Users\\hylu\\AppData\\Local\\OpenAI\\Codex\\bin\\2993767bd1dfb009",
+          "VK_SDK_PATH": "C:\\VulkanSDK\\1.4.357.0",
+          "VK_LOADER_LAYERS_DISABLE": "~implicit~",
+          "VK_INSTANCE_LAYERS": "VK_LAYER_VKRT_SOFTWARE_RAY_QUERY",
+          "VK_LAYER_PATH": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\rq-as-values-final-validation-02\\layer_snapshot;C:\\VulkanSDK\\1.4.357.0\\Bin"
+        }
+      },
+      "timeout_seconds": 60.0,
+      "cases": [
+        {
+          "case": "dEQP-VK.ray_query.builtin.flow.comp.triangles",
+          "status": "pass",
+          "result": "Pass",
+          "reason": "Pass",
+          "exit_code": 0,
+          "elapsed_seconds": 2.625,
+          "command": [
+            "D:\\Codes\\VK-GL-CTS\\build\\external\\vulkancts\\modules\\vulkan\\Release\\deqp-vk.exe",
+            "--deqp-case=dEQP-VK.ray_query.builtin.flow.comp.triangles",
+            "--deqp-visibility=hidden",
+            "--deqp-archive-dir=D:\\Codes\\VK-GL-CTS\\external\\vulkancts\\data",
+            "--deqp-shadercache=disable",
+            "--deqp-watchdog=enable",
+            "--deqp-crashhandler=enable",
+            "--deqp-watchdog-total-time-limit=60",
+            "--deqp-watchdog-interval-time-limit=30",
+            "--deqp-log-filename=D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\rq-as-values-final-validation-02\\0001-triangles-41109dcf4b.qpa",
+            "--deqp-vk-validation=enable",
+            "--deqp-vk-print-validation-errors"
+          ],
+          "cwd": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\rq-as-values-final-validation-02",
+          "stdout": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\rq-as-values-final-validation-02\\0001-triangles-41109dcf4b.stdout.txt",
+          "qpa": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\rq-as-values-final-validation-02\\0001-triangles-41109dcf4b.qpa",
+          "session_info": {
+            "releaseName": "vulkan-cts-1.4.7.0-103-gd18e4c68543103371715845cd914c71e5859963e",
+            "releaseId": "0xd18e4c68",
+            "targetName": "\"Default\"",
+            "logFormatVersion": "\"0.3.4\"",
+            "vendorID": "0x10de",
+            "deviceID": "0x2216",
+            "deviceName": "NVIDIA GeForce RTX 3080",
+            "commandLineParameters": "\"--deqp-case=dEQP-VK.ray_query.builtin.flow.comp.triangles --deqp-visibility=hidden --deqp-archive-dir=D:\\Codes\\VK-GL-CTS\\external\\vulkancts\\data --deqp-shadercache=disable --deqp-watchdog=enable --deqp-crashhandler=enable --deqp-watchdog-total-time-limit=60 --deqp-watchdog-interval-time-limit=30 --deqp-log-filename=D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\rq-as-values-final-validation-02\\0001-triangles-41109dcf4b.qpa --deqp-vk-validation=enable --deqp-vk-print-validation-errors\""
+          },
+          "raw_sha256": {
+            "stdout": "a8a84e5647a35249c61ffc04a2a41a84571fb77453a27479de2dbc9bf4dabc5e",
+            "qpa": "58ad2d787fa882b425a97ecbcdfb566578cbe838a068a4f6322b5bc27bc1c750"
+          }
+        },
+        {
+          "case": "dEQP-VK.ray_query.builtin.flow.comp.aabbs",
+          "status": "pass",
+          "result": "Pass",
+          "reason": "Pass",
+          "exit_code": 0,
+          "elapsed_seconds": 2.532,
+          "command": [
+            "D:\\Codes\\VK-GL-CTS\\build\\external\\vulkancts\\modules\\vulkan\\Release\\deqp-vk.exe",
+            "--deqp-case=dEQP-VK.ray_query.builtin.flow.comp.aabbs",
+            "--deqp-visibility=hidden",
+            "--deqp-archive-dir=D:\\Codes\\VK-GL-CTS\\external\\vulkancts\\data",
+            "--deqp-shadercache=disable",
+            "--deqp-watchdog=enable",
+            "--deqp-crashhandler=enable",
+            "--deqp-watchdog-total-time-limit=60",
+            "--deqp-watchdog-interval-time-limit=30",
+            "--deqp-log-filename=D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\rq-as-values-final-validation-02\\0002-aabbs-610b16a3b8.qpa",
+            "--deqp-vk-validation=enable",
+            "--deqp-vk-print-validation-errors"
+          ],
+          "cwd": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\rq-as-values-final-validation-02",
+          "stdout": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\rq-as-values-final-validation-02\\0002-aabbs-610b16a3b8.stdout.txt",
+          "qpa": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\rq-as-values-final-validation-02\\0002-aabbs-610b16a3b8.qpa",
+          "session_info": {
+            "releaseName": "vulkan-cts-1.4.7.0-103-gd18e4c68543103371715845cd914c71e5859963e",
+            "releaseId": "0xd18e4c68",
+            "targetName": "\"Default\"",
+            "logFormatVersion": "\"0.3.4\"",
+            "vendorID": "0x10de",
+            "deviceID": "0x2216",
+            "deviceName": "NVIDIA GeForce RTX 3080",
+            "commandLineParameters": "\"--deqp-case=dEQP-VK.ray_query.builtin.flow.comp.aabbs --deqp-visibility=hidden --deqp-archive-dir=D:\\Codes\\VK-GL-CTS\\external\\vulkancts\\data --deqp-shadercache=disable --deqp-watchdog=enable --deqp-crashhandler=enable --deqp-watchdog-total-time-limit=60 --deqp-watchdog-interval-time-limit=30 --deqp-log-filename=D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\rq-as-values-final-validation-02\\0002-aabbs-610b16a3b8.qpa --deqp-vk-validation=enable --deqp-vk-print-validation-errors\""
+          },
+          "raw_sha256": {
+            "stdout": "0337eceff1fcaac6a1ec2f73b0d667f4bd4a2c0ca01422895054d4f67d75d8bf",
+            "qpa": "9e969b4846f2b1ca0ac4ed05fa3852f3b2b712cafe5c0bcbc7c3236c3a25cce1"
+          }
+        },
+        {
+          "case": "dEQP-VK.ray_query.builtin.flow.frag.triangles",
+          "status": "pass",
+          "result": "Pass",
+          "reason": "Pass",
+          "exit_code": 0,
+          "elapsed_seconds": 2.437,
+          "command": [
+            "D:\\Codes\\VK-GL-CTS\\build\\external\\vulkancts\\modules\\vulkan\\Release\\deqp-vk.exe",
+            "--deqp-case=dEQP-VK.ray_query.builtin.flow.frag.triangles",
+            "--deqp-visibility=hidden",
+            "--deqp-archive-dir=D:\\Codes\\VK-GL-CTS\\external\\vulkancts\\data",
+            "--deqp-shadercache=disable",
+            "--deqp-watchdog=enable",
+            "--deqp-crashhandler=enable",
+            "--deqp-watchdog-total-time-limit=60",
+            "--deqp-watchdog-interval-time-limit=30",
+            "--deqp-log-filename=D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\rq-as-values-final-validation-02\\0003-triangles-308ca58ace.qpa",
+            "--deqp-vk-validation=enable",
+            "--deqp-vk-print-validation-errors"
+          ],
+          "cwd": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\rq-as-values-final-validation-02",
+          "stdout": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\rq-as-values-final-validation-02\\0003-triangles-308ca58ace.stdout.txt",
+          "qpa": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\rq-as-values-final-validation-02\\0003-triangles-308ca58ace.qpa",
+          "session_info": {
+            "releaseName": "vulkan-cts-1.4.7.0-103-gd18e4c68543103371715845cd914c71e5859963e",
+            "releaseId": "0xd18e4c68",
+            "targetName": "\"Default\"",
+            "logFormatVersion": "\"0.3.4\"",
+            "vendorID": "0x10de",
+            "deviceID": "0x2216",
+            "deviceName": "NVIDIA GeForce RTX 3080",
+            "commandLineParameters": "\"--deqp-case=dEQP-VK.ray_query.builtin.flow.frag.triangles --deqp-visibility=hidden --deqp-archive-dir=D:\\Codes\\VK-GL-CTS\\external\\vulkancts\\data --deqp-shadercache=disable --deqp-watchdog=enable --deqp-crashhandler=enable --deqp-watchdog-total-time-limit=60 --deqp-watchdog-interval-time-limit=30 --deqp-log-filename=D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\rq-as-values-final-validation-02\\0003-triangles-308ca58ace.qpa --deqp-vk-validation=enable --deqp-vk-print-validation-errors\""
+          },
+          "raw_sha256": {
+            "stdout": "ea1b554a17b1c64f26d683f86e6e352c888225cb2e213d2d519b04a5c1123cd5",
+            "qpa": "b79052d027676bfa402745002cd7bbc7760754b1db8f903bae18996184e307f3"
+          }
+        },
+        {
+          "case": "dEQP-VK.ray_query.builtin.flow.vert.triangles",
+          "status": "pass",
+          "result": "Pass",
+          "reason": "Pass",
+          "exit_code": 0,
+          "elapsed_seconds": 2.594,
+          "command": [
+            "D:\\Codes\\VK-GL-CTS\\build\\external\\vulkancts\\modules\\vulkan\\Release\\deqp-vk.exe",
+            "--deqp-case=dEQP-VK.ray_query.builtin.flow.vert.triangles",
+            "--deqp-visibility=hidden",
+            "--deqp-archive-dir=D:\\Codes\\VK-GL-CTS\\external\\vulkancts\\data",
+            "--deqp-shadercache=disable",
+            "--deqp-watchdog=enable",
+            "--deqp-crashhandler=enable",
+            "--deqp-watchdog-total-time-limit=60",
+            "--deqp-watchdog-interval-time-limit=30",
+            "--deqp-log-filename=D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\rq-as-values-final-validation-02\\0004-triangles-c5c116f61a.qpa",
+            "--deqp-vk-validation=enable",
+            "--deqp-vk-print-validation-errors"
+          ],
+          "cwd": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\rq-as-values-final-validation-02",
+          "stdout": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\rq-as-values-final-validation-02\\0004-triangles-c5c116f61a.stdout.txt",
+          "qpa": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\rq-as-values-final-validation-02\\0004-triangles-c5c116f61a.qpa",
+          "session_info": {
+            "releaseName": "vulkan-cts-1.4.7.0-103-gd18e4c68543103371715845cd914c71e5859963e",
+            "releaseId": "0xd18e4c68",
+            "targetName": "\"Default\"",
+            "logFormatVersion": "\"0.3.4\"",
+            "vendorID": "0x10de",
+            "deviceID": "0x2216",
+            "deviceName": "NVIDIA GeForce RTX 3080",
+            "commandLineParameters": "\"--deqp-case=dEQP-VK.ray_query.builtin.flow.vert.triangles --deqp-visibility=hidden --deqp-archive-dir=D:\\Codes\\VK-GL-CTS\\external\\vulkancts\\data --deqp-shadercache=disable --deqp-watchdog=enable --deqp-crashhandler=enable --deqp-watchdog-total-time-limit=60 --deqp-watchdog-interval-time-limit=30 --deqp-log-filename=D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\rq-as-values-final-validation-02\\0004-triangles-c5c116f61a.qpa --deqp-vk-validation=enable --deqp-vk-print-validation-errors\""
+          },
+          "raw_sha256": {
+            "stdout": "197740733c7ae2ed068e089ee7eba1ab45254997b9160f7554a407302aeb991a",
+            "qpa": "b70bc3fb9f7d389c274679b490490225b616de3f85db8b937abfb13cdb214f88"
+          }
+        },
+        {
+          "case": "dEQP-VK.ray_query.builtin.intersectiont.comp.triangles",
+          "status": "pass",
+          "result": "Pass",
+          "reason": "Pass",
+          "exit_code": 0,
+          "elapsed_seconds": 2.75,
+          "command": [
+            "D:\\Codes\\VK-GL-CTS\\build\\external\\vulkancts\\modules\\vulkan\\Release\\deqp-vk.exe",
+            "--deqp-case=dEQP-VK.ray_query.builtin.intersectiont.comp.triangles",
+            "--deqp-visibility=hidden",
+            "--deqp-archive-dir=D:\\Codes\\VK-GL-CTS\\external\\vulkancts\\data",
+            "--deqp-shadercache=disable",
+            "--deqp-watchdog=enable",
+            "--deqp-crashhandler=enable",
+            "--deqp-watchdog-total-time-limit=60",
+            "--deqp-watchdog-interval-time-limit=30",
+            "--deqp-log-filename=D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\rq-as-values-final-validation-02\\0005-triangles-d943811f08.qpa",
+            "--deqp-vk-validation=enable",
+            "--deqp-vk-print-validation-errors"
+          ],
+          "cwd": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\rq-as-values-final-validation-02",
+          "stdout": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\rq-as-values-final-validation-02\\0005-triangles-d943811f08.stdout.txt",
+          "qpa": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\rq-as-values-final-validation-02\\0005-triangles-d943811f08.qpa",
+          "session_info": {
+            "releaseName": "vulkan-cts-1.4.7.0-103-gd18e4c68543103371715845cd914c71e5859963e",
+            "releaseId": "0xd18e4c68",
+            "targetName": "\"Default\"",
+            "logFormatVersion": "\"0.3.4\"",
+            "vendorID": "0x10de",
+            "deviceID": "0x2216",
+            "deviceName": "NVIDIA GeForce RTX 3080",
+            "commandLineParameters": "\"--deqp-case=dEQP-VK.ray_query.builtin.intersectiont.comp.triangles --deqp-visibility=hidden --deqp-archive-dir=D:\\Codes\\VK-GL-CTS\\external\\vulkancts\\data --deqp-shadercache=disable --deqp-watchdog=enable --deqp-crashhandler=enable --deqp-watchdog-total-time-limit=60 --deqp-watchdog-interval-time-limit=30 --deqp-log-filename=D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\rq-as-values-final-validation-02\\0005-triangles-d943811f08.qpa --deqp-vk-validation=enable --deqp-vk-print-validation-errors\""
+          },
+          "raw_sha256": {
+            "stdout": "b2f1dfeaa66c24b093d3218fdbe955d3a012916790ed0755b723d8e50eb53439",
+            "qpa": "04e1e4224c3a4db0e0bedc3bd8d12bdbb54647ba3378899cfd5cd26754ee6e63"
+          }
+        },
+        {
+          "case": "dEQP-VK.ray_query.builtin.instancecustomindex.comp.triangles",
+          "status": "pass",
+          "result": "Pass",
+          "reason": "Pass",
+          "exit_code": 0,
+          "elapsed_seconds": 2.563,
+          "command": [
+            "D:\\Codes\\VK-GL-CTS\\build\\external\\vulkancts\\modules\\vulkan\\Release\\deqp-vk.exe",
+            "--deqp-case=dEQP-VK.ray_query.builtin.instancecustomindex.comp.triangles",
+            "--deqp-visibility=hidden",
+            "--deqp-archive-dir=D:\\Codes\\VK-GL-CTS\\external\\vulkancts\\data",
+            "--deqp-shadercache=disable",
+            "--deqp-watchdog=enable",
+            "--deqp-crashhandler=enable",
+            "--deqp-watchdog-total-time-limit=60",
+            "--deqp-watchdog-interval-time-limit=30",
+            "--deqp-log-filename=D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\rq-as-values-final-validation-02\\0006-triangles-02d0498de4.qpa",
+            "--deqp-vk-validation=enable",
+            "--deqp-vk-print-validation-errors"
+          ],
+          "cwd": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\rq-as-values-final-validation-02",
+          "stdout": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\rq-as-values-final-validation-02\\0006-triangles-02d0498de4.stdout.txt",
+          "qpa": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\rq-as-values-final-validation-02\\0006-triangles-02d0498de4.qpa",
+          "session_info": {
+            "releaseName": "vulkan-cts-1.4.7.0-103-gd18e4c68543103371715845cd914c71e5859963e",
+            "releaseId": "0xd18e4c68",
+            "targetName": "\"Default\"",
+            "logFormatVersion": "\"0.3.4\"",
+            "vendorID": "0x10de",
+            "deviceID": "0x2216",
+            "deviceName": "NVIDIA GeForce RTX 3080",
+            "commandLineParameters": "\"--deqp-case=dEQP-VK.ray_query.builtin.instancecustomindex.comp.triangles --deqp-visibility=hidden --deqp-archive-dir=D:\\Codes\\VK-GL-CTS\\external\\vulkancts\\data --deqp-shadercache=disable --deqp-watchdog=enable --deqp-crashhandler=enable --deqp-watchdog-total-time-limit=60 --deqp-watchdog-interval-time-limit=30 --deqp-log-filename=D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\rq-as-values-final-validation-02\\0006-triangles-02d0498de4.qpa --deqp-vk-validation=enable --deqp-vk-print-validation-errors\""
+          },
+          "raw_sha256": {
+            "stdout": "077b6b383d2285a47ca74449a9dcad2ed167aa4868b05060f7fca8248087c549",
+            "qpa": "4990465e1ef9e99d042bab15eba2b991ebcea8beb84233871c00ef4ddcd9a998"
+          }
+        },
+        {
+          "case": "dEQP-VK.ray_query.builtin.getintersectioninstanceshaderbindingtablerecordoffsetCommitted.comp.triangles",
+          "status": "pass",
+          "result": "Pass",
+          "reason": "Pass",
+          "exit_code": 0,
+          "elapsed_seconds": 2.343,
+          "command": [
+            "D:\\Codes\\VK-GL-CTS\\build\\external\\vulkancts\\modules\\vulkan\\Release\\deqp-vk.exe",
+            "--deqp-case=dEQP-VK.ray_query.builtin.getintersectioninstanceshaderbindingtablerecordoffsetCommitted.comp.triangles",
+            "--deqp-visibility=hidden",
+            "--deqp-archive-dir=D:\\Codes\\VK-GL-CTS\\external\\vulkancts\\data",
+            "--deqp-shadercache=disable",
+            "--deqp-watchdog=enable",
+            "--deqp-crashhandler=enable",
+            "--deqp-watchdog-total-time-limit=60",
+            "--deqp-watchdog-interval-time-limit=30",
+            "--deqp-log-filename=D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\rq-as-values-final-validation-02\\0007-triangles-f890856c83.qpa",
+            "--deqp-vk-validation=enable",
+            "--deqp-vk-print-validation-errors"
+          ],
+          "cwd": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\rq-as-values-final-validation-02",
+          "stdout": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\rq-as-values-final-validation-02\\0007-triangles-f890856c83.stdout.txt",
+          "qpa": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\rq-as-values-final-validation-02\\0007-triangles-f890856c83.qpa",
+          "session_info": {
+            "releaseName": "vulkan-cts-1.4.7.0-103-gd18e4c68543103371715845cd914c71e5859963e",
+            "releaseId": "0xd18e4c68",
+            "targetName": "\"Default\"",
+            "logFormatVersion": "\"0.3.4\"",
+            "vendorID": "0x10de",
+            "deviceID": "0x2216",
+            "deviceName": "NVIDIA GeForce RTX 3080",
+            "commandLineParameters": "\"--deqp-case=dEQP-VK.ray_query.builtin.getintersectioninstanceshaderbindingtablerecordoffsetCommitted.comp.triangles --deqp-visibility=hidden --deqp-archive-dir=D:\\Codes\\VK-GL-CTS\\external\\vulkancts\\data --deqp-shadercache=disable --deqp-watchdog=enable --deqp-crashhandler=enable --deqp-watchdog-total-time-limit=60 --deqp-watchdog-interval-time-limit=30 --deqp-log-filename=D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\rq-as-values-final-validation-02\\0007-triangles-f890856c83.qpa --deqp-vk-validation=enable --deqp-vk-print-validation-errors\""
+          },
+          "raw_sha256": {
+            "stdout": "9ec0139affe0ea821791ab09d97de3d599ad8fbcd01c6f26be034df6f456ab3c",
+            "qpa": "df5df8e958df0e0d8503c6ec6f2077e1bf45e4fdbbbcf2463e3da029883a05dd"
+          }
+        },
+        {
+          "case": "dEQP-VK.ray_query.builtin.getintersectioncandidateaabbopaque.comp.aabbs",
+          "status": "pass",
+          "result": "Pass",
+          "reason": "Pass",
+          "exit_code": 0,
+          "elapsed_seconds": 2.235,
+          "command": [
+            "D:\\Codes\\VK-GL-CTS\\build\\external\\vulkancts\\modules\\vulkan\\Release\\deqp-vk.exe",
+            "--deqp-case=dEQP-VK.ray_query.builtin.getintersectioncandidateaabbopaque.comp.aabbs",
+            "--deqp-visibility=hidden",
+            "--deqp-archive-dir=D:\\Codes\\VK-GL-CTS\\external\\vulkancts\\data",
+            "--deqp-shadercache=disable",
+            "--deqp-watchdog=enable",
+            "--deqp-crashhandler=enable",
+            "--deqp-watchdog-total-time-limit=60",
+            "--deqp-watchdog-interval-time-limit=30",
+            "--deqp-log-filename=D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\rq-as-values-final-validation-02\\0008-aabbs-714429f9e2.qpa",
+            "--deqp-vk-validation=enable",
+            "--deqp-vk-print-validation-errors"
+          ],
+          "cwd": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\rq-as-values-final-validation-02",
+          "stdout": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\rq-as-values-final-validation-02\\0008-aabbs-714429f9e2.stdout.txt",
+          "qpa": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\rq-as-values-final-validation-02\\0008-aabbs-714429f9e2.qpa",
+          "session_info": {
+            "releaseName": "vulkan-cts-1.4.7.0-103-gd18e4c68543103371715845cd914c71e5859963e",
+            "releaseId": "0xd18e4c68",
+            "targetName": "\"Default\"",
+            "logFormatVersion": "\"0.3.4\"",
+            "vendorID": "0x10de",
+            "deviceID": "0x2216",
+            "deviceName": "NVIDIA GeForce RTX 3080",
+            "commandLineParameters": "\"--deqp-case=dEQP-VK.ray_query.builtin.getintersectioncandidateaabbopaque.comp.aabbs --deqp-visibility=hidden --deqp-archive-dir=D:\\Codes\\VK-GL-CTS\\external\\vulkancts\\data --deqp-shadercache=disable --deqp-watchdog=enable --deqp-crashhandler=enable --deqp-watchdog-total-time-limit=60 --deqp-watchdog-interval-time-limit=30 --deqp-log-filename=D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\rq-as-values-final-validation-02\\0008-aabbs-714429f9e2.qpa --deqp-vk-validation=enable --deqp-vk-print-validation-errors\""
+          },
+          "raw_sha256": {
+            "stdout": "dd8c01adc9cbf174068f1f68273188a456efb497f6f08bbcda569333078115a7",
+            "qpa": "236ba25260ea00039ec3434de3c8b201b1b00d40c5d7d43cde405898be126bda"
+          }
+        },
+        {
+          "case": "dEQP-VK.ray_query.ray_flags.compute_shader.opacity.aabbs.cullopaque",
+          "status": "pass",
+          "result": "Pass",
+          "reason": "Pass",
+          "exit_code": 0,
+          "elapsed_seconds": 2.328,
+          "command": [
+            "D:\\Codes\\VK-GL-CTS\\build\\external\\vulkancts\\modules\\vulkan\\Release\\deqp-vk.exe",
+            "--deqp-case=dEQP-VK.ray_query.ray_flags.compute_shader.opacity.aabbs.cullopaque",
+            "--deqp-visibility=hidden",
+            "--deqp-archive-dir=D:\\Codes\\VK-GL-CTS\\external\\vulkancts\\data",
+            "--deqp-shadercache=disable",
+            "--deqp-watchdog=enable",
+            "--deqp-crashhandler=enable",
+            "--deqp-watchdog-total-time-limit=60",
+            "--deqp-watchdog-interval-time-limit=30",
+            "--deqp-log-filename=D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\rq-as-values-final-validation-02\\0009-cullopaque-3ed449f004.qpa",
+            "--deqp-vk-validation=enable",
+            "--deqp-vk-print-validation-errors"
+          ],
+          "cwd": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\rq-as-values-final-validation-02",
+          "stdout": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\rq-as-values-final-validation-02\\0009-cullopaque-3ed449f004.stdout.txt",
+          "qpa": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\rq-as-values-final-validation-02\\0009-cullopaque-3ed449f004.qpa",
+          "session_info": {
+            "releaseName": "vulkan-cts-1.4.7.0-103-gd18e4c68543103371715845cd914c71e5859963e",
+            "releaseId": "0xd18e4c68",
+            "targetName": "\"Default\"",
+            "logFormatVersion": "\"0.3.4\"",
+            "vendorID": "0x10de",
+            "deviceID": "0x2216",
+            "deviceName": "NVIDIA GeForce RTX 3080",
+            "commandLineParameters": "\"--deqp-case=dEQP-VK.ray_query.ray_flags.compute_shader.opacity.aabbs.cullopaque --deqp-visibility=hidden --deqp-archive-dir=D:\\Codes\\VK-GL-CTS\\external\\vulkancts\\data --deqp-shadercache=disable --deqp-watchdog=enable --deqp-crashhandler=enable --deqp-watchdog-total-time-limit=60 --deqp-watchdog-interval-time-limit=30 --deqp-log-filename=D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\rq-as-values-final-validation-02\\0009-cullopaque-3ed449f004.qpa --deqp-vk-validation=enable --deqp-vk-print-validation-errors\""
+          },
+          "raw_sha256": {
+            "stdout": "3cfbcaef35adf2e501b80706e178737ed391639d6e8f00025ef6cb7560d75ef7",
+            "qpa": "ccc09fc15ecdf4d8fa46611a01d43a6d5bdd031a864061ebeefae5c412aea2b9"
+          }
+        },
+        {
+          "case": "dEQP-VK.ray_query.ray_flags.compute_shader.opacity.aabbs.noopaque",
+          "status": "pass",
+          "result": "Pass",
+          "reason": "Pass",
+          "exit_code": 0,
+          "elapsed_seconds": 2.079,
+          "command": [
+            "D:\\Codes\\VK-GL-CTS\\build\\external\\vulkancts\\modules\\vulkan\\Release\\deqp-vk.exe",
+            "--deqp-case=dEQP-VK.ray_query.ray_flags.compute_shader.opacity.aabbs.noopaque",
+            "--deqp-visibility=hidden",
+            "--deqp-archive-dir=D:\\Codes\\VK-GL-CTS\\external\\vulkancts\\data",
+            "--deqp-shadercache=disable",
+            "--deqp-watchdog=enable",
+            "--deqp-crashhandler=enable",
+            "--deqp-watchdog-total-time-limit=60",
+            "--deqp-watchdog-interval-time-limit=30",
+            "--deqp-log-filename=D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\rq-as-values-final-validation-02\\0010-noopaque-0cf54c9686.qpa",
+            "--deqp-vk-validation=enable",
+            "--deqp-vk-print-validation-errors"
+          ],
+          "cwd": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\rq-as-values-final-validation-02",
+          "stdout": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\rq-as-values-final-validation-02\\0010-noopaque-0cf54c9686.stdout.txt",
+          "qpa": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\rq-as-values-final-validation-02\\0010-noopaque-0cf54c9686.qpa",
+          "session_info": {
+            "releaseName": "vulkan-cts-1.4.7.0-103-gd18e4c68543103371715845cd914c71e5859963e",
+            "releaseId": "0xd18e4c68",
+            "targetName": "\"Default\"",
+            "logFormatVersion": "\"0.3.4\"",
+            "vendorID": "0x10de",
+            "deviceID": "0x2216",
+            "deviceName": "NVIDIA GeForce RTX 3080",
+            "commandLineParameters": "\"--deqp-case=dEQP-VK.ray_query.ray_flags.compute_shader.opacity.aabbs.noopaque --deqp-visibility=hidden --deqp-archive-dir=D:\\Codes\\VK-GL-CTS\\external\\vulkancts\\data --deqp-shadercache=disable --deqp-watchdog=enable --deqp-crashhandler=enable --deqp-watchdog-total-time-limit=60 --deqp-watchdog-interval-time-limit=30 --deqp-log-filename=D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\rq-as-values-final-validation-02\\0010-noopaque-0cf54c9686.qpa --deqp-vk-validation=enable --deqp-vk-print-validation-errors\""
+          },
+          "raw_sha256": {
+            "stdout": "0aa84d099cea6adebd933791a3cb75997c9126dbe84a1d8825b4446b02a98b40",
+            "qpa": "afd289fa3b5584cda63b698f4905cf8a54947d4046c51b9774b4d0196e214983"
+          }
+        },
+        {
+          "case": "dEQP-VK.ray_query.acceleration_structures.empty.traditional_structures.compute_shader.gpu_built.index_none.inactive_triangles",
+          "status": "pass",
+          "result": "Pass",
+          "reason": "Pass",
+          "exit_code": 0,
+          "elapsed_seconds": 2.156,
+          "command": [
+            "D:\\Codes\\VK-GL-CTS\\build\\external\\vulkancts\\modules\\vulkan\\Release\\deqp-vk.exe",
+            "--deqp-case=dEQP-VK.ray_query.acceleration_structures.empty.traditional_structures.compute_shader.gpu_built.index_none.inactive_triangles",
+            "--deqp-visibility=hidden",
+            "--deqp-archive-dir=D:\\Codes\\VK-GL-CTS\\external\\vulkancts\\data",
+            "--deqp-shadercache=disable",
+            "--deqp-watchdog=enable",
+            "--deqp-crashhandler=enable",
+            "--deqp-watchdog-total-time-limit=60",
+            "--deqp-watchdog-interval-time-limit=30",
+            "--deqp-log-filename=D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\rq-as-values-final-validation-02\\0011-inactive_triangles-19dd0bf009.qpa",
+            "--deqp-vk-validation=enable",
+            "--deqp-vk-print-validation-errors"
+          ],
+          "cwd": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\rq-as-values-final-validation-02",
+          "stdout": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\rq-as-values-final-validation-02\\0011-inactive_triangles-19dd0bf009.stdout.txt",
+          "qpa": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\rq-as-values-final-validation-02\\0011-inactive_triangles-19dd0bf009.qpa",
+          "session_info": {
+            "releaseName": "vulkan-cts-1.4.7.0-103-gd18e4c68543103371715845cd914c71e5859963e",
+            "releaseId": "0xd18e4c68",
+            "targetName": "\"Default\"",
+            "logFormatVersion": "\"0.3.4\"",
+            "vendorID": "0x10de",
+            "deviceID": "0x2216",
+            "deviceName": "NVIDIA GeForce RTX 3080",
+            "commandLineParameters": "\"--deqp-case=dEQP-VK.ray_query.acceleration_structures.empty.traditional_structures.compute_shader.gpu_built.index_none.inactive_triangles --deqp-visibility=hidden --deqp-archive-dir=D:\\Codes\\VK-GL-CTS\\external\\vulkancts\\data --deqp-shadercache=disable --deqp-watchdog=enable --deqp-crashhandler=enable --deqp-watchdog-total-time-limit=60 --deqp-watchdog-interval-time-limit=30 --deqp-log-filename=D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\rq-as-values-final-validation-02\\0011-inactive_triangles-19dd0bf009.qpa --deqp-vk-validation=enable --deqp-vk-print-validation-errors\""
+          },
+          "raw_sha256": {
+            "stdout": "972d285f8132a60a28daedd088eb93ee3725f8174415dd0bd9add7838d1fb76d",
+            "qpa": "a4691afc0a78419fef9dbd369e0a407eff8b81dcc21ada922557ca4eea1c5e98"
+          }
+        },
+        {
+          "case": "dEQP-VK.ray_query.acceleration_structures.empty.traditional_structures.compute_shader.gpu_built.index_none.no_primitives_top",
+          "status": "pass",
+          "result": "Pass",
+          "reason": "Pass",
+          "exit_code": 0,
+          "elapsed_seconds": 2.172,
+          "command": [
+            "D:\\Codes\\VK-GL-CTS\\build\\external\\vulkancts\\modules\\vulkan\\Release\\deqp-vk.exe",
+            "--deqp-case=dEQP-VK.ray_query.acceleration_structures.empty.traditional_structures.compute_shader.gpu_built.index_none.no_primitives_top",
+            "--deqp-visibility=hidden",
+            "--deqp-archive-dir=D:\\Codes\\VK-GL-CTS\\external\\vulkancts\\data",
+            "--deqp-shadercache=disable",
+            "--deqp-watchdog=enable",
+            "--deqp-crashhandler=enable",
+            "--deqp-watchdog-total-time-limit=60",
+            "--deqp-watchdog-interval-time-limit=30",
+            "--deqp-log-filename=D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\rq-as-values-final-validation-02\\0012-no_primitives_top-368e913283.qpa",
+            "--deqp-vk-validation=enable",
+            "--deqp-vk-print-validation-errors"
+          ],
+          "cwd": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\rq-as-values-final-validation-02",
+          "stdout": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\rq-as-values-final-validation-02\\0012-no_primitives_top-368e913283.stdout.txt",
+          "qpa": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\rq-as-values-final-validation-02\\0012-no_primitives_top-368e913283.qpa",
+          "session_info": {
+            "releaseName": "vulkan-cts-1.4.7.0-103-gd18e4c68543103371715845cd914c71e5859963e",
+            "releaseId": "0xd18e4c68",
+            "targetName": "\"Default\"",
+            "logFormatVersion": "\"0.3.4\"",
+            "vendorID": "0x10de",
+            "deviceID": "0x2216",
+            "deviceName": "NVIDIA GeForce RTX 3080",
+            "commandLineParameters": "\"--deqp-case=dEQP-VK.ray_query.acceleration_structures.empty.traditional_structures.compute_shader.gpu_built.index_none.no_primitives_top --deqp-visibility=hidden --deqp-archive-dir=D:\\Codes\\VK-GL-CTS\\external\\vulkancts\\data --deqp-shadercache=disable --deqp-watchdog=enable --deqp-crashhandler=enable --deqp-watchdog-total-time-limit=60 --deqp-watchdog-interval-time-limit=30 --deqp-log-filename=D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\rq-as-values-final-validation-02\\0012-no_primitives_top-368e913283.qpa --deqp-vk-validation=enable --deqp-vk-print-validation-errors\""
+          },
+          "raw_sha256": {
+            "stdout": "1bcf828f1992fdd9d9a81b916eec6a33c513aa092abd55df2b2d871856f0fb9d",
+            "qpa": "755a744a31156fc1f09b9bed6caa53d8fbc4d4ae267db617c0f3f1474c54bad0"
+          }
+        },
+        {
+          "case": "dEQP-VK.ray_query.advanced.using_wrapper_function.comp.triangles",
+          "status": "pass",
+          "result": "Pass",
+          "reason": "Pass",
+          "exit_code": 0,
+          "elapsed_seconds": 2.36,
+          "command": [
+            "D:\\Codes\\VK-GL-CTS\\build\\external\\vulkancts\\modules\\vulkan\\Release\\deqp-vk.exe",
+            "--deqp-case=dEQP-VK.ray_query.advanced.using_wrapper_function.comp.triangles",
+            "--deqp-visibility=hidden",
+            "--deqp-archive-dir=D:\\Codes\\VK-GL-CTS\\external\\vulkancts\\data",
+            "--deqp-shadercache=disable",
+            "--deqp-watchdog=enable",
+            "--deqp-crashhandler=enable",
+            "--deqp-watchdog-total-time-limit=60",
+            "--deqp-watchdog-interval-time-limit=30",
+            "--deqp-log-filename=D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\rq-as-values-final-validation-02\\0013-triangles-a00623ea19.qpa",
+            "--deqp-vk-validation=enable",
+            "--deqp-vk-print-validation-errors"
+          ],
+          "cwd": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\rq-as-values-final-validation-02",
+          "stdout": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\rq-as-values-final-validation-02\\0013-triangles-a00623ea19.stdout.txt",
+          "qpa": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\rq-as-values-final-validation-02\\0013-triangles-a00623ea19.qpa",
+          "session_info": {
+            "releaseName": "vulkan-cts-1.4.7.0-103-gd18e4c68543103371715845cd914c71e5859963e",
+            "releaseId": "0xd18e4c68",
+            "targetName": "\"Default\"",
+            "logFormatVersion": "\"0.3.4\"",
+            "vendorID": "0x10de",
+            "deviceID": "0x2216",
+            "deviceName": "NVIDIA GeForce RTX 3080",
+            "commandLineParameters": "\"--deqp-case=dEQP-VK.ray_query.advanced.using_wrapper_function.comp.triangles --deqp-visibility=hidden --deqp-archive-dir=D:\\Codes\\VK-GL-CTS\\external\\vulkancts\\data --deqp-shadercache=disable --deqp-watchdog=enable --deqp-crashhandler=enable --deqp-watchdog-total-time-limit=60 --deqp-watchdog-interval-time-limit=30 --deqp-log-filename=D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\rq-as-values-final-validation-02\\0013-triangles-a00623ea19.qpa --deqp-vk-validation=enable --deqp-vk-print-validation-errors\""
+          },
+          "raw_sha256": {
+            "stdout": "a712d7988def984c9f171fd5694f60775998e5d6246ce170993d38cdaf434dc5",
+            "qpa": "9153a1d212e09b3ed5f73a9052ff9d1036cefedb64b114a71c8059b15cb0fbb5"
+          }
+        },
+        {
+          "case": "dEQP-VK.ray_query.acceleration_structures.dynamic_indexing.traditional_structures.dynamic_indexing",
+          "status": "pass",
+          "result": "Pass",
+          "reason": "Pass",
+          "exit_code": 0,
+          "elapsed_seconds": 2.843,
+          "command": [
+            "D:\\Codes\\VK-GL-CTS\\build\\external\\vulkancts\\modules\\vulkan\\Release\\deqp-vk.exe",
+            "--deqp-case=dEQP-VK.ray_query.acceleration_structures.dynamic_indexing.traditional_structures.dynamic_indexing",
+            "--deqp-visibility=hidden",
+            "--deqp-archive-dir=D:\\Codes\\VK-GL-CTS\\external\\vulkancts\\data",
+            "--deqp-shadercache=disable",
+            "--deqp-watchdog=enable",
+            "--deqp-crashhandler=enable",
+            "--deqp-watchdog-total-time-limit=60",
+            "--deqp-watchdog-interval-time-limit=30",
+            "--deqp-log-filename=D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\rq-as-values-final-validation-02\\0014-dynamic_indexing-409fe91b9c.qpa",
+            "--deqp-vk-validation=enable",
+            "--deqp-vk-print-validation-errors"
+          ],
+          "cwd": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\rq-as-values-final-validation-02",
+          "stdout": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\rq-as-values-final-validation-02\\0014-dynamic_indexing-409fe91b9c.stdout.txt",
+          "qpa": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\rq-as-values-final-validation-02\\0014-dynamic_indexing-409fe91b9c.qpa",
+          "session_info": {
+            "releaseName": "vulkan-cts-1.4.7.0-103-gd18e4c68543103371715845cd914c71e5859963e",
+            "releaseId": "0xd18e4c68",
+            "targetName": "\"Default\"",
+            "logFormatVersion": "\"0.3.4\"",
+            "vendorID": "0x10de",
+            "deviceID": "0x2216",
+            "deviceName": "NVIDIA GeForce RTX 3080",
+            "commandLineParameters": "\"--deqp-case=dEQP-VK.ray_query.acceleration_structures.dynamic_indexing.traditional_structures.dynamic_indexing --deqp-visibility=hidden --deqp-archive-dir=D:\\Codes\\VK-GL-CTS\\external\\vulkancts\\data --deqp-shadercache=disable --deqp-watchdog=enable --deqp-crashhandler=enable --deqp-watchdog-total-time-limit=60 --deqp-watchdog-interval-time-limit=30 --deqp-log-filename=D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\rq-as-values-final-validation-02\\0014-dynamic_indexing-409fe91b9c.qpa --deqp-vk-validation=enable --deqp-vk-print-validation-errors\""
+          },
+          "raw_sha256": {
+            "stdout": "d3ee6062e9a26c676798c2dabac771e245d00ea265db9e9730107454b8040361",
+            "qpa": "f3d46a70d361bc4b806564d2ccc37edb525ce96564e3a109eb6742c4fc607fac"
+          }
+        },
+        {
+          "case": "dEQP-VK.ray_query.acceleration_structures.function_argument.traditional_structures.gpu_built",
+          "status": "pass",
+          "result": "Pass",
+          "reason": "Pass",
+          "exit_code": 0,
+          "elapsed_seconds": 1.985,
+          "command": [
+            "D:\\Codes\\VK-GL-CTS\\build\\external\\vulkancts\\modules\\vulkan\\Release\\deqp-vk.exe",
+            "--deqp-case=dEQP-VK.ray_query.acceleration_structures.function_argument.traditional_structures.gpu_built",
+            "--deqp-visibility=hidden",
+            "--deqp-archive-dir=D:\\Codes\\VK-GL-CTS\\external\\vulkancts\\data",
+            "--deqp-shadercache=disable",
+            "--deqp-watchdog=enable",
+            "--deqp-crashhandler=enable",
+            "--deqp-watchdog-total-time-limit=60",
+            "--deqp-watchdog-interval-time-limit=30",
+            "--deqp-log-filename=D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\rq-as-values-final-validation-02\\0015-gpu_built-c1da2891a9.qpa",
+            "--deqp-vk-validation=enable",
+            "--deqp-vk-print-validation-errors"
+          ],
+          "cwd": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\rq-as-values-final-validation-02",
+          "stdout": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\rq-as-values-final-validation-02\\0015-gpu_built-c1da2891a9.stdout.txt",
+          "qpa": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\rq-as-values-final-validation-02\\0015-gpu_built-c1da2891a9.qpa",
+          "session_info": {
+            "releaseName": "vulkan-cts-1.4.7.0-103-gd18e4c68543103371715845cd914c71e5859963e",
+            "releaseId": "0xd18e4c68",
+            "targetName": "\"Default\"",
+            "logFormatVersion": "\"0.3.4\"",
+            "vendorID": "0x10de",
+            "deviceID": "0x2216",
+            "deviceName": "NVIDIA GeForce RTX 3080",
+            "commandLineParameters": "\"--deqp-case=dEQP-VK.ray_query.acceleration_structures.function_argument.traditional_structures.gpu_built --deqp-visibility=hidden --deqp-archive-dir=D:\\Codes\\VK-GL-CTS\\external\\vulkancts\\data --deqp-shadercache=disable --deqp-watchdog=enable --deqp-crashhandler=enable --deqp-watchdog-total-time-limit=60 --deqp-watchdog-interval-time-limit=30 --deqp-log-filename=D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\rq-as-values-final-validation-02\\0015-gpu_built-c1da2891a9.qpa --deqp-vk-validation=enable --deqp-vk-print-validation-errors\""
+          },
+          "raw_sha256": {
+            "stdout": "32c165136fda13b58a391f1c7c5b3ac5a0b3d11233644322f96fe44988a8c1c1",
+            "qpa": "5257689b16f7bf5ea9326032a2715bab4def9713e9fc4f1dcd1acf890b418a5c"
+          }
+        },
+        {
+          "case": "dEQP-VK.ray_query.multiple_ray_queries.compute_shader",
+          "status": "pass",
+          "result": "Pass",
+          "reason": "pass",
+          "exit_code": 0,
+          "elapsed_seconds": 2.969,
+          "command": [
+            "D:\\Codes\\VK-GL-CTS\\build\\external\\vulkancts\\modules\\vulkan\\Release\\deqp-vk.exe",
+            "--deqp-case=dEQP-VK.ray_query.multiple_ray_queries.compute_shader",
+            "--deqp-visibility=hidden",
+            "--deqp-archive-dir=D:\\Codes\\VK-GL-CTS\\external\\vulkancts\\data",
+            "--deqp-shadercache=disable",
+            "--deqp-watchdog=enable",
+            "--deqp-crashhandler=enable",
+            "--deqp-watchdog-total-time-limit=60",
+            "--deqp-watchdog-interval-time-limit=30",
+            "--deqp-log-filename=D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\rq-as-values-final-validation-02\\0016-compute_shader-9e006a52bf.qpa",
+            "--deqp-vk-validation=enable",
+            "--deqp-vk-print-validation-errors"
+          ],
+          "cwd": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\rq-as-values-final-validation-02",
+          "stdout": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\rq-as-values-final-validation-02\\0016-compute_shader-9e006a52bf.stdout.txt",
+          "qpa": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\rq-as-values-final-validation-02\\0016-compute_shader-9e006a52bf.qpa",
+          "session_info": {
+            "releaseName": "vulkan-cts-1.4.7.0-103-gd18e4c68543103371715845cd914c71e5859963e",
+            "releaseId": "0xd18e4c68",
+            "targetName": "\"Default\"",
+            "logFormatVersion": "\"0.3.4\"",
+            "vendorID": "0x10de",
+            "deviceID": "0x2216",
+            "deviceName": "NVIDIA GeForce RTX 3080",
+            "commandLineParameters": "\"--deqp-case=dEQP-VK.ray_query.multiple_ray_queries.compute_shader --deqp-visibility=hidden --deqp-archive-dir=D:\\Codes\\VK-GL-CTS\\external\\vulkancts\\data --deqp-shadercache=disable --deqp-watchdog=enable --deqp-crashhandler=enable --deqp-watchdog-total-time-limit=60 --deqp-watchdog-interval-time-limit=30 --deqp-log-filename=D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\rq-as-values-final-validation-02\\0016-compute_shader-9e006a52bf.qpa --deqp-vk-validation=enable --deqp-vk-print-validation-errors\""
+          },
+          "raw_sha256": {
+            "stdout": "baaa4e8bdfc33ec9995875d2960e56766842e2a4f98a8291c94958ef29590f39",
+            "qpa": "3eef7850a1f4448ea05cbaa6f061cbd9e95a721ab22e4fef267b32d6d980f564"
+          }
+        },
+        {
+          "case": "dEQP-VK.ray_query.multiple_ray_queries.fragment_shader",
+          "status": "pass",
+          "result": "Pass",
+          "reason": "pass",
+          "exit_code": 0,
+          "elapsed_seconds": 3.11,
+          "command": [
+            "D:\\Codes\\VK-GL-CTS\\build\\external\\vulkancts\\modules\\vulkan\\Release\\deqp-vk.exe",
+            "--deqp-case=dEQP-VK.ray_query.multiple_ray_queries.fragment_shader",
+            "--deqp-visibility=hidden",
+            "--deqp-archive-dir=D:\\Codes\\VK-GL-CTS\\external\\vulkancts\\data",
+            "--deqp-shadercache=disable",
+            "--deqp-watchdog=enable",
+            "--deqp-crashhandler=enable",
+            "--deqp-watchdog-total-time-limit=60",
+            "--deqp-watchdog-interval-time-limit=30",
+            "--deqp-log-filename=D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\rq-as-values-final-validation-02\\0017-fragment_shader-3ab5d9b180.qpa",
+            "--deqp-vk-validation=enable",
+            "--deqp-vk-print-validation-errors"
+          ],
+          "cwd": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\rq-as-values-final-validation-02",
+          "stdout": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\rq-as-values-final-validation-02\\0017-fragment_shader-3ab5d9b180.stdout.txt",
+          "qpa": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\rq-as-values-final-validation-02\\0017-fragment_shader-3ab5d9b180.qpa",
+          "session_info": {
+            "releaseName": "vulkan-cts-1.4.7.0-103-gd18e4c68543103371715845cd914c71e5859963e",
+            "releaseId": "0xd18e4c68",
+            "targetName": "\"Default\"",
+            "logFormatVersion": "\"0.3.4\"",
+            "vendorID": "0x10de",
+            "deviceID": "0x2216",
+            "deviceName": "NVIDIA GeForce RTX 3080",
+            "commandLineParameters": "\"--deqp-case=dEQP-VK.ray_query.multiple_ray_queries.fragment_shader --deqp-visibility=hidden --deqp-archive-dir=D:\\Codes\\VK-GL-CTS\\external\\vulkancts\\data --deqp-shadercache=disable --deqp-watchdog=enable --deqp-crashhandler=enable --deqp-watchdog-total-time-limit=60 --deqp-watchdog-interval-time-limit=30 --deqp-log-filename=D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\rq-as-values-final-validation-02\\0017-fragment_shader-3ab5d9b180.qpa --deqp-vk-validation=enable --deqp-vk-print-validation-errors\""
+          },
+          "raw_sha256": {
+            "stdout": "73d50ba1faa402c35bdf8a0b4b1cc0d0b8508fdfdb2b77efb97d77c30ea8e706",
+            "qpa": "936e70b23356d56d73f9ac346826f5505d779ce945230b60539bee40396f116f"
+          }
+        },
+        {
+          "case": "dEQP-VK.ray_query.misc.dynamic_indexing",
+          "status": "pass",
+          "result": "Pass",
+          "reason": "Pass",
+          "exit_code": 0,
+          "elapsed_seconds": 3.875,
+          "command": [
+            "D:\\Codes\\VK-GL-CTS\\build\\external\\vulkancts\\modules\\vulkan\\Release\\deqp-vk.exe",
+            "--deqp-case=dEQP-VK.ray_query.misc.dynamic_indexing",
+            "--deqp-visibility=hidden",
+            "--deqp-archive-dir=D:\\Codes\\VK-GL-CTS\\external\\vulkancts\\data",
+            "--deqp-shadercache=disable",
+            "--deqp-watchdog=enable",
+            "--deqp-crashhandler=enable",
+            "--deqp-watchdog-total-time-limit=60",
+            "--deqp-watchdog-interval-time-limit=30",
+            "--deqp-log-filename=D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\rq-as-values-final-validation-02\\0018-dynamic_indexing-dd91c393d7.qpa",
+            "--deqp-vk-validation=enable",
+            "--deqp-vk-print-validation-errors"
+          ],
+          "cwd": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\rq-as-values-final-validation-02",
+          "stdout": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\rq-as-values-final-validation-02\\0018-dynamic_indexing-dd91c393d7.stdout.txt",
+          "qpa": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\rq-as-values-final-validation-02\\0018-dynamic_indexing-dd91c393d7.qpa",
+          "session_info": {
+            "releaseName": "vulkan-cts-1.4.7.0-103-gd18e4c68543103371715845cd914c71e5859963e",
+            "releaseId": "0xd18e4c68",
+            "targetName": "\"Default\"",
+            "logFormatVersion": "\"0.3.4\"",
+            "vendorID": "0x10de",
+            "deviceID": "0x2216",
+            "deviceName": "NVIDIA GeForce RTX 3080",
+            "commandLineParameters": "\"--deqp-case=dEQP-VK.ray_query.misc.dynamic_indexing --deqp-visibility=hidden --deqp-archive-dir=D:\\Codes\\VK-GL-CTS\\external\\vulkancts\\data --deqp-shadercache=disable --deqp-watchdog=enable --deqp-crashhandler=enable --deqp-watchdog-total-time-limit=60 --deqp-watchdog-interval-time-limit=30 --deqp-log-filename=D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\rq-as-values-final-validation-02\\0018-dynamic_indexing-dd91c393d7.qpa --deqp-vk-validation=enable --deqp-vk-print-validation-errors\""
+          },
+          "raw_sha256": {
+            "stdout": "3ed9389460a4a224d7f60456243009aee4de8cc0bae964c9e288adbc2ba4ebb1",
+            "qpa": "309d2f8040eca7e8a0bc7f9189e03793159597264153e79595c55fa8b4a50876"
+          }
+        },
+        {
+          "case": "dEQP-VK.ray_query.misc.dynamic_indexing_use_first",
+          "status": "pass",
+          "result": "Pass",
+          "reason": "Pass",
+          "exit_code": 0,
+          "elapsed_seconds": 2.797,
+          "command": [
+            "D:\\Codes\\VK-GL-CTS\\build\\external\\vulkancts\\modules\\vulkan\\Release\\deqp-vk.exe",
+            "--deqp-case=dEQP-VK.ray_query.misc.dynamic_indexing_use_first",
+            "--deqp-visibility=hidden",
+            "--deqp-archive-dir=D:\\Codes\\VK-GL-CTS\\external\\vulkancts\\data",
+            "--deqp-shadercache=disable",
+            "--deqp-watchdog=enable",
+            "--deqp-crashhandler=enable",
+            "--deqp-watchdog-total-time-limit=60",
+            "--deqp-watchdog-interval-time-limit=30",
+            "--deqp-log-filename=D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\rq-as-values-final-validation-02\\0019-dynamic_indexing_use_first-4332e09d71.qpa",
+            "--deqp-vk-validation=enable",
+            "--deqp-vk-print-validation-errors"
+          ],
+          "cwd": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\rq-as-values-final-validation-02",
+          "stdout": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\rq-as-values-final-validation-02\\0019-dynamic_indexing_use_first-4332e09d71.stdout.txt",
+          "qpa": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\rq-as-values-final-validation-02\\0019-dynamic_indexing_use_first-4332e09d71.qpa",
+          "session_info": {
+            "releaseName": "vulkan-cts-1.4.7.0-103-gd18e4c68543103371715845cd914c71e5859963e",
+            "releaseId": "0xd18e4c68",
+            "targetName": "\"Default\"",
+            "logFormatVersion": "\"0.3.4\"",
+            "vendorID": "0x10de",
+            "deviceID": "0x2216",
+            "deviceName": "NVIDIA GeForce RTX 3080",
+            "commandLineParameters": "\"--deqp-case=dEQP-VK.ray_query.misc.dynamic_indexing_use_first --deqp-visibility=hidden --deqp-archive-dir=D:\\Codes\\VK-GL-CTS\\external\\vulkancts\\data --deqp-shadercache=disable --deqp-watchdog=enable --deqp-crashhandler=enable --deqp-watchdog-total-time-limit=60 --deqp-watchdog-interval-time-limit=30 --deqp-log-filename=D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\rq-as-values-final-validation-02\\0019-dynamic_indexing_use_first-4332e09d71.qpa --deqp-vk-validation=enable --deqp-vk-print-validation-errors\""
+          },
+          "raw_sha256": {
+            "stdout": "f52da2a11fd19577a6d4ec20f312151534c787a17ab285dc685a4818966dd2d6",
+            "qpa": "04500371ffc29238f7f649854e34e99f45fbc998f47dccc63279f7405e80156a"
+          }
+        },
+        {
+          "case": "dEQP-VK.ray_query.misc.dynamic_indexing_inbounds",
+          "status": "pass",
+          "result": "Pass",
+          "reason": "Pass",
+          "exit_code": 0,
+          "elapsed_seconds": 3.656,
+          "command": [
+            "D:\\Codes\\VK-GL-CTS\\build\\external\\vulkancts\\modules\\vulkan\\Release\\deqp-vk.exe",
+            "--deqp-case=dEQP-VK.ray_query.misc.dynamic_indexing_inbounds",
+            "--deqp-visibility=hidden",
+            "--deqp-archive-dir=D:\\Codes\\VK-GL-CTS\\external\\vulkancts\\data",
+            "--deqp-shadercache=disable",
+            "--deqp-watchdog=enable",
+            "--deqp-crashhandler=enable",
+            "--deqp-watchdog-total-time-limit=60",
+            "--deqp-watchdog-interval-time-limit=30",
+            "--deqp-log-filename=D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\rq-as-values-final-validation-02\\0020-dynamic_indexing_inbounds-d1d296b353.qpa",
+            "--deqp-vk-validation=enable",
+            "--deqp-vk-print-validation-errors"
+          ],
+          "cwd": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\rq-as-values-final-validation-02",
+          "stdout": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\rq-as-values-final-validation-02\\0020-dynamic_indexing_inbounds-d1d296b353.stdout.txt",
+          "qpa": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\rq-as-values-final-validation-02\\0020-dynamic_indexing_inbounds-d1d296b353.qpa",
+          "session_info": {
+            "releaseName": "vulkan-cts-1.4.7.0-103-gd18e4c68543103371715845cd914c71e5859963e",
+            "releaseId": "0xd18e4c68",
+            "targetName": "\"Default\"",
+            "logFormatVersion": "\"0.3.4\"",
+            "vendorID": "0x10de",
+            "deviceID": "0x2216",
+            "deviceName": "NVIDIA GeForce RTX 3080",
+            "commandLineParameters": "\"--deqp-case=dEQP-VK.ray_query.misc.dynamic_indexing_inbounds --deqp-visibility=hidden --deqp-archive-dir=D:\\Codes\\VK-GL-CTS\\external\\vulkancts\\data --deqp-shadercache=disable --deqp-watchdog=enable --deqp-crashhandler=enable --deqp-watchdog-total-time-limit=60 --deqp-watchdog-interval-time-limit=30 --deqp-log-filename=D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\rq-as-values-final-validation-02\\0020-dynamic_indexing_inbounds-d1d296b353.qpa --deqp-vk-validation=enable --deqp-vk-print-validation-errors\""
+          },
+          "raw_sha256": {
+            "stdout": "4c942fa7df55408f3e45482fce9b51774b52fac7f351dc398946cf9b47701406",
+            "qpa": "dec8f371312584356421885bfc938a3e1f57df9a76f2eed5e62c9021676ef575"
+          }
+        },
+        {
+          "case": "dEQP-VK.ray_query.misc.shared_memory_consistency",
+          "status": "pass",
+          "result": "Pass",
+          "reason": "Pass",
+          "exit_code": 0,
+          "elapsed_seconds": 2.141,
+          "command": [
+            "D:\\Codes\\VK-GL-CTS\\build\\external\\vulkancts\\modules\\vulkan\\Release\\deqp-vk.exe",
+            "--deqp-case=dEQP-VK.ray_query.misc.shared_memory_consistency",
+            "--deqp-visibility=hidden",
+            "--deqp-archive-dir=D:\\Codes\\VK-GL-CTS\\external\\vulkancts\\data",
+            "--deqp-shadercache=disable",
+            "--deqp-watchdog=enable",
+            "--deqp-crashhandler=enable",
+            "--deqp-watchdog-total-time-limit=60",
+            "--deqp-watchdog-interval-time-limit=30",
+            "--deqp-log-filename=D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\rq-as-values-final-validation-02\\0021-shared_memory_consistency-9a7d3e409b.qpa",
+            "--deqp-vk-validation=enable",
+            "--deqp-vk-print-validation-errors"
+          ],
+          "cwd": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\rq-as-values-final-validation-02",
+          "stdout": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\rq-as-values-final-validation-02\\0021-shared_memory_consistency-9a7d3e409b.stdout.txt",
+          "qpa": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\rq-as-values-final-validation-02\\0021-shared_memory_consistency-9a7d3e409b.qpa",
+          "session_info": {
+            "releaseName": "vulkan-cts-1.4.7.0-103-gd18e4c68543103371715845cd914c71e5859963e",
+            "releaseId": "0xd18e4c68",
+            "targetName": "\"Default\"",
+            "logFormatVersion": "\"0.3.4\"",
+            "vendorID": "0x10de",
+            "deviceID": "0x2216",
+            "deviceName": "NVIDIA GeForce RTX 3080",
+            "commandLineParameters": "\"--deqp-case=dEQP-VK.ray_query.misc.shared_memory_consistency --deqp-visibility=hidden --deqp-archive-dir=D:\\Codes\\VK-GL-CTS\\external\\vulkancts\\data --deqp-shadercache=disable --deqp-watchdog=enable --deqp-crashhandler=enable --deqp-watchdog-total-time-limit=60 --deqp-watchdog-interval-time-limit=30 --deqp-log-filename=D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\rq-as-values-final-validation-02\\0021-shared_memory_consistency-9a7d3e409b.qpa --deqp-vk-validation=enable --deqp-vk-print-validation-errors\""
+          },
+          "raw_sha256": {
+            "stdout": "fcdc9976eb60a32346ecc5d259eefd2e268a0321c0a4e71494787fa28dbc7991",
+            "qpa": "7d8c3226bee9eb322926b87c74efd7625f1c5c68fa8dc56eb6fda64baa47274c"
+          }
+        }
+      ],
+      "note": "Each case is isolated. NotSupported/noresult/crash/timeout are not passes; this slice is not conformance.",
+      "counts": {
+        "pass": 21,
+        "fail": 0,
+        "notSupported": 0,
+        "crash": 0,
+        "timeout": 0,
+        "noresult": 0
+      },
+      "updated_at_utc": "2026-10-25T21:46:35.722698+00:00",
+      "finished_at_utc": "2026-10-25T21:46:35.722698+00:00",
+      "evidence_run": "rq-as-values-final-validation-02",
+      "summary_path": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\rq-as-values-final-validation-02\\summary.json",
+      "summary_sha256": "17ba2b96f6fe188a2fdc0adddb3a7677816acf350fe4c4261420757a408d96da",
+      "stdout_validation_error_cases": []
+    },
+    {
+      "schema_version": 1,
+      "started_at_utc": "2026-10-25T21:47:31.179009+00:00",
+      "state": "completed",
+      "mode": "ray-tracing",
+      "cts": "D:\\Codes\\VK-GL-CTS\\build\\external\\vulkancts\\modules\\vulkan\\Release\\deqp-vk.exe",
+      "cts_sha256": "8cf824c598181ef43ccd74d67acce89c9cc6fc47029a164440f0b0ea74af0380",
+      "cts_binary_size": 63076864,
+      "cts_revision_declared": "d18e4c68543103371715845cd914c71e5859963e",
+      "resource_archive": "D:\\Codes\\VK-GL-CTS\\external\\vulkancts\\data",
+      "case_list": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\rtp-cases.txt",
+      "case_list_sha256": "daf70018e4858db2c3c94059dfb455af13fe7e7f97ab421a5de4f78c44c3746c",
+      "selected_cases": [
+        "dEQP-VK.ray_tracing_pipeline.builtin.launchidext.rgen_1_1_1",
+        "dEQP-VK.ray_tracing_pipeline.builtin.launchidext.miss_1_1_1",
+        "dEQP-VK.ray_tracing_pipeline.builtin.launchidext.chit_1_1_1",
+        "dEQP-VK.ray_tracing_pipeline.builtin.hitkindext.ahit_aabs",
+        "dEQP-VK.ray_tracing_pipeline.acceleration_structures.update.traditional_structures.gpu.normal.vertices",
+        "dEQP-VK.ray_tracing_pipeline.acceleration_structures.empty.traditional_structures.gpu_built.index_none.no_primitives_top"
+      ],
+      "layer": {
+        "name": "VK_LAYER_HANYANG_ray_tracing_fallback",
+        "source_manifest": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-emitter\\VkLayer_hanyang_ray_tracing_fallback.json",
+        "source_manifest_sha256": "81574e6625e116b8a40d7b7bfb0424611a161cfa2155909ddbc3d147cdee1472",
+        "source_library": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-emitter\\VkLayer_hanyang_ray_tracing_fallback.dll",
+        "snapshot_manifest": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\rtp-typed-emitter-01\\layer_snapshot\\VkLayer_hanyang_ray_tracing_fallback.json",
+        "snapshot_manifest_sha256": "79da3575a4c68044b799cf7a6fe9e5e09d9388bc405c4e3ad826917840bb3e7f",
+        "snapshot_library": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\rtp-typed-emitter-01\\layer_snapshot\\VkLayer_hanyang_ray_tracing_fallback.dll",
+        "library_sha256": "bd26b61251ca8c4ee17415ea7751f975a5c530a7e5d0776b43fc50a5875e0758",
+        "snapshot_scope": "manifest_and_layer_library"
+      },
+      "validation": null,
+      "layer_revision_declared": "worktree-after-4494570-typed-component",
+      "device_info": {
+        "source": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\device-summary.txt",
+        "snapshot": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\rtp-typed-emitter-01\\device_info.txt",
+        "sha256": "09457ba45ef35d3d5dd67ca7102ddadd89ea4c48686e2040c4a45ae29c885904",
+        "note": "User-supplied device report, not independently validated by this runner."
+      },
+      "environment": {
+        "overrides": {
+          "VK_LOADER_LAYERS_DISABLE": "~implicit~",
+          "VK_INSTANCE_LAYERS": "VK_LAYER_HANYANG_ray_tracing_fallback",
+          "VK_LAYER_PATH": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\rtp-typed-emitter-01\\layer_snapshot"
+        },
+        "unset_inherited": {},
+        "effective_driver_environment": {
+          "PATH": "C:\\Users\\hylu\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\native\\powershell;C:\\Users\\hylu\\.codex\\tmp\\arg0-windows\\codex-arg0crdVkg;C:\\Users\\hylu\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\native\\libheif\\libheif\\bin;C:\\Users\\hylu\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\native\\jxrlib\\jxrlib\\bin;C:\\Users\\hylu\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\native\\poppler\\Library\\bin;C:\\Users\\hylu\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\bin\\override;C:\\Program Files\\Microsoft MPI\\Bin\\;C:\\VulkanSDK\\1.4.357.0\\Bin;C:\\Program Files (x86)\\Razer Chroma SDK\\bin;C:\\Program Files\\Razer Chroma SDK\\bin;C:\\Program Files\\Meta Horizon\\Support\\oculus-runtime;C:\\Program Files\\NVIDIA GPU Computing Toolkit\\CUDA\\v13.1\\bin\\x64;C:\\Program Files\\NVIDIA GPU Computing Toolkit\\CUDA\\v13.1\\bin;C:\\Program Files (x86)\\ShadowBot;C:\\VulkanSDK\\1.3.239.0\\Bin;C:\\Windows\\system32;C:\\Windows;C:\\Windows\\System32\\Wbem;C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\;C:\\Windows\\System32\\OpenSSH\\;C:\\FILES\\cmake-3.23.0-rc4-windows-x86_64\\bin;C:\\Program Files\\dotnet\\;C:\\FILES\\vcpkg;C:\\Program Files (x86)\\NVIDIA Corporation\\PhysX\\Common;C:\\WINDOWS\\system32;C:\\WINDOWS;C:\\WINDOWS\\System32\\Wbem;C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\;C:\\WINDOWS\\System32\\OpenSSH\\;C:\\Program Files\\NVIDIA Corporation\\NVIDIA app\\NvDLISR;C:\\Program Files\\LLVM\\bin;C:\\Program Files\\PowerShell\\7-preview\\preview;C:\\WINDOWS\\system32;C:\\WINDOWS;C:\\WINDOWS\\System32\\Wbem;C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\;C:\\WINDOWS\\System32\\OpenSSH\\;C:\\Program Files (x86)\\Windows Kits\\10\\Windows Performance Toolkit\\;C:\\Program Files\\doxygen\\bin;C:\\Program Files (x86)\\dotnet\\;C:\\Users\\hylu\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\native\\powershell;C:\\WINDOWS\\system32\\config\\systemprofile\\AppData\\Local\\Microsoft\\WindowsApps;C:\\Program Files (x86)\\Razer\\ChromaBroadcast\\bin;C:\\Program Files\\Razer\\ChromaBroadcast\\bin;C:\\Users\\hylu\\.local\\bin;C:\\Program Files\\Arm\\Mali Developer Tools\\Mali Offline Compiler v6.4.0\\;C:\\Users\\hylu\\AppData\\Local\\Microsoft\\WindowsApps;C:\\FILES\\Microsoft VS Code\\bin;C:\\Users\\hylu\\.dotnet\\tools;C:\\FILES\\aria2-1.36.0-win-64bit-build1\\aria2-1.36.0-win-64bit-build1;C:\\FILES\\RadeonDeveloperToolSuite-2023-02-15-1051\\RadeonDeveloperToolSuite-2023-02-15-1051;C:\\FILES\\ninja-win;C:\\Users\\hylu\\AppData\\Local\\Android\\Sdk\\platform-tools;C:\\Users\\hylu\\AppData\\Local\\Android\\Sdk\\tools;C:\\Users\\hylu\\AppData\\Local\\Andro;D:\\Codes\\fgit;C:\\Users\\hylu\\.dotnet\\tools;C:\\Users\\hylu\\AppData\\Local\\Microsoft\\WinGet\\Links;D:\\conda\\Scripts;C:\\Users\\hylu\\AppData\\Roaming\\npm;D:\\platform-tools-latest-windows\\platform-tools;C:\\Users\\hylu\\AppData\\Local\\Microsoft\\WinGet\\Packages\\yt-dlp.FFmpeg_Microsoft.Winget.Source_8wekyb3d8bbwe\\ffmpeg-N-120424-g03b9180fe3-win64-gpl/bin;D:\\UEAndroidDEV\\5.6\\sdk\\platform-tools;C:\\Users\\hylu\\AppData\\Local\\Microsoft\\WindowsApps;C:\\Program Files\\Graphviz\\bin;C:\\Program Files\\KTX-Software\\bin;C:\\Users\\hylu\\.codex\\vendor_imports\\renderdoc-mcp\\bin;C:\\Program Files\\Git\\cmd;C:\\Program Files\\Neovim\\bin;C:\\Program Files\\nodejs\\;C:\\Program Files\\NVIDIA Corporation\\Nsight Compute 2026.3.1\\;C:\\FILES\\xmake;C:\\Users\\hylu\\.cargo\\bin;C:\\Users\\hylu\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\bin\\fallback;C:\\Users\\hylu\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\node\\bin;C:\\Users\\hylu\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\native\\git\\cmd;C:\\Users\\hylu\\AppData\\Local\\OpenAI\\Codex\\bin\\c602dfdab3808440;C:\\Users\\hylu\\AppData\\Local\\OpenAI\\Codex\\bin\\2993767bd1dfb009",
+          "VK_SDK_PATH": "C:\\VulkanSDK\\1.4.357.0",
+          "VK_LOADER_LAYERS_DISABLE": "~implicit~",
+          "VK_INSTANCE_LAYERS": "VK_LAYER_HANYANG_ray_tracing_fallback",
+          "VK_LAYER_PATH": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\rtp-typed-emitter-01\\layer_snapshot"
+        }
+      },
+      "timeout_seconds": 60.0,
+      "cases": [
+        {
+          "case": "dEQP-VK.ray_tracing_pipeline.builtin.launchidext.rgen_1_1_1",
+          "status": "pass",
+          "result": "Pass",
+          "reason": "pass",
+          "exit_code": 0,
+          "elapsed_seconds": 1.829,
+          "command": [
+            "D:\\Codes\\VK-GL-CTS\\build\\external\\vulkancts\\modules\\vulkan\\Release\\deqp-vk.exe",
+            "--deqp-case=dEQP-VK.ray_tracing_pipeline.builtin.launchidext.rgen_1_1_1",
+            "--deqp-visibility=hidden",
+            "--deqp-archive-dir=D:\\Codes\\VK-GL-CTS\\external\\vulkancts\\data",
+            "--deqp-shadercache=disable",
+            "--deqp-watchdog=enable",
+            "--deqp-crashhandler=enable",
+            "--deqp-watchdog-total-time-limit=60",
+            "--deqp-watchdog-interval-time-limit=30",
+            "--deqp-log-filename=D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\rtp-typed-emitter-01\\0001-rgen_1_1_1-c355a755e4.qpa"
+          ],
+          "cwd": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\rtp-typed-emitter-01",
+          "stdout": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\rtp-typed-emitter-01\\0001-rgen_1_1_1-c355a755e4.stdout.txt",
+          "qpa": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\rtp-typed-emitter-01\\0001-rgen_1_1_1-c355a755e4.qpa",
+          "session_info": {
+            "releaseName": "vulkan-cts-1.4.7.0-103-gd18e4c68543103371715845cd914c71e5859963e",
+            "releaseId": "0xd18e4c68",
+            "targetName": "\"Default\"",
+            "logFormatVersion": "\"0.3.4\"",
+            "vendorID": "0x10de",
+            "deviceID": "0x2216",
+            "deviceName": "NVIDIA GeForce RTX 3080",
+            "commandLineParameters": "\"--deqp-case=dEQP-VK.ray_tracing_pipeline.builtin.launchidext.rgen_1_1_1 --deqp-visibility=hidden --deqp-archive-dir=D:\\Codes\\VK-GL-CTS\\external\\vulkancts\\data --deqp-shadercache=disable --deqp-watchdog=enable --deqp-crashhandler=enable --deqp-watchdog-total-time-limit=60 --deqp-watchdog-interval-time-limit=30 --deqp-log-filename=D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\rtp-typed-emitter-01\\0001-rgen_1_1_1-c355a755e4.qpa\""
+          },
+          "raw_sha256": {
+            "stdout": "13e30f17185236251abb2dcb558ae117b4a46194bea7d93d4b0f3d4ca9a9156a",
+            "qpa": "a20987340b41dc72384e88cd1899e557eb250abf5fe1dfb3465a4218587254cf"
+          }
+        },
+        {
+          "case": "dEQP-VK.ray_tracing_pipeline.builtin.launchidext.miss_1_1_1",
+          "status": "fail",
+          "result": "Fail",
+          "reason": "Object check() failed: 'VkPipeline = 0' at vkRef.hpp:56",
+          "exit_code": 1,
+          "elapsed_seconds": 2.016,
+          "command": [
+            "D:\\Codes\\VK-GL-CTS\\build\\external\\vulkancts\\modules\\vulkan\\Release\\deqp-vk.exe",
+            "--deqp-case=dEQP-VK.ray_tracing_pipeline.builtin.launchidext.miss_1_1_1",
+            "--deqp-visibility=hidden",
+            "--deqp-archive-dir=D:\\Codes\\VK-GL-CTS\\external\\vulkancts\\data",
+            "--deqp-shadercache=disable",
+            "--deqp-watchdog=enable",
+            "--deqp-crashhandler=enable",
+            "--deqp-watchdog-total-time-limit=60",
+            "--deqp-watchdog-interval-time-limit=30",
+            "--deqp-log-filename=D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\rtp-typed-emitter-01\\0002-miss_1_1_1-56d4f8c506.qpa"
+          ],
+          "cwd": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\rtp-typed-emitter-01",
+          "stdout": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\rtp-typed-emitter-01\\0002-miss_1_1_1-56d4f8c506.stdout.txt",
+          "qpa": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\rtp-typed-emitter-01\\0002-miss_1_1_1-56d4f8c506.qpa",
+          "session_info": {
+            "releaseName": "vulkan-cts-1.4.7.0-103-gd18e4c68543103371715845cd914c71e5859963e",
+            "releaseId": "0xd18e4c68",
+            "targetName": "\"Default\"",
+            "logFormatVersion": "\"0.3.4\"",
+            "vendorID": "0x10de",
+            "deviceID": "0x2216",
+            "deviceName": "NVIDIA GeForce RTX 3080",
+            "commandLineParameters": "\"--deqp-case=dEQP-VK.ray_tracing_pipeline.builtin.launchidext.miss_1_1_1 --deqp-visibility=hidden --deqp-archive-dir=D:\\Codes\\VK-GL-CTS\\external\\vulkancts\\data --deqp-shadercache=disable --deqp-watchdog=enable --deqp-crashhandler=enable --deqp-watchdog-total-time-limit=60 --deqp-watchdog-interval-time-limit=30 --deqp-log-filename=D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\rtp-typed-emitter-01\\0002-miss_1_1_1-56d4f8c506.qpa\""
+          },
+          "raw_sha256": {
+            "stdout": "f9598407ca3889e5eb75298a8d559cb99601a232d1e76d1a0bd9f07f6f9907d7",
+            "qpa": "b8c77fd7849e24fce6f9f79a654b14fde01bbe18a6cbef1a6aec5d93b8529fed"
+          }
+        },
+        {
+          "case": "dEQP-VK.ray_tracing_pipeline.builtin.launchidext.chit_1_1_1",
+          "status": "fail",
+          "result": "Fail",
+          "reason": "Object check() failed: 'VkPipeline = 0' at vkRef.hpp:56",
+          "exit_code": 1,
+          "elapsed_seconds": 1.844,
+          "command": [
+            "D:\\Codes\\VK-GL-CTS\\build\\external\\vulkancts\\modules\\vulkan\\Release\\deqp-vk.exe",
+            "--deqp-case=dEQP-VK.ray_tracing_pipeline.builtin.launchidext.chit_1_1_1",
+            "--deqp-visibility=hidden",
+            "--deqp-archive-dir=D:\\Codes\\VK-GL-CTS\\external\\vulkancts\\data",
+            "--deqp-shadercache=disable",
+            "--deqp-watchdog=enable",
+            "--deqp-crashhandler=enable",
+            "--deqp-watchdog-total-time-limit=60",
+            "--deqp-watchdog-interval-time-limit=30",
+            "--deqp-log-filename=D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\rtp-typed-emitter-01\\0003-chit_1_1_1-3ed33d0a3a.qpa"
+          ],
+          "cwd": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\rtp-typed-emitter-01",
+          "stdout": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\rtp-typed-emitter-01\\0003-chit_1_1_1-3ed33d0a3a.stdout.txt",
+          "qpa": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\rtp-typed-emitter-01\\0003-chit_1_1_1-3ed33d0a3a.qpa",
+          "session_info": {
+            "releaseName": "vulkan-cts-1.4.7.0-103-gd18e4c68543103371715845cd914c71e5859963e",
+            "releaseId": "0xd18e4c68",
+            "targetName": "\"Default\"",
+            "logFormatVersion": "\"0.3.4\"",
+            "vendorID": "0x10de",
+            "deviceID": "0x2216",
+            "deviceName": "NVIDIA GeForce RTX 3080",
+            "commandLineParameters": "\"--deqp-case=dEQP-VK.ray_tracing_pipeline.builtin.launchidext.chit_1_1_1 --deqp-visibility=hidden --deqp-archive-dir=D:\\Codes\\VK-GL-CTS\\external\\vulkancts\\data --deqp-shadercache=disable --deqp-watchdog=enable --deqp-crashhandler=enable --deqp-watchdog-total-time-limit=60 --deqp-watchdog-interval-time-limit=30 --deqp-log-filename=D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\rtp-typed-emitter-01\\0003-chit_1_1_1-3ed33d0a3a.qpa\""
+          },
+          "raw_sha256": {
+            "stdout": "1cf304be31247fc7e2de0e23a13689939bfccd2788c057587e525e9b9e995c92",
+            "qpa": "062b2b3ab002ba9eac43208858f45133e47e5dd005e2895b85f7302c7fab15cb"
+          }
+        },
+        {
+          "case": "dEQP-VK.ray_tracing_pipeline.builtin.hitkindext.ahit_aabs",
+          "status": "fail",
+          "result": "Fail",
+          "reason": "Object check() failed: 'VkPipeline = 0' at vkRef.hpp:56",
+          "exit_code": 1,
+          "elapsed_seconds": 2.11,
+          "command": [
+            "D:\\Codes\\VK-GL-CTS\\build\\external\\vulkancts\\modules\\vulkan\\Release\\deqp-vk.exe",
+            "--deqp-case=dEQP-VK.ray_tracing_pipeline.builtin.hitkindext.ahit_aabs",
+            "--deqp-visibility=hidden",
+            "--deqp-archive-dir=D:\\Codes\\VK-GL-CTS\\external\\vulkancts\\data",
+            "--deqp-shadercache=disable",
+            "--deqp-watchdog=enable",
+            "--deqp-crashhandler=enable",
+            "--deqp-watchdog-total-time-limit=60",
+            "--deqp-watchdog-interval-time-limit=30",
+            "--deqp-log-filename=D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\rtp-typed-emitter-01\\0004-ahit_aabs-2c44ca3e81.qpa"
+          ],
+          "cwd": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\rtp-typed-emitter-01",
+          "stdout": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\rtp-typed-emitter-01\\0004-ahit_aabs-2c44ca3e81.stdout.txt",
+          "qpa": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\rtp-typed-emitter-01\\0004-ahit_aabs-2c44ca3e81.qpa",
+          "session_info": {
+            "releaseName": "vulkan-cts-1.4.7.0-103-gd18e4c68543103371715845cd914c71e5859963e",
+            "releaseId": "0xd18e4c68",
+            "targetName": "\"Default\"",
+            "logFormatVersion": "\"0.3.4\"",
+            "vendorID": "0x10de",
+            "deviceID": "0x2216",
+            "deviceName": "NVIDIA GeForce RTX 3080",
+            "commandLineParameters": "\"--deqp-case=dEQP-VK.ray_tracing_pipeline.builtin.hitkindext.ahit_aabs --deqp-visibility=hidden --deqp-archive-dir=D:\\Codes\\VK-GL-CTS\\external\\vulkancts\\data --deqp-shadercache=disable --deqp-watchdog=enable --deqp-crashhandler=enable --deqp-watchdog-total-time-limit=60 --deqp-watchdog-interval-time-limit=30 --deqp-log-filename=D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\rtp-typed-emitter-01\\0004-ahit_aabs-2c44ca3e81.qpa\""
+          },
+          "raw_sha256": {
+            "stdout": "16af5e0063154997c08899296fdec2a31e06478fa948218c40fe3c40d02511e8",
+            "qpa": "211ac086f544f06edd7cffa364ca9e2a4bdcef799fde36df8bb8f8363ee48bba"
+          }
+        },
+        {
+          "case": "dEQP-VK.ray_tracing_pipeline.acceleration_structures.update.traditional_structures.gpu.normal.vertices",
+          "status": "pass",
+          "result": "Pass",
+          "reason": "Pass",
+          "exit_code": 0,
+          "elapsed_seconds": 2.281,
+          "command": [
+            "D:\\Codes\\VK-GL-CTS\\build\\external\\vulkancts\\modules\\vulkan\\Release\\deqp-vk.exe",
+            "--deqp-case=dEQP-VK.ray_tracing_pipeline.acceleration_structures.update.traditional_structures.gpu.normal.vertices",
+            "--deqp-visibility=hidden",
+            "--deqp-archive-dir=D:\\Codes\\VK-GL-CTS\\external\\vulkancts\\data",
+            "--deqp-shadercache=disable",
+            "--deqp-watchdog=enable",
+            "--deqp-crashhandler=enable",
+            "--deqp-watchdog-total-time-limit=60",
+            "--deqp-watchdog-interval-time-limit=30",
+            "--deqp-log-filename=D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\rtp-typed-emitter-01\\0005-vertices-b835de18b5.qpa"
+          ],
+          "cwd": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\rtp-typed-emitter-01",
+          "stdout": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\rtp-typed-emitter-01\\0005-vertices-b835de18b5.stdout.txt",
+          "qpa": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\rtp-typed-emitter-01\\0005-vertices-b835de18b5.qpa",
+          "session_info": {
+            "releaseName": "vulkan-cts-1.4.7.0-103-gd18e4c68543103371715845cd914c71e5859963e",
+            "releaseId": "0xd18e4c68",
+            "targetName": "\"Default\"",
+            "logFormatVersion": "\"0.3.4\"",
+            "vendorID": "0x10de",
+            "deviceID": "0x2216",
+            "deviceName": "NVIDIA GeForce RTX 3080",
+            "commandLineParameters": "\"--deqp-case=dEQP-VK.ray_tracing_pipeline.acceleration_structures.update.traditional_structures.gpu.normal.vertices --deqp-visibility=hidden --deqp-archive-dir=D:\\Codes\\VK-GL-CTS\\external\\vulkancts\\data --deqp-shadercache=disable --deqp-watchdog=enable --deqp-crashhandler=enable --deqp-watchdog-total-time-limit=60 --deqp-watchdog-interval-time-limit=30 --deqp-log-filename=D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\rtp-typed-emitter-01\\0005-vertices-b835de18b5.qpa\""
+          },
+          "raw_sha256": {
+            "stdout": "f0acc403dcfdfda3702ffc8b307136baa288b77cad219b6aa213888cd4580311",
+            "qpa": "4d96d6fee1b94cb36a0e1502b258e6bb6683042bf3255101dbc7b49fd6057733"
+          }
+        },
+        {
+          "case": "dEQP-VK.ray_tracing_pipeline.acceleration_structures.empty.traditional_structures.gpu_built.index_none.no_primitives_top",
+          "status": "pass",
+          "result": "Pass",
+          "reason": "Pass",
+          "exit_code": 0,
+          "elapsed_seconds": 2.031,
+          "command": [
+            "D:\\Codes\\VK-GL-CTS\\build\\external\\vulkancts\\modules\\vulkan\\Release\\deqp-vk.exe",
+            "--deqp-case=dEQP-VK.ray_tracing_pipeline.acceleration_structures.empty.traditional_structures.gpu_built.index_none.no_primitives_top",
+            "--deqp-visibility=hidden",
+            "--deqp-archive-dir=D:\\Codes\\VK-GL-CTS\\external\\vulkancts\\data",
+            "--deqp-shadercache=disable",
+            "--deqp-watchdog=enable",
+            "--deqp-crashhandler=enable",
+            "--deqp-watchdog-total-time-limit=60",
+            "--deqp-watchdog-interval-time-limit=30",
+            "--deqp-log-filename=D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\rtp-typed-emitter-01\\0006-no_primitives_top-dd33e62507.qpa"
+          ],
+          "cwd": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\rtp-typed-emitter-01",
+          "stdout": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\rtp-typed-emitter-01\\0006-no_primitives_top-dd33e62507.stdout.txt",
+          "qpa": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\rtp-typed-emitter-01\\0006-no_primitives_top-dd33e62507.qpa",
+          "session_info": {
+            "releaseName": "vulkan-cts-1.4.7.0-103-gd18e4c68543103371715845cd914c71e5859963e",
+            "releaseId": "0xd18e4c68",
+            "targetName": "\"Default\"",
+            "logFormatVersion": "\"0.3.4\"",
+            "vendorID": "0x10de",
+            "deviceID": "0x2216",
+            "deviceName": "NVIDIA GeForce RTX 3080",
+            "commandLineParameters": "\"--deqp-case=dEQP-VK.ray_tracing_pipeline.acceleration_structures.empty.traditional_structures.gpu_built.index_none.no_primitives_top --deqp-visibility=hidden --deqp-archive-dir=D:\\Codes\\VK-GL-CTS\\external\\vulkancts\\data --deqp-shadercache=disable --deqp-watchdog=enable --deqp-crashhandler=enable --deqp-watchdog-total-time-limit=60 --deqp-watchdog-interval-time-limit=30 --deqp-log-filename=D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\rtp-typed-emitter-01\\0006-no_primitives_top-dd33e62507.qpa\""
+          },
+          "raw_sha256": {
+            "stdout": "1c2e0df7e8e8915ebb8ff34b5c9c3b6523c4f5a09eaf463ab3aabd391d34d155",
+            "qpa": "2de0249f0a3230d8fe554342d67fbf56ff444853046a6e92b514c0da53b6b640"
+          }
+        }
+      ],
+      "note": "Each case is isolated. NotSupported/noresult/crash/timeout are not passes; this slice is not conformance.",
+      "counts": {
+        "pass": 3,
+        "fail": 3,
+        "notSupported": 0,
+        "crash": 0,
+        "timeout": 0,
+        "noresult": 0
+      },
+      "updated_at_utc": "2026-10-25T21:47:43.420255+00:00",
+      "finished_at_utc": "2026-10-25T21:47:43.420255+00:00",
+      "evidence_run": "rtp-typed-emitter-01",
+      "summary_path": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\rtp-typed-emitter-01\\summary.json",
+      "summary_sha256": "1d7fbd1a902ecdd6c6f0555eb57d39af7235741a98152a0e56405a2ba0b8bd37",
+      "stdout_validation_error_cases": []
+    }
+  ],
+  "intermediate_runs": [
+    {
+      "evidence_run": "rq-as-values-01",
+      "summary_path": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\rq-as-values-01\\summary.json",
+      "summary_sha256": "2926334e435d0efe9f0db7fc7091f66fe440ba6cae6e15db9bf23cb478657abd",
+      "mode": "ray-query",
+      "cts_sha256": "8cf824c598181ef43ccd74d67acce89c9cc6fc47029a164440f0b0ea74af0380",
+      "layer": {
+        "name": "VK_LAYER_VKRT_SOFTWARE_RAY_QUERY",
+        "source_manifest": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rq-goal\\layers\\VkLayer_VKRT_SOFTWARE_RAY_QUERY.json",
+        "source_manifest_sha256": "6ac41421257867794a0d5d40d719fb539abb52952571a23d9e4c9c9196b707ab",
+        "source_library": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rq-goal\\VkLayer_VKRT_SOFTWARE_RAY_QUERY.dll",
+        "snapshot_manifest": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\rq-as-values-01\\layer_snapshot\\VkLayer_VKRT_SOFTWARE_RAY_QUERY.json",
+        "snapshot_manifest_sha256": "64421a53bddd8ce2a9449212a934c4ad3c0c82c7a9c086999a4fab5889f01bfb",
+        "snapshot_library": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\rq-as-values-01\\layer_snapshot\\VkLayer_VKRT_SOFTWARE_RAY_QUERY.dll",
+        "library_sha256": "ecdce4caf8dfa60639b8815801126a7aae45409a550cb814c3e48053d38d5295",
+        "snapshot_scope": "manifest_and_layer_library"
+      },
+      "validation": null,
+      "layer_revision_declared": "worktree-after-4494570",
+      "counts": {
+        "pass": 2,
+        "fail": 0,
+        "notSupported": 0,
+        "crash": 0,
+        "timeout": 0,
+        "noresult": 0
+      },
+      "state": "completed",
+      "selected_cases": [
+        "dEQP-VK.ray_query.advanced.using_wrapper_function.comp.triangles",
+        "dEQP-VK.ray_query.acceleration_structures.dynamic_indexing.traditional_structures.dynamic_indexing"
+      ],
+      "failed_cases": []
+    },
+    {
+      "evidence_run": "native-as-values-01",
+      "summary_path": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\native-as-values-01\\summary.json",
+      "summary_sha256": "05805e120de1cad3ca3cd6aa4379fa31c9011a72ba66113da1672d7f115e751a",
+      "mode": "native",
+      "cts_sha256": "8cf824c598181ef43ccd74d67acce89c9cc6fc47029a164440f0b0ea74af0380",
+      "layer": null,
+      "validation": null,
+      "layer_revision_declared": "worktree-after-4494570",
+      "counts": {
+        "pass": 7,
+        "fail": 0,
+        "notSupported": 0,
+        "crash": 0,
+        "timeout": 0,
+        "noresult": 0
+      },
+      "state": "completed",
+      "selected_cases": [
+        "dEQP-VK.ray_query.acceleration_structures.function_argument.traditional_structures.gpu_built",
+        "dEQP-VK.ray_query.multiple_ray_queries.compute_shader",
+        "dEQP-VK.ray_query.multiple_ray_queries.fragment_shader",
+        "dEQP-VK.ray_query.misc.dynamic_indexing",
+        "dEQP-VK.ray_query.misc.dynamic_indexing_use_first",
+        "dEQP-VK.ray_query.misc.dynamic_indexing_inbounds",
+        "dEQP-VK.ray_query.misc.shared_memory_consistency"
+      ],
+      "failed_cases": []
+    },
+    {
+      "evidence_run": "native-as-values-validation-01",
+      "summary_path": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\native-as-values-validation-01\\summary.json",
+      "summary_sha256": "39ae6d1489c07869adc87241fee89639717930a3f51a9c83ce1906d2880a5393",
+      "mode": "native",
+      "cts_sha256": "8cf824c598181ef43ccd74d67acce89c9cc6fc47029a164440f0b0ea74af0380",
+      "layer": null,
+      "validation": {
+        "manifest": "C:\\VulkanSDK\\1.4.357.0\\Bin\\VkLayer_khronos_validation.json",
+        "manifest_sha256": "20d3ef44fe96aa41fceefab2308892f9d4b346d23eebfe8b5e1690715f23f472",
+        "library": "C:\\VulkanSDK\\1.4.357.0\\Bin\\VkLayer_khronos_validation.dll",
+        "library_sha256": "9725ce7a9225f42f8961c433dacae4cc8fae3a16e95ef1d0a7c7e8bc09132c40",
+        "scope": "original SDK installation, hashed but not copied"
+      },
+      "layer_revision_declared": "worktree-after-4494570",
+      "counts": {
+        "pass": 3,
+        "fail": 0,
+        "notSupported": 0,
+        "crash": 0,
+        "timeout": 0,
+        "noresult": 0
+      },
+      "state": "completed",
+      "selected_cases": [
+        "dEQP-VK.ray_query.acceleration_structures.dynamic_indexing.traditional_structures.dynamic_indexing",
+        "dEQP-VK.ray_query.acceleration_structures.function_argument.traditional_structures.gpu_built",
+        "dEQP-VK.ray_query.multiple_ray_queries.compute_shader"
+      ],
+      "failed_cases": []
+    },
+    {
+      "evidence_run": "rq-as-values-full-01",
+      "summary_path": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\rq-as-values-full-01\\summary.json",
+      "summary_sha256": "dbbd9bced756a89d168296cdf9c3cb6ca9964f71bb8745b20ba1b3f0c6ebe37e",
+      "mode": "ray-query",
+      "cts_sha256": "8cf824c598181ef43ccd74d67acce89c9cc6fc47029a164440f0b0ea74af0380",
+      "layer": {
+        "name": "VK_LAYER_VKRT_SOFTWARE_RAY_QUERY",
+        "source_manifest": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rq-goal\\layers\\VkLayer_VKRT_SOFTWARE_RAY_QUERY.json",
+        "source_manifest_sha256": "6ac41421257867794a0d5d40d719fb539abb52952571a23d9e4c9c9196b707ab",
+        "source_library": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rq-goal\\VkLayer_VKRT_SOFTWARE_RAY_QUERY.dll",
+        "snapshot_manifest": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\rq-as-values-full-01\\layer_snapshot\\VkLayer_VKRT_SOFTWARE_RAY_QUERY.json",
+        "snapshot_manifest_sha256": "f63685100d1ec486ecaec0c937766a202ede6da5ecb5364b6840af5351edfcf1",
+        "snapshot_library": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\rq-as-values-full-01\\layer_snapshot\\VkLayer_VKRT_SOFTWARE_RAY_QUERY.dll",
+        "library_sha256": "d3336a0bf99f01ecb9aaa6614f0aa19d63ac75cb7fa20f2d9219b8fd8fd5ec6b",
+        "snapshot_scope": "manifest_and_layer_library"
+      },
+      "validation": null,
+      "layer_revision_declared": "worktree-after-4494570",
+      "counts": {
+        "pass": 17,
+        "fail": 4,
+        "notSupported": 0,
+        "crash": 0,
+        "timeout": 0,
+        "noresult": 0
+      },
+      "state": "completed",
+      "selected_cases": [
+        "dEQP-VK.ray_query.builtin.flow.comp.triangles",
+        "dEQP-VK.ray_query.builtin.flow.comp.aabbs",
+        "dEQP-VK.ray_query.builtin.flow.frag.triangles",
+        "dEQP-VK.ray_query.builtin.flow.vert.triangles",
+        "dEQP-VK.ray_query.builtin.intersectiont.comp.triangles",
+        "dEQP-VK.ray_query.builtin.instancecustomindex.comp.triangles",
+        "dEQP-VK.ray_query.builtin.getintersectioninstanceshaderbindingtablerecordoffsetCommitted.comp.triangles",
+        "dEQP-VK.ray_query.builtin.getintersectioncandidateaabbopaque.comp.aabbs",
+        "dEQP-VK.ray_query.ray_flags.compute_shader.opacity.aabbs.cullopaque",
+        "dEQP-VK.ray_query.ray_flags.compute_shader.opacity.aabbs.noopaque",
+        "dEQP-VK.ray_query.acceleration_structures.empty.traditional_structures.compute_shader.gpu_built.index_none.inactive_triangles",
+        "dEQP-VK.ray_query.acceleration_structures.empty.traditional_structures.compute_shader.gpu_built.index_none.no_primitives_top",
+        "dEQP-VK.ray_query.advanced.using_wrapper_function.comp.triangles",
+        "dEQP-VK.ray_query.acceleration_structures.dynamic_indexing.traditional_structures.dynamic_indexing",
+        "dEQP-VK.ray_query.acceleration_structures.function_argument.traditional_structures.gpu_built",
+        "dEQP-VK.ray_query.multiple_ray_queries.compute_shader",
+        "dEQP-VK.ray_query.multiple_ray_queries.fragment_shader",
+        "dEQP-VK.ray_query.misc.dynamic_indexing",
+        "dEQP-VK.ray_query.misc.dynamic_indexing_use_first",
+        "dEQP-VK.ray_query.misc.dynamic_indexing_inbounds",
+        "dEQP-VK.ray_query.misc.shared_memory_consistency"
+      ],
+      "failed_cases": [
+        {
+          "case": "dEQP-VK.ray_query.misc.dynamic_indexing",
+          "status": "fail",
+          "result": "Fail",
+          "reason": "Unexpected value found at position 1 in the output buffer: expected 1 but found 0 at vktRayQueryMiscTests.cpp:525",
+          "exit_code": 1,
+          "elapsed_seconds": 3.515,
+          "command": [
+            "D:\\Codes\\VK-GL-CTS\\build\\external\\vulkancts\\modules\\vulkan\\Release\\deqp-vk.exe",
+            "--deqp-case=dEQP-VK.ray_query.misc.dynamic_indexing",
+            "--deqp-visibility=hidden",
+            "--deqp-archive-dir=D:\\Codes\\VK-GL-CTS\\external\\vulkancts\\data",
+            "--deqp-shadercache=disable",
+            "--deqp-watchdog=enable",
+            "--deqp-crashhandler=enable",
+            "--deqp-watchdog-total-time-limit=60",
+            "--deqp-watchdog-interval-time-limit=30",
+            "--deqp-log-filename=D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\rq-as-values-full-01\\0018-dynamic_indexing-dd91c393d7.qpa"
+          ],
+          "cwd": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\rq-as-values-full-01",
+          "stdout": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\rq-as-values-full-01\\0018-dynamic_indexing-dd91c393d7.stdout.txt",
+          "qpa": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\rq-as-values-full-01\\0018-dynamic_indexing-dd91c393d7.qpa",
+          "session_info": {
+            "releaseName": "vulkan-cts-1.4.7.0-103-gd18e4c68543103371715845cd914c71e5859963e",
+            "releaseId": "0xd18e4c68",
+            "targetName": "\"Default\"",
+            "logFormatVersion": "\"0.3.4\"",
+            "vendorID": "0x10de",
+            "deviceID": "0x2216",
+            "deviceName": "NVIDIA GeForce RTX 3080",
+            "commandLineParameters": "\"--deqp-case=dEQP-VK.ray_query.misc.dynamic_indexing --deqp-visibility=hidden --deqp-archive-dir=D:\\Codes\\VK-GL-CTS\\external\\vulkancts\\data --deqp-shadercache=disable --deqp-watchdog=enable --deqp-crashhandler=enable --deqp-watchdog-total-time-limit=60 --deqp-watchdog-interval-time-limit=30 --deqp-log-filename=D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\rq-as-values-full-01\\0018-dynamic_indexing-dd91c393d7.qpa\""
+          },
+          "raw_sha256": {
+            "stdout": "efa6a40d2feae24139271c880e7357297d33be722bfe5d2c8046d8749f1a4645",
+            "qpa": "a06a620ff8087154baa1d0ed7dddae71d97782d1a6e479289f007755740b08fb"
+          }
+        },
+        {
+          "case": "dEQP-VK.ray_query.misc.dynamic_indexing_use_first",
+          "status": "fail",
+          "result": "Fail",
+          "reason": "Unexpected value found at position 1 in the output buffer: expected 1 but found 0 at vktRayQueryMiscTests.cpp:525",
+          "exit_code": 1,
+          "elapsed_seconds": 2.688,
+          "command": [
+            "D:\\Codes\\VK-GL-CTS\\build\\external\\vulkancts\\modules\\vulkan\\Release\\deqp-vk.exe",
+            "--deqp-case=dEQP-VK.ray_query.misc.dynamic_indexing_use_first",
+            "--deqp-visibility=hidden",
+            "--deqp-archive-dir=D:\\Codes\\VK-GL-CTS\\external\\vulkancts\\data",
+            "--deqp-shadercache=disable",
+            "--deqp-watchdog=enable",
+            "--deqp-crashhandler=enable",
+            "--deqp-watchdog-total-time-limit=60",
+            "--deqp-watchdog-interval-time-limit=30",
+            "--deqp-log-filename=D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\rq-as-values-full-01\\0019-dynamic_indexing_use_first-4332e09d71.qpa"
+          ],
+          "cwd": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\rq-as-values-full-01",
+          "stdout": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\rq-as-values-full-01\\0019-dynamic_indexing_use_first-4332e09d71.stdout.txt",
+          "qpa": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\rq-as-values-full-01\\0019-dynamic_indexing_use_first-4332e09d71.qpa",
+          "session_info": {
+            "releaseName": "vulkan-cts-1.4.7.0-103-gd18e4c68543103371715845cd914c71e5859963e",
+            "releaseId": "0xd18e4c68",
+            "targetName": "\"Default\"",
+            "logFormatVersion": "\"0.3.4\"",
+            "vendorID": "0x10de",
+            "deviceID": "0x2216",
+            "deviceName": "NVIDIA GeForce RTX 3080",
+            "commandLineParameters": "\"--deqp-case=dEQP-VK.ray_query.misc.dynamic_indexing_use_first --deqp-visibility=hidden --deqp-archive-dir=D:\\Codes\\VK-GL-CTS\\external\\vulkancts\\data --deqp-shadercache=disable --deqp-watchdog=enable --deqp-crashhandler=enable --deqp-watchdog-total-time-limit=60 --deqp-watchdog-interval-time-limit=30 --deqp-log-filename=D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\rq-as-values-full-01\\0019-dynamic_indexing_use_first-4332e09d71.qpa\""
+          },
+          "raw_sha256": {
+            "stdout": "9cdb0fb7b581c6b727d1caae127ed1ed4582f7e238b6856c90c3ee618df51ed0",
+            "qpa": "a730f11e1386f5294d13960e022315fa166742dc53696adc109cddcf5cdc3962"
+          }
+        },
+        {
+          "case": "dEQP-VK.ray_query.misc.dynamic_indexing_inbounds",
+          "status": "fail",
+          "result": "Fail",
+          "reason": "Unexpected value found at position 1 in the output buffer: expected 1 but found 0 at vktRayQueryMiscTests.cpp:525",
+          "exit_code": 1,
+          "elapsed_seconds": 3.562,
+          "command": [
+            "D:\\Codes\\VK-GL-CTS\\build\\external\\vulkancts\\modules\\vulkan\\Release\\deqp-vk.exe",
+            "--deqp-case=dEQP-VK.ray_query.misc.dynamic_indexing_inbounds",
+            "--deqp-visibility=hidden",
+            "--deqp-archive-dir=D:\\Codes\\VK-GL-CTS\\external\\vulkancts\\data",
+            "--deqp-shadercache=disable",
+            "--deqp-watchdog=enable",
+            "--deqp-crashhandler=enable",
+            "--deqp-watchdog-total-time-limit=60",
+            "--deqp-watchdog-interval-time-limit=30",
+            "--deqp-log-filename=D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\rq-as-values-full-01\\0020-dynamic_indexing_inbounds-d1d296b353.qpa"
+          ],
+          "cwd": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\rq-as-values-full-01",
+          "stdout": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\rq-as-values-full-01\\0020-dynamic_indexing_inbounds-d1d296b353.stdout.txt",
+          "qpa": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\rq-as-values-full-01\\0020-dynamic_indexing_inbounds-d1d296b353.qpa",
+          "session_info": {
+            "releaseName": "vulkan-cts-1.4.7.0-103-gd18e4c68543103371715845cd914c71e5859963e",
+            "releaseId": "0xd18e4c68",
+            "targetName": "\"Default\"",
+            "logFormatVersion": "\"0.3.4\"",
+            "vendorID": "0x10de",
+            "deviceID": "0x2216",
+            "deviceName": "NVIDIA GeForce RTX 3080",
+            "commandLineParameters": "\"--deqp-case=dEQP-VK.ray_query.misc.dynamic_indexing_inbounds --deqp-visibility=hidden --deqp-archive-dir=D:\\Codes\\VK-GL-CTS\\external\\vulkancts\\data --deqp-shadercache=disable --deqp-watchdog=enable --deqp-crashhandler=enable --deqp-watchdog-total-time-limit=60 --deqp-watchdog-interval-time-limit=30 --deqp-log-filename=D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\rq-as-values-full-01\\0020-dynamic_indexing_inbounds-d1d296b353.qpa\""
+          },
+          "raw_sha256": {
+            "stdout": "349aa4848cbae3353457cf781cc838a474058f55a06d6aaa1af3f6f948e584e1",
+            "qpa": "496c8de6aa00719aaa76c5c96a68878a70fdfbde26fb30864070d1d3179c53d0"
+          }
+        },
+        {
+          "case": "dEQP-VK.ray_query.misc.shared_memory_consistency",
+          "status": "fail",
+          "result": "Fail",
+          "reason": "Expected 1 but found 4294967295 at vktRayQueryMiscTests.cpp:2497",
+          "exit_code": 1,
+          "elapsed_seconds": 2.078,
+          "command": [
+            "D:\\Codes\\VK-GL-CTS\\build\\external\\vulkancts\\modules\\vulkan\\Release\\deqp-vk.exe",
+            "--deqp-case=dEQP-VK.ray_query.misc.shared_memory_consistency",
+            "--deqp-visibility=hidden",
+            "--deqp-archive-dir=D:\\Codes\\VK-GL-CTS\\external\\vulkancts\\data",
+            "--deqp-shadercache=disable",
+            "--deqp-watchdog=enable",
+            "--deqp-crashhandler=enable",
+            "--deqp-watchdog-total-time-limit=60",
+            "--deqp-watchdog-interval-time-limit=30",
+            "--deqp-log-filename=D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\rq-as-values-full-01\\0021-shared_memory_consistency-9a7d3e409b.qpa"
+          ],
+          "cwd": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\rq-as-values-full-01",
+          "stdout": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\rq-as-values-full-01\\0021-shared_memory_consistency-9a7d3e409b.stdout.txt",
+          "qpa": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\rq-as-values-full-01\\0021-shared_memory_consistency-9a7d3e409b.qpa",
+          "session_info": {
+            "releaseName": "vulkan-cts-1.4.7.0-103-gd18e4c68543103371715845cd914c71e5859963e",
+            "releaseId": "0xd18e4c68",
+            "targetName": "\"Default\"",
+            "logFormatVersion": "\"0.3.4\"",
+            "vendorID": "0x10de",
+            "deviceID": "0x2216",
+            "deviceName": "NVIDIA GeForce RTX 3080",
+            "commandLineParameters": "\"--deqp-case=dEQP-VK.ray_query.misc.shared_memory_consistency --deqp-visibility=hidden --deqp-archive-dir=D:\\Codes\\VK-GL-CTS\\external\\vulkancts\\data --deqp-shadercache=disable --deqp-watchdog=enable --deqp-crashhandler=enable --deqp-watchdog-total-time-limit=60 --deqp-watchdog-interval-time-limit=30 --deqp-log-filename=D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\rq-as-values-full-01\\0021-shared_memory_consistency-9a7d3e409b.qpa\""
+          },
+          "raw_sha256": {
+            "stdout": "06e165557f79046396d825c1828001f0f037ef09a38f5b2baaae114acce9800e",
+            "qpa": "2259a60fc42b75173f13b8904724fdb8bb6956f550faa832620eefb47cd1838e"
+          }
+        }
+      ]
+    },
+    {
+      "evidence_run": "rq-as-values-validation-01",
+      "summary_path": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\rq-as-values-validation-01\\summary.json",
+      "summary_sha256": "b6f0a0f6bba7465fcc736dbc5379b3f40d11bc9930dea62c04c80416fc1ae897",
+      "mode": "ray-query",
+      "cts_sha256": "8cf824c598181ef43ccd74d67acce89c9cc6fc47029a164440f0b0ea74af0380",
+      "layer": {
+        "name": "VK_LAYER_VKRT_SOFTWARE_RAY_QUERY",
+        "source_manifest": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rq-goal\\layers\\VkLayer_VKRT_SOFTWARE_RAY_QUERY.json",
+        "source_manifest_sha256": "6ac41421257867794a0d5d40d719fb539abb52952571a23d9e4c9c9196b707ab",
+        "source_library": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rq-goal\\VkLayer_VKRT_SOFTWARE_RAY_QUERY.dll",
+        "snapshot_manifest": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\rq-as-values-validation-01\\layer_snapshot\\VkLayer_VKRT_SOFTWARE_RAY_QUERY.json",
+        "snapshot_manifest_sha256": "ef2a7b64e04723a0c6d0dc20800691ecaab60b36b7a708448b8392a4333a53f5",
+        "snapshot_library": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\rq-as-values-validation-01\\layer_snapshot\\VkLayer_VKRT_SOFTWARE_RAY_QUERY.dll",
+        "library_sha256": "d3336a0bf99f01ecb9aaa6614f0aa19d63ac75cb7fa20f2d9219b8fd8fd5ec6b",
+        "snapshot_scope": "manifest_and_layer_library"
+      },
+      "validation": {
+        "manifest": "C:\\VulkanSDK\\1.4.357.0\\Bin\\VkLayer_khronos_validation.json",
+        "manifest_sha256": "20d3ef44fe96aa41fceefab2308892f9d4b346d23eebfe8b5e1690715f23f472",
+        "library": "C:\\VulkanSDK\\1.4.357.0\\Bin\\VkLayer_khronos_validation.dll",
+        "library_sha256": "9725ce7a9225f42f8961c433dacae4cc8fae3a16e95ef1d0a7c7e8bc09132c40",
+        "scope": "original SDK installation, hashed but not copied"
+      },
+      "layer_revision_declared": "worktree-after-4494570",
+      "counts": {
+        "pass": 0,
+        "fail": 3,
+        "notSupported": 0,
+        "crash": 0,
+        "timeout": 0,
+        "noresult": 0
+      },
+      "state": "completed",
+      "selected_cases": [
+        "dEQP-VK.ray_query.acceleration_structures.dynamic_indexing.traditional_structures.dynamic_indexing",
+        "dEQP-VK.ray_query.acceleration_structures.function_argument.traditional_structures.gpu_built",
+        "dEQP-VK.ray_query.multiple_ray_queries.compute_shader"
+      ],
+      "failed_cases": [
+        {
+          "case": "dEQP-VK.ray_query.acceleration_structures.dynamic_indexing.traditional_structures.dynamic_indexing",
+          "status": "fail",
+          "result": "InternalError",
+          "reason": "1 API usage errors found",
+          "exit_code": 1,
+          "elapsed_seconds": 2.844,
+          "command": [
+            "D:\\Codes\\VK-GL-CTS\\build\\external\\vulkancts\\modules\\vulkan\\Release\\deqp-vk.exe",
+            "--deqp-case=dEQP-VK.ray_query.acceleration_structures.dynamic_indexing.traditional_structures.dynamic_indexing",
+            "--deqp-visibility=hidden",
+            "--deqp-archive-dir=D:\\Codes\\VK-GL-CTS\\external\\vulkancts\\data",
+            "--deqp-shadercache=disable",
+            "--deqp-watchdog=enable",
+            "--deqp-crashhandler=enable",
+            "--deqp-watchdog-total-time-limit=60",
+            "--deqp-watchdog-interval-time-limit=30",
+            "--deqp-log-filename=D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\rq-as-values-validation-01\\0001-dynamic_indexing-409fe91b9c.qpa",
+            "--deqp-vk-validation=enable",
+            "--deqp-vk-print-validation-errors"
+          ],
+          "cwd": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\rq-as-values-validation-01",
+          "stdout": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\rq-as-values-validation-01\\0001-dynamic_indexing-409fe91b9c.stdout.txt",
+          "qpa": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\rq-as-values-validation-01\\0001-dynamic_indexing-409fe91b9c.qpa",
+          "session_info": {
+            "releaseName": "vulkan-cts-1.4.7.0-103-gd18e4c68543103371715845cd914c71e5859963e",
+            "releaseId": "0xd18e4c68",
+            "targetName": "\"Default\"",
+            "logFormatVersion": "\"0.3.4\"",
+            "vendorID": "0x10de",
+            "deviceID": "0x2216",
+            "deviceName": "NVIDIA GeForce RTX 3080",
+            "commandLineParameters": "\"--deqp-case=dEQP-VK.ray_query.acceleration_structures.dynamic_indexing.traditional_structures.dynamic_indexing --deqp-visibility=hidden --deqp-archive-dir=D:\\Codes\\VK-GL-CTS\\external\\vulkancts\\data --deqp-shadercache=disable --deqp-watchdog=enable --deqp-crashhandler=enable --deqp-watchdog-total-time-limit=60 --deqp-watchdog-interval-time-limit=30 --deqp-log-filename=D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\rq-as-values-validation-01\\0001-dynamic_indexing-409fe91b9c.qpa --deqp-vk-validation=enable --deqp-vk-print-validation-errors\""
+          },
+          "raw_sha256": {
+            "stdout": "788fd97663eefca316df0e47fa5c630d532b264ec5ffedd43e6c8042285069e2",
+            "qpa": "e1e350261a1e311ddc122c51fce9c5df5457e2c04a85a635a4bbc001643c1689"
+          }
+        },
+        {
+          "case": "dEQP-VK.ray_query.acceleration_structures.function_argument.traditional_structures.gpu_built",
+          "status": "fail",
+          "result": "InternalError",
+          "reason": "1 API usage errors found",
+          "exit_code": 1,
+          "elapsed_seconds": 1.953,
+          "command": [
+            "D:\\Codes\\VK-GL-CTS\\build\\external\\vulkancts\\modules\\vulkan\\Release\\deqp-vk.exe",
+            "--deqp-case=dEQP-VK.ray_query.acceleration_structures.function_argument.traditional_structures.gpu_built",
+            "--deqp-visibility=hidden",
+            "--deqp-archive-dir=D:\\Codes\\VK-GL-CTS\\external\\vulkancts\\data",
+            "--deqp-shadercache=disable",
+            "--deqp-watchdog=enable",
+            "--deqp-crashhandler=enable",
+            "--deqp-watchdog-total-time-limit=60",
+            "--deqp-watchdog-interval-time-limit=30",
+            "--deqp-log-filename=D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\rq-as-values-validation-01\\0002-gpu_built-c1da2891a9.qpa",
+            "--deqp-vk-validation=enable",
+            "--deqp-vk-print-validation-errors"
+          ],
+          "cwd": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\rq-as-values-validation-01",
+          "stdout": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\rq-as-values-validation-01\\0002-gpu_built-c1da2891a9.stdout.txt",
+          "qpa": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\rq-as-values-validation-01\\0002-gpu_built-c1da2891a9.qpa",
+          "session_info": {
+            "releaseName": "vulkan-cts-1.4.7.0-103-gd18e4c68543103371715845cd914c71e5859963e",
+            "releaseId": "0xd18e4c68",
+            "targetName": "\"Default\"",
+            "logFormatVersion": "\"0.3.4\"",
+            "vendorID": "0x10de",
+            "deviceID": "0x2216",
+            "deviceName": "NVIDIA GeForce RTX 3080",
+            "commandLineParameters": "\"--deqp-case=dEQP-VK.ray_query.acceleration_structures.function_argument.traditional_structures.gpu_built --deqp-visibility=hidden --deqp-archive-dir=D:\\Codes\\VK-GL-CTS\\external\\vulkancts\\data --deqp-shadercache=disable --deqp-watchdog=enable --deqp-crashhandler=enable --deqp-watchdog-total-time-limit=60 --deqp-watchdog-interval-time-limit=30 --deqp-log-filename=D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\rq-as-values-validation-01\\0002-gpu_built-c1da2891a9.qpa --deqp-vk-validation=enable --deqp-vk-print-validation-errors\""
+          },
+          "raw_sha256": {
+            "stdout": "a298bdae29d4566ad7ba7795febb0be868999899ec39ba9d2ed0288da60e0d73",
+            "qpa": "56f684f6dcdefe5c59be04f69b0bdc53141de1441d58a10e2d842e7661921c7d"
+          }
+        },
+        {
+          "case": "dEQP-VK.ray_query.multiple_ray_queries.compute_shader",
+          "status": "fail",
+          "result": "InternalError",
+          "reason": "1 API usage errors found",
+          "exit_code": 1,
+          "elapsed_seconds": 3.062,
+          "command": [
+            "D:\\Codes\\VK-GL-CTS\\build\\external\\vulkancts\\modules\\vulkan\\Release\\deqp-vk.exe",
+            "--deqp-case=dEQP-VK.ray_query.multiple_ray_queries.compute_shader",
+            "--deqp-visibility=hidden",
+            "--deqp-archive-dir=D:\\Codes\\VK-GL-CTS\\external\\vulkancts\\data",
+            "--deqp-shadercache=disable",
+            "--deqp-watchdog=enable",
+            "--deqp-crashhandler=enable",
+            "--deqp-watchdog-total-time-limit=60",
+            "--deqp-watchdog-interval-time-limit=30",
+            "--deqp-log-filename=D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\rq-as-values-validation-01\\0003-compute_shader-9e006a52bf.qpa",
+            "--deqp-vk-validation=enable",
+            "--deqp-vk-print-validation-errors"
+          ],
+          "cwd": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\rq-as-values-validation-01",
+          "stdout": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\rq-as-values-validation-01\\0003-compute_shader-9e006a52bf.stdout.txt",
+          "qpa": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\rq-as-values-validation-01\\0003-compute_shader-9e006a52bf.qpa",
+          "session_info": {
+            "releaseName": "vulkan-cts-1.4.7.0-103-gd18e4c68543103371715845cd914c71e5859963e",
+            "releaseId": "0xd18e4c68",
+            "targetName": "\"Default\"",
+            "logFormatVersion": "\"0.3.4\"",
+            "vendorID": "0x10de",
+            "deviceID": "0x2216",
+            "deviceName": "NVIDIA GeForce RTX 3080",
+            "commandLineParameters": "\"--deqp-case=dEQP-VK.ray_query.multiple_ray_queries.compute_shader --deqp-visibility=hidden --deqp-archive-dir=D:\\Codes\\VK-GL-CTS\\external\\vulkancts\\data --deqp-shadercache=disable --deqp-watchdog=enable --deqp-crashhandler=enable --deqp-watchdog-total-time-limit=60 --deqp-watchdog-interval-time-limit=30 --deqp-log-filename=D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\rq-as-values-validation-01\\0003-compute_shader-9e006a52bf.qpa --deqp-vk-validation=enable --deqp-vk-print-validation-errors\""
+          },
+          "raw_sha256": {
+            "stdout": "0d9e9bbe37eb17e8cbbf498b0631d55334854895505fdc5d90e41469fe274b04",
+            "qpa": "1158587aea8e6270a4d22b7fc634c17e9bf85921f375103cd9a30a09441399a8"
+          }
+        }
+      ]
+    },
+    {
+      "evidence_run": "rq-as-values-validation-02",
+      "summary_path": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\rq-as-values-validation-02\\summary.json",
+      "summary_sha256": "68e91f1503c40017d6ca60e79e99464c07eab7a6170aedbc3b00ff029430269f",
+      "mode": "ray-query",
+      "cts_sha256": "8cf824c598181ef43ccd74d67acce89c9cc6fc47029a164440f0b0ea74af0380",
+      "layer": {
+        "name": "VK_LAYER_VKRT_SOFTWARE_RAY_QUERY",
+        "source_manifest": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rq-goal\\layers\\VkLayer_VKRT_SOFTWARE_RAY_QUERY.json",
+        "source_manifest_sha256": "6ac41421257867794a0d5d40d719fb539abb52952571a23d9e4c9c9196b707ab",
+        "source_library": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rq-goal\\VkLayer_VKRT_SOFTWARE_RAY_QUERY.dll",
+        "snapshot_manifest": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\rq-as-values-validation-02\\layer_snapshot\\VkLayer_VKRT_SOFTWARE_RAY_QUERY.json",
+        "snapshot_manifest_sha256": "475252141811f15ef3f72bf4d672dd4c9560a56236a16a2891f25bb89c5fad13",
+        "snapshot_library": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\rq-as-values-validation-02\\layer_snapshot\\VkLayer_VKRT_SOFTWARE_RAY_QUERY.dll",
+        "library_sha256": "624beb46b64b6666b297186474c8c55a60ad850e2504f83181933b8f095d5bbe",
+        "snapshot_scope": "manifest_and_layer_library"
+      },
+      "validation": {
+        "manifest": "C:\\VulkanSDK\\1.4.357.0\\Bin\\VkLayer_khronos_validation.json",
+        "manifest_sha256": "20d3ef44fe96aa41fceefab2308892f9d4b346d23eebfe8b5e1690715f23f472",
+        "library": "C:\\VulkanSDK\\1.4.357.0\\Bin\\VkLayer_khronos_validation.dll",
+        "library_sha256": "9725ce7a9225f42f8961c433dacae4cc8fae3a16e95ef1d0a7c7e8bc09132c40",
+        "scope": "original SDK installation, hashed but not copied"
+      },
+      "layer_revision_declared": "worktree-after-4494570-extensionfix",
+      "counts": {
+        "pass": 3,
+        "fail": 0,
+        "notSupported": 0,
+        "crash": 0,
+        "timeout": 0,
+        "noresult": 0
+      },
+      "state": "completed",
+      "selected_cases": [
+        "dEQP-VK.ray_query.acceleration_structures.dynamic_indexing.traditional_structures.dynamic_indexing",
+        "dEQP-VK.ray_query.acceleration_structures.function_argument.traditional_structures.gpu_built",
+        "dEQP-VK.ray_query.multiple_ray_queries.compute_shader"
+      ],
+      "failed_cases": []
+    },
+    {
+      "evidence_run": "rq-as-values-final-validation-01",
+      "summary_path": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\rq-as-values-final-validation-01\\summary.json",
+      "summary_sha256": "38732f02bdf953539736a45a4e333fbb22b02e128b0c7b67a00c91d31649f20f",
+      "mode": "ray-query",
+      "cts_sha256": "8cf824c598181ef43ccd74d67acce89c9cc6fc47029a164440f0b0ea74af0380",
+      "layer": {
+        "name": "VK_LAYER_VKRT_SOFTWARE_RAY_QUERY",
+        "source_manifest": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rq-goal\\layers\\VkLayer_VKRT_SOFTWARE_RAY_QUERY.json",
+        "source_manifest_sha256": "6ac41421257867794a0d5d40d719fb539abb52952571a23d9e4c9c9196b707ab",
+        "source_library": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rq-goal\\VkLayer_VKRT_SOFTWARE_RAY_QUERY.dll",
+        "snapshot_manifest": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\rq-as-values-final-validation-01\\layer_snapshot\\VkLayer_VKRT_SOFTWARE_RAY_QUERY.json",
+        "snapshot_manifest_sha256": "801bb1136ec629fe43ad8f365aed046357439595ff991585943b0663c11b0a98",
+        "snapshot_library": "D:\\Codes\\Vulkan-ExtensionLayer\\build-rt-cts-evidence\\rq-as-values-final-validation-01\\layer_snapshot\\VkLayer_VKRT_SOFTWARE_RAY_QUERY.dll",
+        "library_sha256": "413751f8d0c5ec66e1f032d9d04c8375231c45124b7e06f5cd77589b2eb65cce",
+        "snapshot_scope": "manifest_and_layer_library"
+      },
+      "validation": {
+        "manifest": "C:\\VulkanSDK\\1.4.357.0\\Bin\\VkLayer_khronos_validation.json",
+        "manifest_sha256": "20d3ef44fe96aa41fceefab2308892f9d4b346d23eebfe8b5e1690715f23f472",
+        "library": "C:\\VulkanSDK\\1.4.357.0\\Bin\\VkLayer_khronos_validation.dll",
+        "library_sha256": "9725ce7a9225f42f8961c433dacae4cc8fae3a16e95ef1d0a7c7e8bc09132c40",
+        "scope": "original SDK installation, hashed but not copied"
+      },
+      "layer_revision_declared": "worktree-after-4494570-workgroupfix",
+      "counts": {
+        "pass": 21,
+        "fail": 0,
+        "notSupported": 0,
+        "crash": 0,
+        "timeout": 0,
+        "noresult": 0
+      },
+      "state": "completed",
+      "selected_cases": [
+        "dEQP-VK.ray_query.builtin.flow.comp.triangles",
+        "dEQP-VK.ray_query.builtin.flow.comp.aabbs",
+        "dEQP-VK.ray_query.builtin.flow.frag.triangles",
+        "dEQP-VK.ray_query.builtin.flow.vert.triangles",
+        "dEQP-VK.ray_query.builtin.intersectiont.comp.triangles",
+        "dEQP-VK.ray_query.builtin.instancecustomindex.comp.triangles",
+        "dEQP-VK.ray_query.builtin.getintersectioninstanceshaderbindingtablerecordoffsetCommitted.comp.triangles",
+        "dEQP-VK.ray_query.builtin.getintersectioncandidateaabbopaque.comp.aabbs",
+        "dEQP-VK.ray_query.ray_flags.compute_shader.opacity.aabbs.cullopaque",
+        "dEQP-VK.ray_query.ray_flags.compute_shader.opacity.aabbs.noopaque",
+        "dEQP-VK.ray_query.acceleration_structures.empty.traditional_structures.compute_shader.gpu_built.index_none.inactive_triangles",
+        "dEQP-VK.ray_query.acceleration_structures.empty.traditional_structures.compute_shader.gpu_built.index_none.no_primitives_top",
+        "dEQP-VK.ray_query.advanced.using_wrapper_function.comp.triangles",
+        "dEQP-VK.ray_query.acceleration_structures.dynamic_indexing.traditional_structures.dynamic_indexing",
+        "dEQP-VK.ray_query.acceleration_structures.function_argument.traditional_structures.gpu_built",
+        "dEQP-VK.ray_query.multiple_ray_queries.compute_shader",
+        "dEQP-VK.ray_query.multiple_ray_queries.fragment_shader",
+        "dEQP-VK.ray_query.misc.dynamic_indexing",
+        "dEQP-VK.ray_query.misc.dynamic_indexing_use_first",
+        "dEQP-VK.ray_query.misc.dynamic_indexing_inbounds",
+        "dEQP-VK.ray_query.misc.shared_memory_consistency"
+      ],
+      "failed_cases": []
+    }
+  ]
+}

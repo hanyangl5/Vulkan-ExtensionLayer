@@ -1,0 +1,111 @@
+/* SPDX-License-Identifier: MIT */
+#version 460
+#extension GL_EXT_buffer_reference : require
+#extension GL_EXT_scalar_block_layout : require
+#extension GL_EXT_shader_explicit_arithmetic_types_int64 : require
+#include "bvh4_abi.glsl"
+#include "as_address.glsl"
+#include "vkrt_as_serialization.glsl"
+layout(local_size_x = 64) in;
+layout(constant_id = 0) const uint deserialize = 0;
+layout(constant_id = 6) const uint64_t registry_context = 0ul;
+layout(buffer_reference, scalar, buffer_reference_align = 4) buffer SerialWord { uint value; };
+layout(push_constant, scalar) uniform SerializationArgs {
+    uint64_t source, destination, as_capacity;
+    uint destination_type, reserved;
+    uint version_data[8];
+}
+args;
+uint read32(uint64_t address) { return SerialWord(address).value; }
+uint64_t read64(uint64_t address) { return uint64_t(read32(address)) | (uint64_t(read32(address + 4ul)) << 32); }
+void write32(uint64_t address, uint value) { SerialWord(address).value = value; }
+uint half64(uint64_t value, uint64_t offset) { return uint(value >> (uint(offset & 4ul) * 8u)); }
+bool overlaps(uint64_t a, uint64_t a_size, uint64_t b, uint64_t b_size) { return a < b + b_size && b < a + a_size; }
+bool valid_header(uint64_t base, uint64_t capacity, out uint64_t physical_size, out uint count, out uint64_t instance_offset,
+                  out uint type) {
+    physical_size = read64(base + uint64_t(VEL_RT_BVH4_HEADER_TOTAL_SIZE));
+    type = read32(base + 8ul);
+    count = type == 0u ? read32(base + uint64_t(VEL_RT_BVH4_HEADER_INSTANCE_COUNT)) : 0u;
+    instance_offset = read64(base + uint64_t(VEL_RT_BVH4_HEADER_INSTANCE_OFFSET));
+    if (read32(base) != VEL_RT_BVH4_MAGIC || read32(base + 4ul) != VEL_RT_BVH4_ABI_VERSION || type > 1u ||
+        (read32(base + 12ul) & VEL_RT_BVH4_FLAG_INVALID) != 0u || physical_size < uint64_t(VEL_RT_BVH4_HEADER_SIZE) ||
+        (physical_size & 3ul) != 0ul || physical_size > capacity || count > 0x3fffffffu)
+        return false;
+    return instance_offset <= physical_size && uint64_t(count) <= (physical_size - instance_offset) / 128ul;
+}
+void main() {
+    uint64_t physical_size, instance_offset, payload, serialized_size;
+    uint count, type;
+    uint64_t source_payload = args.source;
+    if (deserialize != 0u) {
+        for (uint i = 0; i < 8; ++i)
+            if (read32(args.source + uint64_t(i) * 4ul) != args.version_data[i]) return;
+        serialized_size = read64(args.source + 32ul);
+        uint64_t declared_physical = read64(args.source + 40ul), declared_count = read64(args.source + 48ul);
+        if (declared_count > 0x3ffffffful || declared_physical < uint64_t(VEL_RT_BVH4_HEADER_SIZE) ||
+            declared_physical > args.as_capacity)
+            return;
+        payload = vkrt_as_serialization_payload(uint(declared_count));
+        if (serialized_size != vkrt_as_serialization_size(declared_physical, uint(declared_count)) || serialized_size == 0ul ||
+            args.source > 0xfffffffffffffffful - serialized_size)
+            return;
+        source_payload += payload;
+        if (!valid_header(source_payload, declared_physical, physical_size, count, instance_offset, type) ||
+            physical_size != declared_physical || uint64_t(count) != declared_count ||
+            (args.destination_type != 2u && args.destination_type != type) ||
+            args.destination > 0xfffffffffffffffful - physical_size ||
+            overlaps(args.source, serialized_size, args.destination, physical_size))
+            return;
+    } else {
+        if (!valid_header(source_payload, args.as_capacity, physical_size, count, instance_offset, type)) return;
+        payload = vkrt_as_serialization_payload(count);
+        serialized_size = vkrt_as_serialization_size(physical_size, count);
+        if (serialized_size == 0ul || args.source > 0xfffffffffffffffful - physical_size ||
+            args.destination > 0xfffffffffffffffful - serialized_size ||
+            overlaps(args.source, physical_size, args.destination, serialized_size))
+            return;
+    }
+    /* Input metadata is immutable throughout the dispatch. Each output word
+     * has exactly one writer, including reference relocation. */
+    uint64_t length = deserialize != 0u ? physical_size : serialized_size;
+    uint64_t offset = uint64_t(gl_GlobalInvocationID.x) * 4ul;
+    uint64_t stride = uint64_t(gl_NumWorkGroups.x) * 256ul;
+    while (offset < length) {
+        uint word = 0;
+        if (deserialize == 0u && offset < payload) {
+            if (offset < 32ul)
+                word = args.version_data[uint(offset / 4ul)];
+            else if (offset < 40ul)
+                word = half64(serialized_size, offset);
+            else if (offset < 48ul)
+                word = half64(physical_size, offset);
+            else if (offset < 56ul)
+                word = half64(uint64_t(count), offset);
+            else if (offset < 56ul + uint64_t(count) * 8ul) {
+                uint64_t index = (offset - 56ul) / 8ul;
+                word = read32(source_payload + instance_offset + index * 128ul + uint64_t(VEL_RT_BVH4_INSTANCE_PUBLIC_ADDRESS) +
+                              (offset & 4ul));
+            }
+        } else {
+            uint64_t data_offset = deserialize != 0u ? offset : offset - payload;
+            word = read32(source_payload + data_offset);
+            if (data_offset >= instance_offset && data_offset - instance_offset < uint64_t(count) * 128ul) {
+                uint64_t index = (data_offset - instance_offset) / 128ul;
+                uint64_t field = (data_offset - instance_offset) & 127ul;
+                if (field < 8ul || field >= uint64_t(VEL_RT_BVH4_INSTANCE_PUBLIC_ADDRESS)) {
+                    /* The portable payload never retains raw physical BLAS
+                     * addresses. Only the public list controls relocation. */
+                    word = 0;
+                    if (deserialize != 0u) {
+                        uint64_t public_value = read64(args.source + 56ul + index * 8ul);
+                        uint64_t address = field < 8ul ? vel_rt_resolve_as(registry_context, public_value) : public_value;
+                        word = half64(address, field);
+                    }
+                }
+            }
+        }
+        write32(args.destination + offset, word);
+        if (length - offset <= stride) break;
+        offset += stride;
+    }
+}

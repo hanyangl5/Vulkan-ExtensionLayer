@@ -1,0 +1,92 @@
+// Copyright 2026 The Khronos Group Inc.
+// SPDX-License-Identifier: Apache-2.0
+#version 460
+#extension GL_EXT_buffer_reference : require
+#extension GL_EXT_scalar_block_layout : require
+#extension GL_EXT_shader_explicit_arithmetic_types_int64 : require
+
+// Component encoder for a validated compact BuildNode tree. The first dispatch
+// allocates dense internal IDs; after a compute write/read barrier the second
+// emits nodes and parents. Keeping binary arity is deliberate: this first GPU
+// path proves wire-format/addressing, not the reference encoder's SAH collapse.
+layout(local_size_x = 64) in;
+layout(constant_id = 0) const uint phase = 0;
+const uint INVALID = 0xffffffffu;
+const uint INDEX_MASK = 0x3fffffffu;
+layout(buffer_reference, scalar, buffer_reference_align = 4) buffer Word { uint value; };
+struct InputNode { vec3 lower; vec3 upper; uint left; uint right; uint leaf; };
+layout(buffer_reference, scalar, buffer_reference_align = 4) readonly buffer Input { InputNode value; };
+layout(push_constant, scalar) uniform Args {
+    uint64_t source;
+    uint64_t mapping;
+    uint64_t output_as;
+    uint64_t first;
+    uint count;
+    uint root;
+} args;
+
+uint load_word(uint64_t address) { return Word(address).value; }
+void store_word(uint64_t address, uint value) { Word(address).value = value; }
+uint64_t header_offset(uint byte_offset) {
+    return uint64_t(load_word(args.output_as + byte_offset)) |
+           (uint64_t(load_word(args.output_as + byte_offset + 4)) << 32);
+}
+uint64_t node_address(uint id) {
+    return args.output_as + header_offset(48) + uint64_t(id & INDEX_MASK) * uint64_t(128);
+}
+uint64_t parent_address(uint id) {
+    uint kind = id >> 30;
+    if (kind == 0) return node_address(id) + 116;
+    uint64_t index = uint64_t(id & INDEX_MASK);
+    if (kind > 1) index += uint64_t(load_word(args.output_as + 24));
+    if (kind > 2) index += uint64_t(load_word(args.output_as + 28));
+    return args.output_as + header_offset(80) + index * uint64_t(4);
+}
+InputNode input_node(uint index) { return Input(args.source + uint64_t(index) * uint64_t(36)).value; }
+uint mapped_id(uint index) { return load_word(args.mapping + uint64_t(index) * uint64_t(4)); }
+
+void main() {
+    uint64_t index64 = args.first + uint64_t(gl_GlobalInvocationID.x);
+    if (index64 >= uint64_t(args.count)) return;
+    uint index = uint(index64);
+    InputNode input_value = input_node(index);
+    if (phase == 0) {
+        uint id = input_value.leaf;
+        if (id == INVALID) id = atomicAdd(Word(args.output_as + 20).value, 1);
+        store_word(args.mapping + index64 * uint64_t(4), id);
+        store_word(parent_address(id), INVALID);
+        return;
+    }
+    uint id = mapped_id(index);
+    if (index == args.root) {
+        store_word(args.output_as + 16, id);
+        for (uint axis = 0; axis < 3; ++axis) {
+            store_word(args.output_as + 96 + axis * 4, floatBitsToUint(input_value.lower[axis]));
+            store_word(args.output_as + 108 + axis * 4, floatBitsToUint(input_value.upper[axis]));
+        }
+    }
+    if (input_value.leaf != INVALID) return;
+    uint64_t output_node = node_address(id);
+    uint children[2] = uint[2](input_value.left, input_value.right);
+    for (uint slot = 0; slot < 4; ++slot) {
+        uint child_id = INVALID;
+        vec3 lower = vec3(0), upper = vec3(0);
+        if (slot < 2) {
+            InputNode child = input_node(children[slot]);
+            lower = child.lower;
+            upper = child.upper;
+            child_id = mapped_id(children[slot]);
+            store_word(parent_address(child_id), id);
+        }
+        for (uint axis = 0; axis < 3; ++axis) {
+            store_word(output_node + uint64_t(slot * 12 + axis * 4), floatBitsToUint(lower[axis]));
+            store_word(output_node + uint64_t(48 + slot * 12 + axis * 4), floatBitsToUint(upper[axis]));
+        }
+        store_word(output_node + uint64_t(96 + slot * 4), child_id);
+    }
+    store_word(output_node + 112, 2);
+    // parent_id has a distinct writer (the parent invocation), and was
+    // initialized in phase zero. Never overwrite it with a whole-node store.
+    store_word(output_node + 120, 0);
+    store_word(output_node + 124, 0);
+}

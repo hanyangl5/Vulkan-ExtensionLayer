@@ -1,0 +1,46 @@
+# SPDX-License-Identifier: MIT
+name: Ray tracing fallback layer
+
+on:
+  push:
+    paths:
+      - 'layers/raytracing/**'
+      - 'CMakeLists.txt'
+      - 'README.md'
+      - '.github/workflows/rayquery-fallback.yml'
+  pull_request:
+    paths:
+      - 'layers/raytracing/**'
+      - 'CMakeLists.txt'
+      - 'README.md'
+      - '.github/workflows/rayquery-fallback.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  standalone-offline:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Install standalone build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential cmake ninja-build python3 libvulkan-dev \
+            spirv-tools spirv-headers glslc glslang-dev mesa-vulkan-drivers
+      - name: Configure
+        run: >-
+          cmake -S layers/raytracing -B build-raytracing -G Ninja
+          -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON
+      - name: Build layer, tests and validated SPIR-V
+        run: cmake --build build-raytracing --parallel 2
+      - name: Run offline tests
+        run: ctest --test-dir build-raytracing -L offline --output-on-failure
+      - name: Run software Vulkan tests without native RT
+        run: |
+          export VK_ICD_FILENAMES="$(find /usr/share/vulkan/icd.d -name 'lvp_icd*.json' -print -quit)"
+          test -n "$VK_ICD_FILENAMES"
+          ctest --test-dir build-raytracing -L no_native_rt --output-on-failure

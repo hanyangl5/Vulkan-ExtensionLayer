@@ -1,0 +1,48 @@
+/* SPDX-License-Identifier: MIT */
+#version 460
+#extension GL_EXT_buffer_reference : require
+#extension GL_EXT_scalar_block_layout : require
+#extension GL_EXT_shader_explicit_arithmetic_types_int64 : require
+
+layout(local_size_x = 64) in;
+layout(buffer_reference, scalar, buffer_reference_align = 4) readonly buffer InputWord { uint value; };
+layout(buffer_reference, scalar, buffer_reference_align = 4) buffer OutputWord { uint value; };
+layout(push_constant, scalar) uniform FormatArgs {
+    uint64_t input_address, input_capacity, result_address, output_capacity, stride;
+    uint first_query, count, flags, reserved;
+}
+args;
+
+void main() {
+    const uint result64 = 1u, with_availability = 4u, partial = 8u;
+    uint id = gl_GlobalInvocationID.x;
+    if (id >= args.count || (args.flags & ~15u) != 0u || args.input_address == 0ul || args.result_address == 0ul) return;
+    uint64_t width = (args.flags & result64) != 0u ? 8ul : 4ul;
+    uint64_t bytes = width * ((args.flags & with_availability) != 0u ? 2ul : 1ul);
+    uint64_t total_queries = uint64_t(args.first_query) + uint64_t(args.count);
+    uint64_t last = uint64_t(args.count) - 1ul;
+    if ((args.input_address & 3ul) != 0ul || (args.result_address & (width - 1ul)) != 0ul ||
+        args.input_address > 0xfffffffffffffffful - args.input_capacity ||
+        args.result_address > 0xfffffffffffffffful - args.output_capacity || total_queries > args.input_capacity / 16ul ||
+        (last != 0ul &&
+         (args.stride < bytes || (args.stride & (width - 1ul)) != 0ul || args.stride > (0xfffffffffffffffful - bytes) / last)))
+        return;
+    uint64_t required = last * args.stride + bytes;
+    if (required > args.output_capacity) return;
+    /* Private source/result storage cannot overlap while invocations run. */
+    if (args.input_address < args.result_address + required && args.result_address < args.input_address + args.input_capacity)
+        return;
+    uint64_t source = args.input_address + (uint64_t(args.first_query) + uint64_t(id)) * 16ul;
+    uint64_t destination = args.result_address + uint64_t(id) * args.stride;
+    bool available = InputWord(source + 8ul).value != 0u;
+    if (available || (args.flags & partial) != 0u) {
+        OutputWord(destination).value = available ? InputWord(source).value : 0u;
+        if (width == 8ul) OutputWord(destination + 4ul).value = available ? InputWord(source + 4ul).value : 0u;
+    }
+    if ((args.flags & with_availability) != 0u) {
+        OutputWord(destination + width).value = available ? 1u : 0u;
+        if (width == 8ul) OutputWord(destination + width + 4ul).value = 0u;
+    }
+    /* WAIT is an execution dependency supplied by the caller, never a GPU
+     * spin loop. This component does not publish host query availability. */
+}

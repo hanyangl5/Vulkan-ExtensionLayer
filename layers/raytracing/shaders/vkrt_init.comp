@@ -1,0 +1,27 @@
+/* SPDX-License-Identifier: MIT */
+#version 460
+#include "vkrt_bvh_preamble.h"
+#include "vk_bvh_defines.h"
+#include "bvh_ir_contract.h"
+layout(local_size_x = 64) in;
+layout(push_constant, scalar) uniform Init {
+   uint64_t bvh;
+   uint64_t counts;
+   uint32_t leaf_capacity;
+   uint32_t geometry_type;
+} args;
+void main()
+{
+   uint i = gl_LocalInvocationID.x;
+   uint value = 0;
+   if (i < 3) value = 0x7f800000u;
+   else if (i < 6) value = 0x80800000u;
+   if (i == 9 || i == 10) value = 1;
+   if (i == BVH_IR_MAGIC_OFFSET / 4) value = BVH_IR_MAGIC;
+   if (i == BVH_IR_VERSION_OFFSET / 4) value = BVH_IR_VERSION;
+   if (i == BVH_IR_LEAF_CAPACITY_OFFSET / 4) value = args.leaf_capacity;
+   if (i == BVH_IR_GEOMETRY_TYPE_OFFSET / 4) value = args.geometry_type;
+   if (i < BVH_IR_NODE_OFFSET / 4)
+      DEREF(INDEX(uint32_t, args.bvh, i)) = value;
+   DEREF(INDEX(uint32_t, args.counts, i)) = 0;
+}
