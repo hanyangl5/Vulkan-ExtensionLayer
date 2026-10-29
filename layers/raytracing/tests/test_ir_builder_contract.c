@@ -69,7 +69,7 @@ static void emit(void *user, uint32_t stage, const void *data, uint32_t size, ui
 struct ploc_capture {
     struct bvh_ir_build_layout layout;
     uint64_t output, scratch;
-    uint32_t calls, ploc_calls, sort_groups;
+    uint32_t calls, ploc_calls, sort_groups, sort_calls;
 };
 static void emit_ploc(void *user, uint32_t stage, const void *data, uint32_t size, uint32_t groups) {
     struct ploc_capture *c = user;
@@ -77,6 +77,8 @@ static void emit_ploc(void *user, uint32_t stage, const void *data, uint32_t siz
     if (stage == BVH_IR_STAGE_INIT) {
         assert(c->calls == 0 && size == 24);
     } else if (stage == BVH_IR_STAGE_SORT) {
+        const struct morton_sort_args *a = data;
+        assert(size == 48 && a->pass == c->sort_calls++);
         c->sort_groups = groups;
     } else if (stage == BVH_IR_STAGE_PLOC) {
         const struct ploc_args *a = data;
@@ -129,15 +131,15 @@ static void ploc_contract(void) {
     info.type = VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR;
     info.geometryCount = 1;
     info.pGeometries = &geometry;
-    assert(bvh_ir_choose_backend(&info, 1025, true) == BVH_IR_BACKEND_PLOC);
-    assert(bvh_ir_choose_backend(&info, 1025, false) == BVH_IR_BACKEND_LBVH);
-    assert(bvh_ir_choose_backend(&info, 4, true) == BVH_IR_BACKEND_LBVH);
+    assert(bvh_ir_choose_backend(&info, 1025, true, false) == BVH_IR_BACKEND_PLOC);
+    assert(bvh_ir_choose_backend(&info, 1025, false, false) == BVH_IR_BACKEND_LBVH);
+    assert(bvh_ir_choose_backend(&info, 4, true, false) == BVH_IR_BACKEND_LBVH);
     info.flags = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_BUILD_BIT_KHR;
-    assert(bvh_ir_choose_backend(&info, 1025, true) == BVH_IR_BACKEND_LBVH);
+    assert(bvh_ir_choose_backend(&info, 1025, true, false) == BVH_IR_BACKEND_LBVH);
     info.flags = VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_UPDATE_BIT_KHR;
-    assert(bvh_ir_choose_backend(&info, 1025, true) == BVH_IR_BACKEND_LBVH);
+    assert(bvh_ir_choose_backend(&info, 1025, true, false) == BVH_IR_BACKEND_LBVH);
     info.type = VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR;
-    assert(bvh_ir_choose_backend(&info, 1025, true) == BVH_IR_BACKEND_PLOC);
+    assert(bvh_ir_choose_backend(&info, 1025, true, false) == BVH_IR_BACKEND_PLOC);
     info.type = VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR;
     info.flags = 0;
     const uint32_t capacities[] = {0, 1, 2, 3, 4, 5, 1024, 1025, 65537, 1u << 20};
@@ -152,19 +154,133 @@ static void ploc_contract(void) {
         assert(c.layout.prefix_scan_partitions + partitions * 8 <= c.layout.counts);
         assert(bvh_ir_record_build_backend(&info, &range, c.output, c.scratch, 0, emit_ploc, &c, BVH_IR_BACKEND_PLOC) ==
                VK_SUCCESS);
-        assert(c.ploc_calls == 1 && c.calls == (range.primitiveCount ? 4u : 3u));
+        assert(c.ploc_calls == 1 && c.calls == (range.primitiveCount ? 3u : 2u) + c.sort_calls);
     }
     VkAccelerationStructureBuildRangeInfoKHR range = {0};
     range.primitiveCount = BVH_IR_MAX_LEAVES;
     struct ploc_capture c = {0};
     assert(!bvh_ir_ploc_count_eligible(range.primitiveCount));
-    assert(bvh_ir_choose_backend(&info, range.primitiveCount, true) == BVH_IR_BACKEND_LBVH);
+    assert(bvh_ir_choose_backend(&info, range.primitiveCount, true, false) == BVH_IR_BACKEND_LBVH);
     assert(bvh_ir_record_build_backend(&info, &range, UINT64_C(0x100000000), UINT64_C(0x2000000000), 0, emit_ploc, &c,
                                        BVH_IR_BACKEND_PLOC) == VK_ERROR_OUT_OF_DEVICE_MEMORY &&
            c.calls == 0);
 }
+struct hploc_capture {
+    struct bvh_ir_build_layout layout;
+    uint64_t output, scratch;
+    uint32_t calls, sort_groups, init_ranges, hploc_calls, sort_calls;
+};
+static void emit_hploc(void *user, uint32_t stage, const void *data, uint32_t size, uint32_t groups) {
+    struct hploc_capture *c = user;
+    assert(groups);
+    if (stage == BVH_IR_STAGE_INIT) {
+        assert(c->calls == 0 && size == 24);
+    } else if (stage == BVH_IR_STAGE_SORT) {
+        const struct morton_sort_args *a = data;
+        assert(size == 48 && a->pass == c->sort_calls++);
+        c->sort_groups = groups;
+    } else if (stage == BVH_IR_STAGE_HPLOC_INIT) {
+        const struct hploc_init_args *a = data;
+        const uint64_t count = c->layout.leaf_count > 1 ? c->layout.leaf_count - 1 : 1;
+        assert(c->sort_groups && !c->init_ranges && !c->hploc_calls);
+        assert(size == 16 && a->range_count == count && groups == (count + 63) / 64);
+        assert(a->ranges == c->scratch + c->layout.node_info);
+        assert(a->ranges + count * 4 <= c->scratch + c->layout.counts);
+        ++c->init_ranges;
+    } else if (stage == BVH_IR_STAGE_HPLOC) {
+        const struct hploc_args *a = data;
+        uint32_t passes = 0;
+        for (uint32_t n = c->sort_groups - 1; n; n >>= 1) ++passes;
+        uint32_t expected_groups = (uint32_t)((c->layout.leaf_count + 31) / 32);
+        assert(c->init_ranges == 1 && !c->hploc_calls && size == 40);
+        assert(groups == (expected_groups ? expected_groups : 1));
+        assert(a->bvh == c->output + BVH_IR_NODE_OFFSET && a->header == c->output);
+        assert(a->ids == c->scratch + ((passes & 1) ? c->layout.ids_even : c->layout.ids_odd));
+        assert(a->ranges == c->scratch + c->layout.hploc_ranges);
+        assert(a->internal_node_base == c->layout.nodes - BVH_IR_NODE_OFFSET);
+        ++c->hploc_calls;
+    } else {
+        assert(stage == BVH_IR_STAGE_LEAF); /* HPLOC owns both topology and bounds. */
+    }
+    ++c->calls;
+}
+static void hploc_contract(void) {
+    VkPhysicalDeviceLimits limits = {0};
+    limits.maxComputeWorkGroupInvocations = limits.maxComputeWorkGroupSize[0] = 32;
+    limits.maxComputeSharedMemorySize = BVH_IR_HPLOC_SHARED_BYTES;
+    assert(bvh_ir_hploc_eligible(&limits) && !bvh_ir_hploc_eligible(NULL));
+    limits.maxComputeWorkGroupSize[0] = 31;
+    assert(!bvh_ir_hploc_eligible(&limits));
+    limits.maxComputeWorkGroupSize[0] = 32;
+    limits.maxComputeWorkGroupInvocations = 31;
+    assert(!bvh_ir_hploc_eligible(&limits));
+    limits.maxComputeWorkGroupInvocations = 32;
+    limits.maxComputeSharedMemorySize--;
+    assert(!bvh_ir_hploc_eligible(&limits));
+    VkAccelerationStructureGeometryKHR geometry = {0};
+    geometry.geometryType = VK_GEOMETRY_TYPE_AABBS_KHR;
+    geometry.geometry.aabbs.stride = 24;
+    VkAccelerationStructureBuildGeometryInfoKHR info = {0};
+    info.type = VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR;
+    info.geometryCount = 1;
+    info.pGeometries = &geometry;
+    assert(bvh_ir_choose_backend(&info, 1024, true, true) == BVH_IR_BACKEND_PLOC);
+    assert(bvh_ir_choose_backend(&info, 1025, true, true) == BVH_IR_BACKEND_HPLOC);
+    assert(bvh_ir_choose_backend(&info, 1025, false, true) == BVH_IR_BACKEND_HPLOC);
+    assert(bvh_ir_choose_backend(&info, 4, true, true) == BVH_IR_BACKEND_LBVH);
+    assert(bvh_ir_choose_backend(&info, 33, false, true) == BVH_IR_BACKEND_LBVH);
+    assert(bvh_ir_choose_backend(&info, BVH_IR_MAX_LEAVES, true, true) == BVH_IR_BACKEND_HPLOC);
+    info.flags = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_BUILD_BIT_KHR;
+    assert(bvh_ir_choose_backend(&info, 2048, true, true) == BVH_IR_BACKEND_LBVH);
+    info.flags = VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_UPDATE_BIT_KHR;
+    assert(bvh_ir_choose_backend(&info, 2048, true, true) == BVH_IR_BACKEND_LBVH);
+    info.type = VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR;
+    assert(bvh_ir_choose_backend(&info, 2048, true, true) == BVH_IR_BACKEND_HPLOC);
+    const uint32_t capacities[] = {0, 1, 2, 5, 31, 32, 33, 255, 256, 257, 1024, 1025, 65537, 1u << 20, BVH_IR_MAX_LEAVES};
+    for (uint32_t width = 0; width < 2; ++width) {
+        info.flags = width ? VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR : 0;
+        for (uint32_t i = 0; i < sizeof(capacities) / sizeof(capacities[0]); ++i) {
+            VkAccelerationStructureBuildRangeInfoKHR range = {0};
+            range.primitiveCount = capacities[i];
+            struct hploc_capture c = {0};
+            c.output = UINT64_C(0x100000000);
+            c.scratch = UINT64_C(0x2000000000);
+            c.layout = bvh_ir_build_layout(&info, NULL, &range);
+            const struct bvh_ir_build_layout queried = bvh_ir_build_layout(&info, &range.primitiveCount, NULL);
+            assert(c.layout.valid && queried.valid && c.layout.as_size == queried.as_size &&
+                   c.layout.scratch_size == queried.scratch_size && c.layout.ids_odd == queried.ids_odd &&
+                   c.layout.node_info == queried.node_info && c.layout.hploc_ranges == queried.hploc_ranges);
+            assert(c.layout.key_stride == (width ? 12 : 8));
+            uint64_t allocated = range.primitiveCount ? range.primitiveCount : 1;
+            assert(c.layout.ids_even + allocated * c.layout.key_stride <= c.layout.ids_odd);
+            assert(c.layout.ids_odd + allocated * c.layout.key_stride <= c.layout.node_info);
+            assert(c.layout.prefix_scan_partitions == c.layout.hploc_ranges);
+            assert(bvh_ir_record_build_backend(&info, &range, c.output, c.scratch, 0, emit_hploc, &c, BVH_IR_BACKEND_HPLOC) ==
+                   VK_SUCCESS);
+            assert(c.init_ranges == 1 && c.hploc_calls == 1 && c.calls == (range.primitiveCount ? 4u : 3u) + c.sort_calls);
+            c.calls = 0;
+            info.mode = VK_BUILD_ACCELERATION_STRUCTURE_MODE_UPDATE_KHR;
+            assert(bvh_ir_record_build_backend(&info, &range, c.output, c.scratch, 0, emit_hploc, &c, BVH_IR_BACKEND_HPLOC) !=
+                       VK_SUCCESS &&
+                   !c.calls);
+            info.mode = VK_BUILD_ACCELERATION_STRUCTURE_MODE_BUILD_KHR;
+            assert(bvh_ir_record_build_backend(&info, &range, UINT64_MAX - 128, c.scratch, 0, emit_hploc, &c,
+                                               BVH_IR_BACKEND_HPLOC) == VK_ERROR_OUT_OF_DEVICE_MEMORY &&
+                   !c.calls);
+        }
+    }
+    info.flags = 0;
+    uint32_t leaves = 32;
+    struct bvh_ir_build_layout narrow = bvh_ir_build_layout(&info, &leaves, NULL);
+    info.flags = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR;
+    struct bvh_ir_build_layout wide = bvh_ir_build_layout(&info, &leaves, NULL);
+    assert(narrow.ids_odd == 256 && wide.ids_odd == 512);
+    assert(narrow.node_info == 512 && wide.node_info == 1024);
+    assert(narrow.as_size == wide.as_size && wide.scratch_size == narrow.scratch_size + 512);
+}
 int main(void) {
     ploc_contract();
+    hploc_contract();
     for (unsigned n = 0; n < 5; ++n) {
         VkAccelerationStructureGeometryKHR g[2] = {{0}, {0}};
         for (unsigned i = 0; i < 2; ++i) {
@@ -216,7 +332,7 @@ int main(void) {
        assert(layout.valid && layout.as_size > UINT32_MAX && layout.scratch_size > UINT32_MAX);
        assert(bvh_ir_record_build(&info, &range, UINT64_C(0x100000000), UINT64_C(0x2000000000), 0, emit_large, &large) ==
               VK_SUCCESS);
-       assert(large.calls == 5);
+       assert(large.calls == 26); /* One initial local sort plus 21 global merge passes. */
        unsigned before = large.calls;
        assert(bvh_ir_record_build(&info, &range, UINT64_MAX - 128, UINT64_C(0x2000000000), 0, emit_large, &large) ==
                   VK_ERROR_OUT_OF_DEVICE_MEMORY &&

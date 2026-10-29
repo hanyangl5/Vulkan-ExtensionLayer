@@ -18,7 +18,9 @@ work prioritizes the mandatory AS/RQ/RTP baseline; known newer-feature exclusion
 must be explicit. CTS/regression outcomes remain categorized evidence, with no
 requirement to make unrelated optional suites all pass. See the goal's
 [compatibility and test scope](ray_tracing_fallback_goal.md#compatibility-and-test-scope).
-The latest slice is the [physical RT interfaces and production Mesa PLOC checkpoint](rt_pointer_interfaces_ploc_2026-10-29.md).
+The latest slice is the [ub-mode branch review and HPLOC/memory-model checkpoint](rt_ub_review_2026-10-29.md).
+The [physical RT interfaces and production Mesa PLOC checkpoint](rt_pointer_interfaces_ploc_2026-10-29.md)
+is its preceding baseline.
 The [Mesa pipeline comparison and mandatory boundary checkpoint](rt_mesa_pipeline_2026-10-29.md)
 is its committed baseline.
 The preceding [Event-based AS query checkpoint](rt_query_events_2026-10-28.md)
@@ -84,6 +86,9 @@ the final layout, passing build/local checks and the 16-case external CTS rechec
 - [x] Allow independent AS query operations inside known compute-insensitive native query scopes, preserving conservative compute-statistic admission.
 - [x] Preserve physical-pointer-bearing payload/callable/hit-attribute interfaces through the actual six-stage typed scheduler, including recursive type metadata and nested pointer mutation.
 - [x] Select and execute production Mesa PLOC on eligible devices, encode its GPU IR into shared BVH4, and retain LBVH/refit policy fallbacks.
+- [x] Integrate range-arrival HPLOC and 32/64-bit Morton variants, with shared-BVH4 structure/ray checks and artificial XYZ dispatch qualification.
+- [x] Support the tested GLSL450/Vulkan source memory-model paths, mixed native/RT entries and conservative slab intervals; repair reproduced registry and discovery contracts.
+- [x] Review branch-wide code/build/tooling contracts under ub-mode, retaining independent controls, tool limits and remaining quality debt.
 - [ ] M0: complete all capability, no-native-RT, resource ABI, and continuation proofs.
 - [ ] M1: integrate Mesa builders, GPU BVH4 encoding/refit, and shared AS objects.
 - [ ] M2: complete Ray Query lowering and state semantics.
@@ -97,8 +102,8 @@ Component checkmarks do not complete M0/M1/M2 or the full goal.
 
 | Component | Implemented and tested | Remaining boundary |
 | --- | --- | --- |
-| [Portable BVH4 components](../layers/raytracing/docs/BVH4.md) | Checked reference/CPU adapter; generic BDA hierarchy encoder; direct Mesa GPU IR adaptation/record emission with compact active leaves, full flags and explicit TLAS relocation; actual LBVH and eligible PLOC build-to-encode and two-to-four-child GPU collapse, followed by topology-preserving UPDATE/refit | HPLOC, PLOC performance, large construction IDs, numerical qualification and full object/resource qualification |
-| Typed continuation frames | Typed CFG/continuations; execution-owned BDA backing; builtin/push/record state; specialization, linked six-stage scheduler/shared traversal; traditional descriptor-backed opaque provenance; logical StorageBuffer pointer snapshots, supported PtrAccessChain loops, typed Function/Private pointer memory, GLSL450 source physical address identities/aggregate bridges, and physical pointers in cross-stage payload/callable/attribute interfaces | VulkanMemoryModel, remaining pointer/memory variants, multi-root/NonUniform execution qualification, large aggregates, conflicting per-stage FP modes and complete resource qualification |
+| [Portable BVH4 components](../layers/raytracing/docs/BVH4.md) | Checked reference/CPU adapter; generic BDA hierarchy encoder; direct Mesa GPU IR adaptation/record emission with compact active leaves, full flags and explicit TLAS relocation; actual LBVH/eligible PLOC/HPLOC with 32/64-bit keys, two-to-four-child GPU collapse and topology-preserving UPDATE/refit; conservative slab regression | Builder performance, large construction IDs, complete numerical/transform qualification and full object/resource qualification |
+| Typed continuation frames | Typed CFG/continuations; execution-owned BDA backing; builtin/push/record state; specialization, linked six-stage scheduler/shared traversal; traditional descriptor-backed opaque provenance; logical StorageBuffer pointer snapshots, supported PtrAccessChain loops, typed Function/Private pointer memory, source physical address identities/aggregate bridges and cross-stage interfaces; tested GLSL450/Vulkan source memory-model conversion and mixed-entry selection | Remaining pointer/memory/execution-mode variants, multi-root/NonUniform execution qualification, large aggregates, conflicting per-stage FP modes and complete resource qualification |
 | RQ host translation | Consume AS/RQ device requirements; translate resource/synchronization masks and explicit RT buffer queries; lifetime-owned AS address cells with allocator/flush/failure handling and enabled-queue-family sharing; private SSBO indexing/variable-pointer prerequisites | Complete emulation capability/limit reporting on no-RT ICDs, future unknown buffer chains, full-layout descriptor transport and private allocation budgets |
 | AS operations and host dependency | GPU CLONE/COMPACT, serialization/UUID/BLAS relocation, topology-preserving UPDATE/refit; public property pools with per-execution primary/secondary replay, payload/native completion acquisition and reuse/reset/free publication; synchronous deferred operations; owned command-capture and logical-stage planning components | Native logical-stage executor, remaining replay schemas and native-query interaction, true shrinking compaction, refit performance and full resource budgets |
 | RQ compiler compatibility | Actual per-query AS roots from scalar/array descriptors and integer conversions; helper/value/Phi flow; direct/grouped NonUniform propagation; preserve application workgroup/specialization metadata and remove native RT declarations | Full resource-limit transparency, complete opcode/stage coverage and full shared traversal qualification |
@@ -824,6 +829,7 @@ The following are exit checks, not implemented-feature claims.
 
 | Priority | Deliverable | Evidence needed before closing it |
 | --- | --- | --- |
+| First: confirmed P1 | Unify exposed ShaderModule handle ownership | Fix the reproduced same-device native/virtual value collision; public creation/use/destruction, native forwarding, allocator rollback and cross-device controls must pass. See the [review finding](rt_ub_review_2026-10-29.md#open-p1-mixed-shadermodule-handle-namespaces) |
 | 1 | Complete mandatory profile/resource qualification | Qualify protected execution, multi-device groups and pool-specific native query scopes; account for private/native resource budgets without reducing the mandatory public contract |
 | Parallel M4 | Complete logical-stage synchronization semantics | Source semaphore/barrier/event/ownership scopes, native-query interactions and qualified queues/groups. Query COPY uses the proved native bridge. CPU schedules and early-signal timing alone establish neither a correctness failure nor a requirement for a general queue worker |
 | Parallel M0/M1 | Complete no-RT resource and construction contract | Extend the shared software candidate profile to complete resource budgets and queue qualification; qualify production indexed construction and XYZ dispatch, then physical no-RT execution |
@@ -849,7 +855,9 @@ statistics to count hidden query dispatches. They do not close complete resource
 delivery or native-query virtualization. Physical-pointer-bearing cross-stage
 metadata now has a production implementation and public GPU oracle. The next
 concrete compiler step is source memory-model and execution-mode semantics;
-source VulkanMemoryModel/ShaderCall is not implemented by the metadata change.
+the subsequent ub-mode checkpoint implements and executes a bounded source
+VulkanMemoryModel/ShaderCall path. Remaining memory operands and execution modes
+still require independent qualification.
 Matrix access paths
 require their dedicated structural proof in addition to SDK SPIR-V validation.
 
@@ -901,9 +909,10 @@ Detailed remaining work, grouped by subsystem rather than priority:
    qualification where resources permit, additional UPDATE/numerical cases and
    large construction IDs; synthetic address tests alone do not close these.
    Eligible PLOC now has a complete host contract and public GPU evidence.
-   Integrate HPLOC only after resolving its 64-bit MSB, range initialization,
-   collective layout and cross-workgroup publication contracts. Qualify PLOC
-   throughput separately from the current correctness path. M1 remains incomplete.
+   HPLOC now has checked range initialization, 64-bit MSB handling, workgroup
+   collectives and release/acquire range publication, with 32/64-bit and XYZ
+   public GPU regressions. Qualify larger counts, transformed/extreme geometry
+   and builder throughput separately from this correctness path. M1 remains incomplete.
 5. Complete public AS queries beyond the now-tested execution-owned route. Its
    actual GPU properties, repeated/overlapping replay and native completion
    acquisition execute selected external CTS. Complete native synchronization
@@ -915,8 +924,10 @@ Detailed remaining work, grouped by subsystem rather than priority:
    Generic reset/copy queue flags do not alone establish a legal AS-pool case
    on graphics/video-only families; query-type family restrictions also apply.
    Preserve source wait scopes rather than imposing whole-submit waits. The
-   early startup crash has recurred; investigate it while retaining all original
-   failures and recheck evidence. Do not count skips as passes.
+   historical startup failures remain distinct from the newer native
+   physical-interface pipeline-creation crash. Investigate each with its exact
+   binaries while retaining original failures and recheck evidence. Do not
+   count skips as passes.
 6. Qualify the complete capability profile and threading/queue-family behavior
    on physical no-RT GPUs and POSIX. SSBO dynamic/nonuniform indexing and
    variablePointersStorageBuffer and compatible coherent resolver memory are

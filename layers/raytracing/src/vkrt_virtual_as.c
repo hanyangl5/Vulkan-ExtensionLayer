@@ -121,8 +121,7 @@ VkResult vkrt_create_virtual_as(struct vkrt_device_data *dev, const VkAccelerati
         return result;
     }
     VkAccelerationStructureKHR token = (VkAccelerationStructureKHR)(uintptr_t)as;
-    vkrt_map_object(VKRT_HKEY(token), as);
-    if (VKRT_FIND(struct vkrt_virtual_as, token) != as) {
+    if (!vkrt_map_object(VKRT_HKEY(token), as)) {
         free_virtual_as(dev, as);
         return VK_ERROR_OUT_OF_HOST_MEMORY;
     }

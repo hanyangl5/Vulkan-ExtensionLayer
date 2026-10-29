@@ -24,239 +24,252 @@
 #version 460
 
 #include "vkrt_bvh_preamble.h"
+#define VKRT_BVH_COHERENT
 #include "vk_bvh_defines.h"
 #define VK_USED_BUILD_FLAGS VK_HPLOC_BUILD_FLAGS
 #include "vk_bvh_helpers.h"
-#include "vk_debug.h"
 
-layout(local_size_x_id = SUBGROUP_SIZE_ID, local_size_y = 1, local_size_z = 1) in;
+/* Mesa's HPLOC communication group is one full native subgroup. Use a fixed
+ * workgroup instead: public Vulkan does not promise subgroup lane ordering,
+ * size or fullness merely because a specialization constant has that value. */
+layout(local_size_x = HPLOC_WORKGROUP_SIZE, local_size_y = 1, local_size_z = 1) in;
+#define HPLOC_WIDTH HPLOC_WORKGROUP_SIZE
+#define SEARCH_RADIUS 16u
 
 layout(push_constant) uniform CONSTS
 {
    hploc_args args;
 };
 
+shared uint32_t node_ids[HPLOC_WIDTH];
+shared vk_aabb node_aabbs[HPLOC_WIDTH];
+shared uint32_t candidate_infos[HPLOC_WIDTH];
+shared uint32_t collective_values[HPLOC_WIDTH];
+
+/* Every call is reached by the entire workgroup, including padded/inactive
+ * lanes. The second barrier protects readers before the next scratch reuse. */
+uint32_t
+group_ballot(bool predicate)
+{
+   uint32_t lane = gl_LocalInvocationIndex;
+   collective_values[lane] = predicate ? (1u << lane) : 0u;
+   barrier();
+   uint32_t mask = 0;
+   for (uint32_t i = 0; i < HPLOC_WIDTH; ++i)
+      mask |= collective_values[i];
+   barrier();
+   return mask;
+}
+
+uint32_t
+group_shuffle(uint32_t value, uint32_t index)
+{
+   collective_values[gl_LocalInvocationIndex] = value;
+   barrier();
+   uint32_t result = collective_values[index];
+   barrier();
+   return result;
+}
+
+void
+group_publish_buffer()
+{
+   /* Before an arrival this gathers every cluster writer into its owning
+    * lane's release. After an arrival it relays that lane's acquire to all
+    * peers which load the completed child cluster. No workgroup spins. */
+   controlBarrier(gl_ScopeWorkgroup, gl_ScopeDevice, gl_StorageSemanticsBuffer,
+                  gl_SemanticsAcquireRelease | gl_SemanticsMakeAvailable | gl_SemanticsMakeVisible);
+}
+
+uint32_t
+load_id(uint32_t index)
+{
+   if (VK_TEST_BUILD_FLAG_64BIT_KEYS)
+      return DEREF(INDEX(key64_id_pair, args.ids, index)).id;
+   return DEREF(INDEX(key32_id_pair, args.ids, index)).id;
+}
+
+void
+store_id(uint32_t index, uint32_t id)
+{
+   if (VK_TEST_BUILD_FLAG_64BIT_KEYS)
+      DEREF(INDEX(key64_id_pair, args.ids, index)).id = id;
+   else
+      DEREF(INDEX(key32_id_pair, args.ids, index)).id = id;
+}
+
 uint32_t
 delta(uint32_t index)
 {
-   uint32_t left_index = index;
-   uint32_t right_index = index + 1;
-
+   uint32_t next = index + 1;
    if (VK_TEST_BUILD_FLAG_64BIT_KEYS) {
-      uint64_t left_key = packUint2x32(u32vec2(
-         DEREF(INDEX(key64_id_pair, args.ids, left_index)).key_lo,
-         DEREF(INDEX(key64_id_pair, args.ids, left_index)).key_hi));
-      uint64_t right_key = packUint2x32(u32vec2(
-         DEREF(INDEX(key64_id_pair, args.ids, right_index)).key_lo,
-         DEREF(INDEX(key64_id_pair, args.ids, right_index)).key_hi));
-      return left_key != right_key ? (32 + uint32_t(findMSB(left_key ^ right_key))) : uint32_t(findMSB(left_index ^ right_index));
+      uint32_t lo = DEREF(INDEX(key64_id_pair, args.ids, index)).key_lo ^
+                    DEREF(INDEX(key64_id_pair, args.ids, next)).key_lo;
+      uint32_t hi = DEREF(INDEX(key64_id_pair, args.ids, index)).key_hi ^
+                    DEREF(INDEX(key64_id_pair, args.ids, next)).key_hi;
+      /* GLSL.std.450 FindUMsb has a 32-bit operand. Preserve HPLOC's
+       * (not LBVH's complemented) ordering using 32-bit halves. */
+      if (hi != 0) return 64u + uint32_t(findMSB(hi));
+      if (lo != 0) return 32u + uint32_t(findMSB(lo));
    } else {
-      uint32_t left_key = DEREF(INDEX(key32_id_pair, args.ids, left_index)).key;
-      uint32_t right_key = DEREF(INDEX(key32_id_pair, args.ids, right_index)).key;
-
-      return left_key != right_key ? (32 + findMSB(left_key ^ right_key)) : findMSB(left_index ^ right_index);
+      uint32_t difference = DEREF(INDEX(key32_id_pair, args.ids, index)).key ^
+                            DEREF(INDEX(key32_id_pair, args.ids, next)).key;
+      if (difference != 0) return 32u + uint32_t(findMSB(difference));
    }
+   return uint32_t(findMSB(index ^ next));
 }
-
-#define SEARCH_RADIUS 16
-
-shared uint32_t node_ids[SUBGROUP_SIZE];
-shared vk_aabb node_aabbs[SUBGROUP_SIZE];
-shared uint32_t candidate_infos[SUBGROUP_SIZE];
 
 void
 main(void)
 {
-   uint32_t global_id = gl_GlobalInvocationID.x;
+   uint32_t lane = gl_LocalInvocationIndex;
+   uint64_t global_id_wide = vkrt_build_global_id(HPLOC_WIDTH);
    REF(vk_ir_header) header = REF(vk_ir_header)(args.header);
    uint32_t active_leaf_count = DEREF(header).active_leaf_count;
+   if (global_id_wide == 0) DEREF(header).driver_internal[5] = BVH_IR_PRODUCER_HPLOC;
 
    if (active_leaf_count <= 1) {
-      if (global_id > 0)
-         return;
-
+      if (global_id_wide != 0) return;
       DEREF(header).ir_internal_node_count = 1;
-
       uint32_t child_id = VK_BVH_INVALID_NODE;
-      vk_ir_node child = vk_ir_node(vk_aabb(vec3(0.0), vec3(0.0)));
-      if (active_leaf_count > 0) {
-         if (VK_TEST_BUILD_FLAG_64BIT_KEYS) {
-            REF(key64_id_pair) key_id = INDEX(key64_id_pair, args.ids, global_id);
-            child_id = DEREF(key_id).id;
-	 } else {
-            REF(key32_id_pair) key_id = INDEX(key32_id_pair, args.ids, global_id);
-            child_id = DEREF(key_id).id;
-	 }
-         child = DEREF(REF(vk_ir_node)(OFFSET(args.bvh, ir_id_to_offset(args.bvh, child_id))));
+      /* The shared IR encoder requires the canonical empty box, rather than
+       * the zero box accepted by Mesa's original driver-specific encoder. */
+      vk_aabb bounds = vk_aabb(vec3(uintBitsToFloat(0x7f800000u)), vec3(uintBitsToFloat(0xff800000u)));
+      if (active_leaf_count != 0) {
+         child_id = load_id(0);
+         bounds = DEREF(REF(vk_ir_node)(OFFSET(args.bvh, ir_id_to_offset(args.bvh, child_id)))).aabb;
       }
-
       REF(vk_ir_box_node) node = REF(vk_ir_box_node)(OFFSET(args.bvh, args.internal_node_base));
-      DEREF(node).base.aabb = child.aabb;
+      DEREF(node).base.aabb = bounds;
       DEREF(node).children[0] = child_id;
       DEREF(node).children[1] = VK_BVH_INVALID_NODE;
       DEREF(node).bvh_offset = VK_UNKNOWN_BVH_OFFSET;
-      if (VK_TEST_BUILD_FLAG_PROPAGATE_CULL_FLAGS && active_leaf_count > 0)
-         DEREF(node).flags = fetch_child_flags(args.bvh, child_id);
-
+      if (VK_TEST_BUILD_FLAG_PROPAGATE_CULL_FLAGS)
+         DEREF(node).flags = active_leaf_count != 0 ? fetch_child_flags(args.bvh, child_id) : 0;
       return;
    }
 
-   /* Start at the leaf nodes which cover only one primitive => start=end. */
+   bool is_active = global_id_wide < uint64_t(active_leaf_count);
+   uint32_t global_id = is_active ? uint32_t(global_id_wide) : 0;
    uint32_t range_start = global_id;
    uint32_t range_end = global_id;
-
    uint32_t internal_node_count = active_leaf_count - 1;
+   const uint32_t cluster_threshold = HPLOC_WIDTH / 2;
 
-   bool is_active = global_id < active_leaf_count;
-
-   while (subgroupAny(is_active)) {
-      uint32_t parent_index = 0xffffffff;
+   while (group_ballot(is_active) != 0) {
+      group_publish_buffer();
+      uint32_t parent_index = 0xffffffffu;
       if (is_active) {
-         /* The parent node has either the index range_start-1 or range_end. Avoid indexing -1 or active_leaf_count. */
-         bool use_right_parent = range_start == 0 || (range_end < internal_node_count && delta(range_end) < delta(range_start - 1));
-
-         parent_index = use_right_parent ? range_end : (range_start - 1);
+         bool use_right_parent = range_start == 0 ||
+            (range_end < internal_node_count && delta(range_end) < delta(range_start - 1));
+         parent_index = use_right_parent ? range_end : range_start - 1;
          if (parent_index == internal_node_count) {
             is_active = false;
          } else {
-            uint32_t prev_range = atomicExchange(DEREF(INDEX(uint32_t, args.ranges, parent_index)), use_right_parent ? range_start : range_end);
-            if (prev_range == 0xffffffff) {
+            uint32_t previous = atomicExchange(DEREF(INDEX(uint32_t, args.ranges, parent_index)),
+               use_right_parent ? range_start : range_end, gl_ScopeDevice, gl_StorageSemanticsBuffer,
+               gl_SemanticsAcquireRelease | gl_SemanticsMakeAvailable | gl_SemanticsMakeVisible);
+            if (previous == 0xffffffffu)
                is_active = false;
-            } else {
-               if (use_right_parent)
-                  range_end = prev_range;
-               else
-                  range_start = prev_range;
-            }
+            else if (use_right_parent)
+               range_end = previous;
+            else
+               range_start = previous;
          }
       }
+      group_publish_buffer();
 
-      /* Merging phase for every invocation that has a range with more than SUBGROUP_SIZE / 2 nodes.
-       * The nodes are merged until the number of nodes is below SUBGROUP_SIZE / 2 which ensures that
-       * the invocation handling the parent node can load its child nodes.
-       */
-      const uint32_t cluster_threshold = SUBGROUP_SIZE / 2;
+      /* Each child cluster holds at most half a communication group. The
+       * second range arrival cooperatively merges the two child clusters. */
       uint32_t range_size = range_end - range_start + 1;
-      bool range_is_root = subgroupAny(range_size == active_leaf_count);
-      uint64_t cluster_mask = packUint2x32(subgroupBallot(is_active && (range_is_root || range_size > cluster_threshold)).xy);
+      bool range_is_root = group_ballot(is_active && range_size == active_leaf_count) != 0;
+      uint32_t cluster_mask = group_ballot(is_active && (range_is_root || range_size > cluster_threshold));
       while (cluster_mask != 0) {
-         uint32_t cluster_invoc = uint32_t(findLSB(cluster_mask));
-         /* Clear the LSB. */
+         uint32_t owner = uint32_t(findLSB(cluster_mask));
          cluster_mask &= cluster_mask - 1;
-
-         uint32_t start = subgroupShuffle(range_start, cluster_invoc);
-         uint32_t split = subgroupShuffle(parent_index, cluster_invoc);
-         uint32_t end = subgroupShuffle(range_end, cluster_invoc);
-
-         uint32_t load_index, load_base, index_range;
-         if (gl_SubgroupInvocationID >= cluster_threshold) {
-             load_index = gl_SubgroupInvocationID - cluster_threshold;
-             load_base = split + 1;
-             index_range = end - split;
-         } else {
-             load_index = gl_SubgroupInvocationID;
-             load_base = start;
-             index_range = split + 1 - start;
-         }
-         uint32_t node_id_index = load_base + load_index;
-         uint32_t node_id = VK_BVH_INVALID_NODE;
-         if (load_index < index_range) {
-            if (VK_TEST_BUILD_FLAG_64BIT_KEYS) {
-               node_id = DEREF(INDEX(key64_id_pair, args.ids, node_id_index)).id;
-	    } else {
-               node_id = DEREF(INDEX(key32_id_pair, args.ids, node_id_index)).id;
-	    }
-	 }
-
-         uvec4 node_valid_mask = subgroupBallot(node_id != VK_BVH_INVALID_NODE);
-         uint32_t node_prefix_sum = subgroupBallotExclusiveBitCount(node_valid_mask);
-         uint32_t node_count = subgroupBallotBitCount(node_valid_mask);
+         uint32_t start = group_shuffle(range_start, owner);
+         uint32_t split = group_shuffle(parent_index, owner);
+         uint32_t end = group_shuffle(range_end, owner);
+         uint32_t load_index = lane % cluster_threshold;
+         uint32_t load_base = lane >= cluster_threshold ? split + 1 : start;
+         uint32_t index_range = lane >= cluster_threshold ? end - split : split + 1 - start;
+         uint32_t node_id = load_index < index_range ? load_id(load_base + load_index) : VK_BVH_INVALID_NODE;
+         uint32_t valid_mask = group_ballot(node_id != VK_BVH_INVALID_NODE);
+         uint32_t prefix = uint32_t(bitCount(valid_mask & ((1u << lane) - 1u)));
+         uint32_t node_count = uint32_t(bitCount(valid_mask));
          if (node_id != VK_BVH_INVALID_NODE) {
-            node_ids[node_prefix_sum] = node_id;
-            node_aabbs[node_prefix_sum] = DEREF(REF(vk_ir_node)(OFFSET(args.bvh, ir_id_to_offset(args.bvh, node_id)))).aabb;
+            node_ids[prefix] = node_id;
+            node_aabbs[prefix] = DEREF(REF(vk_ir_node)(OFFSET(args.bvh, ir_id_to_offset(args.bvh, node_id)))).aabb;
          }
+         barrier();
 
-         while (node_count > (range_is_root ? 1 : cluster_threshold)) {
+         while (node_count > (range_is_root ? 1u : cluster_threshold)) {
+            vk_aabb node_aabb = vk_aabb(vec3(0.0), vec3(0.0));
             node_id = VK_BVH_INVALID_NODE;
-            vk_aabb node_aabb = node_aabbs[gl_SubgroupInvocationID];
-            if (gl_SubgroupInvocationID < node_count) {
-               candidate_infos[gl_SubgroupInvocationID] = 0xffffffff;
-               uint32_t best_candidate = 0xffffffff;
-               for (uint32_t i = 1; i <= SEARCH_RADIUS; i++) {
-                  int32_t index = int32_t(gl_SubgroupInvocationID) - int(i);
-
-                  vk_aabb shared_bounds;
-                  shared_bounds.min = min(node_aabbs[index].min, node_aabb.min);
-                  shared_bounds.max = max(node_aabbs[index].max, node_aabb.max);
-
-                  uint32_t shared_sa = (floatBitsToUint(aabb_surface_area(shared_bounds)) << 1u) & (~(SUBGROUP_SIZE - 1));
+            if (lane < node_count) {
+               node_id = node_ids[lane];
+               node_aabb = node_aabbs[lane];
+            }
+            candidate_infos[lane] = 0xffffffffu;
+            barrier();
+            uint32_t best_candidate = 0xffffffffu;
+            if (lane < node_count) {
+               for (uint32_t i = 1; i <= SEARCH_RADIUS; ++i) {
+                  int32_t index = int32_t(lane) - int32_t(i);
                   if (index >= 0) {
-                     uint32_t candidate = shared_sa | index;
-                     best_candidate = min(best_candidate, candidate);
-
-                     candidate = shared_sa | gl_SubgroupInvocationID;
-                     atomicMin(candidate_infos[index], candidate);
-                  }
-               }
-
-               best_candidate = min(best_candidate, candidate_infos[gl_SubgroupInvocationID]);
-               uint32_t best_index = best_candidate & (SUBGROUP_SIZE - 1);
-               uint32_t other_node_id = node_ids[best_index];
-
-               vk_aabb shared_bounds;
-               shared_bounds.min = min(node_aabbs[best_index].min, node_aabb.min);
-               shared_bounds.max = max(node_aabbs[best_index].max, node_aabb.max);
-
-               /* There is always at least on pair of invocations that can be merged because there is a finite number of pairs and
-                * one of them therefore has a minimum surface area. If more than two nodes have the exact same surface area, the
-                * neighbor search prioritizes lower invocation indices.
-                */
-               bool merge = best_index < SUBGROUP_SIZE && subgroupShuffle(best_index, best_index) == gl_SubgroupInvocationID;
-
-               node_id = node_ids[gl_SubgroupInvocationID];
-
-               if (merge) {
-                  if (gl_SubgroupInvocationID < best_index) {
-                     uint32_t dst_index = atomicAdd(DEREF(header).ir_internal_node_count, 1);
-                     uint64_t dst_offset = args.internal_node_base + uint64_t(dst_index) * uint64_t(SIZEOF(vk_ir_box_node));
-
-                     node_aabb = shared_bounds;
-
-                     REF(vk_ir_box_node) node = REF(vk_ir_box_node)(OFFSET(args.bvh, dst_offset));
-                     DEREF(node).base.aabb = shared_bounds;
-                     DEREF(node).children[0] = node_id;
-                     DEREF(node).children[1] = other_node_id;
-                     DEREF(node).bvh_offset = VK_UNKNOWN_BVH_OFFSET;
-                     if (VK_TEST_BUILD_FLAG_PROPAGATE_CULL_FLAGS) {
-                        DEREF(node).flags = fetch_child_flags(args.bvh, node_id) & fetch_child_flags(args.bvh, other_node_id);
-                     }
-
-                     node_id = pack_ir_node_id(args.bvh, dst_offset, vk_ir_node_internal);
-                  } else {
-                     node_id = VK_BVH_INVALID_NODE;
+                     vk_aabb bounds;
+                     bounds.min = min(node_aabbs[index].min, node_aabb.min);
+                     bounds.max = max(node_aabbs[index].max, node_aabb.max);
+                     uint32_t area = (floatBitsToUint(aabb_surface_area(bounds)) << 1u) & (~(HPLOC_WIDTH - 1u));
+                     best_candidate = min(best_candidate, area | uint32_t(index));
+                     atomicMin(candidate_infos[index], area | lane);
                   }
                }
             }
-
-            node_count = subgroupBallotBitCount(subgroupBallot(node_id != VK_BVH_INVALID_NODE));
-            uint32_t node_prefix_sum = subgroupBallotExclusiveBitCount(subgroupBallot(node_id != VK_BVH_INVALID_NODE));
+            barrier();
+            uint32_t best_index = 0xffffffffu;
+            if (lane < node_count) {
+               best_candidate = min(best_candidate, candidate_infos[lane]);
+               best_index = best_candidate & (HPLOC_WIDTH - 1u);
+            }
+            uint32_t other_best = group_shuffle(best_index, best_index < node_count ? best_index : 0);
+            bool merge = lane < node_count && best_index < node_count && other_best == lane;
+            if (merge) {
+               if (lane < best_index) {
+                  uint32_t other_node_id = node_ids[best_index];
+                  vk_aabb bounds;
+                  bounds.min = min(node_aabbs[best_index].min, node_aabb.min);
+                  bounds.max = max(node_aabbs[best_index].max, node_aabb.max);
+                  uint32_t dst_index = atomicAdd(DEREF(header).ir_internal_node_count, 1);
+                  uint64_t dst_offset = args.internal_node_base + uint64_t(dst_index) * uint64_t(SIZEOF(vk_ir_box_node));
+                  REF(vk_ir_box_node) node = REF(vk_ir_box_node)(OFFSET(args.bvh, dst_offset));
+                  DEREF(node).base.aabb = bounds;
+                  DEREF(node).children[0] = node_id;
+                  DEREF(node).children[1] = other_node_id;
+                  DEREF(node).bvh_offset = VK_UNKNOWN_BVH_OFFSET;
+                  if (VK_TEST_BUILD_FLAG_PROPAGATE_CULL_FLAGS)
+                     DEREF(node).flags = fetch_child_flags(args.bvh, node_id) & fetch_child_flags(args.bvh, other_node_id);
+                  node_id = pack_ir_node_id(args.bvh, dst_offset, vk_ir_node_internal);
+                  node_aabb = bounds;
+               } else {
+                  node_id = VK_BVH_INVALID_NODE;
+               }
+            }
+            valid_mask = group_ballot(node_id != VK_BVH_INVALID_NODE);
+            node_count = uint32_t(bitCount(valid_mask));
+            prefix = uint32_t(bitCount(valid_mask & ((1u << lane) - 1u)));
             if (node_id != VK_BVH_INVALID_NODE) {
-               node_ids[node_prefix_sum] = node_id;
-               node_aabbs[node_prefix_sum] = node_aabb;
+               node_ids[prefix] = node_id;
+               node_aabbs[prefix] = node_aabb;
             }
+            barrier();
+            /* A later merge can fetch cull flags from an internal node made
+             * by another lane in this iteration, not only from shared AABBs. */
+            group_publish_buffer();
          }
-
-         if (gl_SubgroupInvocationID < min(end - start + 1, cluster_threshold)) {
-            uint32_t dst_node = gl_SubgroupInvocationID < node_count ? node_ids[gl_SubgroupInvocationID] : VK_BVH_INVALID_NODE;
-            if (VK_TEST_BUILD_FLAG_64BIT_KEYS) {
-               DEREF(INDEX(key64_id_pair, args.ids, start + gl_SubgroupInvocationID)).id = dst_node;
-	    } else {
-               DEREF(INDEX(key32_id_pair, args.ids, start + gl_SubgroupInvocationID)).id = dst_node;
-	    }
-         }
-
-         memoryBarrier(gl_ScopeDevice, gl_StorageSemanticsBuffer,
-                       gl_SemanticsAcquireRelease | gl_SemanticsMakeAvailable | gl_SemanticsMakeVisible);
+         if (lane < min(end - start + 1, cluster_threshold))
+            store_id(start + lane, lane < node_count ? node_ids[lane] : VK_BVH_INVALID_NODE);
+         group_publish_buffer();
       }
    }
 }

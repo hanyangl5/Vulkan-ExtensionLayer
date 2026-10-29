@@ -177,18 +177,70 @@ sw_lexicographic_compare(vec3 v0, vec3 v1)
    return a.x > b.x;
 }
 
+/* Only called for nonzero normal values with enough margin to zero/Inf for
+ * the requested number of steps. Integer stepping preserves exact float bits. */
+float sw_float_step_down(float value, uint steps) {
+   uint bits = floatBitsToUint(value);
+   return uintBitsToFloat((bits & 0x80000000u) != 0u ? bits + steps : bits - steps);
+}
+float sw_float_step_up(float value, uint steps) {
+   uint bits = floatBitsToUint(value);
+   return uintBitsToFloat((bits & 0x80000000u) != 0u ? bits - steps : bits + steps);
+}
+
+/* Enclose the exact (bound-origin)/direction, independently of reciprocal
+ * rounding. A false return denotes an unbounded interval, never a ray miss. */
+bool sw_slab_endpoint(float bound, float origin, float direction, out float lower, out float upper) {
+   uint bb = floatBitsToUint(bound) & 0x7fffffffu;
+   uint ob = floatBitsToUint(origin) & 0x7fffffffu;
+   uint db = floatBitsToUint(direction) & 0x7fffffffu;
+   /* Avoid flushed input values, overflowing subtraction, and division outside
+    * Vulkan's guaranteed 2.5-ULP denominator domain [2^-126,2^126]. */
+   if ((bb != 0u && bb < 0x00800000u) || (ob != 0u && ob < 0x00800000u) ||
+       bb >= 0x7f000000u || ob >= 0x7f000000u || db < 0x00800000u || db > 0x7e800000u)
+      return false;
+   precise float numerator = bound - origin;
+   uint nb = floatBitsToUint(numerator) & 0x7fffffffu;
+   if (nb == 0u) {
+      if (bound != origin) return false; // A nonzero result may have flushed.
+      lower = 0.0;
+      upper = 0.0;
+      return true;
+   }
+   if (nb <= 0x00800000u || nb >= 0x7f7fffffu) return false;
+   // Correctly rounded subtraction lies between the two adjacent floats.
+   float nlo = sw_float_step_down(numerator, 1u);
+   float nhi = sw_float_step_up(numerator, 1u);
+   int de = int(db >> 23);
+   int elo = int((floatBitsToUint(nlo) & 0x7fffffffu) >> 23) - de;
+   int ehi = int((floatBitsToUint(nhi) & 0x7fffffffu) >> 23) - de;
+   // The quotient is then within [2^-125,2^125] in magnitude: no flush,
+   // overflow, or exceptional operand can invalidate the ULP error bound.
+   if (elo < -124 || elo > 124 || ehi < -124 || ehi > 124) return false;
+   precise float qlo = nlo / direction;
+   precise float qhi = nhi / direction;
+   // A 2.5-ULP division error can cross one binade boundary. Six adjacent
+   // floats cover the resulting at-most-five steps plus the endpoint.
+   lower = sw_float_step_down(min(qlo, qhi), 6u);
+   upper = sw_float_step_up(max(qlo, qhi), 6u);
+   return true;
+}
+
 bool
 sw_ray_box_test(sw_ray ray, vec3 bmin, vec3 bmax, float tmin, float tmax)
 {
    if (any(greaterThan(bmin, bmax))) return false;
    for (uint axis = 0; axis < 3; ++axis) {
-      if (ray.direction[axis] == 0.0) {
+      uint direction_bits = floatBitsToUint(ray.direction[axis]) & 0x7fffffffu;
+      if (direction_bits == 0u) {
          if (ray.origin[axis] < bmin[axis] || ray.origin[axis] > bmax[axis]) return false;
       } else {
-         float a = (bmin[axis] - ray.origin[axis]) * ray.inv_direction[axis];
-         float b = (bmax[axis] - ray.origin[axis]) * ray.inv_direction[axis];
-         tmin = max(tmin, min(a, b));
-         tmax = min(tmax, max(a, b));
+         float amin, amax, bmin_t, bmax_t;
+         if (!sw_slab_endpoint(bmin[axis], ray.origin[axis], ray.direction[axis], amin, amax) ||
+             !sw_slab_endpoint(bmax[axis], ray.origin[axis], ray.direction[axis], bmin_t, bmax_t))
+            continue;
+         tmin = max(tmin, min(amin, bmin_t));
+         tmax = min(tmax, max(amax, bmax_t));
          if (tmin > tmax) return false;
       }
    }

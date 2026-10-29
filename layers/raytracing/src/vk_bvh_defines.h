@@ -466,6 +466,7 @@ struct morton_sort_args {
    VOID_REF ids_odd;
    REF(morton_ready_count) counts;
    uint32_t leaf_count;
+   uint32_t pass;
 };
 
 #define LBVH_RIGHT_CHILD_BIT_SHIFT 29
@@ -513,7 +514,13 @@ struct ploc_args {
    uint64_t internal_node_offset;
 };
 
+#define HPLOC_WORKGROUP_SIZE 32
 #define VK_HPLOC_BUILD_FLAGS (VK_BUILD_FLAG_PROPAGATE_CULL_FLAGS | VK_BUILD_FLAG_64BIT_KEYS)
+
+struct hploc_init_args {
+    VOID_REF ranges;
+    uint64_t range_count;
+};
 
 struct hploc_args {
    REF(vk_ir_header) header;
@@ -521,26 +528,6 @@ struct hploc_args {
    REF(key32_id_pair) ids;
    VOID_REF ranges;
    uint64_t internal_node_base;
-};
-
-#define PAIR_TRIANGLES_WORKGROUP_SIZE 256
-
-#define VK_PAIR_TRIANGLES_BUILD_FLAGS (VK_BUILD_FLAG_64BIT_KEYS)
-
-struct pair_triangles_args {
-   VOID_REF bvh;
-   REF(vk_ir_header) header;
-   VOID_REF src_ids;
-   REF(vk_prefix_scan_partition) prefix_scan_partitions;
-};
-
-#define VK_ID_PREFIX_SUM_BUILD_FLAGS (VK_BUILD_FLAG_64BIT_KEYS)
-
-struct id_prefix_sum_args {
-   REF(vk_ir_header) header;
-   VOID_REF src_ids;
-   VOID_REF dst_ids;
-   REF(vk_prefix_scan_partition) prefix_scan_partitions;
 };
 
 #endif

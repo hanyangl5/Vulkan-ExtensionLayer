@@ -10,7 +10,7 @@ struct vkrt_build_dispatch_grid {
 
 /* The builder's logical workgroup IDs are flattened independently of native
  * dimensions. Extra groups in the last plane are harmless: each leaf/tree
- * invocation checks its logical bound, while sort claims only its logical jobs.
+ * invocation checks its logical bound; each sort pass guards its entire group.
  * Leave the output untouched if the reported device dimensions cannot cover it. */
 static inline bool vkrt_build_dispatch_grid(uint32_t groups, uint32_t max_x, uint32_t max_y, uint32_t max_z,
                                             struct vkrt_build_dispatch_grid *out) {

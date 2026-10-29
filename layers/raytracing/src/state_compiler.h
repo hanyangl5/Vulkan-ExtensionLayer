@@ -151,7 +151,7 @@ struct TypedContinuationProgram {
 // alignment. CopyMemory's separate target/source masks are applied separately.
 // Mixed native/persistent copies pass a complete typed value through the
 // selected native-root branch, preserving pointer identity records in frames.
-// Memory operands that require another source memory model stay unsupported.
+// Native resource operations preserve their source memory-model operands.
 // OpPtrAccessChain
 // preserves ArrayStride and folds signed Element advances into finite typed
 // route segments. Ordinary zero-index chains can omit and restore the actual
@@ -163,8 +163,8 @@ struct TypedContinuationProgram {
 // Only stable descriptor identities are reconstructed; image reads and atomic
 // effects retain their original source positions, scopes and memory semantics.
 // Opaque Phi/Select and nontraditional descriptor handles remain unsupported.
-// The current backend accepts Logical GLSL450 only; VulkanMemoryModel and
-// physical-storage-buffer addressing require explicit scheduler/frame support.
+// The backend accepts Logical/PhysicalStorageBuffer64 GLSL450 or Vulkan memory
+// models. Typed linking upgrades mixed GLSL450 peers before combining them.
 //
 // TraceRay/ExecuteCallable/ReportIntersection emit typed late-completion
 // requests. All selected-entry payload/callable/attribute variables have

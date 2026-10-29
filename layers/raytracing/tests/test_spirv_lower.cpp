@@ -187,6 +187,116 @@ static bool check_signed_sbt_variant(const std::vector<uint32_t> &user, const st
     return result == 0;
 }
 
+/* The SPIR-V integer getters allow either signedness, independently of GLSL's
+ * builtin signatures. Every result is stored as bits in an observable buffer. */
+static bool check_integer_getter_results(const std::vector<uint32_t> &lib) {
+    struct Getter {
+        const char *instruction, *helper;
+        bool intersection;
+    };
+    const Getter getters[] = {
+        {"OpRayQueryGetIntersectionTypeKHR", "sw_get_intersection_type", true},
+        {"OpRayQueryGetRayFlagsKHR", "sw_get_ray_flags", false},
+        {"OpRayQueryGetIntersectionInstanceCustomIndexKHR", "sw_get_intersection_instance_custom_index", true},
+        {"OpRayQueryGetIntersectionInstanceIdKHR", "sw_get_intersection_instance_id", true},
+        {"OpRayQueryGetIntersectionInstanceShaderBindingTableRecordOffsetKHR", "sw_get_intersection_instance_sbt_offset", true},
+        {"OpRayQueryGetIntersectionGeometryIndexKHR", "sw_get_intersection_geometry_index", true},
+        {"OpRayQueryGetIntersectionPrimitiveIndexKHR", "sw_get_intersection_primitive_index", true},
+    };
+    std::string source = R"spv(
+OpCapability Shader
+OpCapability RayQueryKHR
+OpExtension "SPV_KHR_ray_query"
+OpMemoryModel Logical GLSL450
+OpEntryPoint GLCompute %main "main" %scene %output
+OpExecutionMode %main LocalSize 1 1 1
+OpDecorate %scene DescriptorSet 0
+OpDecorate %scene Binding 0
+OpDecorate %output DescriptorSet 0
+OpDecorate %output Binding 1
+OpDecorate %results ArrayStride 4
+OpDecorate %block Block
+OpMemberDecorate %block 0 Offset 0
+%void = OpTypeVoid
+%bool = OpTypeBool
+%uint = OpTypeInt 32 0
+%int = OpTypeInt 32 1
+%float = OpTypeFloat 32
+%vec3 = OpTypeVector %float 3
+%zero = OpConstant %uint 0
+%mask = OpConstant %uint 255
+%count = OpConstant %uint 14
+%fzero = OpConstant %float 0
+%fone = OpConstant %float 1
+%far = OpConstant %float 100
+%origin = OpConstantComposite %vec3 %fzero %fzero %fzero
+%direction = OpConstantComposite %vec3 %fzero %fzero %fone
+%as = OpTypeAccelerationStructureKHR
+%asptr = OpTypePointer UniformConstant %as
+%scene = OpVariable %asptr UniformConstant
+%results = OpTypeArray %uint %count
+%block = OpTypeStruct %results
+%outptr = OpTypePointer StorageBuffer %block
+%wordptr = OpTypePointer StorageBuffer %uint
+%output = OpVariable %outptr StorageBuffer
+%query = OpTypeRayQueryKHR
+%queryptr = OpTypePointer Function %query
+%fn = OpTypeFunction %void
+)spv";
+    std::string body;
+    for (uint32_t i = 0; i < 14; ++i) {
+        const auto &getter = getters[i / 2];
+        const std::string index = std::to_string(i);
+        source += "%index" + index + " = OpConstant %uint " + index + "\n";
+        body += "%value" + index + " = " + getter.instruction + (i & 1 ? " %uint" : " %int") + " %q" +
+                (getter.intersection ? " %zero\n" : "\n");
+        if (!(i & 1)) body += "%bits" + index + " = OpBitcast %uint %value" + index + "\n";
+        body += "%destination" + index + " = OpAccessChain %wordptr %output %zero %index" + index + "\n";
+        body += "OpStore %destination" + index + (i & 1 ? " %value" : " %bits") + index + "\n";
+    }
+    source += R"spv(
+%main = OpFunction %void None %fn
+%entry = OpLabel
+%q = OpVariable %queryptr Function
+%scene_value = OpLoad %as %scene
+OpRayQueryInitializeKHR %q %scene_value %zero %mask %origin %fzero %direction %far
+%candidate = OpRayQueryProceedKHR %bool %q
+OpSelectionMerge %done None
+OpBranchConditional %candidate %hit %done
+%hit = OpLabel
+)spv" + body + R"spv(
+OpBranch %done
+%done = OpLabel
+OpReturn
+OpFunctionEnd
+)spv";
+    spvtools::SpirvTools validator(SPV_ENV_VULKAN_1_1_SPIRV_1_4);
+    std::vector<uint32_t> words;
+    if (!validator.Assemble(source, &words) || !validator.Validate(words)) {
+        std::fprintf(stderr, "FAIL: integer getter signedness source fixture is invalid\n");
+        return false;
+    }
+    uint32_t *output = nullptr;
+    size_t count = 0;
+    char error[1024];
+    const int result = vkrt_spirv_lower(words.data(), words.size(), lib.data(), lib.size(), &output, &count, error, sizeof(error));
+    if (result) {
+        std::fprintf(stderr, "FAIL: integer getter signedness lowering: %s\n", error);
+        return false;
+    }
+    const std::vector<uint32_t> lowered(output, output + count);
+    vkrt_spirv_lower_free(output);
+    if (!validator.Validate(lowered) || classify(lowered).op_ray_query) return false;
+    for (const auto &getter : getters) {
+        if (count_calls_function_named(lowered, getter.helper) < 2) {
+            std::fprintf(stderr, "FAIL: signed/unsigned calls missing for %s\n", getter.instruction);
+            return false;
+        }
+    }
+    std::printf("All seven integer RQ getters retain signed/unsigned result bits PASS\n");
+    return true;
+}
+
 /* The external CTS flow/image and query-wrapper cases exposed two independent
  * lowering defects. Retain a small validated compile regression for CI; the
  * real CTS executions remain the execution/behavior evidence. */
@@ -1028,6 +1138,7 @@ main(int argc, char **argv)
        failures++;
    }
    if (before.op_sbt_offset && !check_signed_sbt_variant(user, lib)) failures++;
+   if (!check_integer_getter_results(lib)) failures++;
 
    write_spirv(argv[3], out, out_n);
    vkrt_spirv_lower_free(out);

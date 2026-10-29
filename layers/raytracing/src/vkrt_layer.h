@@ -76,8 +76,9 @@ struct vkrt_device_data {
     * is not evidence that a native RT feature was enabled downstream. */
    bool app_requested_ray_query;
    VkPipelineLayout            build_pipeline_layout;
-   VkPipeline build_pipelines[14];
+   VkPipeline build_pipelines[21];
    uint32_t build_ploc_subgroup_size;
+   bool build_hploc_eligible;
    VkPipelineLayout copy_pipeline_layout;
    VkPipeline copy_pipeline;
    uint32_t                    max_build_dispatch_x;
@@ -157,20 +158,6 @@ static inline void vkrt_replay_push_constants(struct vkrt_cmd_buffer_data *cb) {
         return;
     }
 }
-
-/* ------------------------------------------------------------------ */
-/* Shader-module metadata produced by the SPIR-V rewrite               */
-/* ------------------------------------------------------------------ */
-
-struct vkrt_shader_module_data {
-   VkShaderModule              module;
-   struct vkrt_device_data    *device_data;
-   bool                        uses_ray_query;
-   bool                        uses_ray_tracing_pipeline;
-   /* Rewritten SPIR-V storage (heap; freed on destroy). */
-   uint32_t                   *rewritten;
-   size_t                      rewritten_words;
-};
 
 /* ------------------------------------------------------------------ */
 /* Shared globals                                                      */

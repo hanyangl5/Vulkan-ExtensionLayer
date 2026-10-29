@@ -357,12 +357,17 @@ def cts_runs(api, args, output):
             raise ValueError(f"Case must match exactly once in the supplied summary: {name}")
         selected.append(matches[0])
     env = os.environ.copy()
-    for key in LAYER_ENV:
-        env.pop(key, None)
+    for key in list(env):
+        if key in LAYER_ENV or key.startswith("VKRT_NO_RT_GUARD_"):
+            env.pop(key)
     env.update(summary["environment"]["effective_driver_environment"])
-    layer = Path(summary["layer"]["snapshot_library"])
-    expected_hash = summary["layer"]["library_sha256"]
-    if sha256(layer) != expected_hash:
+    env.update(summary["environment"]["overrides"])
+    layer_record = summary.get("layer")
+    if not layer_record and summary.get("mode") != "native":
+        raise ValueError("Fallback diagnostic summary is missing the snapshotted layer")
+    layer = Path(layer_record["snapshot_library"]) if layer_record else None
+    expected_hash = layer_record["library_sha256"] if layer_record else None
+    if layer and sha256(layer) != expected_hash:
         raise ValueError("Layer DLL no longer matches the immutable original summary")
     cts = Path(summary["cts"])
     expected_cts = summary["cts_sha256"]
@@ -381,11 +386,16 @@ def cts_runs(api, args, output):
                 raise ValueError("Case target differs from the original summary CTS executable")
             if api.cts_running():
                 raise RuntimeError("Another CTS process started; refusing concurrent GPU use")
-            if sha256(layer) != expected_hash:
+            if layer and sha256(layer) != expected_hash:
                 raise ValueError("Layer DLL changed during diagnostics")
-            record = run_one(api, args.cdb, command, Path(case["cwd"]), env, directory, args.timeout, args.handle_trace)
+            run_env = env.copy()
+            guard_log = directory / "guard.jsonl" if summary.get("no_native_rt_guard") else None
+            if guard_log:
+                run_env["VKRT_NO_RT_GUARD_LOG"] = str(guard_log)
+            record = run_one(api, args.cdb, command, Path(case["cwd"]), run_env, directory, args.timeout, args.handle_trace)
             record.update(case=case["case"], original_stdout=case["stdout"], original_qpa=case["qpa"],
-                          layer_sha256=expected_hash, changed_arguments=["--deqp-log-filename"])
+                          layer_sha256=expected_hash, changed_arguments=["--deqp-log-filename"],
+                          no_native_rt_guard_log=str(guard_log) if guard_log else None)
             write_json(directory / "capture.json", record)
             runs.append(record)
             write_json(output / "summary.json", {"kind": "startup diagnostic, not a CTS pass matrix", "runs": runs})

@@ -5,6 +5,11 @@
 #include <vulkan/vulkan.h>
 
 namespace vel::rt {
+// Select an ordinary graphics/compute entry from a module also containing RT
+// entries. Preserve its interface, specialization and execution modes, remove
+// unreachable RT code, and validate before normal native/Ray Query lowering.
+std::vector<uint32_t> SelectNativeShaderEntry(const std::vector<uint32_t> &source, const std::string &entry,
+                                              VkShaderStageFlagBits stage);
 // Specialization is applied before typed analysis, including default values.
 // Every stage exports void step(uint64 frameBDA); the scheduler supplies the
 // immutable system prefix, continuation state and typed invocation backing.

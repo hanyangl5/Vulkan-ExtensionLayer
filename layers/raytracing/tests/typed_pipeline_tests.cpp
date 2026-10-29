@@ -3,12 +3,15 @@
 #include "typed_pipeline.h"
 #include "glsl_compiler.h"
 #include <spirv-tools/libspirv.hpp>
+#include <spirv-tools/optimizer.hpp>
 #include <spirv/unified1/spirv.hpp>
+#include <algorithm>
 #include <array>
 #include <cstddef>
 #include <cstring>
 #include <iostream>
 #include <map>
+#include <set>
 #include <sstream>
 #include <stdexcept>
 
@@ -375,7 +378,7 @@ void main() {
     return text.str();
 }
 
-void CheckNative(const Words &source) {
+void CheckNative(const Words &source, uint32_t expected_bindings = 1) {
     spvtools::SpirvTools tools(SPV_ENV_VULKAN_1_3);
     Require(tools.Validate(source), "Linked native module failed validation");
     std::map<uint32_t, uint32_t> bindings;
@@ -406,7 +409,14 @@ void CheckNative(const Words &source) {
         }
     }
     Require(entries == 1, "Linked module must have only the scheduler compute entry");
-    Require(bindings.size() == 1 && bindings.begin()->second == 0, "BDA transport consumed an extra descriptor binding");
+    std::set<uint32_t> actual_bindings, required_bindings;
+    for (const auto &[id, binding] : bindings) {
+        (void)id;
+        actual_bindings.insert(binding);
+    }
+    for (uint32_t binding = 0; binding < expected_bindings; ++binding) required_bindings.insert(binding);
+    Require(bindings.size() == expected_bindings && actual_bindings == required_bindings,
+            "BDA transport changed the application descriptors");
     Require(specialization_ids.size() == 2, "Application specialization leaked into native scheduler");
     for (const auto &[id, value] : specialization_ids) {
         (void)id;
@@ -464,7 +474,8 @@ Words WithShaderCallMemoryBarriers(const Words &source) {
         if (op == spv::OpFunction && !constants) {
             Require(word_type && scope, "memory-scope regression source lacks uint32 constant 6");
             result.insert(result.end(), {(4u << 16) | spv::OpConstant, word_type, semantics,
-                                         uint32_t(spv::MemorySemanticsAcquireReleaseMask | spv::MemorySemanticsUniformMemoryMask)});
+                                         uint32_t(spv::MemorySemanticsAcquireReleaseMask | spv::MemorySemanticsUniformMemoryMask |
+                                                  spv::MemorySemanticsImageMemoryMask)});
             constants = true;
         }
         if (op == spv::OpExecuteCallableKHR) {
@@ -478,7 +489,9 @@ Words WithShaderCallMemoryBarriers(const Words &source) {
     return result;
 }
 
+#include "typed_memory_model_tests.h"
 void CPUChecks(const TypedContinuationProgram &caller, const TypedContinuationProgram &callee) {
+    VulkanMemoryModelChecks(caller, callee);
     Require(NamedConstant(caller.source, "flag_spec") == 1 && NamedConstant(caller.source, "small_spec") == 19 &&
                 NamedConstant(caller.source, "wide_spec") == UINT64_C(0x100000007),
             "Default bool/u16/u64 specialization changed");

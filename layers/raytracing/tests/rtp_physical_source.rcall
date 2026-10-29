@@ -9,6 +9,7 @@
 layout(location = 0) callableDataInEXT uvec4 incomingData;
 layout(location = 1) callableDataEXT uvec4 outgoingData;
 void main() {
+    sourceAcquire();
     uint id = incomingData.x;
     SourceRecords records = SourceRecords(sourcePush.records);
     SourceRecord saved = records.rec[id];
@@ -16,7 +17,9 @@ void main() {
     uint nested = 0u;
     if (incomingData.y == 0u) {
         outgoingData = uvec4(id, 1u, incomingData.z, 0u);
+        sourceRelease();
         executeCallableEXT(0, 1);
+        sourceAcquire();
         nested = outgoingData.w;
         chosen.v[saved.index] += 100u;
     } else {
@@ -27,4 +30,5 @@ void main() {
     }
     saved.a.v[saved.index + 1u] += incomingData.y == 0u ? 30u : 40u;
     incomingData.w = (saved.a.v[saved.index] ^ saved.b.v[saved.index]) + nested;
+    sourceRelease();
 }

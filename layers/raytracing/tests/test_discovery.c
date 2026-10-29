@@ -30,6 +30,7 @@ static const char *last_layer;
 static struct vkrt_resource_native native_resources;
 static unsigned qualification_queries, legacy_properties_queries, properties2_queries, uuid_queries;
 static unsigned query_capabilities = 3;
+static VkShaderStageFlags native_subgroup_stages;
 
 #define INDEX_FIELDS(F)                                     \
     F(maxUpdateAfterBindDescriptorsInAllPools)              \
@@ -135,6 +136,20 @@ static VKAPI_ATTR void VKAPI_CALL mock_properties2(VkPhysicalDevice p, VkPhysica
             INDEX_FIELDS(SET_INDEX)
 #undef SET_INDEX
             u->shaderDenormPreserveFloat32 = VK_TRUE;
+        } else if (next->sType == VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SUBGROUP_PROPERTIES) {
+            VkPhysicalDeviceSubgroupProperties *s = (void *)next;
+            s->subgroupSize = 32;
+            s->supportedStages = native_subgroup_stages;
+            s->supportedOperations = VK_SUBGROUP_FEATURE_BASIC_BIT | VK_SUBGROUP_FEATURE_BALLOT_BIT;
+            s->quadOperationsInAllStages = VK_TRUE;
+        } else if (next->sType == VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_PROPERTIES) {
+            VkPhysicalDeviceVulkan11Properties *s = (void *)next;
+            memset(s->deviceUUID, 0x71, sizeof(s->deviceUUID));
+            s->subgroupSize = 32;
+            s->subgroupSupportedStages = native_subgroup_stages;
+            s->subgroupSupportedOperations = VK_SUBGROUP_FEATURE_BASIC_BIT | VK_SUBGROUP_FEATURE_BALLOT_BIT;
+            s->subgroupQuadOperationsInAllStages = VK_TRUE;
+            s->maxMemoryAllocationSize = UINT64_C(0x123456789abcdef0);
         } else if (next->sType == VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_INLINE_UNIFORM_BLOCK_PROPERTIES) {
             VkPhysicalDeviceInlineUniformBlockProperties *i = (void *)next;
 #define SET_INLINE(name) i->name = native_resources.inline_uniform.name;
@@ -627,6 +642,59 @@ static void properties(void) {
     ignore_rt_properties = false;
 }
 
+static void subgroup_properties(void) {
+    PFN_vkGetPhysicalDeviceProperties2 queries[] = {(void *)vkrt_discovery_proc("vkGetPhysicalDeviceProperties2"),
+                                                    (void *)vkrt_discovery_proc("vkGetPhysicalDeviceProperties2KHR")};
+    const VkShaderStageFlags ordinary =
+        VK_SHADER_STAGE_ALL_GRAPHICS | VK_SHADER_STAGE_COMPUTE_BIT | VK_SHADER_STAGE_TASK_BIT_EXT | VK_SHADER_STAGE_MESH_BIT_EXT;
+    const VkShaderStageFlags rt[] = {VK_SHADER_STAGE_RAYGEN_BIT_KHR,       VK_SHADER_STAGE_ANY_HIT_BIT_KHR,
+                                     VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR,  VK_SHADER_STAGE_MISS_BIT_KHR,
+                                     VK_SHADER_STAGE_INTERSECTION_BIT_KHR, VK_SHADER_STAGE_CALLABLE_BIT_KHR};
+    /* Query prerequisites and descriptor budgets independently determine
+     * software eligibility. Unsupported devices must retain native properties. */
+    for (unsigned mode = 0; mode < 3; ++mode) {
+        resource_defaults();
+        query_capabilities = mode == 0 ? 0 : 3;
+        if (mode == 1) native_resources.properties.limits.maxPerStageDescriptorStorageBuffers = 16;
+        for (unsigned stages = 0; stages <= VKRT_ARRAY_SIZE(rt); ++stages) {
+            native_subgroup_stages = ordinary | (stages ? rt[stages - 1] : 0);
+            const VkShaderStageFlags expected = mode == 2 ? ordinary : native_subgroup_stages;
+            for (unsigned alias = 0; alias < VKRT_ARRAY_SIZE(queries); ++alias)
+                for (unsigned core11 = 0; core11 < 2; ++core11) {
+                    struct {
+                        VkStructureType sType;
+                        void *pNext;
+                        uint64_t sentinel;
+                    } tail = {VK_STRUCTURE_TYPE_MAX_ENUM, NULL, UINT64_C(0xabcdef0123456789)};
+                    VkPhysicalDeviceSubgroupProperties subgroup = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SUBGROUP_PROPERTIES,
+                                                                   .pNext = &tail};
+                    VkPhysicalDeviceVulkan11Properties v11 = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_PROPERTIES,
+                                                              .pNext = &tail};
+                    void *head = core11 ? (void *)&v11 : (void *)&subgroup;
+                    VkPhysicalDeviceProperties2 full = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2, .pNext = head};
+                    queries[alias](physical, &full);
+                    REQUIRE(full.pNext == head && tail.sType == VK_STRUCTURE_TYPE_MAX_ENUM && !tail.pNext &&
+                            tail.sentinel == UINT64_C(0xabcdef0123456789));
+                    if (core11) {
+                        REQUIRE(
+                            v11.sType == VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_PROPERTIES && v11.pNext == &tail &&
+                            v11.subgroupSize == 32 && v11.subgroupSupportedStages == expected &&
+                            v11.subgroupSupportedOperations == (VK_SUBGROUP_FEATURE_BASIC_BIT | VK_SUBGROUP_FEATURE_BALLOT_BIT) &&
+                            v11.subgroupQuadOperationsInAllStages && v11.maxMemoryAllocationSize == UINT64_C(0x123456789abcdef0));
+                        for (unsigned byte = 0; byte < VK_UUID_SIZE; ++byte) REQUIRE(v11.deviceUUID[byte] == 0x71);
+                    } else {
+                        REQUIRE(subgroup.sType == VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SUBGROUP_PROPERTIES &&
+                                subgroup.pNext == &tail && subgroup.subgroupSize == 32 && subgroup.supportedStages == expected &&
+                                subgroup.supportedOperations == (VK_SUBGROUP_FEATURE_BASIC_BIT | VK_SUBGROUP_FEATURE_BALLOT_BIT) &&
+                                subgroup.quadOperationsInAllStages);
+                    }
+                }
+        }
+    }
+    resource_defaults();
+    query_capabilities = 3;
+}
+
 static void expect_rt_masked(PFN_vkEnumerateDeviceExtensionProperties enumerate, PFN_vkGetPhysicalDeviceFeatures2 query) {
     VkPhysicalDeviceRayTracingPipelineFeaturesKHR rtp = {.sType =
                                                              VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_FEATURES_KHR};
@@ -844,6 +912,7 @@ int main(void) {
     duplicate_library = false;
     ineligible_library(enumerate);
     properties();
+    subgroup_properties();
     budget_failure(enumerate, query);
     query_backend_failure(enumerate, query);
     optional_virtual_object_consumers(enumerate, query);

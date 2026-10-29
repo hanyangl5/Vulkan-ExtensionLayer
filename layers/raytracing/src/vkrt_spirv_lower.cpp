@@ -1833,10 +1833,13 @@ int vkrt_spirv_lower_with_context(const uint32_t *user_words, size_t user_word_c
                 }
                 uint32_t rty = merged[i + 1];
                 uint32_t res = merged[i + 2];
-                /* SPIR-V permits either signedness for this 32-bit result;
-                 * the GLSL helper has the unsigned return type. */
-                uint32_t call_type =
-                    op == SpvOpRayQueryGetIntersectionInstanceShaderBindingTableRecordOffsetKHR ? val_ty.at(fn) : rty;
+                /* Every integer getter permits either signedness, independent
+                 * of its GLSL helper. Call using the actual return type, then
+                 * preserve all 32 result bits at the source interface. */
+                const bool integer_getter = op == SpvOpRayQueryGetIntersectionTypeKHR || op == SpvOpRayQueryGetRayFlagsKHR ||
+                                            (op >= SpvOpRayQueryGetIntersectionInstanceCustomIndexKHR &&
+                                             op <= SpvOpRayQueryGetIntersectionPrimitiveIndexKHR);
+                uint32_t call_type = integer_getter ? val_ty.at(fn) : rty;
                 uint32_t call_result = call_type == rty ? res : ids.fresh();
                 uint32_t q_orig = merged[i + 3];
                 uint32_t q_arg = q_orig;

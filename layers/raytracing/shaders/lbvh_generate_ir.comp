@@ -23,6 +23,7 @@
 
 #version 460
 
+#define VKRT_BVH_COHERENT
 #include "vkrt_bvh_preamble.h"
 #include "vk_bvh_defines.h"
 #define VK_USED_BUILD_FLAGS VK_LBVH_GENERATE_IR_BUILD_FLAGS

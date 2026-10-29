@@ -95,6 +95,7 @@ vkrt_CreateInstance(const VkInstanceCreateInfo *pCreateInfo,
                                                       "vkDestroyInstance");
       if (fpDestroyInstance)
          fpDestroyInstance(*pInstance, pAllocator);
+      *pInstance = VK_NULL_HANDLE;
       return VK_ERROR_OUT_OF_HOST_MEMORY;
    }
 
@@ -107,28 +108,43 @@ vkrt_CreateInstance(const VkInstanceCreateInfo *pCreateInfo,
    data->api_version = pCreateInfo->pApplicationInfo && pCreateInfo->pApplicationInfo->apiVersion ?
       pCreateInfo->pApplicationInfo->apiVersion : VK_API_VERSION_1_0;
 
-   vkrt_map_object(VKRT_HKEY(*pInstance), data);
-
-   /* vkrt_CreateDevice is handed a VkPhysicalDevice, not the instance, so
-    * every physical device has to resolve back to this instance data. */
-   {
-      uint32_t n = 0;
-      if (data->vtable.EnumeratePhysicalDevices &&
-          data->vtable.EnumeratePhysicalDevices(*pInstance, &n, NULL) == VK_SUCCESS &&
-          n > 0) {
-         VkPhysicalDevice *pds =
-            (VkPhysicalDevice *)calloc(n, sizeof(*pds));
-         if (pds) {
-            data->vtable.EnumeratePhysicalDevices(*pInstance, &n, pds);
-            for (uint32_t i = 0; i < n; i++)
-               vkrt_map_object(VKRT_HKEY(pds[i]), data);
-            free(pds);
-         }
-      }
+   if (!vkrt_map_object(VKRT_HKEY(*pInstance), data)) {
+       data->vtable.DestroyInstance(*pInstance, pAllocator);
+       free(data);
+       *pInstance = VK_NULL_HANDLE;
+       return VK_ERROR_OUT_OF_HOST_MEMORY;
    }
 
    VKRT_LOG_DBG("CreateInstance ok (%p)", (void *)*pInstance);
    return VK_SUCCESS;
+}
+
+static VKAPI_ATTR VkResult VKAPI_CALL vkrt_EnumeratePhysicalDevices(VkInstance instance, uint32_t *count,
+                                                                    VkPhysicalDevice *devices) {
+    struct vkrt_instance_data *data = VKRT_FIND(struct vkrt_instance_data, instance);
+    if (!data || !data->vtable.EnumeratePhysicalDevices) return VK_ERROR_INITIALIZATION_FAILED;
+    uint32_t capacity = devices ? *count : 0;
+    VkResult result = data->vtable.EnumeratePhysicalDevices(instance, count, devices);
+    if (!devices || (result != VK_SUCCESS && result != VK_INCOMPLETE)) return result;
+    if (*count > capacity) return VK_ERROR_INITIALIZATION_FAILED;
+    for (uint32_t i = 0; i < *count; ++i)
+        if (!vkrt_map_object(VKRT_HKEY(devices[i]), data)) return VK_ERROR_OUT_OF_HOST_MEMORY;
+    return result;
+}
+static VKAPI_ATTR VkResult VKAPI_CALL vkrt_EnumeratePhysicalDeviceGroups(VkInstance instance, uint32_t *count,
+                                                                         VkPhysicalDeviceGroupProperties *groups) {
+    struct vkrt_instance_data *data = VKRT_FIND(struct vkrt_instance_data, instance);
+    if (!data || !data->vtable.EnumeratePhysicalDeviceGroups) return VK_ERROR_INITIALIZATION_FAILED;
+    uint32_t capacity = groups ? *count : 0;
+    VkResult result = data->vtable.EnumeratePhysicalDeviceGroups(instance, count, groups);
+    if (!groups || (result != VK_SUCCESS && result != VK_INCOMPLETE)) return result;
+    if (*count > capacity) return VK_ERROR_INITIALIZATION_FAILED;
+    for (uint32_t i = 0; i < *count; ++i) {
+        if (groups[i].physicalDeviceCount > VK_MAX_DEVICE_GROUP_SIZE) return VK_ERROR_INITIALIZATION_FAILED;
+        for (uint32_t j = 0; j < groups[i].physicalDeviceCount; ++j)
+            if (!vkrt_map_object(VKRT_HKEY(groups[i].physicalDevices[j]), data)) return VK_ERROR_OUT_OF_HOST_MEMORY;
+    }
+    return result;
 }
 
 static VKAPI_ATTR void VKAPI_CALL
@@ -141,7 +157,7 @@ vkrt_DestroyInstance(VkInstance instance,
       return;
 
    data->vtable.DestroyInstance(instance, pAllocator);
-   vkrt_unmap_object(VKRT_HKEY(instance));
+   vkrt_unmap_owner_objects(data);
    free(data);
 }
 
@@ -155,6 +171,33 @@ static void vkrt_free_device_data(struct vkrt_device_data *data) {
     pthread_mutex_destroy(&data->command_buffers_lock);
 #endif
     free(data);
+}
+
+static VkResult register_device_queues(struct vkrt_device_data *data, const VkDeviceCreateInfo *info) {
+    /* Queue retrieval has no VkResult. Acquire every requested alias here,
+     * where host or loader-data failure can still roll back device creation. */
+    for (uint32_t i = 0; i < info->queueCreateInfoCount; ++i) {
+        const VkDeviceQueueCreateInfo *create = &info->pQueueCreateInfos[i];
+        for (uint32_t j = 0; j < create->queueCount; ++j) {
+            VkQueue queue = VK_NULL_HANDLE;
+            if (!create->flags && data->vtable.GetDeviceQueue) {
+                data->vtable.GetDeviceQueue(data->device, create->queueFamilyIndex, j, &queue);
+            } else if (data->vtable.GetDeviceQueue2) {
+                VkDeviceQueueInfo2 get = {.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_INFO_2,
+                                          .flags = create->flags,
+                                          .queueFamilyIndex = create->queueFamilyIndex,
+                                          .queueIndex = j};
+                data->vtable.GetDeviceQueue2(data->device, &get, &queue);
+            }
+            if (!queue) return VK_ERROR_INITIALIZATION_FAILED;
+            if (data->set_loader_data) {
+                VkResult result = data->set_loader_data(data->device, queue);
+                if (result != VK_SUCCESS) return result;
+            }
+            if (!vkrt_map_object(VKRT_HKEY(queue), data)) return VK_ERROR_OUT_OF_HOST_MEMORY;
+        }
+    }
+    return VK_SUCCESS;
 }
 
 static bool debug_object_owns(struct vkrt_device_data *dev, VkObjectType type, uint64_t handle) {
@@ -277,6 +320,8 @@ vkrt_CreateDevice(VkPhysicalDevice physicalDevice,
    }
    if (result == VK_SUCCESS) result = vkrt_shader_interface_init(data, pCreateInfo);
    if (result == VK_SUCCESS) result = vkrt_shader_objects_init(data);
+   if (result == VK_SUCCESS && !vkrt_map_object(VKRT_HKEY(*pDevice), data)) result = VK_ERROR_OUT_OF_HOST_MEMORY;
+   if (result == VK_SUCCESS) result = register_device_queues(data, pCreateInfo);
    if (result != VK_SUCCESS) {
       VKRT_LOG_ERR("GPU BVH pipeline initialization failed: %d", result);
       vkrt_build_finish(data);
@@ -293,6 +338,7 @@ vkrt_CreateDevice(VkPhysicalDevice physicalDevice,
       vkrt_memory_allocations_finish(data);
       vkrt_debug_objects_finish(data);
       data->vtable.DestroyDevice(*pDevice, pAllocator);
+      vkrt_unmap_owner_objects(data);
       *pDevice = VK_NULL_HANDLE;
       vkrt_free_device_data(data);
       return result;
@@ -309,10 +355,6 @@ vkrt_CreateDevice(VkPhysicalDevice physicalDevice,
       }
    }
 
-   vkrt_map_object(VKRT_HKEY(*pDevice), data);
-   /* Physical devices map to the instance data so CreateDevice can find it;
-    * now also key the physical device to our device data for the AS calls
-    * that take VkPhysicalDevice. Keep both. */
    VKRT_LOG_DBG("CreateDevice ok (%p) app_requested_ray_query=%d", (void *)*pDevice, (int)data->app_requested_ray_query);
    return VK_SUCCESS;
 }
@@ -341,14 +383,7 @@ vkrt_DestroyDevice(VkDevice device, const VkAllocationCallbacks *pAllocator)
    vkrt_debug_objects_finish(data);
    data->vtable.DestroyDevice(device, pAllocator);
    /* Remove device and queue aliases before releasing their shared owner. */
-   vkrt_mutex_lock(&vkrt_global.objects_lock);
-   for (size_t i = 0; i < vkrt_global.objects.capacity;) {
-      if (vkrt_global.objects.entries[i].value == data) {
-         vkrt_map_remove(&vkrt_global.objects, vkrt_global.objects.entries[i].key);
-         i = 0; /* deletion can shift a wrapped probe cluster */
-      } else ++i;
-   }
-   vkrt_mutex_unlock(&vkrt_global.objects_lock);
+   vkrt_unmap_owner_objects(data);
    vkrt_free_device_data(data);
 }
 
@@ -397,15 +432,6 @@ vkrt_CreateShaderModule(VkDevice device,
    if (result != VK_SUCCESS)
       return result;
 
-   struct vkrt_shader_module_data *sm =
-      (struct vkrt_shader_module_data *)calloc(1, sizeof(*sm));
-   if (sm) {
-      sm->module        = *pShaderModule;
-      sm->device_data   = data;
-      sm->uses_ray_query = uses_rq;
-      vkrt_map_object(VKRT_HKEY(*pShaderModule), sm);
-   }
-
    if (uses_rq)
       VKRT_LOG_DBG("CreateShaderModule %p: ray query lowered",
                    (void *)*pShaderModule);
@@ -421,13 +447,6 @@ vkrt_DestroyShaderModule(VkDevice device, VkShaderModule shaderModule,
       return;
 
    if (vkrt_rtp_destroy_shader(data, shaderModule)) return;
-   struct vkrt_shader_module_data *sm =
-      (struct vkrt_shader_module_data *)vkrt_unmap_object(
-         VKRT_HKEY(shaderModule));
-   if (sm) {
-      free(sm->rewritten);
-      free(sm);
-   }
    data->vtable.DestroyShaderModule(device, shaderModule, pAllocator);
 }
 
@@ -775,6 +794,16 @@ PFN_vkVoidFunction vkrt_device_direct_proc(struct vkrt_device_data *dev, const c
 static VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL
 vkrt_GetInstanceProcAddr(VkInstance instance, const char *pName)
 {
+    bool physical_devices = !strcmp(pName, "vkEnumeratePhysicalDevices");
+    bool physical_groups =
+        !strcmp(pName, "vkEnumeratePhysicalDeviceGroups") || !strcmp(pName, "vkEnumeratePhysicalDeviceGroupsKHR");
+    if (physical_devices || physical_groups) {
+        struct vkrt_instance_data *owner = instance ? VKRT_FIND(struct vkrt_instance_data, instance) : NULL;
+        if (!owner) return NULL;
+        if (physical_devices)
+            return owner->vtable.EnumeratePhysicalDevices ? (PFN_vkVoidFunction)vkrt_EnumeratePhysicalDevices : NULL;
+        return owner->vtable.EnumeratePhysicalDeviceGroups ? (PFN_vkVoidFunction)vkrt_EnumeratePhysicalDeviceGroups : NULL;
+    }
    static const struct {
       const char *name;
       void       *ptr;

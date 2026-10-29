@@ -7,12 +7,18 @@ on:
       - 'layers/raytracing/**'
       - 'CMakeLists.txt'
       - 'README.md'
+      - 'scripts/run_rt_cts.py'
+      - 'scripts/test_rt_cts_guard_evidence.py'
+      - 'scripts/test_debug_cts_startup.py'
       - '.github/workflows/rayquery-fallback.yml'
   pull_request:
     paths:
       - 'layers/raytracing/**'
       - 'CMakeLists.txt'
       - 'README.md'
+      - 'scripts/run_rt_cts.py'
+      - 'scripts/test_rt_cts_guard_evidence.py'
+      - 'scripts/test_debug_cts_startup.py'
       - '.github/workflows/rayquery-fallback.yml'
 
 permissions:
@@ -31,10 +37,19 @@ jobs:
           sudo apt-get install -y --no-install-recommends \
             build-essential cmake ninja-build python3 libvulkan-dev \
             spirv-tools spirv-headers glslc glslang-dev mesa-vulkan-drivers
+      - name: Check out matching Vulkan headers and registry
+        uses: actions/checkout@v4
+        with:
+          repository: KhronosGroup/Vulkan-Headers
+          ref: e3b1eec08173d6b825cd3ac88c885a63b621504a # v1.4.357
+          path: .ci/Vulkan-Headers
+          persist-credentials: false
       - name: Configure
         run: >-
           cmake -S layers/raytracing -B build-raytracing -G Ninja
           -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON
+          -DVulkan_INCLUDE_DIR="$GITHUB_WORKSPACE/.ci/Vulkan-Headers/include"
+          -DVKRT_VULKAN_REGISTRY="$GITHUB_WORKSPACE/.ci/Vulkan-Headers/registry/vk.xml"
       - name: Build layer, tests and validated SPIR-V
         run: cmake --build build-raytracing --parallel 2
       - name: Run offline tests

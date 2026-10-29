@@ -848,7 +848,10 @@ void BoundariesAndSourcePreservation() {
     Replace(memory_model, "OpExtension \"SPV_KHR_ray_tracing\"",
             "OpExtension \"SPV_KHR_ray_tracing\"\nOpExtension \"SPV_KHR_vulkan_memory_model\"");
     Replace(memory_model, "OpMemoryModel Logical GLSL450", "OpMemoryModel Logical Vulkan");
-    reject(memory_model, "source memory model requires explicit frame/scheduler support");
+    auto memory_program = CompileTypedContinuationSteps(Source(memory_model), "main", spv::ExecutionModelIntersectionKHR);
+    Require(tools.Disassemble(memory_program.spirv, &disassembly), "Vulkan memory-model disassembly failed");
+    Require(disassembly.find("OpMemoryModel Logical Vulkan") != std::string::npos,
+            "Vulkan source memory model changed during state lowering");
 }
 const char *kPointerSource = R"spv(
 OpCapability Shader

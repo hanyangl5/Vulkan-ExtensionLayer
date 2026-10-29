@@ -356,14 +356,16 @@ static VKAPI_ATTR void VKAPI_CALL GetDeviceQueue(VkDevice device, uint32_t famil
    struct vkrt_device_data *dev = VKRT_FIND(struct vkrt_device_data, device);
    if (!dev) return;
    dev->vtable.GetDeviceQueue(device, family, index, queue);
-   if (*queue) vkrt_map_object(VKRT_HKEY(*queue), dev);
+   /* Production creation already acquired this alias. Replacing it never
+    * grows the map, even if another thread has filled its load threshold. */
+   if (*queue && !vkrt_map_object(VKRT_HKEY(*queue), dev)) *queue = VK_NULL_HANDLE;
 }
 static VKAPI_ATTR void VKAPI_CALL GetDeviceQueue2(VkDevice device, const VkDeviceQueueInfo2 *info, VkQueue *queue)
 {
    struct vkrt_device_data *dev = VKRT_FIND(struct vkrt_device_data, device);
    if (!dev || !dev->vtable.GetDeviceQueue2) return;
    dev->vtable.GetDeviceQueue2(device, info, queue);
-   if (*queue) vkrt_map_object(VKRT_HKEY(*queue), dev);
+   if (*queue && !vkrt_map_object(VKRT_HKEY(*queue), dev)) *queue = VK_NULL_HANDLE;
 }
 static VKAPI_ATTR VkResult VKAPI_CALL QueueWaitIdle(VkQueue queue) {
     struct vkrt_device_data *dev = VKRT_FIND(struct vkrt_device_data, queue);

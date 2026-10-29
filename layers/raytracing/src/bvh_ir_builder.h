@@ -13,10 +13,22 @@ enum bvh_ir_stage {
     BVH_IR_STAGE_TREE,
     BVH_IR_STAGE_BOUNDS,
     BVH_IR_STAGE_PLOC,
+    BVH_IR_STAGE_HPLOC_INIT,
+    BVH_IR_STAGE_HPLOC,
     BVH_IR_STAGE_COUNT
 };
 
-enum bvh_ir_backend { BVH_IR_BACKEND_LBVH, BVH_IR_BACKEND_PLOC };
+enum bvh_ir_backend { BVH_IR_BACKEND_LBVH, BVH_IR_BACKEND_PLOC, BVH_IR_BACKEND_HPLOC };
+
+/* The public HPLOC port uses a fixed logical workgroup, not native subgroup
+ * collectives. Its conservative LDS bound includes padded vec3 AABBs. This is
+ * below the existing 128-invocation baseline and adds no subgroup features. */
+#define BVH_IR_HPLOC_SHARED_BYTES 2048u
+static inline bool bvh_ir_hploc_eligible(const VkPhysicalDeviceLimits *limits) {
+    return limits && limits->maxComputeWorkGroupInvocations >= HPLOC_WORKGROUP_SIZE &&
+           limits->maxComputeWorkGroupSize[0] >= HPLOC_WORKGROUP_SIZE &&
+           limits->maxComputeSharedMemorySize >= BVH_IR_HPLOC_SHARED_BYTES;
+}
 
 /* Pinned Mesa 837ab0e PLOC uses a 1024-lane workgroup. The public adapter's
  * local compaction scan follows logical workgroup order, independent of the
@@ -44,15 +56,20 @@ static inline bool bvh_ir_ploc_count_eligible(uint32_t leaves) {
 }
 
 static inline enum bvh_ir_backend bvh_ir_choose_backend(const VkAccelerationStructureBuildGeometryInfoKHR *info, uint32_t leaves,
-                                                        bool ploc_eligible) {
-    if (!ploc_eligible || leaves <= 4 || !bvh_ir_ploc_count_eligible(leaves)) return BVH_IR_BACKEND_LBVH;
+                                                        bool ploc_eligible, bool hploc_eligible) {
+    if (leaves <= 4) return BVH_IR_BACKEND_LBVH;
     /* Preserve the pinned common builder's quality/fast-build policy. UPDATE
      * itself remains the independent topology-preserving runtime refit. */
-    return info->type == VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR ||
-                   !(info->flags & (VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_BUILD_BIT_KHR |
-                                    VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_UPDATE_BIT_KHR))
-               ? BVH_IR_BACKEND_PLOC
-               : BVH_IR_BACKEND_LBVH;
+    if (info->type != VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR &&
+        (info->flags &
+         (VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_BUILD_BIT_KHR | VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_UPDATE_BIT_KHR)))
+        return BVH_IR_BACKEND_LBVH;
+    /* Mesa's common host leaves HPLOC selection to a driver hook. This public
+     * adapter keeps PLOC for small quality builds and selects the scalable
+     * range-arrival HPLOC path above one PLOC workgroup's requested capacity.
+     * Lack of either optional builder always retains a correct alternative. */
+    if (leaves > PLOC_WORKGROUP_SIZE && hploc_eligible) return BVH_IR_BACKEND_HPLOC;
+    return ploc_eligible && bvh_ir_ploc_count_eligible(leaves) ? BVH_IR_BACKEND_PLOC : BVH_IR_BACKEND_LBVH;
 }
 
 /* emit must bind the corresponding common shader, push these bytes, cover the
@@ -87,7 +104,7 @@ static inline VkResult bvh_ir_record_build_backend(const VkAccelerationStructure
                                                    VkDeviceAddress scratch, VkDeviceAddress blas_ir_addresses, bvh_ir_emit_fn emit,
                                                    void *user, enum bvh_ir_backend backend) {
     if (!info || !ranges || !emit || !address || !scratch || info->mode != VK_BUILD_ACCELERATION_STRUCTURE_MODE_BUILD_KHR ||
-        (backend != BVH_IR_BACKEND_LBVH && backend != BVH_IR_BACKEND_PLOC))
+        (backend != BVH_IR_BACKEND_LBVH && backend != BVH_IR_BACKEND_PLOC && backend != BVH_IR_BACKEND_HPLOC))
         return VK_ERROR_INITIALIZATION_FAILED;
     uint32_t type = info->type == VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR ? 2u : 0u;
     for (uint32_t g = 0; g < info->geometryCount; ++g) {
@@ -163,10 +180,23 @@ static inline VkResult bvh_ir_record_build_backend(const VkAccelerationStructure
     sort.ids_odd = scratch + l.ids_odd;
     sort.counts = scratch + l.counts;
     sort.leaf_count = (uint32_t)l.leaf_count;
-    emit(user, BVH_IR_STAGE_SORT, &sort, sizeof(sort), groups);
     uint32_t merge_passes = 0;
     for (uint32_t n = groups - 1; n; n >>= 1) ++merge_passes;
+    /* Static GPU pass count follows requested capacity, never a CPU readback.
+     * Every emit has a compute publication barrier. No workgroup waits for a
+     * different workgroup to make progress inside the sort dispatch. */
+    for (sort.pass = 0; sort.pass <= merge_passes; ++sort.pass) emit(user, BVH_IR_STAGE_SORT, &sort, sizeof(sort), groups);
     VkDeviceAddress sorted = scratch + ((merge_passes & 1) ? l.ids_even : l.ids_odd);
+    if (backend == BVH_IR_BACKEND_HPLOC) {
+        const uint64_t range_count = l.leaf_count > 1 ? l.leaf_count - 1 : 1;
+        const struct hploc_init_args init_ranges = {scratch + l.hploc_ranges, range_count};
+        emit(user, BVH_IR_STAGE_HPLOC_INIT, &init_ranges, sizeof(init_ranges), (uint32_t)((range_count + 63) / 64));
+        const struct hploc_args hploc = {address, address + BVH_IR_NODE_OFFSET, sorted, scratch + l.hploc_ranges,
+                                         l.nodes - BVH_IR_NODE_OFFSET};
+        uint32_t groups = (uint32_t)((l.leaf_count + HPLOC_WORKGROUP_SIZE - 1) / HPLOC_WORKGROUP_SIZE);
+        emit(user, BVH_IR_STAGE_HPLOC, &hploc, sizeof(hploc), groups ? groups : 1);
+        return VK_SUCCESS;
+    }
     if (backend == BVH_IR_BACKEND_PLOC) {
         struct ploc_args ploc;
         memset(&ploc, 0, sizeof(ploc));

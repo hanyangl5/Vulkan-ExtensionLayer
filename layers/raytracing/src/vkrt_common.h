@@ -104,20 +104,18 @@ vkrt_hash64(uint64_t k)
 static inline bool
 vkrt_map_grow(struct vkrt_map *m)
 {
-   size_t new_cap = m->capacity ? m->capacity * 2 : 64;
-   struct vkrt_map_entry *ne =
-      (struct vkrt_map_entry *)calloc(new_cap, sizeof(*ne));
-   if (!ne)
-      return false;
+    if (m->capacity > SIZE_MAX / 2) return false;
+    size_t new_cap = m->capacity ? m->capacity * 2 : 64;
+    if (new_cap > SIZE_MAX / sizeof(struct vkrt_map_entry)) return false;
+    struct vkrt_map_entry *ne = (struct vkrt_map_entry *)calloc(new_cap, sizeof(*ne));
+    if (!ne) return false;
 
-   for (size_t i = 0; i < m->capacity; i++) {
-      if (!m->entries[i].value)
-         continue;
-      size_t idx = (size_t)vkrt_hash64(m->entries[i].key) & (new_cap - 1);
-      while (ne[idx].value)
-         idx = (idx + 1) & (new_cap - 1);
-      ne[idx] = m->entries[i];
-   }
+    for (size_t i = 0; i < m->capacity; i++) {
+        if (!m->entries[i].value) continue;
+        size_t idx = (size_t)vkrt_hash64(m->entries[i].key) & (new_cap - 1);
+        while (ne[idx].value) idx = (idx + 1) & (new_cap - 1);
+        ne[idx] = m->entries[i];
+    }
 
    free(m->entries);
    m->entries  = ne;
@@ -129,6 +127,19 @@ vkrt_map_grow(struct vkrt_map *m)
 static inline void *
 vkrt_map_insert(struct vkrt_map *m, uint64_t key, void *value)
 {
+    /* Replacing an existing alias must remain allocation-free. Void queue
+     * retrieval uses entries reserved by successful device creation. */
+    if (m->capacity) {
+        size_t existing = (size_t)vkrt_hash64(key) & (m->capacity - 1);
+        while (m->entries[existing].value) {
+            if (m->entries[existing].key == key) {
+                void *previous = m->entries[existing].value;
+                m->entries[existing].value = value;
+                return previous;
+            }
+            existing = (existing + 1) & (m->capacity - 1);
+        }
+    }
    if (m->count * 4 >= m->capacity * 3) {
       if (!vkrt_map_grow(m))
          return NULL;
@@ -286,13 +297,14 @@ vkrt_global_ensure(void)
 #endif
 }
 
-static inline void
-vkrt_map_object(uint64_t key, void *value)
-{
-   vkrt_global_ensure();
-   vkrt_mutex_lock(&vkrt_global.objects_lock);
-   vkrt_map_insert(&vkrt_global.objects, key, value);
-   vkrt_mutex_unlock(&vkrt_global.objects_lock);
+static inline bool vkrt_map_object(uint64_t key, void *value) {
+    if (!value) return false;
+    vkrt_global_ensure();
+    vkrt_mutex_lock(&vkrt_global.objects_lock);
+    vkrt_map_insert(&vkrt_global.objects, key, value);
+    bool mapped = vkrt_map_lookup(&vkrt_global.objects, key) == value;
+    vkrt_mutex_unlock(&vkrt_global.objects_lock);
+    return mapped;
 }
 
 static inline void *
@@ -313,6 +325,24 @@ vkrt_unmap_object(uint64_t key)
    void *v = vkrt_map_remove(&vkrt_global.objects, key);
    vkrt_mutex_unlock(&vkrt_global.objects_lock);
    return v;
+}
+
+/* Dispatchable children alias their instance/device's immutable owner record.
+ * Retire every alias before freeing that owner. Deletion can shift a wrapped
+ * probe cluster, so restart the scan after each successful removal. */
+static inline void vkrt_unmap_owner_objects(void *owner) {
+    if (!owner) return;
+    vkrt_global_ensure();
+    vkrt_mutex_lock(&vkrt_global.objects_lock);
+    for (size_t i = 0; i < vkrt_global.objects.capacity;) {
+        if (vkrt_global.objects.entries[i].value == owner) {
+            vkrt_map_remove(&vkrt_global.objects, vkrt_global.objects.entries[i].key);
+            i = 0;
+        } else {
+            ++i;
+        }
+    }
+    vkrt_mutex_unlock(&vkrt_global.objects_lock);
 }
 
 #define VKRT_FIND(type, obj) ((type *)vkrt_find_object(VKRT_HKEY(obj)))

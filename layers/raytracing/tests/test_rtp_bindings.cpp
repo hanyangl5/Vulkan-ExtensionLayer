@@ -1251,7 +1251,18 @@ void PipelineLayoutAliases() {
         device_owner.allocations, device_owner.frees, instance_owner.allocations, instance_owner.frees, fault_cases,
         NativeReferences());
 }
+#include "rtp_mixed_entry_tests.h"
 }  // namespace
+extern "C" VkResult vkrt_rewrite_shader_module(vkrt_device_data *, const VkShaderModuleCreateInfo *source,
+                                               VkShaderModuleCreateInfo *rewritten, bool *query, bool *pipeline) {
+    // Adapter spy only: real Ray Query lowering has public GPU/CTS coverage.
+    // Every selected mixed-entry module must pass through this normal hook.
+    CheckSelectedModule(MixedWords(source->pCode, source->pCode + source->codeSize / 4));
+    ++selected_rewrites;
+    *rewritten = *source;
+    *query = *pipeline = false;
+    return VK_SUCCESS;
+}
 extern "C" VkDeviceAddress vkrt_as_registry_address(vkrt_device_data *data) {
     CHECK(data == &dev);
     return 0;
@@ -1347,6 +1358,7 @@ int main() {
     vkrt_map_object(VKRT_HKEY(command), &cb);
     CHECK(vkrt_rtp_init(&dev, nullptr) == VK_SUCCESS);
     DescriptorDefinitions();
+    MixedEntryPipelines();
     PipelineDerivatives();
     const std::string bank_source = R"spv(
 OpCapability Shader

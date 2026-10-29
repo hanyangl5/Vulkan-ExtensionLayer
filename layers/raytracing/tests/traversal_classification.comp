@@ -19,6 +19,17 @@ void main()
    if (index == 0u)
       result.values[32] = uvec4(VEL_RT_BVH4_ABI_VERSION, VEL_RT_BVH4_HEADER_SIZE,
                                 VEL_RT_BVH4_NODE_SIZE, VEL_RT_BVH4_INSTANCE_SIZE);
+   if (index == 32u) return;
+   if (index >= 33u) {
+      uint base = 32u + (index - 33u) * 4u;
+      vec4 origin = uintBitsToFloat(input_cases.values[base]);
+      vec4 direction = uintBitsToFloat(input_cases.values[base + 1u]);
+      vec3 bmin = uintBitsToFloat(input_cases.values[base + 2u].xyz);
+      vec3 bmax = uintBitsToFloat(input_cases.values[base + 3u].xyz);
+      bool hit = sw_ray_box_test(sw_setup_ray(origin.xyz, direction.xyz), bmin, bmax, origin.w, direction.w);
+      result.values[index] = uvec4(uint(hit), 0x534c4142u, index - 33u, 0u);
+      return;
+   }
    if (index >= 30u) {
       sw_ray_query_state q;
       q.as_address = index == 30u ? pc.deep_tlas : pc.resume_tlas;

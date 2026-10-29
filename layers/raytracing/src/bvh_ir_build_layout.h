@@ -21,10 +21,18 @@ BVH_IR_STATIC_ASSERT(offsetof(struct vk_ir_header, dst_leaf_node_offset) == 80,
 BVH_IR_STATIC_ASSERT(offsetof(struct leaf_args, primitive_count) == 80, "leaf push ABI");
 BVH_IR_STATIC_ASSERT(sizeof(struct leaf_args) == 96, "wide leaf push ABI");
 BVH_IR_STATIC_ASSERT(sizeof(struct ploc_args) == 48, "wide PLOC push ABI");
+BVH_IR_STATIC_ASSERT(sizeof(struct hploc_args) == 40, "wide HPLOC push ABI");
+BVH_IR_STATIC_ASSERT(sizeof(struct hploc_init_args) == 16, "HPLOC range init ABI");
+BVH_IR_STATIC_ASSERT(sizeof(struct key32_id_pair) == 8, "Morton32 pair ABI");
+BVH_IR_STATIC_ASSERT(sizeof(struct key64_id_pair) == 12, "Morton64 pair ABI");
+BVH_IR_STATIC_ASSERT(sizeof(struct morton_sort_args) == 48, "Morton sort push ABI");
+BVH_IR_STATIC_ASSERT(offsetof(struct morton_sort_args, pass) == 44, "Morton sort pass ABI");
 BVH_IR_STATIC_ASSERT(sizeof(struct vk_prefix_scan_partition) == 8, "PLOC partition ABI");
 BVH_IR_STATIC_ASSERT(offsetof(struct vk_ir_header, sync_data) == 44, "Mesa phase sentinel ABI");
 BVH_IR_STATIC_ASSERT(offsetof(struct vk_ir_header, driver_internal) + 5 * sizeof(uint32_t) == BVH_IR_PRODUCER_OFFSET,
                      "Mesa producer_id ABI");
+BVH_IR_STATIC_ASSERT(offsetof(struct vk_ir_header, driver_internal) + 4 * sizeof(uint32_t) == BVH_IR_KEY_BITS_OFFSET,
+                     "Mesa executed key width ABI");
 
 static inline VkDeviceSize bvh_ir_align_size(VkDeviceSize v, VkDeviceSize a) {
     if (v > UINT64_MAX - (a - 1)) return UINT64_MAX;
@@ -35,8 +43,9 @@ static inline uint32_t bvh_ir_leaf_stride(VkGeometryTypeKHR type) {
 }
 struct bvh_ir_build_layout {
    VkDeviceSize nodes, as_size;
-   VkDeviceSize ids_even, ids_odd, node_info, prefix_scan_partitions, counts, scratch_size;
+   VkDeviceSize ids_even, ids_odd, node_info, prefix_scan_partitions, hploc_ranges, counts, scratch_size;
    VkDeviceSize leaf_count;
+   uint32_t key_stride;
    bool valid;
 };
 static inline struct bvh_ir_build_layout
@@ -56,20 +65,23 @@ bvh_ir_build_layout(const VkAccelerationStructureBuildGeometryInfoKHR *info, con
       leaves += (VkDeviceSize)n * stride;
    }
    n = l.leaf_count ? l.leaf_count : 1;
+   l.key_stride = (info->flags & VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR) ? 12 : 8;
    if (leaves > UINT64_MAX - BVH_IR_NODE_OFFSET) goto invalid;
    l.nodes = BVH_IR_NODE_OFFSET + leaves;
    if ((n > 1 ? n - 1 : 1) > (UINT64_MAX - l.nodes) / 40) goto invalid;
    l.as_size = bvh_ir_align_size(l.nodes + (n > 1 ? n - 1 : 1) * 40, 256);
    if (l.as_size == UINT64_MAX || n > UINT64_MAX / 16) goto invalid;
    l.ids_even = 0;
-   l.ids_odd = bvh_ir_align_size(n * 8, 256);
-   if (l.ids_odd == UINT64_MAX || n * 8 > UINT64_MAX - l.ids_odd) goto invalid;
-   l.node_info = bvh_ir_align_size(l.ids_odd + n * 8, 256);
+   l.ids_odd = bvh_ir_align_size(n * l.key_stride, 256);
+   if (l.ids_odd == UINT64_MAX || n * l.key_stride > UINT64_MAX - l.ids_odd) goto invalid;
+   l.node_info = bvh_ir_align_size(l.ids_odd + n * l.key_stride, 256);
    if (l.node_info == UINT64_MAX || n * 16 > UINT64_MAX - l.node_info) goto invalid;
    /* Sort has finished before either internal builder runs. The LBVH node
     * info allocation (16 bytes/leaf) also covers PLOC's 8-byte partition per
-    * 1024 leaves, including the empty build's single allocated slot. */
+    * 1024 leaves, including the empty build's single allocated slot. HPLOC's
+    * max(n,2)-1 uint range entries fit the same region after sorting. */
    l.prefix_scan_partitions = l.node_info;
+   l.hploc_ranges = l.node_info;
    l.counts = bvh_ir_align_size(l.node_info + n * 16, 256);
    if (l.counts > UINT64_MAX - 256) goto invalid;
    l.scratch_size = l.counts + 256;

@@ -208,10 +208,55 @@ int main(int argc, char **argv) {
     VkQueue queue;
     vkGetDeviceQueue(device, family, 0, &queue);
 
-    enum { CASE_COUNT = 32, OUTPUT_COUNT = CASE_COUNT + 1 };
+    enum { CASE_COUNT = 32, SLAB_COUNT = 4112, OUTPUT_COUNT = CASE_COUNT + 1 + SLAB_COUNT };
+    struct slab_case {
+        float origin[3], tmin;
+        float direction[3], tmax;
+        float bmin[3];
+        uint32_t expected;
+        float bmax[3];
+        uint32_t pad;
+    } slabs[SLAB_COUNT];
+    _Static_assert(sizeof(struct slab_case) == 64, "slab case buffer ABI");
+    memset(slabs, 0, sizeof(slabs));
+    const uint32_t direction_bits[] = {1019314950u, 0x3f000001u, 0x3eaaaaabu, 0x3fa00001u,
+                                       0x00800000u, 0x7f7fffffu, 0x00000001u, 0x80000001u};
+    uint32_t slab_random = 0x6295ab13u;
+    for (unsigned i = 0; i < SLAB_COUNT; ++i) {
+        float x;
+        slab_random = slab_random * 1664525u + 1013904223u;
+        uint32_t bits = i < 16 ? direction_bits[i % 8] : 0x3c000000u + (slab_random & 0x07ffffffu);
+        if (i >= 16 && (i & 1)) bits |= 0x80000000u;
+        memcpy(&x, &bits, sizeof(x));
+        slabs[i].direction[0] = slabs[i].bmin[0] = slabs[i].bmax[0] = x;
+        slabs[i].direction[1] = slabs[i].direction[2] = 1;
+        slabs[i].bmin[1] = slabs[i].bmax[1] = slabs[i].bmin[2] = slabs[i].bmax[2] = 1;
+        slabs[i].tmax = 2;
+        slabs[i].expected = 1;
+    }
+    // Every hit above is analytic: origin0, point=direction, exactly t=1.
+    slabs[8].direction[0] = slabs[8].bmin[0] = slabs[8].bmax[0] = 0;
+    slabs[9] = slabs[8];
+    uint32_t negative_zero = 0x80000000u;
+    memcpy(&slabs[9].direction[0], &negative_zero, sizeof(negative_zero));
+    slabs[10] = slabs[8];
+    slabs[10].origin[0] = 1;
+    slabs[10].expected = 0;
+    slabs[11] = slabs[8];
+    slabs[11].bmin[2] = slabs[11].bmax[2] = 2;
+    slabs[11].expected = 0;
+    slabs[12] = slabs[13] = slabs[14] = slabs[0];
+    slabs[12].tmin = slabs[12].tmax = 1;
+    slabs[13].tmax = 1;
+    slabs[14].tmin = 1;
+    slabs[15] = slabs[8];
+    slabs[15].origin[2] = 3;
+    slabs[15].direction[2] = 0;
+    slabs[15].expected = 0;
     const uint32_t tlas_size = 768;
     struct buffer nodes = make_buffer(512), tlas = make_buffer(tlas_size);
-    struct buffer cases = make_buffer(CASE_COUNT * 16), output = make_buffer(OUTPUT_COUNT * 16);
+    struct buffer cases = make_buffer(CASE_COUNT * 16 + sizeof(slabs)), output = make_buffer(OUTPUT_COUNT * 16);
+    memcpy((uint8_t *)cases.mapped + CASE_COUNT * 16, slabs, sizeof(slabs));
     VelRtBvh4Header *blas_header = nodes.mapped, *tlas_header = tlas.mapped;
     *blas_header = (VelRtBvh4Header){.magic = VEL_RT_BVH4_MAGIC,
                                      .version = VEL_RT_BVH4_ABI_VERSION,
@@ -333,7 +378,7 @@ int main(int argc, char **argv) {
     VkDescriptorSet set;
     CHECK(vkAllocateDescriptorSets(device, &dai, &set));
     VkDescriptorBufferInfo buffer_infos[] = {
-        {tlas.handle, 0, tlas_size}, {output.handle, 0, OUTPUT_COUNT * 16}, {cases.handle, 0, CASE_COUNT * 16}};
+        {tlas.handle, 0, tlas_size}, {output.handle, 0, OUTPUT_COUNT * 16}, {cases.handle, 0, CASE_COUNT * 16 + sizeof(slabs)}};
     VkWriteDescriptorSet writes[3];
     for (uint32_t i = 0; i < 3; ++i)
         writes[i] = (VkWriteDescriptorSet){.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
@@ -358,7 +403,7 @@ int main(int argc, char **argv) {
     vkCmdBindDescriptorSets(command, VK_PIPELINE_BIND_POINT_COMPUTE, layout, 0, 1, &set, 0, NULL);
     VkDeviceAddress addresses[4] = {nodes.address, tlas.address, deep_tlas.address, resume_tlas.address};
     vkCmdPushConstants(command, layout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(addresses), addresses);
-    vkCmdDispatch(command, CASE_COUNT, 1, 1);
+    vkCmdDispatch(command, OUTPUT_COUNT, 1, 1);
     VkMemoryBarrier barrier = {.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER,
                                .srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT,
                                .dstAccessMask = VK_ACCESS_HOST_READ_BIT};
@@ -390,6 +435,14 @@ int main(int argc, char **argv) {
     }
     const uint32_t deep_expected[] = {1, 77, 0, 0}, resume_expected[] = {3, 11, 3, 0x3f000000};
     const uint32_t *results = output.mapped;
+    for (unsigned i = 0; i < SLAB_COUNT; ++i) {
+        const uint32_t *row = results + (CASE_COUNT + 1 + i) * 4;
+        if (row[0] != slabs[i].expected || row[1] != 0x534c4142u || row[2] != i || row[3]) {
+            fprintf(stderr, "conservative slab case %u: got %u/%x/%u/%u, expected hit %u\n", i, row[0], row[1], row[2], row[3],
+                    slabs[i].expected);
+            ++failures;
+        }
+    }
     if (memcmp(results + 30 * 4, deep_expected, sizeof(deep_expected)) ||
         memcmp(results + 31 * 4, resume_expected, sizeof(resume_expected))) {
         fprintf(stderr, "parent walk/resume got deep %u/%u/%u/%x, resume %u/%u/%u/%x\n", results[120], results[121], results[122],
@@ -414,7 +467,7 @@ int main(int argc, char **argv) {
     vkDestroyInstance(instance, NULL);
     printf(
         "Traversal classification %s: compiled ABI, 30 opacity/cull cases, SBT selectors, depth140/four-child walk, candidate "
-        "resume (%d "
+        "resume, 4112 analytic conservative slab cases (%d "
         "failures)\n",
         failures ? "FAIL" : "PASS", failures);
     return failures ? 1 : 0;

@@ -17,9 +17,13 @@
  * fields for its consumer; neither the CPU adapter nor BVH4 encoder requires
  * them to be zero. This diagnostic is transient IR provenance, not a runtime
  * BVH4/serialization field or builder input flag. Common INIT writes zero;
- * an actual PLOC invocation writes its ID. */
+ * an actual PLOC/HPLOC invocation writes its ID. driver_internal[4] records
+ * the key width written by the executed sorting shader, rather than a host
+ * selection flag. Both remain zero until their producing shaders run. */
+#define BVH_IR_KEY_BITS_OFFSET 100u
 #define BVH_IR_PRODUCER_OFFSET 104u
 #define BVH_IR_PRODUCER_PLOC 0x504c4f43u
+#define BVH_IR_PRODUCER_HPLOC 0x48504c43u
 #define BVH_IR_MAGIC 0x58424856u
 #define BVH_IR_VERSION 2u
 /* v2 stores tagged byte offsets. v3 stores tagged record indices so address
@@ -32,6 +36,9 @@
 #define BVH_IR_TRIANGLE_SIZE 68u
 #define BVH_IR_AABB_SIZE 32u
 #define BVH_IR_INSTANCE_SIZE 96u
+/* The largest default sorter variant has 256 key64/id triples (12 bytes)
+ * and four shared scalar indices. PLOC's larger LDS is admitted separately. */
+#define BVH_IR_SORT_SHARED_BYTES (256u * 12u + 4u * 4u)
 #define BVH_IR_INTERNAL_COUNT(active) (((active) > 1u) ? (active) - 1u : 1u)
 #define BVH_IR_BOX_OFFSET(capacity, stride) ((capacity) * (stride))
 #define BVH_IR_ROOT_ID(capacity, stride, count) \

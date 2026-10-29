@@ -97,6 +97,7 @@ class GuardEvidenceTests(unittest.TestCase):
                     evidence, error = guard_evidence(log)
                     self.assertEqual(evidence["verified"], valid)
                     self.assertEqual(error is None, valid)
+                    self.assertEqual(evidence["reject_records"], sum(record["event"] == "reject" for record in records))
             log.write_text('{"event":', encoding="utf-8")
             self.assertIsNotNone(guard_evidence(log)[1])
             log.write_text('{}\n', encoding="utf-8")
@@ -112,6 +113,31 @@ class GuardEvidenceTests(unittest.TestCase):
         self.assertNotIn("VK_INSTANCE_LAYERS", env)
         self.assertNotIn("VKRT_NO_RT_GUARD_LOG", env)
         self.assertNotIn("VKRT_NO_RT_GUARD_MASK_DISCOVERY", env)
+
+    def test_validation_layer_path_without_rejection_guard(self):
+        import os
+        for mode, snapshot, expected in (
+                ("native", None, ["validation"]),
+                ("software-rt", Path("fallback"), ["fallback", "validation"])):
+            with self.subTest(mode=mode):
+                env, meta = run_environment(mode, snapshot, validation_dir=Path("validation"))
+                self.assertEqual(env["VK_LAYER_PATH"].split(os.pathsep), expected)
+                self.assertEqual(meta["overrides"]["VK_LAYER_PATH"], env["VK_LAYER_PATH"])
+                self.assertEqual(meta["effective_driver_environment"]["VK_LAYER_PATH"], env["VK_LAYER_PATH"])
+
+    def test_reproducibility_environment_records_driver_inputs(self):
+        inputs = {"VK_DRIVER_FILES": "driver.json", "DEQP_LOG_LEVEL": "debug", "VEL_BUILD": "local",
+                  "MESA_VK_DEVICE_SELECT": "1", "NVIDIA_PROFILE": "test", "__GL_SYNC_TO_VBLANK": "0",
+                  "PATH": "audit-bin", "UNRELATED_SETTING": "ignored", "API_TOKEN": "not-for-evidence"}
+        with patch.dict("os.environ", inputs, clear=True):
+            env, meta = run_environment("native", None)
+        recorded = meta["effective_driver_environment"]
+        for key in inputs.keys() - {"UNRELATED_SETTING", "API_TOKEN"}:
+            with self.subTest(key=key):
+                self.assertEqual(recorded[key], env[key])
+        self.assertEqual(recorded["VK_LOADER_LAYERS_DISABLE"], env["VK_LOADER_LAYERS_DISABLE"])
+        self.assertNotIn("UNRELATED_SETTING", recorded)
+        self.assertNotIn("API_TOKEN", recorded)
 
     def test_forced_dispatch_profile_does_not_leak_into_cts(self):
         with patch.dict("os.environ", {"VKRT_NO_RT_GUARD_DISPATCH_LIMITS": "2,2,64", "VKRT_NO_RT_GUARD_MEMORY_COUNT": "4096"}):

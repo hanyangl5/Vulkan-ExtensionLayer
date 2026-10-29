@@ -66,6 +66,13 @@ void vkrt_apply_software_rt_profile(const struct vkrt_software_rt_profile *profi
     if (!profile || !properties) return;
     /* Applying resource limits may itself write into profile-owned nodes. */
     const struct vkrt_software_rt_profile p = *profile;
+    /* The continuation scheduler does not preserve source subgroup execution
+     * across ray tracing shader calls. These stages are optional in the
+     * subgroup property; retain every native non-RT stage, including Compute.
+     * Vulkan 1.1 and the standalone property must report identical support. */
+    const VkShaderStageFlags rt_stages = VK_SHADER_STAGE_RAYGEN_BIT_KHR | VK_SHADER_STAGE_ANY_HIT_BIT_KHR |
+                                         VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR | VK_SHADER_STAGE_MISS_BIT_KHR |
+                                         VK_SHADER_STAGE_INTERSECTION_BIT_KHR | VK_SHADER_STAGE_CALLABLE_BIT_KHR;
     vkrt_apply_resource_profile(&p.resources, properties);
     for (VkBaseOutStructure *node = properties->pNext; node; node = node->pNext) {
         if (node->sType == VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_PROPERTIES_KHR) {
@@ -78,6 +85,10 @@ void vkrt_apply_software_rt_profile(const struct vkrt_software_rt_profile *profi
 #define COPY_RTP(name) target->name = p.rtp.name;
             RTP_PROPERTIES(COPY_RTP)
 #undef COPY_RTP
+        } else if (node->sType == VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SUBGROUP_PROPERTIES) {
+            ((VkPhysicalDeviceSubgroupProperties *)node)->supportedStages &= ~rt_stages;
+        } else if (node->sType == VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_PROPERTIES) {
+            ((VkPhysicalDeviceVulkan11Properties *)node)->subgroupSupportedStages &= ~rt_stages;
         }
     }
 }

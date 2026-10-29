@@ -223,7 +223,7 @@ static VKAPI_ATTR void VKAPI_CALL mock_properties(VkPhysicalDevice p, VkPhysical
     properties->limits.maxComputeWorkGroupCount[1] = missing_capability == 23 ? 0 : 1;
     properties->limits.maxComputeWorkGroupCount[2] = missing_capability == 24 ? 0 : 1;
     properties->limits.maxPushConstantsSize = missing_capability == 25 ? 127 : 128;
-    properties->limits.maxComputeSharedMemorySize = missing_capability == 26 ? 2067 : 2068;
+    properties->limits.maxComputeSharedMemorySize = missing_capability == 26 ? 3087 : 3088;
     VkPhysicalDeviceLimits *c = &properties->limits;
     c->maxPerStageDescriptorSamplers = c->maxPerStageDescriptorUniformBuffers = c->maxPerStageDescriptorStorageBuffers =
         c->maxPerStageDescriptorSampledImages = c->maxPerStageDescriptorStorageImages = c->maxPerStageDescriptorInputAttachments =
@@ -1089,7 +1089,8 @@ static void builder_property_prerequisites(void) {
     const VkPhysicalDeviceFeatures saved_core = core;
     for (missing_capability = 13; missing_capability <= 26; ++missing_capability) {
         unsigned before = creates;
-        REQUIRE(call(&basic) == VK_ERROR_FEATURE_NOT_PRESENT && creates == before);
+        VkResult expected = missing_capability == 16 ? VK_SUCCESS : VK_ERROR_FEATURE_NOT_PRESENT;
+        REQUIRE(call(&basic) == expected && creates == before + (expected == VK_SUCCESS));
         REQUIRE(!memcmp(&basic, &saved, sizeof(basic)) && !memcmp(&query, &saved_query, sizeof(query)) &&
                 !memcmp(&core, &saved_core, sizeof(core)) && suffix.payload == UINT64_C(0x123456789abcdef0));
     }
@@ -1236,6 +1237,7 @@ static void shader_object_backend(void) {
     /* Each prerequisite is shared with physical UUID classification. Missing
      * one does not reject an ordinary shader-object native device. */
     for (unsigned missing = 1; missing <= 26; ++missing) {
+        if (missing == 16) continue;  // Native shuffle is not a private builder prerequisite.
         defaults();
         missing_capability = missing;
         shader.pNext = &v11;

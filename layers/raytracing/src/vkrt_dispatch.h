@@ -19,6 +19,7 @@ struct vkrt_instance_dispatch {
    PFN_vkGetInstanceProcAddr               GetInstanceProcAddr;
    PFN_vkDestroyInstance                   DestroyInstance;
    PFN_vkEnumeratePhysicalDevices          EnumeratePhysicalDevices;
+   PFN_vkEnumeratePhysicalDeviceGroups EnumeratePhysicalDeviceGroups;
    PFN_vkEnumerateDeviceExtensionProperties EnumerateDeviceExtensionProperties;
    PFN_vkGetPhysicalDeviceProperties       GetPhysicalDeviceProperties;
    PFN_vkGetPhysicalDeviceProperties2      GetPhysicalDeviceProperties2;
@@ -176,6 +177,9 @@ vkrt_instance_dispatch_load(struct vkrt_instance_dispatch *t,
    VKRT_LOAD_I(GetInstanceProcAddr);
    VKRT_LOAD_I(DestroyInstance);
    VKRT_LOAD_I(EnumeratePhysicalDevices);
+   VKRT_LOAD_I(EnumeratePhysicalDeviceGroups);
+   if (!t->EnumeratePhysicalDeviceGroups)
+       t->EnumeratePhysicalDeviceGroups = (PFN_vkEnumeratePhysicalDeviceGroups)gipa(instance, "vkEnumeratePhysicalDeviceGroupsKHR");
    VKRT_LOAD_I(EnumerateDeviceExtensionProperties);
    VKRT_LOAD_I(GetPhysicalDeviceProperties);
    VKRT_LOAD_I(GetPhysicalDeviceProperties2);

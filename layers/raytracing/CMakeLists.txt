@@ -159,12 +159,10 @@ add_custom_command(
 add_custom_target(vkrt_traversal_spv ALL DEPENDS ${VKRT_TRAVERSAL_SPV} ${VKRT_TRAVERSAL_SPV}.h)
 add_dependencies(${VKRT_LAYER_NAME} vkrt_traversal_spv)
 
-# GPU BVH builder.  These are the standalone-compatible subset of Mesa's
-# builder used by the initial LBVH path.  Keep the shader names stable: M2's
-# runtime pipeline cache loads the staged files by these names.
+# Production GPU build/copy/query shaders are embedded by the canonical layer.
+# The plain leaf reference is built separately by the BVH4 component tests.
 set(VKRT_BVH_SHADER_SOURCES
    shaders/vkrt_init.comp
-   shaders/leaf.comp
    shaders/leaf_bvh4.comp
    shaders/vkrt_bvh4_prepare.comp
    shaders/vkrt_bvh4_copy.comp
@@ -173,18 +171,24 @@ set(VKRT_BVH_SHADER_SOURCES
    shaders/vkrt_query_format.comp
    shaders/vkrt_query_publish.comp
    shaders/bvh4_mesa_encode.comp
-   shaders/id_prefix_sum.comp
    shaders/morton_sort.comp
+   shaders/morton_sort64.comp
    shaders/lbvh_main.comp
    shaders/lbvh_generate_ir.comp
-   shaders/pair_triangles.comp
    shaders/ploc_internal.comp
+   shaders/vkrt_hploc_init.comp
+   shaders/hploc_internal.comp
 )
 set(VKRT_BVH_SPV)
 find_program(VKRT_SPIRV_VAL spirv-val HINTS "${Vulkan_INCLUDE_DIRS}/../Bin" REQUIRED)
 target_include_directories(${VKRT_LAYER_NAME} PRIVATE ${CMAKE_CURRENT_BINARY_DIR}/bvh)
 foreach(_vkrt_bvh_src IN LISTS VKRT_BVH_SHADER_SOURCES)
    get_filename_component(_vkrt_bvh_name "${_vkrt_bvh_src}" NAME_WE)
+   set(_vkrt_bvh_defines)
+   if(_vkrt_bvh_name STREQUAL "morton_sort64")
+      set(_vkrt_bvh_src shaders/morton_sort.comp)
+      set(_vkrt_bvh_defines -DMORTON_SORT_KEY64)
+   endif()
    set(_vkrt_bvh_spv "${CMAKE_CURRENT_BINARY_DIR}/bvh/${_vkrt_bvh_name}.spv")
    add_custom_command(
       OUTPUT ${_vkrt_bvh_spv} ${_vkrt_bvh_spv}.h
@@ -192,6 +196,7 @@ foreach(_vkrt_bvh_src IN LISTS VKRT_BVH_SHADER_SOURCES)
       COMMAND ${VKRT_GLSLC}
               -fshader-stage=compute
               --target-env=vulkan1.1 --target-spv=spv1.4
+              ${_vkrt_bvh_defines}
               -I ${CMAKE_CURRENT_SOURCE_DIR}/shaders
               -I ${VKRT_SHARED_HEADERS}
               ${CMAKE_CURRENT_SOURCE_DIR}/${_vkrt_bvh_src}
@@ -212,7 +217,6 @@ foreach(_vkrt_bvh_src IN LISTS VKRT_BVH_SHADER_SOURCES)
          ${CMAKE_CURRENT_SOURCE_DIR}/shaders/vkrt_as_serialization.glsl
          ${CMAKE_CURRENT_SOURCE_DIR}/shaders/as_address.glsl
          ${CMAKE_CURRENT_SOURCE_DIR}/shaders/bvh4_abi.glsl
-         ${CMAKE_CURRENT_SOURCE_DIR}/shaders/pair_triangles.h
          ${CMAKE_CURRENT_SOURCE_DIR}/cmake/embed_spv.cmake
       COMMENT "Compiling GPU BVH builder ${_vkrt_bvh_name}"
       VERBATIM
@@ -505,12 +509,13 @@ if(BUILD_TESTING)
    add_test(NAME vkrt.no_native_rt_guard.controls COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/no_native_rt_guard_checks.py"
       --executable "$<TARGET_FILE:test_no_native_rt_guard>" --output "${CMAKE_CURRENT_BINARY_DIR}/no-native-rt-guard/controls")
    add_test(NAME vkrt.cts_guard_evidence COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/../../scripts/test_rt_cts_guard_evidence.py")
+   add_test(NAME vkrt.cts_startup_environment COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/../../scripts/test_debug_cts_startup.py")
    add_test(NAME vkrt.no_native_rt_guard.zero_timestamps COMMAND "${Python3_EXECUTABLE}"
       "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_no_native_rt_guard_audit.py"
       --executable "$<TARGET_FILE:test_no_native_rt_guard>"
       --output "${CMAKE_CURRENT_BINARY_DIR}/no-native-rt-guard/zero-timestamps")
    set_tests_properties(vkrt.no_native_rt_guard vkrt.no_native_rt_guard.controls vkrt.no_native_rt_guard.zero_timestamps
-      vkrt.cts_guard_evidence PROPERTIES LABELS "offline;no_native_rt")
+      vkrt.cts_guard_evidence vkrt.cts_startup_environment PROPERTIES LABELS "offline;no_native_rt")
    add_executable(test_no_native_rt_guard_memory tests/test_no_native_rt_guard_memory.c)
    target_include_directories(test_no_native_rt_guard_memory PRIVATE ${Vulkan_INCLUDE_DIRS})
    target_link_libraries(test_no_native_rt_guard_memory PRIVATE Threads::Threads)
@@ -545,6 +550,22 @@ if(BUILD_TESTING)
       list(APPEND VKRT_RTP_API11_SPV ${output})
    endforeach()
    add_custom_target(vkrt_rtp_api11_spv DEPENDS ${VKRT_RTP_API11_SPV})
+   get_filename_component(_vkrt_spirv_bin "${VKRT_SPIRV_VAL}" DIRECTORY)
+   find_program(VKRT_SPIRV_LINK NAMES spirv-link HINTS "${_vkrt_spirv_bin}" REQUIRED)
+   set(VKRT_MIXED_API_SPV ${CMAKE_CURRENT_BINARY_DIR}/rtp_mixed_entry.spv)
+   set(VKRT_MIXED_RQ_SPV ${CMAKE_CURRENT_BINARY_DIR}/rq_mixed_entry.spv)
+   add_custom_command(OUTPUT ${VKRT_MIXED_API_SPV}
+      COMMAND ${VKRT_SPIRV_LINK} --target-env vulkan1.1spv1.4
+         ${CMAKE_CURRENT_BINARY_DIR}/rtp_api11.rgen.spv ${CMAKE_CURRENT_BINARY_DIR}/rtp_api11.comp.spv -o ${VKRT_MIXED_API_SPV}
+      COMMAND ${VKRT_SPIRV_VAL} --target-env vulkan1.1spv1.4 ${VKRT_MIXED_API_SPV}
+      DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/rtp_api11.rgen.spv ${CMAKE_CURRENT_BINARY_DIR}/rtp_api11.comp.spv VERBATIM)
+   add_custom_command(OUTPUT ${VKRT_MIXED_RQ_SPV}
+      COMMAND ${VKRT_SPIRV_LINK} --target-env vulkan1.1spv1.4
+         ${CMAKE_CURRENT_BINARY_DIR}/rtp_api11.rgen.spv ${VKRT_TEST_RQ11_SPV} -o ${VKRT_MIXED_RQ_SPV}
+      COMMAND ${VKRT_SPIRV_VAL} --target-env vulkan1.1spv1.4 ${VKRT_MIXED_RQ_SPV}
+      DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/rtp_api11.rgen.spv ${VKRT_TEST_RQ11_SPV} VERBATIM)
+   add_custom_target(vkrt_mixed_entry_spv DEPENDS ${VKRT_MIXED_API_SPV} ${VKRT_MIXED_RQ_SPV})
+   add_dependencies(test_gpu_build vkrt_mixed_entry_spv)
    set(VKRT_RTP_NESTED_SPV)
    foreach(stage rgen rmiss rchit)
       set(output ${CMAKE_CURRENT_BINARY_DIR}/rtp_nested.${stage}.spv)
@@ -567,7 +588,8 @@ if(BUILD_TESTING)
             ${CMAKE_CURRENT_SOURCE_DIR}/tests/rtp_physical_source.${stage} -o ${output}
          COMMAND ${VKRT_SPIRV_VAL} --target-env vulkan1.1spv1.4 ${output}
          DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/tests/rtp_physical_source.${stage}
-            ${CMAKE_CURRENT_SOURCE_DIR}/tests/rtp_physical_source_common.glsl VERBATIM)
+            ${CMAKE_CURRENT_SOURCE_DIR}/tests/rtp_physical_source_common.glsl
+            ${CMAKE_CURRENT_SOURCE_DIR}/tests/rtp_source_memory_model.glsl VERBATIM)
       list(APPEND VKRT_RTP_PHYSICAL_SPV ${output})
    endforeach()
    add_custom_target(vkrt_rtp_physical_spv DEPENDS ${VKRT_RTP_PHYSICAL_SPV})
@@ -580,7 +602,8 @@ if(BUILD_TESTING)
             ${CMAKE_CURRENT_SOURCE_DIR}/tests/rtp_physical_interfaces.${stage} -o ${output}
          COMMAND ${VKRT_SPIRV_VAL} --target-env vulkan1.1spv1.4 ${output}
          DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/tests/rtp_physical_interfaces.${stage}
-            ${CMAKE_CURRENT_SOURCE_DIR}/tests/rtp_physical_interfaces_common.glsl VERBATIM)
+            ${CMAKE_CURRENT_SOURCE_DIR}/tests/rtp_physical_interfaces_common.glsl
+            ${CMAKE_CURRENT_SOURCE_DIR}/tests/rtp_source_memory_model.glsl VERBATIM)
       list(APPEND VKRT_RTP_PHYSICAL_INTERFACES_SPV ${output})
    endforeach()
    add_custom_target(vkrt_rtp_physical_interfaces_spv DEPENDS ${VKRT_RTP_PHYSICAL_INTERFACES_SPV})
@@ -590,6 +613,61 @@ if(BUILD_TESTING)
    set_target_properties(test_rtp_api PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED ON)
    add_dependencies(test_rtp_api vkrt_rtp_api_spv vkrt_rtp_api11_spv vkrt_rtp_nested_spv vkrt_rtp_physical_spv)
    add_dependencies(test_rtp_api vkrt_rtp_physical_interfaces_spv)
+   set(VKRT_RTP_VMM_SOURCE_SPV)
+   set(VKRT_RTP_VMM_INTERFACES_SPV)
+   foreach(fixture source interfaces)
+      if(fixture STREQUAL "source")
+         set(_vmm_stages rgen rcall)
+      else()
+         set(_vmm_stages rgen rmiss rchit rahit rint rcall)
+      endif()
+      foreach(stage IN LISTS _vmm_stages)
+         set(output ${CMAKE_CURRENT_BINARY_DIR}/rtp_vmm_${fixture}.${stage}.spv)
+         add_custom_command(OUTPUT ${output}
+            COMMAND ${VKRT_GLSLC} --target-env=vulkan1.1 --target-spv=spv1.4 -DVKRT_SOURCE_MEMORY_MODEL
+               -I ${CMAKE_CURRENT_SOURCE_DIR}/tests
+               ${CMAKE_CURRENT_SOURCE_DIR}/tests/rtp_physical_${fixture}.${stage} -o ${output}
+            COMMAND ${VKRT_SPIRV_VAL} --target-env vulkan1.1spv1.4 ${output}
+            DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/tests/rtp_physical_${fixture}.${stage}
+               ${CMAKE_CURRENT_SOURCE_DIR}/tests/rtp_physical_${fixture}_common.glsl
+               ${CMAKE_CURRENT_SOURCE_DIR}/tests/rtp_source_memory_model.glsl VERBATIM)
+         if(fixture STREQUAL "source")
+            list(APPEND VKRT_RTP_VMM_SOURCE_SPV ${output})
+         else()
+            list(APPEND VKRT_RTP_VMM_INTERFACES_SPV ${output})
+         endif()
+      endforeach()
+   endforeach()
+   add_custom_target(vkrt_rtp_vmm_spv DEPENDS ${VKRT_RTP_VMM_SOURCE_SPV} ${VKRT_RTP_VMM_INTERFACES_SPV})
+   add_dependencies(test_rtp_api vkrt_rtp_vmm_spv)
+   add_dependencies(test_rtp_api vkrt_mixed_entry_spv)
+   foreach(mode software native)
+      add_test(NAME vkrt.rtp_api.mixed_entry.${mode} COMMAND test_rtp_api
+         ${VKRT_MIXED_API_SPV} ${CMAKE_CURRENT_BINARY_DIR}/rtp_api11.rmiss.spv
+         ${CMAKE_CURRENT_BINARY_DIR}/rtp_api11.rchit.spv ${VKRT_MIXED_API_SPV} --mixed-entry)
+      add_test(NAME vkrt.gpu_build.mixed_entry.${mode} COMMAND test_gpu_build --mixed-entry-query)
+      set_tests_properties(vkrt.rtp_api.mixed_entry.${mode} vkrt.gpu_build.mixed_entry.${mode} PROPERTIES
+         LABELS "gpu;typed_rtp" TIMEOUT 600 SKIP_RETURN_CODE 77)
+   endforeach()
+   set_tests_properties(vkrt.rtp_api.mixed_entry.software vkrt.gpu_build.mixed_entry.software PROPERTIES
+      ENVIRONMENT "VK_LAYER_PATH=${CMAKE_BINARY_DIR}/layers;VK_INSTANCE_LAYERS=VK_LAYER_VKRT_SOFTWARE_RAY_QUERY;ENABLE_VKRT_SOFTWARE_RAY_QUERY=1;VK_LOADER_LAYERS_DISABLE=~implicit~")
+   set_tests_properties(vkrt.rtp_api.mixed_entry.native vkrt.gpu_build.mixed_entry.native PROPERTIES
+      ENVIRONMENT "VK_INSTANCE_LAYERS=;VK_LOADER_LAYERS_DISABLE=~implicit~")
+   foreach(mode software native)
+      add_test(NAME vkrt.rtp_api.memory_model.${mode} COMMAND test_rtp_api ${VKRT_RTP_VMM_SOURCE_SPV} --memory-model-source)
+      add_test(NAME vkrt.rtp_api.mixed_memory_model.${mode} COMMAND test_rtp_api
+         ${CMAKE_CURRENT_BINARY_DIR}/rtp_vmm_source.rgen.spv ${CMAKE_CURRENT_BINARY_DIR}/rtp_physical_source.rcall.spv --memory-model-source)
+      set_tests_properties(vkrt.rtp_api.memory_model.${mode} vkrt.rtp_api.mixed_memory_model.${mode} PROPERTIES
+         LABELS "gpu;typed_rtp" SKIP_RETURN_CODE 77 TIMEOUT 180)
+   endforeach()
+   set_tests_properties(vkrt.rtp_api.memory_model.software vkrt.rtp_api.mixed_memory_model.software PROPERTIES
+      ENVIRONMENT "VK_LAYER_PATH=${CMAKE_BINARY_DIR}/layers;VK_INSTANCE_LAYERS=VK_LAYER_VKRT_SOFTWARE_RAY_QUERY;ENABLE_VKRT_SOFTWARE_RAY_QUERY=1;VK_LOADER_LAYERS_DISABLE=~implicit~")
+   set_tests_properties(vkrt.rtp_api.memory_model.native vkrt.rtp_api.mixed_memory_model.native PROPERTIES
+      ENVIRONMENT "VK_INSTANCE_LAYERS=;VK_LOADER_LAYERS_DISABLE=~implicit~")
+   add_test(NAME vkrt.rtp_api.memory_model_interfaces.software COMMAND test_rtp_api ${VKRT_RTP_VMM_INTERFACES_SPV} --memory-model-interfaces)
+   set_tests_properties(vkrt.rtp_api.memory_model_interfaces.software PROPERTIES
+      ENVIRONMENT "VK_LAYER_PATH=${CMAKE_BINARY_DIR}/layers;VK_INSTANCE_LAYERS=VK_LAYER_VKRT_SOFTWARE_RAY_QUERY;ENABLE_VKRT_SOFTWARE_RAY_QUERY=1;VK_LOADER_LAYERS_DISABLE=~implicit~"
+      LABELS "gpu;typed_rtp" SKIP_RETURN_CODE 77 TIMEOUT 180)
    foreach(mode software native)
       add_test(NAME vkrt.rtp_api.physical_interfaces.${mode} COMMAND test_rtp_api
          ${VKRT_RTP_PHYSICAL_INTERFACES_SPV} --physical-interfaces)
@@ -607,6 +685,12 @@ if(BUILD_TESTING)
    set_tests_properties(vkrt.rtp_api.physical_source.software PROPERTIES
       ENVIRONMENT "VK_LAYER_PATH=${CMAKE_BINARY_DIR}/layers;VK_INSTANCE_LAYERS=VK_LAYER_VKRT_SOFTWARE_RAY_QUERY")
    set_tests_properties(vkrt.rtp_api.physical_source.native PROPERTIES ENVIRONMENT "VK_INSTANCE_LAYERS=")
+   foreach(family vkrt.rtp_api.mixed_entry vkrt.gpu_build.mixed_entry vkrt.rtp_api.memory_model
+         vkrt.rtp_api.mixed_memory_model vkrt.rtp_api.physical_interfaces vkrt.rtp_api.physical_source)
+      set_property(TEST ${family}.software APPEND PROPERTY LABELS no_native_rt)
+      set_property(TEST ${family}.native APPEND PROPERTY LABELS native_rt)
+   endforeach()
+   set_property(TEST vkrt.rtp_api.memory_model_interfaces.software APPEND PROPERTY LABELS no_native_rt)
    set(VKRT_RTP_ARENA_SPV)
    foreach(stage rgen rcall)
       set(output ${CMAKE_CURRENT_BINARY_DIR}/rtp_arena.${stage}.spv)
@@ -789,6 +873,8 @@ if(BUILD_TESTING)
       set_tests_properties(vkrt.query_events.zero_timestamps.${mode} PROPERTIES
          LABELS "gpu;query_publication;injected_zero_timestamps" TIMEOUT 180)
    endforeach()
+   set_property(TEST vkrt.query_events.zero_timestamps.software APPEND PROPERTY LABELS no_native_rt)
+   set_property(TEST vkrt.query_events.zero_timestamps.native APPEND PROPERTY LABELS native_rt)
    add_executable(test_query_signal_order tests/test_query_signal_order.c)
    target_include_directories(test_query_signal_order PRIVATE src tests ${Vulkan_INCLUDE_DIRS})
    target_link_libraries(test_query_signal_order PRIVATE ${Vulkan_LIBRARIES} Threads::Threads)
@@ -1056,6 +1142,12 @@ if(BUILD_TESTING)
    set_target_properties(test_registry_concurrency PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED ON)
    add_test(NAME vkrt.registry_concurrency COMMAND test_registry_concurrency)
    set_tests_properties(vkrt.registry_concurrency PROPERTIES LABELS "offline;concurrency" TIMEOUT 60)
+   add_executable(test_registry_retirement tests/test_registry_retirement.c)
+   target_include_directories(test_registry_retirement PRIVATE src ${Vulkan_INCLUDE_DIRS})
+   target_link_libraries(test_registry_retirement PRIVATE Threads::Threads)
+   set_target_properties(test_registry_retirement PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED ON)
+   add_test(NAME vkrt.registry_retirement COMMAND test_registry_retirement)
+   set_tests_properties(vkrt.registry_retirement PROPERTIES LABELS "offline" TIMEOUT 60)
    add_executable(test_spirv_ids tests/test_spirv_ids.cpp src/vkrt_spirv_ids.cpp)
    target_include_directories(test_spirv_ids PRIVATE src ${Vulkan_INCLUDE_DIRS} ${VKRT_SPIRV_HEADERS_INCLUDE_DIR})
    target_link_libraries(test_spirv_ids PRIVATE ${VKRT_SPIRV_LIBRARIES})
@@ -1122,14 +1214,30 @@ if(BUILD_TESTING)
       ENVIRONMENT "VK_INSTANCE_LAYERS=" LABELS "gpu;software_compute;no_native_rt" TIMEOUT 120)
    add_test(NAME vkrt.cpu_fixture COMMAND test_single_tri)
    add_test(NAME vkrt.gpu_build.software COMMAND test_gpu_build)
-   add_test(NAME vkrt.gpu_build.ploc.software COMMAND test_gpu_build --require-ploc)
-   set_tests_properties(vkrt.gpu_build.ploc.software PROPERTIES
+   add_test(NAME vkrt.gpu_build.mesa.software COMMAND test_gpu_build --require-mesa-builders)
+   set_tests_properties(vkrt.gpu_build.mesa.software PROPERTIES
       ENVIRONMENT "VK_LAYER_PATH=${CMAKE_BINARY_DIR}/layers;VK_INSTANCE_LAYERS=VK_LAYER_VKRT_SOFTWARE_RAY_QUERY;ENABLE_VKRT_SOFTWARE_RAY_QUERY=1;VK_LOADER_LAYERS_DISABLE=~implicit~"
       LABELS "gpu;no_native_rt" TIMEOUT 600 SKIP_RETURN_CODE 77)
-   add_test(NAME vkrt.gpu_build.ploc_small.native COMMAND test_gpu_build --ploc-small)
-   set_tests_properties(vkrt.gpu_build.ploc_small.native PROPERTIES
+   add_test(NAME vkrt.gpu_build.builder_small.native COMMAND test_gpu_build --builder-small)
+   set_tests_properties(vkrt.gpu_build.builder_small.native PROPERTIES
       ENVIRONMENT "VK_INSTANCE_LAYERS=;VK_LOADER_LAYERS_DISABLE=~implicit~"
       LABELS "gpu;native_rt" TIMEOUT 600)
+   foreach(width 32 64)
+      if(width EQUAL 64)
+         set(_builder_arg --builder-edges64)
+      else()
+         set(_builder_arg --builder-edges)
+      endif()
+      foreach(mode software native)
+         add_test(NAME vkrt.gpu_build.edges${width}.${mode} COMMAND test_gpu_build ${_builder_arg})
+         set_tests_properties(vkrt.gpu_build.edges${width}.${mode} PROPERTIES LABELS "gpu" TIMEOUT 600 SKIP_RETURN_CODE 77)
+      endforeach()
+      set_tests_properties(vkrt.gpu_build.edges${width}.software PROPERTIES
+         ENVIRONMENT "VK_LAYER_PATH=${CMAKE_BINARY_DIR}/layers;VK_INSTANCE_LAYERS=VK_LAYER_VKRT_SOFTWARE_RAY_QUERY;ENABLE_VKRT_SOFTWARE_RAY_QUERY=1;VK_LOADER_LAYERS_DISABLE=~implicit~")
+      set_tests_properties(vkrt.gpu_build.edges${width}.native PROPERTIES ENVIRONMENT "VK_INSTANCE_LAYERS=;VK_LOADER_LAYERS_DISABLE=~implicit~")
+      set_property(TEST vkrt.gpu_build.edges${width}.software APPEND PROPERTY LABELS no_native_rt)
+      set_property(TEST vkrt.gpu_build.edges${width}.native APPEND PROPERTY LABELS native_rt)
+   endforeach()
    add_test(NAME vkrt.gpu_build.vulkan11.software COMMAND test_gpu_build --vulkan11)
    set_tests_properties(vkrt.gpu_build.vulkan11.software PROPERTIES
       ENVIRONMENT "VK_LAYER_PATH=${CMAKE_BINARY_DIR}/layers;VK_INSTANCE_LAYERS=VK_LAYER_VKRT_SOFTWARE_RAY_QUERY;ENABLE_VKRT_SOFTWARE_RAY_QUERY=1;VK_LOADER_LAYERS_DISABLE=~implicit~"

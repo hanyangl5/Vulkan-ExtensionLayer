@@ -9,13 +9,42 @@
 #include <stdbool.h>
 #include <vulkan/vulkan.h>
 static bool g_vulkan11;
+static bool g_mixed_query;
 #ifndef vkCreateInstance
 static VkResult create_api_instance(const VkInstanceCreateInfo *info, const VkAllocationCallbacks *allocator, VkInstance *out);
 #define vkCreateInstance create_api_instance
 #define VKRT_GPU_BUILD_INSTANCE_WRAPPER
 #endif
-#define VKRT_TEST_RQ_SHADER_PATH (g_vulkan11 ? "rq_test11.comp.spv" : "rq_test.comp.spv")
+#define VKRT_TEST_RQ_SHADER_PATH (g_mixed_query ? "rq_mixed_entry.spv" : g_vulkan11 ? "rq_test11.comp.spv" : "rq_test.comp.spv")
+static VkResult create_api_device(VkPhysicalDevice physical, const VkDeviceCreateInfo *info, const VkAllocationCallbacks *allocator,
+                                  VkDevice *device);
+#define vkCreateDevice create_api_device
 #include "00_single_tri/main.c"
+#undef vkCreateDevice
+
+static VkResult create_api_device(VkPhysicalDevice physical, const VkDeviceCreateInfo *info, const VkAllocationCallbacks *allocator,
+                                  VkDevice *device) {
+    if (!g_mixed_query) return vkCreateDevice(physical, info, allocator, device);
+    VkPhysicalDeviceRayTracingPipelineFeaturesKHR pipeline = {
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_FEATURES_KHR};
+    VkPhysicalDeviceFeatures2 supported = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2, .pNext = &pipeline};
+    vkGetPhysicalDeviceFeatures2(physical, &supported);
+    if (!pipeline.rayTracingPipeline) exit(77);
+    pipeline = (VkPhysicalDeviceRayTracingPipelineFeaturesKHR){
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_FEATURES_KHR,
+        .pNext = (void *)info->pNext,
+        .rayTracingPipeline = VK_TRUE};
+    VkDeviceCreateInfo local = *info;
+    local.pNext = &pipeline;
+    const char **extensions = malloc(((size_t)info->enabledExtensionCount + 1) * sizeof(*extensions));
+    if (!extensions) return VK_ERROR_OUT_OF_HOST_MEMORY;
+    memcpy(extensions, info->ppEnabledExtensionNames, info->enabledExtensionCount * sizeof(*extensions));
+    extensions[local.enabledExtensionCount++] = VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME;
+    local.ppEnabledExtensionNames = extensions;
+    VkResult result = vkCreateDevice(physical, &local, allocator, device);
+    free(extensions);
+    return result;
+}
 #ifdef VKRT_GPU_BUILD_INSTANCE_WRAPPER
 #undef vkCreateInstance
 
@@ -44,8 +73,10 @@ static bool g_split_builds;
 static bool g_aligned_values;
 static bool g_pool_pressure;
 static bool g_rejected_builds;
-static bool g_require_ploc;
+static bool g_require_mesa;
 static bool g_ploc_small;
+static bool g_builder_edges, g_coincident;
+static VkBuildAccelerationStructureFlagsKHR g_build_flags;
 static uint32_t g_active_limit = UINT32_MAX;
 static VkAccelerationStructureKHR g_pressure_views[1023];
 
@@ -136,7 +167,7 @@ static void record_builds(VkCommandBuffer cmd)
          VK_PIPELINE_STAGE_ACCELERATION_STRUCTURE_BUILD_BIT_KHR | VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
          0, 1, &b, 0, NULL, 0, NULL);
    }
-   if (g_require_ploc) {
+   if (g_require_mesa) {
        VkMemoryBarrier host = {.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER,
                                .srcAccessMask = VK_ACCESS_ACCELERATION_STRUCTURE_WRITE_BIT_KHR,
                                .dstAccessMask = VK_ACCESS_HOST_READ_BIT};
@@ -150,10 +181,13 @@ static void prepare_as(struct built_as *as, VkAccelerationStructureTypeKHR type,
    const VkAccelerationStructureBuildRangeInfoKHR *ranges, bool pointers)
 {
    memset(as, 0, sizeof(*as));
-   as->info = (VkAccelerationStructureBuildGeometryInfoKHR){
-      .sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_GEOMETRY_INFO_KHR,
-      .type = type, .mode = VK_BUILD_ACCELERATION_STRUCTURE_MODE_BUILD_KHR,
-      .geometryCount = geometry_count, .pGeometries = geometries};
+   as->info =
+       (VkAccelerationStructureBuildGeometryInfoKHR){.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_GEOMETRY_INFO_KHR,
+                                                     .type = type,
+                                                     .flags = g_build_flags,
+                                                     .mode = VK_BUILD_ACCELERATION_STRUCTURE_MODE_BUILD_KHR,
+                                                     .geometryCount = geometry_count,
+                                                     .pGeometries = geometries};
    memcpy(as->ranges, ranges, geometry_count * sizeof(*ranges));
    uint32_t counts[2];
    const VkAccelerationStructureGeometryKHR *pg[2];
@@ -291,7 +325,7 @@ static void rejected_builds(const struct built_as *as)
 static void validate_tree(const struct built_as *as, uint32_t expected_leaves)
 {
    if (!g_software) return;
-   if (g_require_ploc) {
+   if (g_require_mesa) {
        struct vkrt_build_layout layout = vkrt_build_layout(&as->info, NULL, as->ranges);
        VkDeviceSize offset = as->info.scratchData.deviceAddress - as->scratch.addr + layout.source;
        if (!layout.valid || offset > as->scratch.size || sizeof(struct vk_ir_header) > as->scratch.size - offset) {
@@ -301,16 +335,24 @@ static void validate_tree(const struct built_as *as, uint32_t expected_leaves)
        }
        struct vk_ir_header ir;
        memcpy(&ir, (const uint8_t *)as->scratch.mapped + offset, sizeof(ir));
-       uint32_t expected = layout.leaf_count > 4 ? BVH_IR_PRODUCER_PLOC : 0;
+       bool quality = as->info.type == VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR ||
+                      !(as->info.flags & (VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_BUILD_BIT_KHR |
+                                          VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_UPDATE_BIT_KHR));
+       uint32_t expected = !quality || layout.leaf_count <= 4 ? 0
+                           : layout.leaf_count > 1024         ? BVH_IR_PRODUCER_HPLOC
+                                                              : BVH_IR_PRODUCER_PLOC;
        expect_u("selected IR producer", ir.driver_internal[5], expected);
-       if (expected) {
+       expect_u("executed Morton key width", ir.driver_internal[4],
+                as->info.flags & VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR ? 64 : 32);
+       expect_u("active IR leaves", ir.active_leaf_count, expected_leaves);
+       if (expected == BVH_IR_PRODUCER_PLOC) {
            expect_u("PLOC terminal phase", ir.sync_data.phase_index, expected_leaves > 2 ? UINT32_MAX : 0);
-           expect_u("PLOC active leaves", ir.active_leaf_count, expected_leaves);
-           if (layout.leaf_count > 1024 && ir.sync_data.task_done_counter <= 1) ++g_fail;
+       } else if (expected == BVH_IR_PRODUCER_HPLOC) {
+           expect_u("HPLOC allocated internal nodes", ir.ir_internal_node_count, expected_leaves > 1 ? expected_leaves - 1 : 1);
        }
-       printf("IR producer=%08x capacity=%llu active=%u phase=%08x tasks=%u/%u\n", ir.driver_internal[5],
-              (unsigned long long)layout.leaf_count, ir.active_leaf_count, ir.sync_data.phase_index, ir.sync_data.task_done_counter,
-              ir.sync_data.task_started_counter);
+       printf("IR producer=%08x keys=%u capacity=%llu active=%u phase=%08x tasks=%u/%u\n", ir.driver_internal[5],
+              ir.driver_internal[4], (unsigned long long)layout.leaf_count, ir.active_leaf_count, ir.sync_data.phase_index,
+              ir.sync_data.task_done_counter, ir.sync_data.task_started_counter);
    }
    const uint8_t *bytes = as->output.mapped;
    for (uint32_t i = 0; i < 256; ++i) {
@@ -355,9 +397,13 @@ static void validate_tree(const struct built_as *as, uint32_t expected_leaves)
    };
    struct visit *stack = malloc((size_t)(total + 1) * sizeof(*stack));
    uint8_t *visited = calloc((size_t)(total + 1), 1);
-   if (!stack || !visited) {
+   size_t input_count = 0;
+   for (uint32_t g = 0; g < as->info.geometryCount; ++g) input_count += as->ranges[g].primitiveCount;
+   uint8_t *originals = calloc(input_count + 1, 1);
+   if (!stack || !visited || !originals) {
        free(stack);
        free(visited);
+       free(originals);
        ++g_fail;
        return;
    }
@@ -434,16 +480,35 @@ static void validate_tree(const struct built_as *as, uint32_t expected_leaves)
                const VkAccelerationStructureGeometryKHR *input =
                    as->info.pGeometries ? &as->info.pGeometries[geometry] : as->info.ppGeometries[geometry];
                expect_u("full geometry flags", flags, input->flags);
-               if (primitive >= as->ranges[geometry].primitiveCount) ++g_fail;
+               if (primitive >= as->ranges[geometry].primitiveCount) {
+                   ++g_fail;
+                   goto finish;
+               }
+               size_t original = primitive;
+               for (uint32_t g = 0; g < geometry; ++g) original += as->ranges[g].primitiveCount;
+               if (original >= input_count || originals[original]++) {
+                   fprintf(stderr, "Duplicate or invalid original geometry/primitive identity\n");
+                   ++g_fail;
+                   goto finish;
+               }
                for (unsigned axis = 0; axis < 3; ++axis)
                    if (current.bounds[axis] > bounds[axis] + 1e-4f || current.bounds[axis + 3] < bounds[axis + 3] - 1e-4f) ++g_fail;
+           } else if (kind == VEL_RT_BVH4_INSTANCE) {
+               const VelRtBvh4Instance *leaf = (const void *)(bytes + h.instance_offset + (uint64_t)index * sizeof(*leaf));
+               if (leaf->instance_id >= input_count || originals[leaf->instance_id]++) {
+                   fprintf(stderr, "Duplicate or invalid original instance identity\n");
+                   ++g_fail;
+                   goto finish;
+               }
            }
        }
    }
 finish:
    expect_u("reachable leaves", leaves, expected_leaves);
    expect_u("reachable internal nodes", nodes, h.node_count);
-   free(visited); free(stack);
+   free(originals);
+   free(visited);
+   free(stack);
 }
 
 static void triangles_case(uint32_t n, bool inactive, bool indexed, bool two_geometries, bool transformed)
@@ -458,10 +523,10 @@ static void triangles_case(uint32_t n, bool inactive, bool indexed, bool two_geo
    float *v = vertices.mapped;
    memset(v, 0, (size_t)vertices.size);
    for (uint32_t i = 0; i < n; ++i) {
-      float x = (float)i * 3;
-      float triangle[9] = {x-1,-1,0, x+1,-1,0, x,1,0};
-      if ((inactive && i % 7 == 0) || i >= g_active_limit) triangle[0] = NAN;
-      memcpy(v + 3 + i * 9, triangle, sizeof(triangle));
+       float x = g_coincident ? 0 : (float)i * 3;
+       float triangle[9] = {x - 1, -1, 0, x + 1, -1, 0, x, 1, 0};
+       if ((inactive && i % 7 == 0) || i >= g_active_limit) triangle[0] = NAN;
+       memcpy(v + 3 + i * 9, triangle, sizeof(triangle));
    }
    buf_create((VkDeviceSize)(count * 3 + 2) * 2, VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR |
       VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, &indices);
@@ -520,7 +585,7 @@ static void triangles_case(uint32_t n, bool inactive, bool indexed, bool two_geo
        float bv = j < 3 ? .5f : .1f + .3f * (float)(random >> 16) / 65535.f;
        float direction[] = {j < 3 ? 0 : .137f, j < 3 ? 0 : -.071f, -1};
        bool outside = j >= 3 && j % 4 == 0;
-       float origin[] = {((float)target * 3 + 2 * u + bv - 1) * (transformed ? 2 : 1) - 2 * direction[0],
+       float origin[] = {((g_coincident ? 0 : (float)target * 3) + 2 * u + bv - 1) * (transformed ? 2 : 1) - 2 * direction[0],
                          (outside ? 3 : 2 * bv - 1) + (transformed ? 4.f : 0.f) - 2 * direction[1], 2};
        struct out_block out;
        run_ray(tlas.handle, origin, direction, 0, 100, 0, 0xff, &out);
@@ -529,7 +594,10 @@ static void triangles_case(uint32_t n, bool inactive, bool indexed, bool two_geo
        expect_u("GPU-built shadow", out.shadow_hit, hit);
        if (hit) {
            uint32_t geom = two_geometries && target >= split;
-           expect_u("original primitive", out.primitive_index, target - (geom ? split : 0));
+           if (g_coincident) {
+               if (out.primitive_index >= n) ++g_fail;
+           } else
+               expect_u("original primitive", out.primitive_index, target - (geom ? split : 0));
            expect_u("geometry", out.geometry_index, geom);
            expect_u("instance", out.instance_index, 0);
            expect_u("instance custom", out.instance_custom_index, 42);
@@ -550,8 +618,8 @@ static void triangles_case(uint32_t n, bool inactive, bool indexed, bool two_geo
            expect_u("ray culling/opacity flags", out.hit_type, expected[j]);
        }
    }
-   uint32_t active = n - (inactive ? (n + 6) / 7 : 0);
-   if (g_ploc_small) active = g_active_limit;
+   uint32_t active = n < g_active_limit ? n : g_active_limit;
+   active -= inactive ? (active + 6) / 7 : 0;
    validate_tree(&blas, active);
    /* A non-null reference to an empty BLAS is a recoverable degenerate instance. */
    validate_tree(&tlas, 1);
@@ -634,10 +702,14 @@ int main(int argc, char **argv) {
     g_pool_pressure = argc == 2 && !strcmp(argv[1], "--pool-pressure");
     g_rejected_builds = argc == 2 && !strcmp(argv[1], "--rejected-builds");
     g_vulkan11 = argc == 2 && !strcmp(argv[1], "--vulkan11");
-    g_require_ploc = argc == 2 && !strcmp(argv[1], "--require-ploc");
-    g_ploc_small = argc == 2 && !strcmp(argv[1], "--ploc-small");
-    g_require_ploc |= g_ploc_small && g_software;
-    if (g_require_ploc && !g_software) return 2;
+    g_mixed_query = argc == 2 && !strcmp(argv[1], "--mixed-entry-query");
+    bool require_mesa = argc == 2 && !strcmp(argv[1], "--require-mesa-builders");
+    g_ploc_small = argc == 2 && !strcmp(argv[1], "--builder-small");
+    g_builder_edges = argc == 2 && (!strcmp(argv[1], "--builder-edges") || !strcmp(argv[1], "--builder-edges64"));
+    if (g_builder_edges && !strcmp(argv[1], "--builder-edges64"))
+        g_build_flags = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR;
+    g_require_mesa = g_software && (require_mesa || g_ploc_small || g_builder_edges);
+    if (require_mesa && !g_software) return 2;
     if (g_vulkan11) {
         size_t words;
         uint32_t *shader = read_spv("rq_test11.comp.spv", &words);
@@ -649,21 +721,36 @@ int main(int argc, char **argv) {
         free(shader);
     }
     init_vulkan();
-    if (g_require_ploc) {
+    if (g_require_mesa) {
         VkPhysicalDeviceSubgroupProperties subgroup = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SUBGROUP_PROPERTIES};
         VkPhysicalDeviceProperties2 properties = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2, .pNext = &subgroup};
         vkGetPhysicalDeviceProperties2(g_pdev, &properties);
-        if (!bvh_ir_ploc_eligible(&properties.properties.limits, &subgroup)) {
+        if (!bvh_ir_ploc_eligible(&properties.properties.limits, &subgroup) ||
+            !bvh_ir_hploc_eligible(&properties.properties.limits)) {
             vkDestroyCommandPool(g_dev, g_pool, NULL);
             vkDestroyDevice(g_dev, NULL);
             vkDestroyInstance(g_instance, NULL);
-            printf("SKIP: selected device does not qualify for PLOC\n");
+            printf("SKIP: selected device does not qualify for the full Mesa builder test matrix\n");
             return 77;
         }
     }
     pBuild = (void *)vkGetDeviceProcAddr(g_dev, "vkCmdBuildAccelerationStructuresKHR");
     if (!pBuild) return 1;
-    if (g_ploc_small || g_require_ploc) {
+    if (g_builder_edges) {
+        g_ploc_small = true;
+        for (g_active_limit = 0; g_active_limit <= 2; ++g_active_limit) triangles_case(1025, false, false, false, false);
+        g_active_limit = UINT32_MAX;
+        const uint32_t counts[] = {31, 32, 33, 1025, 2049};
+        for (uint32_t i = 0; i < ARRAY_SIZE(counts); ++i) triangles_case(counts[i], i == 4, true, false, false);
+        g_coincident = true;
+        triangles_case(1025, false, false, false, false);
+        g_coincident = false;
+        g_build_flags |= g_build_flags ? VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_UPDATE_BIT_KHR
+                                       : VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_BUILD_BIT_KHR;
+        triangles_case(257, false, false, false, false);
+        goto finish;
+    }
+    if (g_ploc_small || g_require_mesa) {
         bool small_only = g_ploc_small;
         g_ploc_small = true;
         for (g_active_limit = 0; g_active_limit <= 2; ++g_active_limit) triangles_case(9, false, false, false, false);
@@ -671,7 +758,7 @@ int main(int argc, char **argv) {
         g_ploc_small = false;
         if (small_only) goto finish;
     }
-    if (g_aligned_values || g_pool_pressure || g_rejected_builds) {
+    if (g_aligned_values || g_pool_pressure || g_rejected_builds || g_mixed_query) {
         triangles_case(1, false, false, false, false);
         goto finish;
     }

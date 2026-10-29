@@ -15,6 +15,8 @@ static unsigned library_mode;
 static unsigned descriptor_mode;
 static bool separate_compute, descriptor_core;
 static bool debug_names_mode, vulkan11_mode, physical_source_mode;
+static bool source_memory_model_mode;
+static bool mixed_entry_mode;
 static bool private_data_mode, private_core, private_extension;
 #include <vulkan/vulkan.h>
 #if VK_USE_64_BIT_PTR_DEFINES
@@ -135,6 +137,9 @@ static VkResult create_device(VkPhysicalDevice physical, const VkDeviceCreateInf
                                                         .pNext = &six};
     supported.pNext = &maintenance;
     VkPhysicalDeviceFeatures2 features = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2, .pNext = &supported};
+    VkPhysicalDeviceVulkanMemoryModelFeatures memory_model = {
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_MEMORY_MODEL_FEATURES, .pNext = &supported};
+    if (source_memory_model_mode) features.pNext = &memory_model;
     PFN_vkGetPhysicalDeviceFeatures2 query = (void *)vkGetInstanceProcAddr(g_instance, "vkGetPhysicalDeviceFeatures2");
     query(physical, &features);
     VkPhysicalDeviceProperties native_properties;
@@ -219,6 +224,13 @@ static VkResult create_device(VkPhysicalDevice physical, const VkDeviceCreateInf
         extensions[local.enabledExtensionCount++] =
             descriptor_mode == 3 ? VK_EXT_DESCRIPTOR_BUFFER_EXTENSION_NAME : VK_KHR_PUSH_DESCRIPTOR_EXTENSION_NAME;
     if (private_extension) extensions[local.enabledExtensionCount++] = VK_EXT_PRIVATE_DATA_EXTENSION_NAME;
+    if (source_memory_model_mode) {
+        if (!memory_model.vulkanMemoryModel || !memory_model.vulkanMemoryModelDeviceScope ||
+            !memory_model.vulkanMemoryModelAvailabilityVisibilityChains ||
+            !device_extension(physical, VK_KHR_VULKAN_MEMORY_MODEL_EXTENSION_NAME))
+            exit(77);
+        extensions[local.enabledExtensionCount++] = VK_KHR_VULKAN_MEMORY_MODEL_EXTENSION_NAME;
+    }
     local.ppEnabledExtensionNames = extensions;
     if (advertised) {
         extensions[local.enabledExtensionCount++] = VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME;
@@ -251,6 +263,11 @@ static VkResult create_device(VkPhysicalDevice physical, const VkDeviceCreateInf
         if (!features.features.shaderInt64) exit(77);
         enabled_core.shaderInt64 = VK_TRUE;
         local.pEnabledFeatures = &enabled_core;
+    }
+    if (source_memory_model_mode) {
+        memory_model.pNext = (void *)local.pNext;
+        local.pNext = &memory_model;
+        printf("Source VulkanMemoryModel, DeviceScope and availability/visibility chains enabled\n");
     }
     VkResult result = vkCreateDevice(physical, &local, a, out);
     if (result == VK_SUCCESS && two_queues) vkGetDeviceQueue(*out, queue_info.queueFamilyIndex, 1, &second_queue);
@@ -505,11 +522,13 @@ static void bind_compute_descriptors(VkCommandBuffer command, VkPipelineLayout l
 #include "rtp_physical_source_fixture.h"
 int main(int argc, char **argv) {
     setvbuf(stdout, NULL, _IONBF, 0);
-    if (argc == 8 && !strcmp(argv[7], "--physical-interfaces")) {
+    if (argc == 8 && (!strcmp(argv[7], "--physical-interfaces") || !strcmp(argv[7], "--memory-model-interfaces"))) {
+        source_memory_model_mode = !strcmp(argv[7], "--memory-model-interfaces");
         physical_source_mode = vulkan11_mode = true;
         return run_physical_fixture((const char *const *)(argv + 1), true);
     }
-    if (argc == 4 && !strcmp(argv[3], "--physical-source")) {
+    if (argc == 4 && (!strcmp(argv[3], "--physical-source") || !strcmp(argv[3], "--memory-model-source"))) {
+        source_memory_model_mode = !strcmp(argv[3], "--memory-model-source");
         physical_source_mode = vulkan11_mode = true;
         return run_physical_source_fixture(argv[1], argv[2]);
     }
@@ -521,6 +540,8 @@ int main(int argc, char **argv) {
     maintenance6_mode = argc == 6 && !strcmp(argv[5], "--maintenance6");
     shader_object_mode = argc == 6 && !strcmp(argv[5], "--shader-object");
     vulkan11_mode = argc == 6 && !strcmp(argv[5], "--vulkan11");
+    mixed_entry_mode = argc == 6 && !strcmp(argv[5], "--mixed-entry");
+    vulkan11_mode |= mixed_entry_mode;
     debug_names_mode = argc == 6 && !strcmp(argv[5], "--push-template-debug");
     private_data_mode = argc == 6 && !strcmp(argv[5], "--push-template-private-data");
     derivatives_mode = argc == 6 && !strcmp(argv[5], "--derivatives");
@@ -540,7 +561,7 @@ int main(int argc, char **argv) {
             "usage: %s rgen.spv miss.spv chit.spv compute.spv "
             "[--capability-harness|--maintenance6|--shader-object|--derivatives|--libraries|--library-stages|"
             "--push-descriptors[-maintenance6]|--push-template[-maintenance6]|--push-template-debug|--push-template-private-data|"
-            "--descriptor-buffer[-maintenance6]|--vulkan11]\n",
+            "--descriptor-buffer[-maintenance6]|--vulkan11|--mixed-entry]\n",
             argv[0]);
         return 1;
     }
@@ -810,7 +831,7 @@ int main(int argc, char **argv) {
     }
     inline_layout = &lci;
     VkShaderModule modules[4];
-    for (unsigned i = 0; i < 4; ++i) modules[i] = shader(argv[i + 1]);
+    for (unsigned i = 0; i < 4; ++i) modules[i] = mixed_entry_mode && i == 3 ? modules[0] : shader(argv[i + 1]);
     VkPipelineShaderStageCreateInfo stages[3];
     VkShaderStageFlagBits kinds[] = {VK_SHADER_STAGE_RAYGEN_BIT_KHR, VK_SHADER_STAGE_MISS_BIT_KHR,
                                      VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR};
@@ -944,6 +965,7 @@ int main(int argc, char **argv) {
     annotate_object(VK_OBJECT_TYPE_PIPELINE, OBJECT_HANDLE(rt), "public RTP pipeline");
     annotate_object(VK_OBJECT_TYPE_PIPELINE, OBJECT_HANDLE(compute), "native compute pipeline");
     for (unsigned i = 0; i < 4; ++i) {
+        if (mixed_entry_mode && i == 3) continue;
         annotate_object(VK_OBJECT_TYPE_SHADER_MODULE, OBJECT_HANDLE(modules[i]), "public shader module");
         vkDestroyShaderModule(g_dev, modules[i], NULL);
     }

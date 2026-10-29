@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #include "typed_pipeline.h"
 #include "spirv_environment.h"
+#include "spirv_memory_model.h"
 #include <spirv-tools/libspirv.hpp>
 #include <spirv-tools/linker.hpp>
 #include <spirv-tools/optimizer.hpp>
@@ -205,11 +206,11 @@ Words ImportStages(const Words &scheduler, const std::vector<TypedContinuationPr
         auto op = spv::Op(scheduler[p] & 0xffff);
         uint32_t length = scheduler[p] >> 16;
         if (op == spv::OpMemoryModel) {
-            Require(
-                scheduler[p + 2] == spv::MemoryModelGLSL450 && (scheduler[p + 1] == spv::AddressingModelLogical ||
-                                                                scheduler[p + 1] == spv::AddressingModelPhysicalStorageBuffer64),
-                "scheduler memory model is incompatible with physical typed stages");
-            Emit(result, spv::OpMemoryModel, {spv::AddressingModelPhysicalStorageBuffer64, spv::MemoryModelGLSL450});
+            Require((scheduler[p + 2] == spv::MemoryModelGLSL450 || scheduler[p + 2] == spv::MemoryModelVulkan) &&
+                        (scheduler[p + 1] == spv::AddressingModelLogical ||
+                         scheduler[p + 1] == spv::AddressingModelPhysicalStorageBuffer64),
+                    "scheduler memory model is incompatible with physical typed stages");
+            Emit(result, spv::OpMemoryModel, {spv::AddressingModelPhysicalStorageBuffer64, scheduler[p + 2]});
             continue;
         }
         if (!decorated && op >= spv::OpTypeVoid && op <= spv::OpTypeForwardPointer) {
@@ -255,7 +256,119 @@ Words ImportStages(const Words &scheduler, const std::vector<TypedContinuationPr
     Validate(result, UniversalEnvironmentForSPIRV(result.at(1)));
     return result;
 }
+
+bool UsesVulkanMemoryModel(const Words &module) {
+    for (size_t p = 5; p < module.size(); p += module[p] >> 16)
+        if ((module[p] & 65535) == spv::OpMemoryModel) return module[p + 2] == spv::MemoryModelVulkan;
+    return false;
+}
+Words UpgradeTypedMemoryModel(const Words &module) {
+    if (UsesVulkanMemoryModel(module)) return module;
+    Words shell = module;
+    uint32_t addressing = UINT32_MAX;
+    for (size_t p = 5; p < shell.size(); p += shell[p] >> 16) {
+        if ((shell[p] & 65535) != spv::OpMemoryModel) continue;
+        Require(shell[p + 2] == spv::MemoryModelGLSL450, "incompatible typed memory model");
+        addressing = shell[p + 1];
+        shell[p + 1] = spv::AddressingModelLogical;
+    }
+    Require(addressing == spv::AddressingModelLogical || addressing == spv::AddressingModelPhysicalStorageBuffer64,
+            "unsupported typed addressing model");
+    // The generic upgrader narrows existing Device atomic/barrier scopes to
+    // QueueFamily. Preserve the application's wider scope using temporary
+    // ShaderCall scope IDs, restored to Device after the pass. Ordinary data
+    // constants are never rewritten. The backend enables native Device scope.
+    RewriteTypedMemoryScopes(shell, spv::ScopeDevice, spv::ScopeShaderCallKHR);
+    // SPIRV-Tools' memory-semantics pass is gated on Logical addressing. Give
+    // it that addressing shell without changing any pointer types/instructions,
+    // then restore the actual addressing before validating or exposing output.
+    // Apply this only AFTER typed lowering: RT payload pointer aggregates now
+    // contain numeric identities, so a coherent pointee cannot accidentally
+    // mark the payload itself as a NonPrivatePointer access.
+    spvtools::Optimizer upgrade(UniversalEnvironmentForSPIRV(module.at(1)));
+    std::string errors;
+    upgrade.SetMessageConsumer([&](spv_message_level_t, const char *, const spv_position_t &, const char *message) {
+        errors += std::string(message) + "\n";
+    });
+    upgrade.RegisterPass(spvtools::CreateUpgradeMemoryModelPass());
+    spvtools::OptimizerOptions options;
+    options.set_run_validator(false);  // The temporary addressing shell is internal to this pass.
+    Words result;
+    Require(upgrade.Run(shell.data(), shell.size(), &result, options), "memory model upgrade failed: " + errors);
+    for (size_t p = 5; p < result.size(); p += result[p] >> 16)
+        if ((result[p] & 65535) == spv::OpMemoryModel) result[p + 1] = addressing;
+    Require(UsesVulkanMemoryModel(result), "memory model upgrade did not run");
+    LowerTypedShaderCallScopes(result);
+    Validate(result, UniversalEnvironmentForSPIRV(result.at(1)));
+    return result;
+}
 }  // namespace
+
+Words SelectNativeShaderEntry(const Words &source, const std::string &entry, VkShaderStageFlagBits stage) {
+    const auto environment = VulkanEnvironmentForSPIRV(source.size() > 1 ? source[1] : 0);
+    Validate(source, environment);
+    auto matches = [&](uint32_t model) {
+        switch (stage) {
+            case VK_SHADER_STAGE_VERTEX_BIT:
+                return model == spv::ExecutionModelVertex;
+            case VK_SHADER_STAGE_TESSELLATION_CONTROL_BIT:
+                return model == spv::ExecutionModelTessellationControl;
+            case VK_SHADER_STAGE_TESSELLATION_EVALUATION_BIT:
+                return model == spv::ExecutionModelTessellationEvaluation;
+            case VK_SHADER_STAGE_GEOMETRY_BIT:
+                return model == spv::ExecutionModelGeometry;
+            case VK_SHADER_STAGE_FRAGMENT_BIT:
+                return model == spv::ExecutionModelFragment;
+            case VK_SHADER_STAGE_COMPUTE_BIT:
+                return model == spv::ExecutionModelGLCompute;
+            case VK_SHADER_STAGE_TASK_BIT_EXT:
+                return model == spv::ExecutionModelTaskEXT || model == spv::ExecutionModelTaskNV;
+            case VK_SHADER_STAGE_MESH_BIT_EXT:
+                return model == spv::ExecutionModelMeshEXT || model == spv::ExecutionModelMeshNV;
+            default:
+                return false;
+        }
+    };
+    uint32_t selected = 0;
+    for (size_t p = 5; p < source.size(); p += source[p] >> 16)
+        if ((source[p] & 65535) == spv::OpEntryPoint && matches(source[p + 1]) &&
+            String(source, p + 3, p + (source[p] >> 16)) == entry) {
+            Require(!selected, "ambiguous native shader entry point");
+            selected = source[p + 2];
+        }
+    Require(selected != 0, "native shader entry point is absent");
+    Words module(source.begin(), source.begin() + 5);
+    for (size_t p = 5; p < source.size(); p += source[p] >> 16) {
+        auto op = source[p] & 65535;
+        if (op == spv::OpEntryPoint && source[p + 2] != selected) continue;
+        if ((op == spv::OpExecutionMode || op == spv::OpExecutionModeId) && source[p + 1] != selected) continue;
+        module.insert(module.end(), source.begin() + p, source.begin() + p + (source[p] >> 16));
+    }
+    spvtools::Optimizer cleanup(environment);
+    cleanup.RegisterPass(spvtools::CreateEliminateDeadFunctionsPass());
+    cleanup.RegisterPass(spvtools::CreateAggressiveDCEPass(true));
+    cleanup.RegisterPass(spvtools::CreateDeadVariableEliminationPass());
+    cleanup.RegisterPass(spvtools::CreateEliminateDeadConstantPass());
+    cleanup.RegisterPass(spvtools::CreateTrimCapabilitiesPass());
+    spvtools::ValidatorOptions validation;
+    validation.SetScalarBlockLayout(true);
+    spvtools::OptimizerOptions options;
+    options.set_validator_options(validation);
+    Words cleaned;
+    Require(cleanup.Run(module.data(), module.size(), &cleaned, options), "native entry cleanup failed");
+    // The generic trimmer does not cover every RT capability. Source validation
+    // and reachable-code elimination precede this removal; validating again
+    // proves that no retained declaration/operation requires the RT capability.
+    module.assign(cleaned.begin(), cleaned.begin() + 5);
+    for (size_t p = 5; p < cleaned.size(); p += cleaned[p] >> 16) {
+        const auto op = cleaned[p] & 65535;
+        if (op == spv::OpCapability && cleaned[p + 1] == spv::CapabilityRayTracingKHR) continue;
+        if (op == spv::OpExtension && String(cleaned, p + 1, p + (cleaned[p] >> 16)) == "SPV_KHR_ray_tracing") continue;
+        module.insert(module.end(), cleaned.begin() + p, cleaned.begin() + p + (cleaned[p] >> 16));
+    }
+    Validate(module, environment);
+    return module;
+}
 
 TypedContinuationProgram CompileTypedPipelineStage(const Words &source, const std::string &entry, VkShaderStageFlagBits stage,
                                                    const VkSpecializationInfo *specialization, const std::string &export_name) {
@@ -297,6 +410,11 @@ Words LinkTypedPipelineProgram(const Words &scheduler, const std::vector<TypedCo
             }
         }
     }
+    // A linked module has one memory model. Upgrade GLSL450 peers and the
+    // scheduler with the actual SPIRV-Tools semantics conversion, including
+    // coherent/volatile accesses, barriers and atomic availability/visibility.
+    if (std::any_of(modules.begin(), modules.end(), UsesVulkanMemoryModel))
+        for (auto &module : modules) module = UpgradeTypedMemoryModel(module);
     const auto environment = UniversalEnvironmentForSPIRV(version);
     spvtools::Context context(environment);
     std::string error;
@@ -324,18 +442,11 @@ Words LinkTypedPipelineProgram(const Words &scheduler, const std::vector<TypedCo
     // conversion becomes OpCopyObject when both IDs now name the same type.
     struct Metadata {
         std::unordered_map<uint32_t, uint32_t> result_types;
-        std::unordered_map<uint32_t, std::pair<uint32_t, uint32_t>> constants;
-        std::vector<size_t> scope_operands;
         size_t offset = 5;
     } metadata;
     auto collect_type = [](void *user, const spv_parsed_instruction_t *instruction) {
         auto &data = *static_cast<Metadata *>(user);
         if (instruction->result_id && instruction->type_id) data.result_types.emplace(instruction->result_id, instruction->type_id);
-        if (instruction->opcode == spv::OpConstant && instruction->num_words == 4)
-            data.constants.emplace(instruction->result_id, std::make_pair(instruction->type_id, instruction->words[3]));
-        for (uint32_t i = 0; i < instruction->num_operands; ++i)
-            if (instruction->operands[i].type == SPV_OPERAND_TYPE_SCOPE_ID)
-                data.scope_operands.push_back(data.offset + instruction->operands[i].offset);
         data.offset += instruction->num_words;
         return SPV_SUCCESS;
     };
@@ -346,26 +457,6 @@ Words LinkTypedPipelineProgram(const Words &scheduler, const std::vector<TypedCo
         if (spv::Op(cleaned[p] & 0xffff) == spv::OpCopyLogical && metadata.result_types.at(cleaned[p + 3]) == cleaned[p + 1])
             cleaned[p] = (cleaned[p] & 0xffff0000u) | spv::OpCopyObject;
     }
-    // One native invocation executes its entire logical shader-call tree.
-    // Device scope conservatively includes that tree and retains the original
-    // acquire/release memory semantics. Invocation scope cannot do so: Vulkan
-    // requires Relaxed semantics for an Invocation-scoped memory barrier. The
-    // backend already requires native device-scope memory-model support. Rewrite
-    // only parsed scope operands: numeric 6 can also be ordinary source data.
-    Words scope_constants;
-    std::map<uint32_t, uint32_t> device_scopes;
-    for (size_t operand : metadata.scope_operands) {
-        auto constant = metadata.constants.find(cleaned[operand]);
-        if (constant == metadata.constants.end() || constant->second.second != spv::ScopeShaderCallKHR) continue;
-        uint32_t type = constant->second.first;
-        auto found = device_scopes.find(type);
-        if (found == device_scopes.end()) {
-            uint32_t id = cleaned[3]++;
-            found = device_scopes.emplace(type, id).first;
-            Emit(scope_constants, spv::OpConstant, {type, id, spv::ScopeDevice});
-        }
-        cleaned[operand] = found->second;
-    }
     std::vector<uint32_t> globals;
     bool in_function = false;
     uint32_t entry_count = 0;
@@ -375,13 +466,8 @@ Words LinkTypedPipelineProgram(const Words &scheduler, const std::vector<TypedCo
         if (op == spv::OpVariable && !in_function) globals.push_back(cleaned[p + 2]);
     }
     result.assign(cleaned.begin(), cleaned.begin() + 5);
-    bool inserted_scopes = false;
     for (size_t p = 5; p < cleaned.size(); p += cleaned[p] >> 16) {
         uint32_t length = cleaned[p] >> 16;
-        if (!inserted_scopes && spv::Op(cleaned[p] & 0xffff) == spv::OpFunction) {
-            result.insert(result.end(), scope_constants.begin(), scope_constants.end());
-            inserted_scopes = true;
-        }
         if (spv::Op(cleaned[p] & 0xffff) == spv::OpEntryPoint) {
             Require(++entry_count == 1, "scheduler must have one compute entry point");
             Require(cleaned[p + 1] == spv::ExecutionModelGLCompute, "scheduler entry is not compute");
@@ -400,6 +486,7 @@ Words LinkTypedPipelineProgram(const Words &scheduler, const std::vector<TypedCo
             result.insert(result.end(), cleaned.begin() + p, cleaned.begin() + p + length);
     }
     Require(entry_count == 1, "scheduler has no compute entry point");
+    LowerTypedShaderCallScopes(result);
     Validate(result, VulkanEnvironmentForSPIRV(result.at(1)));
     return result;
 }

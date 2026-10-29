@@ -10,10 +10,35 @@
 #include "lbvh_main.spv.h"
 #include "lbvh_generate_ir.spv.h"
 #include "ploc_internal.spv.h"
+#include "vkrt_hploc_init.spv.h"
+#include "hploc_internal.spv.h"
+#include "morton_sort64.spv.h"
 #include "vkrt_bvh4_prepare.spv.h"
 #include "bvh4_mesa_encode.spv.h"
 
-enum { INIT, LEAF, SORT, TREE, BOUNDS, PREPARE, ENCODE_0, ENCODE_1, ENCODE_2, ENCODE_3, ENCODE_4, ENCODE_5, ENCODE_6, PLOC };
+enum {
+    INIT,
+    LEAF,
+    SORT,
+    TREE,
+    BOUNDS,
+    PREPARE,
+    ENCODE_0,
+    ENCODE_1,
+    ENCODE_2,
+    ENCODE_3,
+    ENCODE_4,
+    ENCODE_5,
+    ENCODE_6,
+    PLOC,
+    HPLOC_INIT,
+    HPLOC,
+    SORT64,
+    TREE64,
+    BOUNDS64,
+    PLOC64,
+    HPLOC64
+};
 
 VkResult vkrt_build_init(struct vkrt_device_data *dev)
 {
@@ -24,6 +49,7 @@ VkResult vkrt_build_init(struct vkrt_device_data *dev)
    dev->max_build_dispatch_z = properties.limits.maxComputeWorkGroupCount[2];
    if (!dev->max_build_dispatch_x || !dev->max_build_dispatch_y || !dev->max_build_dispatch_z) return VK_ERROR_FEATURE_NOT_PRESENT;
    dev->build_ploc_subgroup_size = 0;
+   dev->build_hploc_eligible = bvh_ir_hploc_eligible(&properties.limits);
    if (dev->instance_data->vtable.GetPhysicalDeviceProperties2) {
        VkPhysicalDeviceSubgroupProperties subgroup = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SUBGROUP_PROPERTIES};
        VkPhysicalDeviceProperties2 p = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2, .pNext = &subgroup};
@@ -44,7 +70,9 @@ VkResult vkrt_build_init(struct vkrt_device_data *dev)
        SHADER(vkrt_init),        SHADER(leaf_bvh4),         SHADER(morton_sort),      SHADER(lbvh_main),
        SHADER(lbvh_generate_ir), SHADER(vkrt_bvh4_prepare), SHADER(bvh4_mesa_encode), SHADER(bvh4_mesa_encode),
        SHADER(bvh4_mesa_encode), SHADER(bvh4_mesa_encode),  SHADER(bvh4_mesa_encode), SHADER(bvh4_mesa_encode),
-       SHADER(bvh4_mesa_encode), SHADER(ploc_internal)
+       SHADER(bvh4_mesa_encode), SHADER(ploc_internal),     SHADER(vkrt_hploc_init),  SHADER(hploc_internal),
+       SHADER(morton_sort64),    SHADER(lbvh_main),         SHADER(lbvh_generate_ir), SHADER(ploc_internal),
+       SHADER(hploc_internal)
 #undef SHADER
    };
    _Static_assert(VKRT_ARRAY_SIZE(shaders) == VKRT_ARRAY_SIZE(dev->build_pipelines), "build pipeline phase table");
@@ -59,9 +87,13 @@ VkResult vkrt_build_init(struct vkrt_device_data *dev)
    entries[6] = (VkSpecializationMapEntry){6, 24, 8};
    VkSpecializationInfo spec = {7, entries, sizeof(values), &values};
    for (uint32_t i = 0; i < VKRT_ARRAY_SIZE(shaders); ++i) {
-       if (i == PLOC && !dev->build_ploc_subgroup_size) continue;
+       bool ploc = i == PLOC || i == PLOC64;
+       bool hploc = i == HPLOC || i == HPLOC64;
+       if (ploc && !dev->build_ploc_subgroup_size) continue;
+       if ((hploc || i == HPLOC_INIT) && !dev->build_hploc_eligible) continue;
        bool encode = i >= ENCODE_0 && i <= ENCODE_6;
-       values.values[0] = i == PLOC ? dev->build_ploc_subgroup_size : 64;
+       values.values[0] = ploc ? dev->build_ploc_subgroup_size : hploc ? HPLOC_WORKGROUP_SIZE : 64;
+       values.values[2] = i >= SORT64 ? VK_BUILD_FLAG_64BIT_KEYS : 0;
        struct {
            uint32_t phase, padding;
            uint64_t context;
@@ -126,6 +158,7 @@ struct vkrt_build_emit_context {
    struct vkrt_device_data *dev;
    VkCommandBuffer cmd;
    bool leaf_only;
+   bool key64;
 };
 
 static void vkrt_build_emit(void *user, uint32_t pass, const void *args,
@@ -133,7 +166,31 @@ static void vkrt_build_emit(void *user, uint32_t pass, const void *args,
 {
    struct vkrt_build_emit_context *ctx = user;
    if (ctx->leaf_only && pass > BVH_IR_STAGE_LEAF) return;
-   dispatch(ctx->dev, ctx->cmd, pass == BVH_IR_STAGE_PLOC ? PLOC : pass, args, size, groups);
+   uint32_t pipeline;
+   switch (pass) {
+       case BVH_IR_STAGE_SORT:
+           pipeline = ctx->key64 ? SORT64 : SORT;
+           break;
+       case BVH_IR_STAGE_TREE:
+           pipeline = ctx->key64 ? TREE64 : TREE;
+           break;
+       case BVH_IR_STAGE_BOUNDS:
+           pipeline = ctx->key64 ? BOUNDS64 : BOUNDS;
+           break;
+       case BVH_IR_STAGE_PLOC:
+           pipeline = ctx->key64 ? PLOC64 : PLOC;
+           break;
+       case BVH_IR_STAGE_HPLOC_INIT:
+           pipeline = HPLOC_INIT;
+           break;
+       case BVH_IR_STAGE_HPLOC:
+           pipeline = ctx->key64 ? HPLOC64 : HPLOC;
+           break;
+       default:
+           pipeline = pass;
+           break;
+   }
+   dispatch(ctx->dev, ctx->cmd, pipeline, args, size, groups);
 }
 
 void vkrt_cmd_build_as(struct vkrt_device_data *dev, VkCommandBuffer cmd, uint32_t count,
@@ -213,14 +270,14 @@ void vkrt_cmd_build_as(struct vkrt_device_data *dev, VkCommandBuffer cmd, uint32
               geometry_prefix += ranges[i][g].primitiveCount;
           }
       }
-      struct vkrt_build_emit_context context = {dev, cmd, update};
+      struct vkrt_build_emit_context context = {dev, cmd, update, l.ir.key_stride == 12};
       /* UPDATE only refreshes source leaf records. Sorting, construction and
        * IR parent/bounds passes are omitted; the retained runtime topology
        * and original application IDs drive the separate refit below. */
       VkAccelerationStructureBuildGeometryInfoKHR build = *info;
       build.mode = VK_BUILD_ACCELERATION_STRUCTURE_MODE_BUILD_KHR;
-      enum bvh_ir_backend backend =
-          bvh_ir_choose_backend(&build, (uint32_t)l.leaf_count, !update && dev->build_ploc_subgroup_size != 0);
+      enum bvh_ir_backend backend = bvh_ir_choose_backend(
+          &build, (uint32_t)l.leaf_count, !update && dev->build_ploc_subgroup_size != 0, !update && dev->build_hploc_eligible);
       VkResult result =
           bvh_ir_record_build_backend(&build, ranges[i], scratch + l.source, scratch, 0, vkrt_build_emit, &context, backend);
       if (result != VK_SUCCESS) { cb->record_result = result; break; }

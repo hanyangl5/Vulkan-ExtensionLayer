@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #include "state_compiler.h"
 #include "spirv_environment.h"
+#include "spirv_memory_model.h"
 #include "frame_emitter.h"
 #include <spirv-tools/libspirv.hpp>
 #include <spirv-tools/optimizer.hpp>
@@ -149,10 +150,11 @@ class Compiler {
                         NeedGlobal(id);
                 }
             }
+            if (i.op == spv::OpMemoryModel) vulkan_source = i.words.at(2) == spv::MemoryModelVulkan;
             if (i.op == spv::OpMemoryModel &&
                 ((i.words.at(1) != spv::AddressingModelLogical && i.words.at(1) != spv::AddressingModelPhysicalStorageBuffer64) ||
-                 i.words.at(2) != spv::MemoryModelGLSL450))
-                Unsupported("source memory model requires explicit frame/scheduler support; only GLSL450 is implemented");
+                 (i.words.at(2) != spv::MemoryModelGLSL450 && i.words.at(2) != spv::MemoryModelVulkan)))
+                Unsupported("source addressing/memory model is not GLSL450 or Vulkan");
         }
         for (const auto &i : parsed.instructions) {
             if (!i.in_function) continue;
@@ -291,9 +293,9 @@ class Compiler {
             annotations << "OpDecorate %sc_step LinkageAttributes \"" << config.step_export_name << "\" Export\n";
         }
         if (source_caps.str().find("NonUniform") != std::string::npos) EnsureExtension("SPV_EXT_descriptor_indexing");
-        std::string assembly =
-            code.capabilities + source_caps.str() + code.extensions + extensions.str() + imports.str() +
-            ((BDA() || physical_source) ? "OpMemoryModel PhysicalStorageBuffer64 GLSL450\n" : "OpMemoryModel Logical GLSL450\n");
+        std::string assembly = code.capabilities + source_caps.str() + code.extensions + extensions.str() + imports.str() +
+                               ((BDA() || physical_source) ? "OpMemoryModel PhysicalStorageBuffer64 " : "OpMemoryModel Logical ") +
+                               (vulkan_source ? "Vulkan\n" : "GLSL450\n");
         if (config.emit_compute_entry) {
             assembly += "OpEntryPoint GLCompute %sc_main \"main\" " + code.memory;
             for (const auto &global : interfaces) assembly += " " + global;
@@ -310,6 +312,7 @@ class Compiler {
         });
         auto assembled = tools.Assemble(assembly, &output.spirv);
         if (!assembled) Unsupported("generated assembly failed: " + error);
+        if (config.emit_compute_entry) LowerTypedShaderCallScopes(output.spirv);
         spvtools::ValidatorOptions validation;
         validation.SetScalarBlockLayout(true);
         auto valid = tools.Validate(output.spirv.data(), output.spirv.size(), validation);
@@ -397,6 +400,7 @@ class Compiler {
     std::ostringstream source_caps, imports, extensions, execution_modes, annotations, declarations, functions, qualified_functions;
     std::ostringstream forward_types, bridge_functions;
     bool physical_source = false;
+    bool vulkan_source = false;
     std::string gid, gid_type, group_count, pc_pointer;
     bool BDA() const { return config.transport == TypedFrameTransport::PhysicalAddress; }
     void CollectBuiltins() {

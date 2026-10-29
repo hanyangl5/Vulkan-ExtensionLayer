@@ -114,13 +114,18 @@ static VKAPI_ATTR VkResult VKAPI_CALL AllocateCommandBuffers(VkDevice device,
               break;
           }
       }
+      if (!vkrt_map_object(VKRT_HKEY(cb->cmd), cb)) {
+          vkrt_replay_journal_destroy(cb->replay.journal);
+          free(cb);
+          break;
+      }
       cb->next = dev->command_buffers; dev->command_buffers = cb;
-      vkrt_map_object(VKRT_HKEY(cb->cmd), cb);
       vkrt_replay_lookup_context(cb->cmd);
    }
    if (i != info->commandBufferCount) {
       for (uint32_t j = 0; j < i; ++j) remove_cb(dev, commands[j]);
       dev->vtable.FreeCommandBuffers(device, info->commandPool, info->commandBufferCount, commands);
+      memset(commands, 0, (size_t)info->commandBufferCount * sizeof(*commands));
       r = VK_ERROR_OUT_OF_HOST_MEMORY;
    }
    vkrt_mutex_unlock(&dev->command_buffers_lock);

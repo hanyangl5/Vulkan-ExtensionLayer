@@ -4,6 +4,7 @@
 #include "vkrt_rt_capabilities.h"
 #include "vkrt_resource_profile.h"
 #include "vkrt_software_profile.h"
+#include "bvh_ir_contract.h"
 #include <vulkan/vulkan_beta.h>
 
 /* The full SDK beta type is available without globally enabling provisional
@@ -307,18 +308,16 @@ static bool native_backend_capabilities(struct vkrt_instance_data *inst, VkPhysi
         return false;
     }
 
-    /* These requirements come from the active leaf/Morton/LBVH SPIR-V, not
-     * the unused PLOC/HPLOC variants. Leaf encoding preserves float32 signed
-     * zero/Inf/NaN and uses subgroup ballots; Morton sorting uses shuffles.
-     * The selected host specializations use at most 128 invocations in X and
-     * 256 key32/id pairs plus five uints (2068 bytes) in workgroup storage. */
+    /* The baseline leaf pass uses subgroup ballots. Sorting now merges in
+     * logical workgroup order, with no native subgroup shuffle requirement.
+     * The 128-invocation/64-bit-key sorter is the largest baseline LDS user;
+     * larger optional PLOC workgroups have their own selection predicate. */
     VkPhysicalDeviceFloatControlsProperties floating = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FLOAT_CONTROLS_PROPERTIES};
     VkPhysicalDeviceSubgroupProperties subgroup = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SUBGROUP_PROPERTIES,
                                                    .pNext = &floating};
     VkPhysicalDeviceProperties2 properties2 = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2, .pNext = &subgroup};
     inst->vtable.GetPhysicalDeviceProperties2(physical, &properties2);
-    const VkSubgroupFeatureFlags operations =
-        VK_SUBGROUP_FEATURE_BASIC_BIT | VK_SUBGROUP_FEATURE_BALLOT_BIT | VK_SUBGROUP_FEATURE_SHUFFLE_BIT;
+    const VkSubgroupFeatureFlags operations = VK_SUBGROUP_FEATURE_BASIC_BIT | VK_SUBGROUP_FEATURE_BALLOT_BIT;
     const VkPhysicalDeviceLimits *limits = &properties2.properties.limits;
     /* The native feature substrate remains Vulkan 1.2+. An application using
      * 1.1 enables actual extension aliases, including SPIR-V 1.4 and float
@@ -332,8 +331,8 @@ static bool native_backend_capabilities(struct vkrt_instance_data *inst, VkPhysi
         limits->maxComputeWorkGroupSize[0] < 128 || limits->maxComputeWorkGroupSize[1] < 1 ||
         limits->maxComputeWorkGroupSize[2] < 1 || limits->maxComputeWorkGroupCount[0] < 1 ||
         limits->maxComputeWorkGroupCount[1] < 1 || limits->maxComputeWorkGroupCount[2] < 1 ||
-        limits->maxComputeSharedMemorySize < 2068 || limits->maxPushConstantsSize < 128) {
-        VKRT_LOG_ERR("GPU BVH requires compute subgroup basic/ballot/shuffle, float32 preservation and active workgroup limits");
+        limits->maxComputeSharedMemorySize < BVH_IR_SORT_SHARED_BYTES || limits->maxPushConstantsSize < 128) {
+        VKRT_LOG_ERR("GPU BVH requires compute subgroup basic/ballot, float32 preservation and active workgroup limits");
         return false;
     }
 

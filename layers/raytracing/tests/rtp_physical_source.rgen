@@ -20,7 +20,9 @@ void main() {
     privateRecords[(slot + 1u) % 3u] = saved;
     SourceData chosen = (id & 1u) == 0u ? saved.a : saved.b;
     callData = uvec4(id, 0u, sourcePush.seed, 0u);
+    sourceRelease();
     executeCallableEXT(0, 0);
+    sourceAcquire();
     SourceData(uint64_t(savedPointers[0])).v[saved.index + 3u] += 5u;
     SourceData(uint64_t(savedPointers[1])).v[saved.index + 3u] += 7u;
     SourceWideData freshPointers[2] = pointers.pair;

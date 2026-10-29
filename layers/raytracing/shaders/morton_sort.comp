@@ -114,36 +114,9 @@ compare_key64(key64_id_pair a, key64_id_pair b)
 }
 
 bool
-compare_key64_gt(key64_id_pair a, key64_id_pair b)
-{
-   uint64_t left_key = packUint2x32(u32vec2(a.key_lo, a.key_hi));
-   uint64_t right_key = packUint2x32(u32vec2(b.key_lo, b.key_hi));
-   return left_key > right_key;
-}
-
-key64_id_pair
-shuffle_key64(key64_id_pair val, uint lane)
-{
-   return key64_id_pair(subgroupShuffle(val.id, lane), subgroupShuffle(val.key_lo, lane),
-                        subgroupShuffle(val.key_hi, lane));
-}
-
-bool
 compare_key32(key32_id_pair a, key32_id_pair b)
 {
    return a.key < b.key;
-}
-
-bool
-compare_key32_gt(key32_id_pair a, key32_id_pair b)
-{
-   return a.key > b.key;
-}
-
-key32_id_pair
-shuffle_key32(key32_id_pair val, uint lane)
-{
-   return key32_id_pair(subgroupShuffle(val.id, lane), subgroupShuffle(val.key, lane));
 }
 
 #ifdef MORTON_SORT_KEY64
@@ -152,16 +125,12 @@ shuffle_key32(key32_id_pair val, uint lane)
 #define GET_KEY              get_key64
 #define KEY_REF              REF(key64_id_pair)
 #define KEY_COMPARE          compare_key64
-#define KEY_COMPARE_GT       compare_key64_gt
-#define KEY_SUBGROUP_SHUFFLE shuffle_key64
 #else
 #define KEY_T                key32_id_pair
 #define INVALID_KEY          key32_id_pair(0xFFFFFFFF, 0xFFFFFFFF)
 #define GET_KEY              get_key32
 #define KEY_REF              REF(key32_id_pair)
 #define KEY_COMPARE          compare_key32
-#define KEY_COMPARE_GT       compare_key32_gt
-#define KEY_SUBGROUP_SHUFFLE shuffle_key32
 #endif
 
 layout(push_constant) uniform CONSTS
@@ -172,7 +141,6 @@ layout(push_constant) uniform CONSTS
 /* Mesa accepts named shared blocks.  The Vulkan GLSL frontend in glslc
  * requires ordinary workgroup variables; the names are already unique. */
 shared KEY_T shared_kvs[KEYVALS_PER_WG];
-shared uint32_t shared_wg_id;
 shared uint32_t shared_first_a_index;
 shared uint32_t shared_first_b_index;
 shared uint32_t shared_next_a_index;
@@ -322,8 +290,10 @@ merge_shared_kv_list(out KEY_T local_kvs[MORTON_SORT_KVS_PER_THREAD], uint32_t d
     */
    uint32_t first_b_index = first_dst_elem - first_a_index;
 
-   KEY_T a_key = shared_kvs[src_a_start + first_a_index];
-   KEY_T b_key = shared_kvs[src_b_start + first_b_index];
+   KEY_T a_key = INVALID_KEY;
+   KEY_T b_key = INVALID_KEY;
+   if (first_a_index < src_a_len) a_key = shared_kvs[src_a_start + first_a_index];
+   if (first_b_index < src_b_len) b_key = shared_kvs[src_b_start + first_b_index];
 
    for (uint32_t i = 0; i < MORTON_SORT_KVS_PER_THREAD; ++i) {
       if (first_dst_elem + i >= src_a_len + src_b_len)
@@ -340,80 +310,29 @@ merge_shared_kv_list(out KEY_T local_kvs[MORTON_SORT_KVS_PER_THREAD], uint32_t d
       if (pick_a) {
          local_kvs[i] = a_key;
          ++first_a_index;
-         a_key = shared_kvs[src_a_start + first_a_index];
+         if (first_a_index < src_a_len) a_key = shared_kvs[src_a_start + first_a_index];
       } else {
          local_kvs[i] = b_key;
          ++first_b_index;
-         b_key = shared_kvs[src_b_start + first_b_index];
+         if (first_b_index < src_b_len) b_key = shared_kvs[src_b_start + first_b_index];
       }
    }
 }
 
 void
-subgroup_bitonic_merge_step(inout KEY_T local_kvs[MORTON_SORT_KVS_PER_THREAD], uint32_t dst_width)
+sort_local_keys(inout KEY_T local_kvs[MORTON_SORT_KVS_PER_THREAD])
 {
-   if (dst_width > gl_SubgroupSize * MORTON_SORT_KVS_PER_THREAD)
-      return;
-
-   uint32_t input_base = gl_SubgroupInvocationID.x * MORTON_SORT_KVS_PER_THREAD;
-   [[unroll]]
-   for (uint32_t delta_div = 2; delta_div <= dst_width; delta_div *= 2) {
-      uint32_t delta = dst_width / delta_div;
-      KEY_T new_local_kvs[MORTON_SORT_KVS_PER_THREAD];
-      for (uint32_t i = 0; i < MORTON_SORT_KVS_PER_THREAD; ++i) {
-         new_local_kvs[i] = local_kvs[i];
+   /* Start with each invocation's tiny ordered run. All wider merges follow
+    * logical local IDs; public Vulkan need not assign consecutive local IDs
+    * to consecutive subgroup lanes, or even provide full subgroups. */
+   for (uint32_t i = 1; i < MORTON_SORT_KVS_PER_THREAD; ++i) {
+      KEY_T value = local_kvs[i];
+      uint32_t j = i;
+      while (j != 0 && KEY_COMPARE(value, local_kvs[j - 1])) {
+         local_kvs[j] = local_kvs[j - 1];
+         --j;
       }
-
-      for (uint32_t i = 0; i < MORTON_SORT_KVS_PER_THREAD; ++i) {
-         KEY_T test_kv;
-         uint32_t input_idx = input_base + i;
-         if (delta >= MORTON_SORT_KVS_PER_THREAD)
-            test_kv =
-               KEY_SUBGROUP_SHUFFLE(local_kvs[i], gl_SubgroupInvocationID ^ (delta / MORTON_SORT_KVS_PER_THREAD));
-         else
-            test_kv = local_kvs[i ^ delta];
-
-         bool flip_comparator = (input_idx & dst_width) != 0;
-         if ((input_idx & delta) != 0)
-            flip_comparator = !flip_comparator;
-
-         bool comparator;
-         if (flip_comparator)
-            comparator = KEY_COMPARE_GT(test_kv, local_kvs[i]);
-         else
-            comparator = KEY_COMPARE(test_kv, local_kvs[i]);
-
-         if (comparator)
-            new_local_kvs[i] = test_kv;
-         else
-            new_local_kvs[i] = local_kvs[i];
-      }
-      for (uint32_t i = 0; i < MORTON_SORT_KVS_PER_THREAD; ++i) {
-         local_kvs[i] = new_local_kvs[i];
-      }
-   }
-}
-
-void
-subgroup_bitonic_merge(inout KEY_T local_kvs[MORTON_SORT_KVS_PER_THREAD])
-{
-   /* NIR unfortunately can't unroll this loop. Unroll the outer loop manually and only have the
-    * loop construct as a fallback in case gl_SubgroupSize * MORTON_SORT_KVS_PER_THREAD exceeds 512.
-    * This shouldn't really happen, so it should be practically dead code, but in case something does hit this,
-    * it's better to generate suboptimal correct code than to output incorrect sorts.
-    */
-   subgroup_bitonic_merge_step(local_kvs, 2);
-   subgroup_bitonic_merge_step(local_kvs, 4);
-   subgroup_bitonic_merge_step(local_kvs, 8);
-   subgroup_bitonic_merge_step(local_kvs, 16);
-   subgroup_bitonic_merge_step(local_kvs, 32);
-   subgroup_bitonic_merge_step(local_kvs, 64);
-   subgroup_bitonic_merge_step(local_kvs, 128);
-   subgroup_bitonic_merge_step(local_kvs, 256);
-   subgroup_bitonic_merge_step(local_kvs, 512);
-   if (gl_SubgroupSize * MORTON_SORT_KVS_PER_THREAD > 512) {
-      for (uint32_t dst_width = 1024; dst_width <= gl_SubgroupSize * MORTON_SORT_KVS_PER_THREAD; dst_width *= 2)
-         subgroup_bitonic_merge_step(local_kvs, dst_width);
+      local_kvs[j] = value;
    }
 }
 
@@ -513,110 +432,42 @@ void
 main()
 {
    uint32_t kv_count = args.leaf_count;
-   /* Native XYZ packing may add padding workgroups. The cooperative task
-    * counters and merge parity depend on logical jobs, not physical grid size. */
    uint32_t logical_groups = max(1u, DIV_ROUND_UP(kv_count, KEYVALS_PER_WG));
-
-   uint32_t num_wgs_done = 0;
-   while (true) {
-      uint32_t cur_wg_id;
-      if (logical_groups == 1) {
-         cur_wg_id = 0;
-         if (num_wgs_done > 0)
-            break;
-      } else {
-         if (gl_LocalInvocationID.x == 0) {
-            shared_wg_id = atomicAdd(DEREF(INDEX(morton_ready_count, args.counts, 0)).ready, 1);
-         }
-
-         barrier();
-
-         cur_wg_id = shared_wg_id;
-
-         if (cur_wg_id >= logical_groups)
-            break;
-
-         barrier();
-      }
-
-      KEY_T local_kvs[MORTON_SORT_KVS_PER_THREAD];
-      uint32_t wg_base = cur_wg_id * KEYVALS_PER_WG;
-      uint32_t base = wg_base + gl_LocalInvocationID.x * MORTON_SORT_KVS_PER_THREAD;
-      if (base + MORTON_SORT_KVS_PER_THREAD <= kv_count) {
-         for (uint32_t i = 0; i < MORTON_SORT_KVS_PER_THREAD; ++i) {
-            uint32_t id_index = base + i;
-            uint32_t id = DEREF(INDEX(uint32_t, args.ids_even, id_index));
-            local_kvs[i] = GET_KEY(args.header, args.bvh, id);
-         }
-      } else {
-         for (uint32_t i = 0; i < MORTON_SORT_KVS_PER_THREAD; ++i) {
-            uint32_t id_index = base + i;
-            if (id_index < kv_count) {
-               uint32_t id = DEREF(INDEX(uint32_t, args.ids_even, id_index));
-               local_kvs[i] = GET_KEY(args.header, args.bvh, id);
-            } else {
-               local_kvs[i] = INVALID_KEY;
-            }
-         }
-      }
-
-      subgroup_bitonic_merge(local_kvs);
-
-      /* Intra-workgroup cooperative merging steps */
-      for (uint multiplier = gl_SubgroupSize * 2; multiplier <= MORTON_SORT_WORKGROUP_SIZE; multiplier *= 2) {
-         intra_wg_merge(local_kvs, multiplier);
-         barrier();
-      }
-
-      store_keyvals_to_global(local_kvs, KEY_REF(args.ids_odd), wg_base, kv_count - wg_base);
-
-      barrier();
-      ++num_wgs_done;
+   uint64_t wide_group = vkrt_build_global_id(gl_WorkGroupSize.x) / uint64_t(gl_WorkGroupSize.x);
+   /* Entire padding workgroups return together, before any collective. */
+   if (wide_group >= uint64_t(logical_groups)) return;
+   uint32_t group = uint32_t(wide_group);
+   if (group == 0 && gl_LocalInvocationIndex == 0) {
+#ifdef MORTON_SORT_KEY64
+      DEREF(args.header).driver_internal[4] = 64;
+#else
+      DEREF(args.header).driver_internal[4] = 32;
+#endif
    }
 
-   uint32_t max_log2_multiplier = findMSB(logical_groups - 1) + 1;
-
-   uint32_t group_counter_base = 0;
-   uint32_t last_log2_multiplier = 0;
-   for (uint log2_multiplier = 1; log2_multiplier <= max_log2_multiplier;) {
-      bool pass_even = (log2_multiplier & 0x1) == 0;
+   /* Each global merging level is a separate dispatch with a public Vulkan
+    * dependency. No workgroup waits for another workgroup to be scheduled. */
+   if (args.pass != 0) {
+      bool pass_even = (args.pass & 0x1) == 0;
       KEY_REF cur_in = pass_even ? KEY_REF(args.ids_even) : KEY_REF(args.ids_odd);
       KEY_REF cur_out = pass_even ? KEY_REF(args.ids_odd) : KEY_REF(args.ids_even);
-
-      uint32_t workgroup_multiplier = 1 << log2_multiplier;
-
-      controlBarrier(gl_ScopeWorkgroup, gl_ScopeDevice, gl_StorageSemanticsBuffer, gl_SemanticsRelease | gl_SemanticsMakeAvailable);
-
-      if (gl_LocalInvocationID.x == 0) {
-         if (num_wgs_done > 0) {
-            atomicAdd(DEREF(INDEX(morton_ready_count, args.counts, last_log2_multiplier)).done, num_wgs_done);
-            num_wgs_done = 0;
-         }
-         shared_wg_id = atomicAdd(DEREF(INDEX(morton_ready_count, args.counts, log2_multiplier)).ready, 1);
-      }
-
-      barrier();
-
-      last_log2_multiplier = log2_multiplier;
-      uint32_t cur_wg_id = shared_wg_id;
-
-      if (cur_wg_id >= logical_groups) {
-         ++log2_multiplier;
-         continue;
-      }
-
-      /* Spin waiting for outstanding work to finish. */
-      if (gl_LocalInvocationID.x == 0) {
-         while (atomicLoad(DEREF(INDEX(morton_ready_count, args.counts, log2_multiplier - 1)).done, gl_ScopeDevice,
-                           gl_StorageSemanticsBuffer,
-                           gl_SemanticsAcquire | gl_SemanticsMakeVisible) < logical_groups) {}
-      }
-
-      barrier();
-
-      memoryBarrier(gl_ScopeDevice, gl_StorageSemanticsBuffer, gl_SemanticsAcquire | gl_SemanticsMakeVisible);
-
-      per_wg_merge(kv_count, cur_wg_id, workgroup_multiplier, cur_in, cur_out);
-      num_wgs_done = 1;
+      per_wg_merge(kv_count, group, 1u << args.pass, cur_in, cur_out);
+      return;
    }
+
+   KEY_T local_kvs[MORTON_SORT_KVS_PER_THREAD];
+   uint32_t wg_base = group * KEYVALS_PER_WG;
+   uint32_t base = wg_base + gl_LocalInvocationIndex * MORTON_SORT_KVS_PER_THREAD;
+   for (uint32_t i = 0; i < MORTON_SORT_KVS_PER_THREAD; ++i) {
+      uint32_t index = base + i;
+      local_kvs[i] = index < kv_count
+                        ? GET_KEY(args.header, args.bvh, DEREF(INDEX(uint32_t, args.ids_even, index)))
+                        : INVALID_KEY;
+   }
+   sort_local_keys(local_kvs);
+   for (uint32_t multiplier = 2; multiplier <= MORTON_SORT_WORKGROUP_SIZE; multiplier *= 2) {
+      intra_wg_merge(local_kvs, multiplier);
+      barrier();
+   }
+   store_keyvals_to_global(local_kvs, KEY_REF(args.ids_odd), wg_base, kv_count - wg_base);
 }

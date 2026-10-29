@@ -541,6 +541,48 @@ VKAPI_ATTR void VKAPI_CALL DestroyPipelineLayout(VkDevice device, VkPipelineLayo
         return VK_SUCCESS;
     });
 }
+struct NativeStageModules {
+    vkrt_device_data *dev;
+    const VkAllocationCallbacks *allocator;
+    std::vector<VkShaderModule> modules;
+    ~NativeStageModules() {
+        for (auto module : modules) dev->vtable.DestroyShaderModule(dev->device, module, allocator);
+    }
+    VkPipelineShaderStageCreateInfo Translate(const VkPipelineShaderStageCreateInfo &stage) {
+        if (!RawShader(dev, stage.module)) return stage;
+        Need(stage.pName != nullptr);
+        const auto selected = SelectNativeShaderEntry(ShaderWords(dev, stage.module), stage.pName, stage.stage);
+        VkShaderModuleCreateInfo source{};
+        source.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
+        source.pCode = selected.data();
+        source.codeSize = selected.size() * sizeof(uint32_t);
+        VkShaderModuleCreateInfo rewritten{};
+        bool query = false, pipeline = false;
+        Check(vkrt_rewrite_shader_module(dev, &source, &rewritten, &query, &pipeline));
+        struct RewriteGuard {
+            const uint32_t *source, *rewritten;
+            ~RewriteGuard() {
+                if (rewritten != source) std::free(const_cast<uint32_t *>(rewritten));
+            }
+        } release{source.pCode, rewritten.pCode};
+        Need(!pipeline);
+        VkShaderModule module{};
+        const auto result = dev->vtable.CreateShaderModule(dev->device, &rewritten, allocator, &module);
+        if (module) {
+            try {
+                modules.push_back(module);
+            } catch (...) {
+                dev->vtable.DestroyShaderModule(dev->device, module, allocator);
+                throw;
+            }
+        }
+        Check(result);
+        Need(module != VK_NULL_HANDLE);
+        auto translated = stage;
+        translated.module = module;
+        return translated;
+    }
+};
 VKAPI_ATTR VkResult VKAPI_CALL CreateComputePipelines(VkDevice device, VkPipelineCache cache, uint32_t count,
                                                       const VkComputePipelineCreateInfo *infos, const VkAllocationCallbacks *a,
                                                       VkPipeline *out) {
@@ -549,8 +591,10 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateComputePipelines(VkDevice device, VkPipelin
         std::fill(out, out + count, VK_NULL_HANDLE);
         std::vector<VkComputePipelineCreateInfo> copy(infos, infos + count);
         std::vector<std::shared_ptr<Layout>> refs;
+        NativeStageModules modules{d, a, {}};
         for (auto &c : copy) {
-            Need(!RawShader(d, c.stage.module) && !FindPipeline(d, c.basePipelineHandle));
+            Need(!FindPipeline(d, c.basePipelineHandle));
+            c.stage = modules.Translate(c.stage);
             auto ref = FindLayout(d, c.layout);
             if (ref) {
                 c.layout = ref->native;
@@ -568,9 +612,14 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateGraphicsPipelines(VkDevice device, VkPipeli
         std::fill(out, out + count, VK_NULL_HANDLE);
         std::vector<VkGraphicsPipelineCreateInfo> copy(infos, infos + count);
         std::vector<std::shared_ptr<Layout>> refs;
-        for (auto &c : copy) {
+        NativeStageModules modules{d, a, {}};
+        std::vector<std::vector<VkPipelineShaderStageCreateInfo>> stages(count);
+        for (uint32_t n = 0; n < count; ++n) {
+            auto &c = copy[n];
             Need(!FindPipeline(d, c.basePipelineHandle));
-            for (uint32_t s = 0; s < c.stageCount; ++s) Need(!RawShader(d, c.pStages[s].module));
+            if (c.stageCount) stages[n].assign(c.pStages, c.pStages + c.stageCount);
+            for (auto &stage : stages[n]) stage = modules.Translate(stage);
+            c.pStages = stages[n].data();
             auto ref = FindLayout(d, c.layout);
             if (ref) {
                 c.layout = ref->native;

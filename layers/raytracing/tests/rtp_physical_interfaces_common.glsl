@@ -1,9 +1,10 @@
 // Copyright 2026 The Khronos Group Inc.
 // SPDX-License-Identifier: Apache-2.0
+#include "rtp_source_memory_model.glsl"
 layout(buffer_reference, std430, buffer_reference_align = 4) coherent buffer SourceData { uint v[]; };
 struct SourceRecord { SourceData a; SourceData b; uint index; uint pad; };
-layout(buffer_reference, std430, buffer_reference_align = 8) buffer SourceRecords { SourceRecord rec[]; };
-layout(buffer_reference, std430, buffer_reference_align = 4) buffer SourceOutput { uint v[]; };
+layout(buffer_reference, std430, buffer_reference_align = 8) coherent buffer SourceRecords { SourceRecord rec[]; };
+layout(buffer_reference, std430, buffer_reference_align = 4) coherent buffer SourceOutput { uint v[]; };
 struct PointerPack { SourceData refs[2]; uint tag; uint pad; };
 struct Transfer { PointerPack groups[2]; SourceData chosen; uint index; uint total; uint depth; uint pad; };
 layout(push_constant, std430) uniform SourcePush {
