@@ -4,6 +4,7 @@
 #include "vkrt_layer.h"
 #include "vkrt_resource_profile.h"
 #include "vkrt_software_profile.h"
+#include <vulkan/vulkan_beta.h>
 
 struct vkrt_global vkrt_global = VKRT_GLOBAL_INITIALIZER;
 #define HANDLE(type, value) ((type)(uintptr_t)(value))
@@ -246,7 +247,9 @@ static const char *optional_object_names[] = {VK_EXT_SHADER_MODULE_IDENTIFIER_EX
                                               VK_KHR_PIPELINE_BINARY_EXTENSION_NAME,
                                               VK_EXT_DEVICE_GENERATED_COMMANDS_EXTENSION_NAME,
                                               VK_NV_DEVICE_GENERATED_COMMANDS_EXTENSION_NAME,
-                                              VK_NV_DEVICE_GENERATED_COMMANDS_COMPUTE_EXTENSION_NAME};
+                                              VK_NV_DEVICE_GENERATED_COMMANDS_COMPUTE_EXTENSION_NAME,
+                                              VK_ARM_DATA_GRAPH_EXTENSION_NAME,
+                                              VK_AMDX_SHADER_ENQUEUE_EXTENSION_NAME};
 static uint32_t extension_version(const char *name) {
     if (!strcmp(name, VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME)) return VK_KHR_ACCELERATION_STRUCTURE_SPEC_VERSION;
     if (!strcmp(name, VK_KHR_RAY_QUERY_EXTENSION_NAME)) return VK_KHR_RAY_QUERY_SPEC_VERSION;
@@ -293,6 +296,10 @@ static VKAPI_ATTR VkResult VKAPI_CALL mock_enumerate(VkPhysicalDevice p, const c
             strcpy(rows[total].extensionName, optional_object_names[i]);
             rows[total++].specVersion = 201 + i;
         }
+    if (expose_optional_objects) {
+        strcpy(rows[total].extensionName, VK_ARM_TENSORS_EXTENSION_NAME);
+        rows[total++].specVersion = 501;
+    }
     if (!properties) {
         *count = total;
         return VK_SUCCESS;
@@ -348,6 +355,22 @@ static VKAPI_ATTR void VKAPI_CALL mock_features(VkPhysicalDevice p, VkPhysicalDe
         } else if (next->sType == VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DEVICE_GENERATED_COMMANDS_COMPUTE_FEATURES_NV) {
             VkPhysicalDeviceDeviceGeneratedCommandsComputeFeaturesNV *g = (void *)next;
             g->deviceGeneratedCompute = g->deviceGeneratedComputePipelines = g->deviceGeneratedComputeCaptureReplay = VK_TRUE;
+        } else if (next->sType == VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DATA_GRAPH_FEATURES_ARM) {
+            VkPhysicalDeviceDataGraphFeaturesARM *g = (void *)next;
+            g->dataGraph = g->dataGraphUpdateAfterBind = g->dataGraphSpecializationConstants = g->dataGraphDescriptorBuffer =
+                g->dataGraphShaderModule = VK_TRUE;
+        } else if (next->sType == VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_TENSOR_FEATURES_ARM) {
+            VkPhysicalDeviceTensorFeaturesARM *t = (void *)next;
+            t->tensorNonPacked = t->shaderTensorAccess = t->shaderStorageTensorArrayDynamicIndexing =
+                t->shaderStorageTensorArrayNonUniformIndexing = t->descriptorBindingStorageTensorUpdateAfterBind = t->tensors =
+                    VK_TRUE;
+        } else if (next->sType == (VkStructureType)1000134000) {
+            VkPhysicalDeviceShaderEnqueueFeaturesAMDX *g = (void *)next;
+            g->shaderEnqueue = g->shaderMeshEnqueue = VK_TRUE;
+        } else if (next->sType == VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MESH_SHADER_FEATURES_EXT) {
+            VkPhysicalDeviceMeshShaderFeaturesEXT *m = (void *)next;
+            m->taskShader = m->meshShader = m->multiviewMeshShader = m->primitiveFragmentShadingRateMeshShader =
+                m->meshShaderQueries = VK_TRUE;
         } else if (next->sType == VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_GRAPHICS_PIPELINE_LIBRARY_FEATURES_EXT) {
             ((VkPhysicalDeviceGraphicsPipelineLibraryFeaturesEXT *)next)->graphicsPipelineLibrary = VK_TRUE;
         } else if (next->sType == VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PIPELINE_CREATION_CACHE_CONTROL_FEATURES) {
@@ -853,19 +876,44 @@ static void optional_virtual_object_consumers(PFN_vkEnumerateDeviceExtensionProp
         .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DEVICE_GENERATED_COMMANDS_FEATURES_NV, .pNext = &generated};
     VkPhysicalDeviceDeviceGeneratedCommandsComputeFeaturesNV compute_nv = {
         .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DEVICE_GENERATED_COMMANDS_COMPUTE_FEATURES_NV, .pNext = &generated_nv};
-    VkPhysicalDeviceFeatures2 f = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2, .pNext = &compute_nv};
-    VkBool32 *bits[] = {&identifier.shaderModuleIdentifier,          &executable.pipelineExecutableInfo,
-                        &properties.pipelinePropertiesIdentifier,    &binaries.pipelineBinaries,
-                        &generated.deviceGeneratedCommands,          &generated.dynamicGeneratedPipelineLayout,
-                        &generated_nv.deviceGeneratedCommands,       &compute_nv.deviceGeneratedCompute,
-                        &compute_nv.deviceGeneratedComputePipelines, &compute_nv.deviceGeneratedComputeCaptureReplay};
+    VkPhysicalDeviceDataGraphFeaturesARM data_graph = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DATA_GRAPH_FEATURES_ARM,
+                                                       .pNext = &compute_nv};
+    VkPhysicalDeviceTensorFeaturesARM tensors = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_TENSOR_FEATURES_ARM,
+                                                 .pNext = &data_graph};
+    VkPhysicalDeviceShaderEnqueueFeaturesAMDX enqueue = {.sType = (VkStructureType)1000134000, .pNext = &tensors};
+    VkPhysicalDeviceMeshShaderFeaturesEXT mesh = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MESH_SHADER_FEATURES_EXT,
+                                                  .pNext = &enqueue};
+    VkPhysicalDeviceFeatures2 f = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2, .pNext = &mesh};
+    VkBool32 *bits[] = {&identifier.shaderModuleIdentifier,
+                        &executable.pipelineExecutableInfo,
+                        &properties.pipelinePropertiesIdentifier,
+                        &binaries.pipelineBinaries,
+                        &generated.deviceGeneratedCommands,
+                        &generated.dynamicGeneratedPipelineLayout,
+                        &generated_nv.deviceGeneratedCommands,
+                        &compute_nv.deviceGeneratedCompute,
+                        &compute_nv.deviceGeneratedComputePipelines,
+                        &compute_nv.deviceGeneratedComputeCaptureReplay,
+                        &data_graph.dataGraph,
+                        &data_graph.dataGraphUpdateAfterBind,
+                        &data_graph.dataGraphSpecializationConstants,
+                        &data_graph.dataGraphDescriptorBuffer,
+                        &data_graph.dataGraphShaderModule,
+                        &enqueue.shaderEnqueue,
+                        &enqueue.shaderMeshEnqueue};
     expose_optional_objects = true;
     for (unsigned eligible = 0; eligible < 2; ++eligible) {
         query_capabilities = eligible ? 3 : 0;
         query(physical, &f);
         for (unsigned bit = 0; bit < VKRT_ARRAY_SIZE(bits); ++bit) REQUIRE(*bits[bit] == !eligible);
         REQUIRE(gpl.graphicsPipelineLibrary && cache.pipelineCreationCacheControl);
-        REQUIRE(f.pNext == &compute_nv && compute_nv.pNext == &generated_nv && generated_nv.pNext == &generated &&
+        REQUIRE(mesh.taskShader && mesh.meshShader && mesh.multiviewMeshShader && mesh.primitiveFragmentShadingRateMeshShader &&
+                mesh.meshShaderQueries);
+        REQUIRE(tensors.tensors && tensors.tensorNonPacked && tensors.shaderTensorAccess &&
+                tensors.shaderStorageTensorArrayDynamicIndexing && tensors.shaderStorageTensorArrayNonUniformIndexing &&
+                tensors.descriptorBindingStorageTensorUpdateAfterBind);
+        REQUIRE(f.pNext == &mesh && mesh.pNext == &enqueue && enqueue.pNext == &tensors && tensors.pNext == &data_graph &&
+                data_graph.pNext == &compute_nv && compute_nv.pNext == &generated_nv && generated_nv.pNext == &generated &&
                 generated.pNext == &binaries && binaries.pNext == &properties && properties.pNext == &executable &&
                 executable.pNext == &identifier && identifier.pNext == &gpl && gpl.pNext == &cache && !cache.pNext);
         VkExtensionProperties rows[40];
@@ -883,6 +931,13 @@ static void optional_virtual_object_consumers(PFN_vkEnumerateDeviceExtensionProp
                 }
             REQUIRE(found == !eligible);
         }
+        unsigned found_tensors = 0;
+        for (unsigned row = 0; row < count; ++row)
+            if (!strcmp(rows[row].extensionName, VK_ARM_TENSORS_EXTENSION_NAME)) {
+                ++found_tensors;
+                REQUIRE(rows[row].specVersion == 501);
+            }
+        REQUIRE(found_tensors == 1);
     }
     expose_optional_objects = false;
     query_capabilities = 3;

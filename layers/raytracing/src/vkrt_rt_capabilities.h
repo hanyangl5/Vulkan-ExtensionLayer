@@ -5,6 +5,7 @@
 #define VKRT_RT_CAPABILITIES_H
 #include "vkrt_common.h"
 #include <stddef.h>
+#include <vulkan/vulkan_beta.h>
 
 #define VKRT_RTP_SHADER_STAGES                                                                             \
     (VK_SHADER_STAGE_RAYGEN_BIT_KHR | VK_SHADER_STAGE_MISS_BIT_KHR | VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR | \
@@ -45,7 +46,8 @@ static inline bool vkrt_virtual_object_extension(const char *name) {
            !strcmp(name, VK_EXT_PIPELINE_PROPERTIES_EXTENSION_NAME) || !strcmp(name, VK_KHR_PIPELINE_BINARY_EXTENSION_NAME) ||
            !strcmp(name, VK_EXT_DEVICE_GENERATED_COMMANDS_EXTENSION_NAME) ||
            !strcmp(name, VK_NV_DEVICE_GENERATED_COMMANDS_EXTENSION_NAME) ||
-           !strcmp(name, VK_NV_DEVICE_GENERATED_COMMANDS_COMPUTE_EXTENSION_NAME);
+           !strcmp(name, VK_NV_DEVICE_GENERATED_COMMANDS_COMPUTE_EXTENSION_NAME) ||
+           !strcmp(name, VK_ARM_DATA_GRAPH_EXTENSION_NAME) || !strcmp(name, VK_AMDX_SHADER_ENQUEUE_EXTENSION_NAME);
 }
 
 /* SDK357 has no promoted/core aliases for these structures. Do not mask their
@@ -56,7 +58,7 @@ static inline bool vkrt_virtual_object_feature_range(VkStructureType type, size_
         *offset = offsetof(ctype, first);                            \
         *bytes = offsetof(ctype, last) + sizeof(VkBool32) - *offset; \
         return true
-    switch (type) {
+    switch ((uint32_t)type) {
         RANGE(VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_MODULE_IDENTIFIER_FEATURES_EXT,
               VkPhysicalDeviceShaderModuleIdentifierFeaturesEXT, shaderModuleIdentifier, shaderModuleIdentifier);
         RANGE(VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PIPELINE_EXECUTABLE_PROPERTIES_FEATURES_KHR,
@@ -72,6 +74,13 @@ static inline bool vkrt_virtual_object_feature_range(VkStructureType type, size_
         RANGE(VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DEVICE_GENERATED_COMMANDS_COMPUTE_FEATURES_NV,
               VkPhysicalDeviceDeviceGeneratedCommandsComputeFeaturesNV, deviceGeneratedCompute,
               deviceGeneratedComputeCaptureReplay);
+        /* Graph pipeline creation accepts a ShaderModule in its pNext chain.
+         * It has no adapter for the public software module/layout namespace. */
+        RANGE(VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DATA_GRAPH_FEATURES_ARM, VkPhysicalDeviceDataGraphFeaturesARM, dataGraph,
+              dataGraphShaderModule);
+        /* The SDK beta typedef is available without globally enabling beta
+         * enums. Its protected sType is from registry extension135, offset0. */
+        RANGE((VkStructureType)1000134000, VkPhysicalDeviceShaderEnqueueFeaturesAMDX, shaderEnqueue, shaderMeshEnqueue);
         default:
             return false;
     }
@@ -121,7 +130,7 @@ static inline bool vkrt_unsupported_rt_feature_range(VkStructureType type, size_
         RANGE(VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_OPACITY_MICROMAP_FEATURES_KHR, VkPhysicalDeviceOpacityMicromapFeaturesKHR, micromap,
               micromap);
 #endif
-#ifdef VK_NV_displacement_micromap
+#if defined(VK_ENABLE_BETA_EXTENSIONS) && defined(VK_NV_displacement_micromap)
         RANGE(VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DISPLACEMENT_MICROMAP_FEATURES_NV, VkPhysicalDeviceDisplacementMicromapFeaturesNV,
               displacementMicromap, displacementMicromap);
 #endif
@@ -137,7 +146,7 @@ static inline bool vkrt_unsupported_rt_feature_range(VkStructureType type, size_
         RANGE(VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_INVOCATION_MASK_FEATURES_HUAWEI, VkPhysicalDeviceInvocationMaskFeaturesHUAWEI,
               invocationMask, invocationMask);
 #endif
-#ifdef VK_AMDX_dense_geometry_format
+#if defined(VK_ENABLE_BETA_EXTENSIONS) && defined(VK_AMDX_dense_geometry_format)
         RANGE(VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DENSE_GEOMETRY_FORMAT_FEATURES_AMDX,
               VkPhysicalDeviceDenseGeometryFormatFeaturesAMDX, denseGeometryFormat, denseGeometryFormat);
 #endif

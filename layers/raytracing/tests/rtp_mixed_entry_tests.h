@@ -249,7 +249,7 @@ void MixedEntryPipelines() {
     CHECK(selected_rewrites == selected_creates && source == MixedEntriesSource());
     drop_layout(device, layout, nullptr);
     vkrt_rtp_forget_descriptor_layout(&dev, set);
-    CHECK(vkrt_rtp_destroy_shader(&dev, module));
+    CHECK(vkrt_rtp_destroy_shader(&dev, module, nullptr));
     dev.vtable.CreateShaderModule = create_shader;
     dev.vtable.DestroyShaderModule = destroy_shader;
     dev.vtable.CreateComputePipelines = create_compute;

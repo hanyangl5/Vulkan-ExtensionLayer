@@ -39,10 +39,17 @@ The standalone build requires no Vulkan-Samples or private Mesa checkout. Use:
   optimizer and linker components, and glslang development libraries. A full
   Vulkan SDK supplies these; a loader-only installation does not.
 
-The local checkpoint uses Vulkan SDK 1.4.357.0. CI provisions Vulkan-Headers
-v1.4.357 and its matching registry explicitly; Ubuntu 24.04 distro headers alone
-are too old for the current production types. The CI configuration has local
-header/generator probes, while the actual Ubuntu build remains unqualified.
+The local checkpoint uses Vulkan-Headers v1.4.366 and its matching registry,
+with compiler/SPIR-V libraries from Vulkan SDK 1.4.357.0. CI pins that same
+header/registry revision. Older SDK headers lack sizes for newer native feature
+structures and can reject valid chain ordering during software RT translation.
+Select matching headers and registry together; the private shader target remains
+Vulkan 1.1 with SPIR-V 1.4. The CI configuration has local header/generator
+probes, while the actual Ubuntu build remains unqualified.
+
+For a separate Vulkan-Headers checkout, add
+`-DVulkan_INCLUDE_DIR=<checkout>/include` and
+`-DVKRT_VULKAN_REGISTRY=<checkout>/registry/vk.xml` to the configure command.
 
 From the repository root, in an initialized x64 compiler terminal on Windows:
 

@@ -391,65 +391,6 @@ vkrt_DestroyDevice(VkDevice device, const VkAllocationCallbacks *pAllocator)
 /* Shader module interception                                          */
 /* ================================================================== */
 
-static VKAPI_ATTR VkResult VKAPI_CALL
-vkrt_CreateShaderModule(VkDevice device,
-                        const VkShaderModuleCreateInfo *pCreateInfo,
-                        const VkAllocationCallbacks *pAllocator,
-                        VkShaderModule *pShaderModule)
-{
-   struct vkrt_device_data *data = VKRT_FIND(struct vkrt_device_data, device);
-   if (!data)
-      return VK_ERROR_INITIALIZATION_FAILED;
-
-   if (!data->virtual_rt) return data->vtable.CreateShaderModule(device, pCreateInfo, pAllocator, pShaderModule);
-   VkShaderModuleCreateInfo local_ci = *pCreateInfo;
-   bool handled = false;
-   VkResult rtp_result = vkrt_rtp_create_shader(data, pCreateInfo, pAllocator, pShaderModule, &handled);
-   if (handled || rtp_result != VK_SUCCESS) return rtp_result;
-   bool uses_rq = false, uses_rtp = false;
-
-   VkResult result = vkrt_rewrite_shader_module(data, pCreateInfo, &local_ci,
-                                                &uses_rq, &uses_rtp);
-   if (result != VK_SUCCESS) {
-      /* Fail-fast on RT-pipeline ops / unrepresentable input (doc 11.1). */
-      return result;
-   }
-
-   if (uses_rtp) {
-      VKRT_LOG_ERR(
-         "CreateShaderModule: VK_KHR_ray_tracing_pipeline ops are not "
-         "supported by the software ray-query layer (doc section 2)");
-      free((void *)local_ci.pCode);
-      return VK_ERROR_FEATURE_NOT_PRESENT;
-   }
-
-   result = data->vtable.CreateShaderModule(device, &local_ci, pAllocator,
-                                            pShaderModule);
-
-   if (local_ci.pCode != pCreateInfo->pCode)
-      free((void *)local_ci.pCode);
-
-   if (result != VK_SUCCESS)
-      return result;
-
-   if (uses_rq)
-      VKRT_LOG_DBG("CreateShaderModule %p: ray query lowered",
-                   (void *)*pShaderModule);
-   return VK_SUCCESS;
-}
-
-static VKAPI_ATTR void VKAPI_CALL
-vkrt_DestroyShaderModule(VkDevice device, VkShaderModule shaderModule,
-                         const VkAllocationCallbacks *pAllocator)
-{
-   struct vkrt_device_data *data = VKRT_FIND(struct vkrt_device_data, device);
-   if (!data)
-      return;
-
-   if (vkrt_rtp_destroy_shader(data, shaderModule)) return;
-   data->vtable.DestroyShaderModule(device, shaderModule, pAllocator);
-}
-
 /* Immutable samplers and conversions are copied while their native objects are
  * live. Metadata uses device ownership, independently of public object callbacks. */
 static VKAPI_ATTR VkResult VKAPI_CALL vkrt_CreateSampler(VkDevice device, const VkSamplerCreateInfo *info,

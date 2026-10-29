@@ -367,6 +367,13 @@ static size_t bool_payload_size(VkStructureType type) {
                 VkPhysicalDeviceDeviceGeneratedCommandsFeaturesNV, deviceGeneratedCommands);
         PAYLOAD(VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DEVICE_GENERATED_COMMANDS_COMPUTE_FEATURES_NV,
                 VkPhysicalDeviceDeviceGeneratedCommandsComputeFeaturesNV, deviceGeneratedComputeCaptureReplay);
+        PAYLOAD(VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DATA_GRAPH_FEATURES_ARM, VkPhysicalDeviceDataGraphFeaturesARM,
+                dataGraphShaderModule);
+        PAYLOAD((VkStructureType)1000134000, VkPhysicalDeviceShaderEnqueueFeaturesAMDX, shaderMeshEnqueue);
+        PAYLOAD(VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_COOPERATIVE_MATRIX_FEATURES_KHR, VkPhysicalDeviceCooperativeMatrixFeaturesKHR,
+                cooperativeMatrixRobustBufferAccess);
+        PAYLOAD(VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_COOPERATIVE_MATRIX_MAINTENANCE_1_FEATURES_EXT,
+                VkPhysicalDeviceCooperativeMatrixMaintenance1FeaturesEXT, cooperativeMatrixGetCoordinate);
         default:
             REQUIRE(false);
             return 0;
@@ -525,6 +532,15 @@ static VKAPI_ATTR VkResult VKAPI_CALL mock_create(VkPhysicalDevice p, const VkDe
                 break;
             case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DEVICE_GENERATED_COMMANDS_COMPUTE_FEATURES_NV:
                 EXPECT_NODE(VkPhysicalDeviceDeviceGeneratedCommandsComputeFeaturesNV, next, (void)0);
+                break;
+            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DATA_GRAPH_FEATURES_ARM:
+                EXPECT_NODE(VkPhysicalDeviceDataGraphFeaturesARM, next, (void)0);
+                break;
+            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_COOPERATIVE_MATRIX_FEATURES_KHR:
+                EXPECT_NODE(VkPhysicalDeviceCooperativeMatrixFeaturesKHR, next, (void)0);
+                break;
+            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_COOPERATIVE_MATRIX_MAINTENANCE_1_FEATURES_EXT:
+                EXPECT_NODE(VkPhysicalDeviceCooperativeMatrixMaintenance1FeaturesEXT, next, (void)0);
                 break;
             default:
                 REQUIRE(next == opaque_suffix);
@@ -1697,6 +1713,7 @@ static void optional_virtual_object_consumers(void) {
         .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DEVICE_GENERATED_COMMANDS_FEATURES_NV};
     VkPhysicalDeviceDeviceGeneratedCommandsComputeFeaturesNV compute_nv = {
         .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DEVICE_GENERATED_COMMANDS_COMPUTE_FEATURES_NV};
+    VkPhysicalDeviceDataGraphFeaturesARM data_graph = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DATA_GRAPH_FEATURES_ARM};
     struct {
         void *node;
         VkBool32 *bits;
@@ -1710,6 +1727,7 @@ static void optional_virtual_object_consumers(void) {
         {&generated, &generated.deviceGeneratedCommands, 2, VK_EXT_DEVICE_GENERATED_COMMANDS_EXTENSION_NAME},
         {&generated_nv, &generated_nv.deviceGeneratedCommands, 1, VK_NV_DEVICE_GENERATED_COMMANDS_EXTENSION_NAME},
         {&compute_nv, &compute_nv.deviceGeneratedCompute, 3, VK_NV_DEVICE_GENERATED_COMMANDS_COMPUTE_EXTENSION_NAME},
+        {&data_graph, &data_graph.dataGraph, 5, VK_ARM_DATA_GRAPH_EXTENSION_NAME},
     };
     for (unsigned i = 0; i < VKRT_ARRAY_SIZE(cases); ++i) {
         defaults();
@@ -1762,6 +1780,95 @@ static void optional_virtual_object_consumers(void) {
     }
 }
 
+static void provisional_graph_consumer_is_not_admitted(void) {
+    defaults();
+    expect_private_dynamic_indexing = true;
+    /* SDK357 beta type exists, but its protected sType has no entry in the
+     * core-header metadata used by this build. Do not assume a feature gate. */
+    VkPhysicalDeviceAccelerationStructureFeaturesKHR as = {
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_FEATURES_KHR, .accelerationStructure = VK_TRUE};
+    VkPhysicalDeviceShaderEnqueueFeaturesAMDX graph = {
+        .sType = (VkStructureType)1000134000, .pNext = &as, .shaderEnqueue = VK_TRUE};
+    const char *extensions[] = {VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME, VK_AMDX_SHADER_ENQUEUE_EXTENSION_NAME};
+    basic.ppEnabledExtensionNames = extensions;
+    basic.enabledExtensionCount = VKRT_ARRAY_SIZE(extensions);
+    expected_extensions[0] = VK_AMDX_SHADER_ENQUEUE_EXTENSION_NAME;
+    expected_extension_count = 1;
+    for (unsigned order = 0; order < 2; ++order) {
+        graph.pNext = order ? NULL : &as;
+        as.pNext = order ? &graph : NULL;
+        basic.pNext = order ? (void *)&as : (void *)&graph;
+        opaque_suffix = order ? (const VkBaseInStructure *)&graph : NULL;
+        for (unsigned bit = 0; bit < 2; ++bit) {
+            graph.shaderEnqueue = bit == 0;
+            graph.shaderMeshEnqueue = bit == 1;
+            unsigned before = creates;
+            REQUIRE(call(&basic) == VK_ERROR_FEATURE_NOT_PRESENT && creates == before);
+            REQUIRE(graph.shaderEnqueue == (bit == 0) && graph.shaderMeshEnqueue == (bit == 1));
+        }
+    }
+    /* A native-only device retains the actual beta payload and extension. */
+    graph.pNext = NULL;
+    graph.shaderEnqueue = graph.shaderMeshEnqueue = VK_TRUE;
+    basic.pNext = &graph;
+    basic.ppEnabledExtensionNames = &extensions[1];
+    basic.enabledExtensionCount = 1;
+    REQUIRE(call_non_rt(&basic) == VK_SUCCESS);
+    REQUIRE(graph.shaderEnqueue && graph.shaderMeshEnqueue && !graph.pNext);
+}
+
+static void newer_native_cooperative_matrix_chain(void) {
+    defaults();
+    expect_private_dynamic_indexing = true;
+    VkPhysicalDeviceAccelerationStructureFeaturesKHR as = {
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_FEATURES_KHR, .accelerationStructure = VK_TRUE};
+    VkPhysicalDeviceCooperativeMatrixFeaturesKHR base = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_COOPERATIVE_MATRIX_FEATURES_KHR,
+                                                         .cooperativeMatrix = VK_TRUE};
+    VkPhysicalDeviceCooperativeMatrixMaintenance1FeaturesEXT maintenance = {
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_COOPERATIVE_MATRIX_MAINTENANCE_1_FEATURES_EXT};
+    const char *extensions[] = {VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME, VK_KHR_COOPERATIVE_MATRIX_EXTENSION_NAME,
+                                VK_EXT_COOPERATIVE_MATRIX_MAINTENANCE_1_EXTENSION_NAME};
+    expected_extensions[0] = extensions[1];
+    expected_extensions[1] = extensions[2];
+    expected_extension_count = 2;
+    basic.ppEnabledExtensionNames = extensions;
+    basic.enabledExtensionCount = VKRT_ARRAY_SIZE(extensions);
+    for (unsigned order = 0; order < 2; ++order) {
+        maintenance.pNext = order ? NULL : &base;
+        base.pNext = order ? (void *)&maintenance : (void *)&as;
+        as.pNext = order ? &base : NULL;
+        basic.pNext = order ? (void *)&as : (void *)&maintenance;
+        for (unsigned enabled = 0; enabled < 2; ++enabled) {
+            maintenance.cooperativeMatrixProperties2 = maintenance.cooperativeMatrixReductions =
+                maintenance.cooperativeMatrixConversions = maintenance.cooperativeMatrixPerElementOperations =
+                    maintenance.cooperativeMatrixGetCoordinate = enabled;
+            unsigned before = creates;
+            REQUIRE(call(&basic) == VK_SUCCESS && creates == before + 1);
+            REQUIRE(base.cooperativeMatrix && !base.cooperativeMatrixRobustBufferAccess);
+            REQUIRE(maintenance.cooperativeMatrixProperties2 == enabled && maintenance.cooperativeMatrixReductions == enabled &&
+                    maintenance.cooperativeMatrixConversions == enabled &&
+                    maintenance.cooperativeMatrixPerElementOperations == enabled &&
+                    maintenance.cooperativeMatrixGetCoordinate == enabled);
+            REQUIRE(maintenance.pNext == (order ? NULL : &base) && base.pNext == (order ? (void *)&maintenance : (void *)&as) &&
+                    as.pNext == (order ? &base : NULL));
+        }
+    }
+    /* The ordinary native path preserves the same valid extension dependency
+     * and payload without private backend augmentation. */
+    base.pNext = &maintenance;
+    maintenance.pNext = NULL;
+    basic.pNext = &base;
+    basic.ppEnabledExtensionNames = &extensions[1];
+    basic.enabledExtensionCount = 2;
+    for (unsigned enabled = 0; enabled < 2; ++enabled) {
+        maintenance.cooperativeMatrixProperties2 = maintenance.cooperativeMatrixReductions =
+            maintenance.cooperativeMatrixConversions = maintenance.cooperativeMatrixPerElementOperations =
+                maintenance.cooperativeMatrixGetCoordinate = enabled;
+        REQUIRE(call_non_rt(&basic) == VK_SUCCESS);
+        REQUIRE(base.cooperativeMatrix && base.pNext == &maintenance && !maintenance.pNext);
+    }
+}
+
 int main(void) {
     non_rt_boundary();
     shader_object_backend();
@@ -1777,6 +1884,8 @@ int main(void) {
     query_backend_boundary();
     library_and_alias_availability();
     optional_virtual_object_consumers();
+    provisional_graph_consumer_is_not_admitted();
+    newer_native_cooperative_matrix_chain();
     legacy_native_address_boundary();
     query_marker_selection();
     timestamp_fallback_physical_substrate();

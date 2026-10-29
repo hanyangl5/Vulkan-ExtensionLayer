@@ -60,6 +60,7 @@ set(VKRT_SHARED_HEADERS ${CMAKE_CURRENT_SOURCE_DIR}/src)
 
 add_library(${VKRT_LAYER_NAME} SHARED
    src/vkrt_layer.c
+   src/vkrt_shader.c
    src/vkrt_spirv.c
    src/vkrt_spirv_lower.cpp
    src/vkrt_spirv_ids.cpp
@@ -550,6 +551,29 @@ if(BUILD_TESTING)
       list(APPEND VKRT_RTP_API11_SPV ${output})
    endforeach()
    add_custom_target(vkrt_rtp_api11_spv DEPENDS ${VKRT_RTP_API11_SPV})
+   add_executable(test_shader_inline tests/test_shader_inline.c)
+   target_include_directories(test_shader_inline PRIVATE ${Vulkan_INCLUDE_DIRS})
+   target_link_libraries(test_shader_inline PRIVATE ${Vulkan_LIBRARIES})
+   set_target_properties(test_shader_inline PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED ON)
+   add_dependencies(test_shader_inline vkrt_rtp_api11_spv vkrt_test_rq11_spv)
+   foreach(mode software native)
+      add_test(NAME vkrt.shader_inline.plain.${mode} COMMAND test_shader_inline
+         ${CMAKE_CURRENT_BINARY_DIR}/rtp_api11.comp.spv)
+      set(_inline_expected)
+      if(mode STREQUAL "software")
+         set(_inline_expected --expect-unsupported)
+      endif()
+      add_test(NAME vkrt.shader_inline.query.${mode} COMMAND test_shader_inline
+         ${VKRT_TEST_RQ11_SPV} --query ${_inline_expected})
+      set_tests_properties(vkrt.shader_inline.plain.${mode} vkrt.shader_inline.query.${mode} PROPERTIES
+         LABELS "gpu;pipeline_creation" SKIP_RETURN_CODE 77 TIMEOUT 120)
+   endforeach()
+   set_tests_properties(vkrt.shader_inline.plain.software vkrt.shader_inline.query.software PROPERTIES
+      ENVIRONMENT "VK_LAYER_PATH=${CMAKE_BINARY_DIR}/layers;VK_INSTANCE_LAYERS=VK_LAYER_VKRT_SOFTWARE_RAY_QUERY;ENABLE_VKRT_SOFTWARE_RAY_QUERY=1;VK_LOADER_LAYERS_DISABLE=~implicit~")
+   set_property(TEST vkrt.shader_inline.plain.software vkrt.shader_inline.query.software APPEND PROPERTY LABELS no_native_rt)
+   set_tests_properties(vkrt.shader_inline.plain.native vkrt.shader_inline.query.native PROPERTIES
+      ENVIRONMENT "VK_INSTANCE_LAYERS=;VK_LOADER_LAYERS_DISABLE=~implicit~")
+   set_property(TEST vkrt.shader_inline.plain.native vkrt.shader_inline.query.native APPEND PROPERTY LABELS native_rt)
    get_filename_component(_vkrt_spirv_bin "${VKRT_SPIRV_VAL}" DIRECTORY)
    find_program(VKRT_SPIRV_LINK NAMES spirv-link HINTS "${_vkrt_spirv_bin}" REQUIRED)
    set(VKRT_MIXED_API_SPV ${CMAKE_CURRENT_BINARY_DIR}/rtp_mixed_entry.spv)
@@ -1021,7 +1045,7 @@ if(BUILD_TESTING)
    add_test(NAME vkrt.dsl_lifetime.retained.native COMMAND test_dsl_lifetime ${VKRT_DSL_LIFETIME_SPV} --retain-dsl)
    set_tests_properties(vkrt.dsl_lifetime.native vkrt.dsl_lifetime.retained.native PROPERTIES
       ENVIRONMENT "VK_INSTANCE_LAYERS=" LABELS "gpu;no_native_rt" SKIP_RETURN_CODE 77 TIMEOUT 120)
-   add_executable(test_rtp_bindings tests/test_rtp_bindings.cpp src/vkrt_rtp.cpp src/vkrt_debug_objects.c)
+   add_executable(test_rtp_bindings tests/test_rtp_bindings.cpp src/vkrt_rtp.cpp src/vkrt_debug_objects.c src/vkrt_shader.c)
    target_include_directories(test_rtp_bindings PRIVATE src ${CMAKE_CURRENT_BINARY_DIR} ${Vulkan_INCLUDE_DIRS} ${VKRT_SPIRV_HEADERS_INCLUDE_DIR})
    target_link_libraries(test_rtp_bindings PRIVATE vkrt_typed_compiler vkrt_command_replay Threads::Threads)
    target_compile_definitions(test_rtp_bindings PRIVATE NOMINMAX _CRT_SECURE_NO_WARNINGS)

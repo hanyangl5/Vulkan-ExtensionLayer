@@ -1,8 +1,13 @@
 # Generate sizes from the registry matching the selected Vulkan headers.
 # No Vulkan-Utility-Libraries checkout is required.
 find_package(Python3 COMPONENTS Interpreter REQUIRED)
-find_path(VKRT_VULKAN_CORE_INCLUDE_DIR vulkan/vulkan_core.h
-   HINTS ${Vulkan_INCLUDE_DIRS} REQUIRED)
+# Resolve from the selected Vulkan include path on each configure. A separate
+# cached find_path can otherwise keep an old SDK header after Vulkan_INCLUDE_DIR
+# changes, generating a smaller pNext table than the compiler's actual headers.
+unset(_vkrt_selected_vulkan_include)
+find_path(_vkrt_selected_vulkan_include vulkan/vulkan_core.h
+   PATHS ${Vulkan_INCLUDE_DIRS} NO_DEFAULT_PATH NO_CACHE REQUIRED)
+set(VKRT_VULKAN_CORE_INCLUDE_DIR "${_vkrt_selected_vulkan_include}")
 find_file(VKRT_VULKAN_REGISTRY vk.xml
    HINTS "$ENV{VULKAN_SDK}/share/vulkan/registry"
          "${VKRT_VULKAN_CORE_INCLUDE_DIR}/../share/vulkan/registry"

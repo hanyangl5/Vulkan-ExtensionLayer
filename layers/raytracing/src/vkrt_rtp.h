@@ -20,7 +20,15 @@ bool vkrt_rtp_layout_compatible(struct vkrt_device_data *dev, VkPipelineLayout a
 PFN_vkVoidFunction vkrt_rtp_proc(const char *name);
 VkResult vkrt_rtp_create_shader(struct vkrt_device_data *dev, const VkShaderModuleCreateInfo *info,
                                 const VkAllocationCallbacks *allocator, VkShaderModule *module, bool *handled);
-bool vkrt_rtp_destroy_shader(struct vkrt_device_data *dev, VkShaderModule module);
+/* Consume a successful native CreateShaderModule result. On bookkeeping failure,
+ * destroy it with the live creation allocator and leave the public output NULL.
+ * Devices without RTP ownership keep their native handle unchanged. */
+VkResult vkrt_rtp_wrap_native_shader(struct vkrt_device_data *dev, VkShaderModule native, const VkAllocationCallbacks *allocator,
+                                     VkShaderModule *module);
+/* Borrow a tracked native module; raw source/untracked handles return false and
+ * clear native. The public Vulkan object synchronization rules still apply. */
+bool vkrt_rtp_native_shader(struct vkrt_device_data *dev, VkShaderModule module, VkShaderModule *native);
+bool vkrt_rtp_destroy_shader(struct vkrt_device_data *dev, VkShaderModule module, const VkAllocationCallbacks *allocator);
 void vkrt_rtp_reset_command(struct vkrt_cmd_buffer_data *cb);
 VkPipelineLayout vkrt_rtp_native_layout(struct vkrt_device_data *dev, VkPipelineLayout layout);
 VkPipelineLayout vkrt_rtp_command_native_layout(struct vkrt_cmd_buffer_data *cb, VkPipelineLayout layout);

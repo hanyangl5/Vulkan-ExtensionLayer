@@ -23,6 +23,7 @@ struct vkrt_global vkrt_global = VKRT_GLOBAL_INITIALIZER;
 #include <cstdlib>
 #include <map>
 #include <mutex>
+#include <new>
 #include <set>
 #include <thread>
 #include <vector>
@@ -838,7 +839,7 @@ OpFunctionEnd
     trace_pushes.clear();
     trace_barriers.clear();
     destroy(device, execution, nullptr);
-    CHECK(vkrt_rtp_destroy_shader(&dev, shader));
+    CHECK(vkrt_rtp_destroy_shader(&dev, shader, nullptr));
     destroy_layout(device, layout, nullptr);
     CHECK(layouts.empty() && native_pipelines.empty() && native_shaders.empty());
 }
@@ -1252,9 +1253,24 @@ void PipelineLayoutAliases() {
         NativeReferences());
 }
 #include "rtp_mixed_entry_tests.h"
+#include "rtp_shader_ownership_tests.h"
 }  // namespace
+// One-shot, thread-local fault in the real C++ ownership-map allocation. Normal
+// allocations retain the same malloc/free contract throughout this CPU fixture.
+void *operator new(std::size_t size) {
+    if (ShaderOwnership::fail_next_new) {
+        ShaderOwnership::fail_next_new = false;
+        ++ShaderOwnership::bookkeeping_faults;
+        throw std::bad_alloc();
+    }
+    if (void *memory = std::malloc(size ? size : 1)) return memory;
+    throw std::bad_alloc();
+}
+void operator delete(void *memory) noexcept { std::free(memory); }
+void operator delete(void *memory, std::size_t) noexcept { std::free(memory); }
 extern "C" VkResult vkrt_rewrite_shader_module(vkrt_device_data *, const VkShaderModuleCreateInfo *source,
                                                VkShaderModuleCreateInfo *rewritten, bool *query, bool *pipeline) {
+    if (ShaderOwnership::active) return ShaderOwnership::Rewrite(source, rewritten, query, pipeline);
     // Adapter spy only: real Ray Query lowering has public GPU/CTS coverage.
     // Every selected mixed-entry module must pass through this normal hook.
     CheckSelectedModule(MixedWords(source->pCode, source->pCode + source->codeSize / 4));
@@ -1359,6 +1375,7 @@ int main() {
     CHECK(vkrt_rtp_init(&dev, nullptr) == VK_SUCCESS);
     DescriptorDefinitions();
     MixedEntryPipelines();
+    ShaderOwnership::Run();
     PipelineDerivatives();
     const std::string bank_source = R"spv(
 OpCapability Shader

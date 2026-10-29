@@ -20,11 +20,12 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y build-essential cmake ninja-build python3 libvulkan-dev mesa-vulkan-drivers vulkan-validationlayers glslang-dev glslang-tools glslc spirv-tools spirv-headers
+      # Preserve newer native feature chains without raising the backend feature floor.
       - name: Check out matching Vulkan headers and registry
         uses: actions/checkout@v4
         with:
           repository: KhronosGroup/Vulkan-Headers
-          ref: e3b1eec08173d6b825cd3ac88c885a63b621504a # v1.4.357
+          ref: 73814d006638aa00bd553215b054f0f02e457e22 # v1.4.366
           path: .ci/Vulkan-Headers
           persist-credentials: false
       - name: Test shared BVH4 GPU encoding without native RT

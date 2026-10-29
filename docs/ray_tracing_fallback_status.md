@@ -18,7 +18,9 @@ work prioritizes the mandatory AS/RQ/RTP baseline; known newer-feature exclusion
 must be explicit. CTS/regression outcomes remain categorized evidence, with no
 requirement to make unrelated optional suites all pass. See the goal's
 [compatibility and test scope](ray_tracing_fallback_goal.md#compatibility-and-test-scope).
-The latest slice is the [ub-mode branch review and HPLOC/memory-model checkpoint](rt_ub_review_2026-10-29.md).
+The latest slice is the [ShaderModule ownership and header qualification checkpoint](rt_shader_ownership_2026-10-29.md).
+It resolves the ShaderModule P1 from the
+[ub-mode branch review and HPLOC/memory-model checkpoint](rt_ub_review_2026-10-29.md).
 The [physical RT interfaces and production Mesa PLOC checkpoint](rt_pointer_interfaces_ploc_2026-10-29.md)
 is its preceding baseline.
 The [Mesa pipeline comparison and mandatory boundary checkpoint](rt_mesa_pipeline_2026-10-29.md)
@@ -89,6 +91,7 @@ the final layout, passing build/local checks and the 16-case external CTS rechec
 - [x] Integrate range-arrival HPLOC and 32/64-bit Morton variants, with shared-BVH4 structure/ray checks and artificial XYZ dispatch qualification.
 - [x] Support the tested GLSL450/Vulkan source memory-model paths, mixed native/RT entries and conservative slab intervals; repair reproduced registry and discovery contracts.
 - [x] Review branch-wide code/build/tooling contracts under ub-mode, retaining independent controls, tool limits and remaining quality debt.
+- [x] Unify source/native ShaderModule identities, verify public allocator/rollback/consumer behavior, and preserve newer compatible feature prefixes using matching header/registry metadata.
 - [ ] M0: complete all capability, no-native-RT, resource ABI, and continuation proofs.
 - [ ] M1: integrate Mesa builders, GPU BVH4 encoding/refit, and shared AS objects.
 - [ ] M2: complete Ray Query lowering and state semantics.
@@ -829,7 +832,7 @@ The following are exit checks, not implemented-feature claims.
 
 | Priority | Deliverable | Evidence needed before closing it |
 | --- | --- | --- |
-| First: confirmed P1 | Unify exposed ShaderModule handle ownership | Fix the reproduced same-device native/virtual value collision; public creation/use/destruction, native forwarding, allocator rollback and cross-device controls must pass. See the [review finding](rt_ub_review_2026-10-29.md#open-p1-mixed-shadermodule-handle-namespaces) |
+| Next object qualification | Complete other public object namespaces and consumers | ShaderModule ownership is unified and its public lifetime/forwarding/rollback controls pass. Qualify mixed native/software Pipeline and PipelineLayout identities and the remaining resource/interoperability paths; the supplemental Pipeline reproduction has no execution evidence |
 | 1 | Complete mandatory profile/resource qualification | Qualify protected execution, multi-device groups and pool-specific native query scopes; account for private/native resource budgets without reducing the mandatory public contract |
 | Parallel M4 | Complete logical-stage synchronization semantics | Source semaphore/barrier/event/ownership scopes, native-query interactions and qualified queues/groups. Query COPY uses the proved native bridge. CPU schedules and early-signal timing alone establish neither a correctness failure nor a requirement for a general queue worker |
 | Parallel M0/M1 | Complete no-RT resource and construction contract | Extend the shared software candidate profile to complete resource budgets and queue qualification; qualify production indexed construction and XYZ dispatch, then physical no-RT execution |

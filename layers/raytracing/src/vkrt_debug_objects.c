@@ -24,6 +24,11 @@ struct object_annotation {
     struct object_tag *tags;
     struct private_value *private_data;
 };
+/* Every owned shader module uses its public identity here, including modules
+ * backed by a native shader. Native module values can alias each other or a
+ * raw RT token, so annotation/private-data sidecars must not unwrap or merge
+ * them. The typed ownership callback covers both kinds; no token reaches ICD
+ * debug/private-data calls. */
 struct debug_objects {
     struct debug_objects *next;
     struct vkrt_device_data *dev;

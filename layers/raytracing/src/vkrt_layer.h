@@ -176,6 +176,11 @@ VKAPI_ATTR VkResult VKAPI_CALL vkrt_AllocateMemory(VkDevice device,
    const VkMemoryAllocateInfo *info, const VkAllocationCallbacks *allocator, VkDeviceMemory *memory);
 VKAPI_ATTR void VKAPI_CALL vkrt_FreeMemory(VkDevice device, VkDeviceMemory memory, const VkAllocationCallbacks *allocator);
 
+/* vkrt_shader.c: public module hooks shared with native-spy regressions. */
+VKAPI_ATTR VkResult VKAPI_CALL vkrt_CreateShaderModule(VkDevice device, const VkShaderModuleCreateInfo *info,
+                                                       const VkAllocationCallbacks *allocator, VkShaderModule *module);
+VKAPI_ATTR void VKAPI_CALL vkrt_DestroyShaderModule(VkDevice device, VkShaderModule module, const VkAllocationCallbacks *allocator);
+
 /* vkrt_spirv.c */
 VkResult vkrt_rewrite_shader_module(struct vkrt_device_data *dev,
                                     const VkShaderModuleCreateInfo *ci,

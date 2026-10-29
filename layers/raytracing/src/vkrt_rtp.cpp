@@ -136,10 +136,20 @@ struct Layout {
     }
 };
 struct ShaderToken {
+    enum class Kind { Source, Native };
     Allocator allocator;
+    Kind kind;
     Words words;
-    ShaderToken(Allocator a, Words w) : allocator(a), words(std::move(w)) {}
+    VkShaderModule native{};
+    ShaderToken(Allocator a, Words w) : allocator(a), kind(Kind::Source), words(std::move(w)) {}
+    ShaderToken(Allocator a, VkShaderModule module) : allocator(a), kind(Kind::Native), native(module) {}
 };
+void FreeShader(vkrt_device_data *dev, ShaderToken *token, Allocator allocator) {
+    if (token->kind == ShaderToken::Kind::Native)
+        dev->vtable.DestroyShaderModule(dev->device, token->native, allocator.custom ? &allocator.callbacks : nullptr);
+    token->~ShaderToken();
+    allocator.free(token);
+}
 struct LayoutToken {
     Allocator allocator;
     Allocator public_allocator;
@@ -300,15 +310,27 @@ std::shared_ptr<Pipeline> FindPipeline(vkrt_device_data *d, VkPipeline h) {
     auto i = d->rtp->pipelines.find(VKRT_HKEY(h));
     return i == d->rtp->pipelines.end() ? nullptr : i->second->value;
 }
+VkShaderModule RegisterShader(vkrt_device_data *dev, ShaderToken *token) {
+    const auto module = Handle<VkShaderModule>(token);
+    try {
+        std::lock_guard<std::mutex> lock(dev->rtp->lock);
+        dev->rtp->shaders.emplace(VKRT_HKEY(module), token);
+    } catch (...) {
+        FreeToken(token);
+        throw;
+    }
+    return module;
+}
 bool RawShader(vkrt_device_data *d, VkShaderModule h) {
     if (!d->rtp) return false;
     std::lock_guard<std::mutex> lock(d->rtp->lock);
-    return d->rtp->shaders.count(VKRT_HKEY(h)) != 0;
+    auto i = d->rtp->shaders.find(VKRT_HKEY(h));
+    return i != d->rtp->shaders.end() && i->second->kind == ShaderToken::Kind::Source;
 }
 Words ShaderWords(vkrt_device_data *d, VkShaderModule h) {
     std::lock_guard<std::mutex> lock(d->rtp->lock);
     auto i = d->rtp->shaders.find(VKRT_HKEY(h));
-    Need(i != d->rtp->shaders.end());
+    Need(i != d->rtp->shaders.end() && i->second->kind == ShaderToken::Kind::Source);
     return i->second->words;
 }
 bool Compatible(const Layout &a, const Layout &b, uint32_t last) {
@@ -541,6 +563,14 @@ VKAPI_ATTR void VKAPI_CALL DestroyPipelineLayout(VkDevice device, VkPipelineLayo
         return VK_SUCCESS;
     });
 }
+struct ShaderRewrite {
+    VkShaderModuleCreateInfo info;
+    const uint32_t *original;
+    explicit ShaderRewrite(const VkShaderModuleCreateInfo &source) : info(source), original(source.pCode) {}
+    ~ShaderRewrite() {
+        if (info.pCode != original) std::free(const_cast<uint32_t *>(info.pCode));
+    }
+};
 struct NativeStageModules {
     vkrt_device_data *dev;
     const VkAllocationCallbacks *allocator;
@@ -548,7 +578,33 @@ struct NativeStageModules {
     ~NativeStageModules() {
         for (auto module : modules) dev->vtable.DestroyShaderModule(dev->device, module, allocator);
     }
+    void AdmitInline(const VkPipelineShaderStageCreateInfo &stage) {
+        if (stage.module || !dev->virtual_rt) return;
+        vk_foreach_struct_const(item, stage.pNext) {
+            if (item->sType != VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO) continue;
+            auto source = *reinterpret_cast<const VkShaderModuleCreateInfo *>(item);
+            // This pNext continues the stage chain, not a module creation chain.
+            // Inspect a local copy; the native inline stage stays unchanged.
+            source.pNext = nullptr;
+            ShaderRewrite rewritten(source);
+            bool query = false, pipeline = false;
+            const auto result = vkrt_rewrite_shader_module(dev, &source, &rewritten.info, &query, &pipeline);
+            if (query || pipeline) {
+                VKRT_LOG_ERR("inline shader modules using software ray-query or ray-tracing source are not supported");
+                throw Failure{VK_ERROR_FEATURE_NOT_PRESENT};
+            }
+            Check(result);
+            return;
+        }
+    }
     VkPipelineShaderStageCreateInfo Translate(const VkPipelineShaderStageCreateInfo &stage) {
+        AdmitInline(stage);
+        VkShaderModule native{};
+        if (vkrt_rtp_native_shader(dev, stage.module, &native)) {
+            auto translated = stage;
+            translated.module = native;
+            return translated;
+        }
         if (!RawShader(dev, stage.module)) return stage;
         Need(stage.pName != nullptr);
         const auto selected = SelectNativeShaderEntry(ShaderWords(dev, stage.module), stage.pName, stage.stage);
@@ -556,18 +612,12 @@ struct NativeStageModules {
         source.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
         source.pCode = selected.data();
         source.codeSize = selected.size() * sizeof(uint32_t);
-        VkShaderModuleCreateInfo rewritten{};
+        ShaderRewrite rewritten(source);
         bool query = false, pipeline = false;
-        Check(vkrt_rewrite_shader_module(dev, &source, &rewritten, &query, &pipeline));
-        struct RewriteGuard {
-            const uint32_t *source, *rewritten;
-            ~RewriteGuard() {
-                if (rewritten != source) std::free(const_cast<uint32_t *>(rewritten));
-            }
-        } release{source.pCode, rewritten.pCode};
+        Check(vkrt_rewrite_shader_module(dev, &source, &rewritten.info, &query, &pipeline));
         Need(!pipeline);
         VkShaderModule module{};
-        const auto result = dev->vtable.CreateShaderModule(dev->device, &rewritten, allocator, &module);
+        const auto result = dev->vtable.CreateShaderModule(dev->device, &rewritten.info, allocator, &module);
         if (module) {
             try {
                 modules.push_back(module);
@@ -1333,7 +1383,7 @@ extern "C" void vkrt_rtp_finish(vkrt_device_data *dev) {
     }
     for (auto p : s->shaders) {
         vkrt_debug_object_forget(dev, VK_OBJECT_TYPE_SHADER_MODULE, p.first);
-        FreeToken(p.second);
+        FreeShader(dev, p.second, p.second->allocator);
     }
     for (auto &p : s->layouts) {
         for (auto token = p.second.tokens; token;) {
@@ -1450,19 +1500,35 @@ extern "C" VkResult vkrt_rtp_create_shader(vkrt_device_data *dev, const VkShader
         *handled = true;
         *out = VK_NULL_HANDLE;
         Need(!ci->pNext && !ci->flags && !banked);
-        auto token = Token<ShaderToken>(a, Words(ci->pCode, ci->pCode + ci->codeSize / 4));
-        try {
-            std::lock_guard<std::mutex> lock(dev->rtp->lock);
-            dev->rtp->shaders.emplace(VKRT_HKEY(Handle<VkShaderModule>(token)), token);
-        } catch (...) {
-            FreeToken(token);
-            throw;
-        }
-        *out = Handle<VkShaderModule>(token);
+        *out = RegisterShader(dev, Token<ShaderToken>(a, Words(ci->pCode, ci->pCode + ci->codeSize / 4)));
         return VK_SUCCESS;
     });
 }
-extern "C" bool vkrt_rtp_destroy_shader(vkrt_device_data *dev, VkShaderModule h) {
+extern "C" VkResult vkrt_rtp_wrap_native_shader(vkrt_device_data *dev, VkShaderModule native,
+                                                const VkAllocationCallbacks *allocator, VkShaderModule *out) {
+    *out = VK_NULL_HANDLE;
+    if (!dev->rtp) {
+        *out = native;
+        return VK_SUCCESS;
+    }
+    const VkResult result = Guard([&] {
+        *out = RegisterShader(dev, Token<ShaderToken>(allocator, native));
+        return VK_SUCCESS;
+    });
+    if (result != VK_SUCCESS) dev->vtable.DestroyShaderModule(dev->device, native, allocator);
+    return result;
+}
+extern "C" bool vkrt_rtp_native_shader(vkrt_device_data *dev, VkShaderModule module, VkShaderModule *native) {
+    if (!native) return false;
+    *native = VK_NULL_HANDLE;
+    if (!dev || !dev->rtp) return false;
+    std::lock_guard<std::mutex> lock(dev->rtp->lock);
+    auto i = dev->rtp->shaders.find(VKRT_HKEY(module));
+    if (i == dev->rtp->shaders.end() || i->second->kind != ShaderToken::Kind::Native) return false;
+    *native = i->second->native;
+    return true;
+}
+extern "C" bool vkrt_rtp_destroy_shader(vkrt_device_data *dev, VkShaderModule h, const VkAllocationCallbacks *allocator) {
     if (!dev->rtp) return false;
     ShaderToken *token = nullptr;
     VkResult status = Guard([&] {
@@ -1476,7 +1542,7 @@ extern "C" bool vkrt_rtp_destroy_shader(vkrt_device_data *dev, VkShaderModule h)
     });
     if (token) {
         vkrt_debug_object_forget(dev, VK_OBJECT_TYPE_SHADER_MODULE, VKRT_HKEY(h));
-        FreeToken(token);
+        FreeShader(dev, token, Allocator(allocator));
     }
     return token != nullptr || status != VK_SUCCESS;
 }
