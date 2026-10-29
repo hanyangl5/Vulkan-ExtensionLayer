@@ -76,7 +76,8 @@ struct vkrt_device_data {
     * is not evidence that a native RT feature was enabled downstream. */
    bool app_requested_ray_query;
    VkPipelineLayout            build_pipeline_layout;
-   VkPipeline build_pipelines[13];
+   VkPipeline build_pipelines[14];
+   uint32_t build_ploc_subgroup_size;
    VkPipelineLayout copy_pipeline_layout;
    VkPipeline copy_pipeline;
    uint32_t                    max_build_dispatch_x;

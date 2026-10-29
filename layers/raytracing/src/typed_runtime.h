@@ -20,6 +20,13 @@ struct TypedRuntimeBuildOptions {
     // Default component ABI remains the original context-only configuration.
     bool launch_base_via_push_constants = false;
 };
+struct TypedRuntimeInterface {
+    uint32_t stage, variable, source_type, storage_class, canonical_type;
+    // Frame representation, not the decorated source resource layout. Each
+    // physical pointer occupies its Vulkan-defined uint64 address; recursive
+    // pointees do not expand the storage charged to an interface value.
+    uint64_t offset, size;
+};
 struct TypedRuntimeProgram {
     std::vector<uint32_t> spirv;
     std::vector<std::array<uint8_t, VEL_RT_SBT_HANDLE_BYTES>> group_handles;
@@ -33,6 +40,8 @@ struct TypedRuntimeProgram {
     uint32_t max_ray_recursion_depth = 0;
     uint32_t max_hit_attribute_bytes = 0;
     std::vector<uint64_t> stage_stack_bytes;
+    // The exact plan consumed by the scheduler's typed copy checks/tables.
+    std::vector<TypedRuntimeInterface> interfaces;
 };
 struct TypedRuntimeArenaPlan {
     uint64_t default_arena_bytes = 0;

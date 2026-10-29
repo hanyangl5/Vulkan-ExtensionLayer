@@ -347,11 +347,16 @@ struct morton_ready_count {
 #define VK_GEOMETRY_INSTANCE_FORCE_OPAQUE_BIT_KHR                 4
 #define VK_GEOMETRY_INSTANCE_FORCE_NO_OPAQUE_BIT_KHR              8
 
-#define TYPE(type, align)                                                                                              \
-   layout(buffer_reference, buffer_reference_align = align, scalar) buffer type##_ref                                  \
-   {                                                                                                                   \
-      type value;                                                                                                      \
-   };
+/* PLOC communicates buffer records between invocations within its persistent
+ * workgroup. Under VulkanMemoryModel these accesses must be non-private even
+ * when the publication uses a device-scoped control/memory barrier. */
+#ifdef VKRT_BVH_COHERENT
+#define VKRT_BVH_MEMORY_QUALIFIER coherent
+#else
+#define VKRT_BVH_MEMORY_QUALIFIER
+#endif
+#define TYPE(type, align) \
+    layout(buffer_reference, buffer_reference_align = align, scalar) VKRT_BVH_MEMORY_QUALIFIER buffer type##_ref { type value; };
 
 #define REF(type)  type##_ref
 #define VOID_REF   uint64_t

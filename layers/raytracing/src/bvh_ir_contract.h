@@ -13,6 +13,13 @@
 #define BVH_IR_LEAF_CAPACITY_OFFSET 116u
 #define BVH_IR_GEOMETRY_TYPE_OFFSET 120u
 #define BVH_IR_BUILD_FLAGS_OFFSET 124u
+/* driver_internal[5] is named producer_id by this adapter. Mesa reserves these
+ * fields for its consumer; neither the CPU adapter nor BVH4 encoder requires
+ * them to be zero. This diagnostic is transient IR provenance, not a runtime
+ * BVH4/serialization field or builder input flag. Common INIT writes zero;
+ * an actual PLOC invocation writes its ID. */
+#define BVH_IR_PRODUCER_OFFSET 104u
+#define BVH_IR_PRODUCER_PLOC 0x504c4f43u
 #define BVH_IR_MAGIC 0x58424856u
 #define BVH_IR_VERSION 2u
 /* v2 stores tagged byte offsets. v3 stores tagged record indices so address

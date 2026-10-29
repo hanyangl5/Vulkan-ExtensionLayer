@@ -1,0 +1,834 @@
+{
+  "schema_version": 1,
+  "source_base": "a844662cd7fd15846529990fa62bbf6e373de1a6",
+  "goal_status": "active; complete mandatory AS/RQ/RTP and M0-M5 remain incomplete",
+  "scope": "Cycle-aware physical-pointer RT interface matching and production Mesa PLOC, actual six-stage software GPU oracles and representative external CTS. Native physical-interface creation crashes remain unqualified.",
+  "source_scope": "Working-tree bytes before Git normalization; this manifest excludes itself. Earlier component freezes and diagnostic variants retain their original hashes/scopes.",
+  "sources": [
+    {
+      "path": "docs/ray_tracing_fallback_status.md",
+      "sha256": "950e63122c575592b58e1f4be8941537e73709ce1c04040cece563f703db7233",
+      "bytes": 67280
+    },
+    {
+      "path": "docs/rt_mesa_ploc_2026-10-29.md",
+      "sha256": "a91a8bdac1cbc19591ead4a107c6b9664ab1864d3de83fd7cdb1844a3ce7ee44",
+      "bytes": 9651
+    },
+    {
+      "path": "docs/rt_pointer_interfaces_ploc_2026-10-29.md",
+      "sha256": "548741a49f6d83ebebd9344eee5369e314823d2b2b165e390543f987b8706100",
+      "bytes": 11106
+    },
+    {
+      "path": "layers/raytracing/CMakeLists.txt",
+      "sha256": "4f3442ce9dd0b884797f536e02f0f1b41d002d8a1897f97b09f00f301a19ff31",
+      "bytes": 79871
+    },
+    {
+      "path": "layers/raytracing/shaders/ploc_internal.comp",
+      "sha256": "32aee1b3853e2a1f0ab1786391114c6fcec8aed885efe354d4f88d19c4a2a93a",
+      "bytes": 17617
+    },
+    {
+      "path": "layers/raytracing/shaders/vkrt_init.comp",
+      "sha256": "18c6cb165aa1e1912804acc9885785cc1fd1de4cfad275457c96d86e67c0bedd",
+      "bytes": 1141
+    },
+    {
+      "path": "layers/raytracing/src/bvh_ir_build_layout.h",
+      "sha256": "a86df62debb35cfb6a60f78e3cfd9eabc88fde1a61bec45c1e004d10855b8ec1",
+      "bytes": 4092
+    },
+    {
+      "path": "layers/raytracing/src/bvh_ir_builder.h",
+      "sha256": "d692cc29e393d3e06484ad1885d4473ed27cb35f0ce2be51f8e5745d65b01ab9",
+      "bytes": 12324
+    },
+    {
+      "path": "layers/raytracing/src/bvh_ir_contract.h",
+      "sha256": "dd0569bc4d60c0b81cb62d337869ef651064720dbb106ce8a61887859943d00d",
+      "bytes": 2123
+    },
+    {
+      "path": "layers/raytracing/src/typed_runtime.cpp",
+      "sha256": "a0c473f3c128a773de8eb6e9186e60a29cc51b7be46c6b1b0b734b9874793fac",
+      "bytes": 19495
+    },
+    {
+      "path": "layers/raytracing/src/typed_runtime.h",
+      "sha256": "0bb27b1a1b5a4036353c902994c95bce09f2ed64a1361cf7816e406f6b917856",
+      "bytes": 4525
+    },
+    {
+      "path": "layers/raytracing/src/vk_bvh_defines.h",
+      "sha256": "c5ff161cfb59bfbc47d4a83035823f687a44d1215d660ebbf88168c77e03017f",
+      "bytes": 17136
+    },
+    {
+      "path": "layers/raytracing/src/vkrt_build.c",
+      "sha256": "d44e93b05ac71bd96f4ffafa21eb4ed3bcf761b6cbd08e292a90a792160d24c4",
+      "bytes": 16305
+    },
+    {
+      "path": "layers/raytracing/src/vkrt_layer.h",
+      "sha256": "67992352de31c82437e75861e8a5c4e9fbd7eec198394e3b766eac4ba21b09be",
+      "bytes": 11859
+    },
+    {
+      "path": "layers/raytracing/tests/rtp_physical_interfaces.rahit",
+      "sha256": "b7bc71dec0adf05721fb8c4f99a2d8f60af7723e091edbf46cf1ba776eb1aea4",
+      "bytes": 676
+    },
+    {
+      "path": "layers/raytracing/tests/rtp_physical_interfaces.rcall",
+      "sha256": "0edbe0cb742f49b4e7d861bbe9967a6a88a4853b041f4397735a2ae59fb566ba",
+      "bytes": 1304
+    },
+    {
+      "path": "layers/raytracing/tests/rtp_physical_interfaces.rchit",
+      "sha256": "e748c70b4df78bcb128a3831e04c2bb72d22b2094c404ba7d52ec51a8bfbd514",
+      "bytes": 881
+    },
+    {
+      "path": "layers/raytracing/tests/rtp_physical_interfaces.rgen",
+      "sha256": "1b60e8781f23b8c4408a76e9fe6c1aa82b0ea2220520c54605f248543b53d590",
+      "bytes": 2430
+    },
+    {
+      "path": "layers/raytracing/tests/rtp_physical_interfaces.rint",
+      "sha256": "af2742c50c66704314e322d84e55c3a5ecf48cc8fd7f2841794de67d15c187b8",
+      "bytes": 1220
+    },
+    {
+      "path": "layers/raytracing/tests/rtp_physical_interfaces.rmiss",
+      "sha256": "758be1b46dafdead370c85cd55100f4df18cb3234974323607321627f61df0e9",
+      "bytes": 855
+    },
+    {
+      "path": "layers/raytracing/tests/rtp_physical_interfaces_common.glsl",
+      "sha256": "4eda2baf0f6ca75011de93ef3edda2dec9f06d1ae5a02d47cd7d1961df906c31",
+      "bytes": 948
+    },
+    {
+      "path": "layers/raytracing/tests/rtp_physical_source_fixture.h",
+      "sha256": "82a425e20c4e5619fb187d4a2be17ac635d306e82f48bb33349ff6f21f4fe0d0",
+      "bytes": 25675
+    },
+    {
+      "path": "layers/raytracing/tests/test_gpu_build.c",
+      "sha256": "684dcc98258360c719fb58142853325d48f033d2adeafb4051b2f578eba3b8d5",
+      "bytes": 39056
+    },
+    {
+      "path": "layers/raytracing/tests/test_ir_builder_contract.c",
+      "sha256": "d29587148b0caae7bc2f49a4bdfe4c4303afb17e85968916e5f5fc63d783faae",
+      "bytes": 11853
+    },
+    {
+      "path": "layers/raytracing/tests/test_rtp_api.c",
+      "sha256": "de1ae7e9cbd9ae71d0ee22e994a8b690a007be7f90540167306f2b64baf8c682",
+      "bytes": 75393
+    },
+    {
+      "path": "layers/raytracing/tests/typed_physical_interface_tests.h",
+      "sha256": "12883c3227c205e3e33f06ad4f07c85bcb1bdd3921d40188c0764e321b68b042",
+      "bytes": 10824
+    },
+    {
+      "path": "layers/raytracing/tests/typed_runtime_tests.cpp",
+      "sha256": "8e6292b6c5c66172514b2e55827a49e8afa783623477a42a0659f4dd04ac5637",
+      "bytes": 24805
+    }
+  ],
+  "components": [
+    {
+      "path": "build-source-layout/physical-interfaces/manifest.json",
+      "sha256": "9509a56c8c8d386f2dba3666f10909699c4f7d029c20dfb6d90ab023e27c4240",
+      "bytes": 36444
+    },
+    {
+      "path": "build-source-layout/physical-interface-review/manifest.json",
+      "sha256": "922787e8b6bf4f335e8a37bd4a270a968438b992d53e7e61362cfacd88dfa1e2",
+      "bytes": 11555
+    },
+    {
+      "path": "build-source-layout/physical-interface-review/fixture-design.json",
+      "sha256": "05ed8dea7a26601dad3f36369986db3ed93e7b81ee0c54305677000f734d4799",
+      "bytes": 8102
+    },
+    {
+      "path": "build-pointer-interfaces-2026-10-29/native-optimized/manifest.json",
+      "sha256": "77153d3ff0de92761266d18ce7d02b5fdb95619e21029e1abebbddf98df93e85",
+      "bytes": 21380
+    },
+    {
+      "path": "build-pointer-interfaces-2026-10-29/hploc-next-plan.md",
+      "sha256": "f5b293c8ebb5eb23b5386c7f298f6df22722260ba0eafbb9c71c73f468dbf45c",
+      "bytes": 12661
+    }
+  ],
+  "builds": [
+    {
+      "path": "build-pointer-interfaces-2026-10-29/final-build.log",
+      "sha256": "bec892e09e4584182add7cb44b7dfa88840913ead6867a8ddf152c5894b07c17",
+      "bytes": 6341
+    },
+    {
+      "path": "build-pointer-interfaces-2026-10-29/final-qualified-build.log",
+      "sha256": "978f21cc5dd4b6456756a382307f7d7872e2219714b5bd2fdc7c0f32c5e9036f",
+      "bytes": 147
+    },
+    {
+      "path": "build-pointer-interfaces-2026-10-29/parent-qualified-build.log",
+      "sha256": "90c067d90a7227c671d6c5e87e163b0a0b171ffecfc32e281301173ede72f6d6",
+      "bytes": 4874
+    }
+  ],
+  "offline": {
+    "passed": 49,
+    "failed": 0,
+    "log": {
+      "path": "build-pointer-interfaces-2026-10-29/offline-qualified.log",
+      "sha256": "a19e3136ac26f94bd3d878ab42ced2ac6d8c27bb8fde110247b3e6b844075954",
+      "bytes": 6716
+    }
+  },
+  "gpu": {
+    "path": "build-pointer-interfaces-2026-10-29/gpu-qualified/summary.json",
+    "sha256": "2e8e33db84139af8a3f40a7c26a21b3957513a91e85d3677a3387fb930b28924",
+    "bytes": 15736,
+    "positive_runs": 6,
+    "dll_sha256": "102f68324b94df3e7a788a8610df6c96cfdeaa6c1706830fe9e65f87e5aaa34f",
+    "cases": [
+      {
+        "name": "interfaces-below",
+        "command": [
+          "D:\\Codes\\Vulkan-ExtensionLayer\\build-raytracing-unified\\test_rtp_api.exe",
+          "D:\\Codes\\Vulkan-ExtensionLayer\\build-raytracing-unified\\rtp_physical_interfaces.rgen.spv",
+          "D:\\Codes\\Vulkan-ExtensionLayer\\build-raytracing-unified\\rtp_physical_interfaces.rmiss.spv",
+          "D:\\Codes\\Vulkan-ExtensionLayer\\build-raytracing-unified\\rtp_physical_interfaces.rchit.spv",
+          "D:\\Codes\\Vulkan-ExtensionLayer\\build-raytracing-unified\\rtp_physical_interfaces.rahit.spv",
+          "D:\\Codes\\Vulkan-ExtensionLayer\\build-raytracing-unified\\rtp_physical_interfaces.rint.spv",
+          "D:\\Codes\\Vulkan-ExtensionLayer\\build-raytracing-unified\\rtp_physical_interfaces.rcall.spv",
+          "--physical-interfaces"
+        ],
+        "exit_code": 0,
+        "validation_markers": 0,
+        "verified": true
+      },
+      {
+        "name": "interfaces-above",
+        "command": [
+          "D:\\Codes\\Vulkan-ExtensionLayer\\build-raytracing-unified\\test_rtp_api.exe",
+          "D:\\Codes\\Vulkan-ExtensionLayer\\build-raytracing-unified\\rtp_physical_interfaces.rgen.spv",
+          "D:\\Codes\\Vulkan-ExtensionLayer\\build-raytracing-unified\\rtp_physical_interfaces.rmiss.spv",
+          "D:\\Codes\\Vulkan-ExtensionLayer\\build-raytracing-unified\\rtp_physical_interfaces.rchit.spv",
+          "D:\\Codes\\Vulkan-ExtensionLayer\\build-raytracing-unified\\rtp_physical_interfaces.rahit.spv",
+          "D:\\Codes\\Vulkan-ExtensionLayer\\build-raytracing-unified\\rtp_physical_interfaces.rint.spv",
+          "D:\\Codes\\Vulkan-ExtensionLayer\\build-raytracing-unified\\rtp_physical_interfaces.rcall.spv",
+          "--physical-interfaces"
+        ],
+        "exit_code": 0,
+        "validation_markers": 0,
+        "verified": true
+      },
+      {
+        "name": "physical-source-below",
+        "command": [
+          "D:\\Codes\\Vulkan-ExtensionLayer\\build-raytracing-unified\\test_rtp_api.exe",
+          "D:\\Codes\\Vulkan-ExtensionLayer\\build-raytracing-unified\\rtp_physical_source.rgen.spv",
+          "D:\\Codes\\Vulkan-ExtensionLayer\\build-raytracing-unified\\rtp_physical_source.rcall.spv",
+          "--physical-source"
+        ],
+        "exit_code": 0,
+        "validation_markers": 0,
+        "verified": true
+      },
+      {
+        "name": "ploc-below",
+        "command": [
+          "D:\\Codes\\Vulkan-ExtensionLayer\\build-raytracing-unified\\test_gpu_build.exe",
+          "--require-ploc"
+        ],
+        "exit_code": 0,
+        "validation_markers": 0,
+        "verified": true
+      },
+      {
+        "name": "ploc-above",
+        "command": [
+          "D:\\Codes\\Vulkan-ExtensionLayer\\build-raytracing-unified\\test_gpu_build.exe",
+          "--require-ploc"
+        ],
+        "exit_code": 0,
+        "validation_markers": 0,
+        "verified": true
+      },
+      {
+        "name": "ploc-small-native",
+        "command": [
+          "D:\\Codes\\Vulkan-ExtensionLayer\\build-raytracing-unified\\test_gpu_build.exe",
+          "--ploc-small"
+        ],
+        "exit_code": 0,
+        "validation_markers": 0,
+        "verified": true
+      }
+    ],
+    "outputs": [
+      {
+        "path": "build-pointer-interfaces-2026-10-29/gpu-qualified/interfaces-below.log",
+        "sha256": "bda12e07b0449dfd1fa2d69bae74461f5d9c561c050094db80bbb82fef068165",
+        "bytes": 3898
+      },
+      {
+        "path": "build-pointer-interfaces-2026-10-29/gpu-qualified/interfaces-above.log",
+        "sha256": "f8266a4d2f9bda5abeb10a8ee5eb673b0dafaf9080d45bfda047d563908759a2",
+        "bytes": 3898
+      },
+      {
+        "path": "build-pointer-interfaces-2026-10-29/gpu-qualified/physical-source-below.log",
+        "sha256": "a10cba262fabc05e737b7c65f3c800700dea6405bcb434dd18c28ed0dad4b528",
+        "bytes": 2315
+      },
+      {
+        "path": "build-pointer-interfaces-2026-10-29/gpu-qualified/ploc-below.log",
+        "sha256": "12c44224d3bc74021751c8b762ad69d5672ee8eb5d04790dc897fb11bea9bf31",
+        "bytes": 63052
+      },
+      {
+        "path": "build-pointer-interfaces-2026-10-29/gpu-qualified/ploc-above.log",
+        "sha256": "189b8d20a91fe374cbc55b178a1be7073e5eebf8e6f632be3f839754fb6d9c13",
+        "bytes": 63052
+      },
+      {
+        "path": "build-pointer-interfaces-2026-10-29/gpu-qualified/ploc-small-native.log",
+        "sha256": "6c53ce7fc855839b8067872105765c6c3d22fb8fda6e125f74c1332272f07ac2",
+        "bytes": 7631
+      }
+    ]
+  },
+  "controls": {
+    "path": "build-pointer-interfaces-2026-10-29/gpu-controls/summary.json",
+    "sha256": "22c5a997618836c9bc0a630b2c07e98963b76f397d9bad72912c9127ad4647a2",
+    "bytes": 5808,
+    "verified_observations": 3,
+    "description": "Two expected previous-DLL negatives and one successful native full geometry-builder control. Expected negatives are not positive tests.",
+    "outputs": [
+      {
+        "path": "build-pointer-interfaces-2026-10-29/gpu-controls/interfaces-old.log",
+        "sha256": "3284745212e04672958794aa3597ddfe25cfedf99c3ba0bb877617b1e214afd5",
+        "bytes": 2583
+      },
+      {
+        "path": "build-pointer-interfaces-2026-10-29/gpu-controls/ploc-native.log",
+        "sha256": "cfc6c5033aa59036f818f0efb65d3cfc6c4783ab68313e2734cb6eb67a2d2a69",
+        "bytes": 40367
+      },
+      {
+        "path": "build-pointer-interfaces-2026-10-29/gpu-controls/ploc-old.log",
+        "sha256": "3ac334b25fcb5a2a09878b6d0d8827c5c30eeb3a2f84f421286a37f7ee6c36ec",
+        "bytes": 63514
+      }
+    ]
+  },
+  "cts": {
+    "path": "build-rt-cts-evidence/physical-ploc-qualified-2026-10-29/summary.json",
+    "sha256": "4b3af4a18d8dbcdf8110f26c72d63609d63e59937adcfa0abdfad583c9a6cebd",
+    "bytes": 85830,
+    "counts": {
+      "pass": 16,
+      "fail": 0,
+      "notSupported": 0,
+      "crash": 0,
+      "timeout": 0,
+      "noresult": 0
+    },
+    "dll_sha256": "102f68324b94df3e7a788a8610df6c96cfdeaa6c1706830fe9e65f87e5aaa34f",
+    "cts_sha256": "8cf824c598181ef43ccd74d67acce89c9cc6fc47029a164440f0b0ea74af0380",
+    "cts_revision": "d18e4c68543103371715845cd914c71e5859963e",
+    "native_rt_discovery_masked": true,
+    "zero_timestamps_injected": true,
+    "guard_counters": {
+      "checked": 16116,
+      "rejected": 0,
+      "timestamp_write_attempts": 0,
+      "event_signals": 4,
+      "event_status_queries": 4
+    },
+    "validation_markers": 0,
+    "raw_outputs": [
+      {
+        "path": "build-rt-cts-evidence/physical-ploc-qualified-2026-10-29/0001-ray_payload-4949e25a1f.stdout.txt",
+        "sha256": "5d07b2bb2a8f55620a4fbbd0c68e98176fa59128a5d1b7ab4e35aa1d3d723173",
+        "bytes": 984
+      },
+      {
+        "path": "build-rt-cts-evidence/physical-ploc-qualified-2026-10-29/0001-ray_payload-4949e25a1f.qpa",
+        "sha256": "6482740cb6e0a3933afa7c6f40456ba4301156e8c65f0f4efa9e8cc25cc8d035",
+        "bytes": 10016
+      },
+      {
+        "path": "build-rt-cts-evidence/physical-ploc-qualified-2026-10-29/0001-ray_payload-4949e25a1f.guard.jsonl",
+        "sha256": "2e341776dfa6b42b273cfdc5f67f992d2cb1e4e3fab9070b4c2328d8e00771c6",
+        "bytes": 3451
+      },
+      {
+        "path": "build-rt-cts-evidence/physical-ploc-qualified-2026-10-29/0002-callable_data-ed7af975c2.stdout.txt",
+        "sha256": "19961907b7afcf5c5c1c778321e1e24b3b1e24d896fe5b1e178d9721500d2026",
+        "bytes": 988
+      },
+      {
+        "path": "build-rt-cts-evidence/physical-ploc-qualified-2026-10-29/0002-callable_data-ed7af975c2.qpa",
+        "sha256": "08d195df32679ba64ff88db74397184742ed4cb0e253af65cedd694b57af05ab",
+        "bytes": 8576
+      },
+      {
+        "path": "build-rt-cts-evidence/physical-ploc-qualified-2026-10-29/0002-callable_data-ed7af975c2.guard.jsonl",
+        "sha256": "565ff7a262d13d5348de0de102d8f5db5a6bc60e1f94240cf22ab6f252483352",
+        "bytes": 3451
+      },
+      {
+        "path": "build-rt-cts-evidence/physical-ploc-qualified-2026-10-29/0003-hit_attributes-268c80d9cc.stdout.txt",
+        "sha256": "dd665ad8e2febcac47e4a9a1c5a5a7cf7005d746e1b10fb2915e0a200968de69",
+        "bytes": 990
+      },
+      {
+        "path": "build-rt-cts-evidence/physical-ploc-qualified-2026-10-29/0003-hit_attributes-268c80d9cc.qpa",
+        "sha256": "160b99d89a7de784c3d7f31d35c0d1356390d4ade811267b2b171c60f402b60a",
+        "bytes": 11514
+      },
+      {
+        "path": "build-rt-cts-evidence/physical-ploc-qualified-2026-10-29/0003-hit_attributes-268c80d9cc.guard.jsonl",
+        "sha256": "b609142e51f505b76effe6faca4acd65d3ec7585992fad7789fb84c64a74a6ce",
+        "bytes": 3458
+      },
+      {
+        "path": "build-rt-cts-evidence/physical-ploc-qualified-2026-10-29/0004-shader_record_buffer_call-bf9b102edb.stdout.txt",
+        "sha256": "cb5ede8324f49726612e9033d37323ce789c5bac232ed50cd9a890665ed5c6c0",
+        "bytes": 1012
+      },
+      {
+        "path": "build-rt-cts-evidence/physical-ploc-qualified-2026-10-29/0004-shader_record_buffer_call-bf9b102edb.qpa",
+        "sha256": "691ecfc2c3348183c508473b8ee664a72fc1af386740648b6ea2cbc8cffa4ad1",
+        "bytes": 12742
+      },
+      {
+        "path": "build-rt-cts-evidence/physical-ploc-qualified-2026-10-29/0004-shader_record_buffer_call-bf9b102edb.guard.jsonl",
+        "sha256": "eaeb61093b969fbbb6079ccc8b0f48c64ad885c7d90fc3e93233b071b27bc7c1",
+        "bytes": 3458
+      },
+      {
+        "path": "build-rt-cts-evidence/physical-ploc-qualified-2026-10-29/0005-v3uint64-881d824867.stdout.txt",
+        "sha256": "f88403021abbc2d935b499215f21f070bf1e972256603dcf72200b40428a3773",
+        "bytes": 976
+      },
+      {
+        "path": "build-rt-cts-evidence/physical-ploc-qualified-2026-10-29/0005-v3uint64-881d824867.qpa",
+        "sha256": "465b1324cd0979fb9fbbdde29e12af739394bd373915dcd5134b3a04e7a3cdbe",
+        "bytes": 12654
+      },
+      {
+        "path": "build-rt-cts-evidence/physical-ploc-qualified-2026-10-29/0005-v3uint64-881d824867.guard.jsonl",
+        "sha256": "818d4bed3af45e5e07cba513afbd54b73611970931786d552a749d825512ee8d",
+        "bytes": 3458
+      },
+      {
+        "path": "build-rt-cts-evidence/physical-ploc-qualified-2026-10-29/0006-v3uint64-a7cc21b95d.stdout.txt",
+        "sha256": "dbd90dce3b5b25a1b985ae2bb94bf7a887bae6120ed1f25ebab69728c3064374",
+        "bytes": 979
+      },
+      {
+        "path": "build-rt-cts-evidence/physical-ploc-qualified-2026-10-29/0006-v3uint64-a7cc21b95d.qpa",
+        "sha256": "f1abe54cc9ed4ec45f0a186aff68800cf6e268ade7c3da5e99ecf699647c043b",
+        "bytes": 15617
+      },
+      {
+        "path": "build-rt-cts-evidence/physical-ploc-qualified-2026-10-29/0006-v3uint64-a7cc21b95d.guard.jsonl",
+        "sha256": "97a8d9fcdfe716d485afdf453cf18cd97e009009a7da1cf60a468680d41034c9",
+        "bytes": 3458
+      },
+      {
+        "path": "build-rt-cts-evidence/physical-ploc-qualified-2026-10-29/0007-rgen_call_call-7963dceca5.stdout.txt",
+        "sha256": "76bd27312ab615e604f9474e130848534020466a7336a54950a28d726f007183",
+        "bytes": 978
+      },
+      {
+        "path": "build-rt-cts-evidence/physical-ploc-qualified-2026-10-29/0007-rgen_call_call-7963dceca5.qpa",
+        "sha256": "95285eb091085e1179f8691afcdc6951cb2f9f82b2ca2d089001733e4a109673",
+        "bytes": 27533
+      },
+      {
+        "path": "build-rt-cts-evidence/physical-ploc-qualified-2026-10-29/0007-rgen_call_call-7963dceca5.guard.jsonl",
+        "sha256": "b75a1f0a16583d92e6de38addedefb6b8880e2354988012949fc11c3801638c7",
+        "bytes": 3459
+      },
+      {
+        "path": "build-rt-cts-evidence/physical-ploc-qualified-2026-10-29/0008-hit_call-39eab150fe.stdout.txt",
+        "sha256": "bfee43dbd6906aa841fe6b030626600b2e8d20aff5c69e0914f96de5125fc8b7",
+        "bytes": 966
+      },
+      {
+        "path": "build-rt-cts-evidence/physical-ploc-qualified-2026-10-29/0008-hit_call-39eab150fe.qpa",
+        "sha256": "82a739c8a466cb6f4f57a3bdac88c4bcf9d23888483579f7ba4954b0c6741635",
+        "bytes": 27534
+      },
+      {
+        "path": "build-rt-cts-evidence/physical-ploc-qualified-2026-10-29/0008-hit_call-39eab150fe.guard.jsonl",
+        "sha256": "4c77655688aa6cd9df74a6727828c7b7ac61c04a80b6dad3487e447aad78c29f",
+        "bytes": 3452
+      },
+      {
+        "path": "build-rt-cts-evidence/physical-ploc-qualified-2026-10-29/0009-single_instance-4fae8e8533.stdout.txt",
+        "sha256": "ccadc8f36cd1c3dee85c1289df0202a6098d9f098dee397be02a21ca23a9a783",
+        "bytes": 1042
+      },
+      {
+        "path": "build-rt-cts-evidence/physical-ploc-qualified-2026-10-29/0009-single_instance-4fae8e8533.qpa",
+        "sha256": "308798bab85a2f42380c09cfc98295ad24b250e30ea1adca3756e22a156dd969",
+        "bytes": 13423
+      },
+      {
+        "path": "build-rt-cts-evidence/physical-ploc-qualified-2026-10-29/0009-single_instance-4fae8e8533.guard.jsonl",
+        "sha256": "6a514a3ada5206b3ea3b161c658c9301d0b1e2024def4d44b7b246cbdfd7c375",
+        "bytes": 3452
+      },
+      {
+        "path": "build-rt-cts-evidence/physical-ploc-qualified-2026-10-29/0010-multiple_instances-cabd579bfa.stdout.txt",
+        "sha256": "e4df9f3e22096683d422b3a9cd84b78059c63e6a386139c9a42815c7148f5844",
+        "bytes": 1053
+      },
+      {
+        "path": "build-rt-cts-evidence/physical-ploc-qualified-2026-10-29/0010-multiple_instances-cabd579bfa.qpa",
+        "sha256": "06d1991caa1e1fb90178666170d903b433f7c89708e3f36a4a60f3ededd11bf8",
+        "bytes": 13451
+      },
+      {
+        "path": "build-rt-cts-evidence/physical-ploc-qualified-2026-10-29/0010-multiple_instances-cabd579bfa.guard.jsonl",
+        "sha256": "68ea4f4eab80152108e980bed2d1df8977e0c5f1ce760f55a566e291cce4cbd8",
+        "bytes": 3459
+      },
+      {
+        "path": "build-rt-cts-evidence/physical-ploc-qualified-2026-10-29/0011-single_instance-639b73d010.stdout.txt",
+        "sha256": "2b48aedd0c2ad06ca20d50634e979399f20ae94c943cfdcdf609d830c285b9f1",
+        "bytes": 1047
+      },
+      {
+        "path": "build-rt-cts-evidence/physical-ploc-qualified-2026-10-29/0011-single_instance-639b73d010.qpa",
+        "sha256": "2acc721786a6cb6bcfb0e615dee36491fc6bfc04871e17e6ab962f08cd01cbd4",
+        "bytes": 13439
+      },
+      {
+        "path": "build-rt-cts-evidence/physical-ploc-qualified-2026-10-29/0011-single_instance-639b73d010.guard.jsonl",
+        "sha256": "adb38db32d0a3ec7a2a15e29f49ba11aaedd82699bc739619d49159d4de3b88c",
+        "bytes": 3459
+      },
+      {
+        "path": "build-rt-cts-evidence/physical-ploc-qualified-2026-10-29/0012-0_0_0_0-24f7f103f0.stdout.txt",
+        "sha256": "18f0bea4e79fdb3dc1c10b2df0d4df6b9c2d1c67df434e0f1cce606684b96381",
+        "bytes": 1048
+      },
+      {
+        "path": "build-rt-cts-evidence/physical-ploc-qualified-2026-10-29/0012-0_0_0_0-24f7f103f0.qpa",
+        "sha256": "2e8cc6bd7d83499241176539ebcf94596bd4eb2fb8ed43c4f7e99f1fc9cd159b",
+        "bytes": 19588
+      },
+      {
+        "path": "build-rt-cts-evidence/physical-ploc-qualified-2026-10-29/0012-0_0_0_0-24f7f103f0.guard.jsonl",
+        "sha256": "ae467bf3e6cb32534dc8104c6b742500a9dfa613bc3ff8cf2aa963bb96db3c18",
+        "bytes": 3453
+      },
+      {
+        "path": "build-rt-cts-evidence/physical-ploc-qualified-2026-10-29/0013-fastbuild_update_0_0-c69ec3a25d.stdout.txt",
+        "sha256": "eb09c3fe68ed160717cd2eee10624ab319844265ab8987ca0155d1ef50197394",
+        "bytes": 1077
+      },
+      {
+        "path": "build-rt-cts-evidence/physical-ploc-qualified-2026-10-29/0013-fastbuild_update_0_0-c69ec3a25d.qpa",
+        "sha256": "43b265914180a48892f80c1288b580f025b1a18f82b291740431b9c710c1ca7c",
+        "bytes": 19655
+      },
+      {
+        "path": "build-rt-cts-evidence/physical-ploc-qualified-2026-10-29/0013-fastbuild_update_0_0-c69ec3a25d.guard.jsonl",
+        "sha256": "b84ce9fb24a60a3a564ad20fe506a719f121db92e934b7f134b0f8e378778860",
+        "bytes": 3452
+      },
+      {
+        "path": "build-rt-cts-evidence/physical-ploc-qualified-2026-10-29/0014-geometry_transform-b16d215aca.stdout.txt",
+        "sha256": "31918cbdb3e2c794c06a377c3960a5b96b4d5b7bd3a12deb98050c98c11f47f8",
+        "bytes": 1035
+      },
+      {
+        "path": "build-rt-cts-evidence/physical-ploc-qualified-2026-10-29/0014-geometry_transform-b16d215aca.qpa",
+        "sha256": "3fb0c9fcc3f43caed8671f7a74e658f24fe343a120356fecc9e47a61ec18bded",
+        "bytes": 19515
+      },
+      {
+        "path": "build-rt-cts-evidence/physical-ploc-qualified-2026-10-29/0014-geometry_transform-b16d215aca.guard.jsonl",
+        "sha256": "d4054251b245def632dd0a79f24081a1c1a731430d88e66a0fa36ded0d7ec627",
+        "bytes": 3459
+      },
+      {
+        "path": "build-rt-cts-evidence/physical-ploc-qualified-2026-10-29/0015-triangles-1e760a1f60.stdout.txt",
+        "sha256": "691bb47653889be1e9a468da822985f156612e5cd37d42d0798053cb39ab01ab",
+        "bytes": 1061
+      },
+      {
+        "path": "build-rt-cts-evidence/physical-ploc-qualified-2026-10-29/0015-triangles-1e760a1f60.qpa",
+        "sha256": "3936da4054bd6a977e56ff5da82579257cf251df9b62251e8589e6047b0963c3",
+        "bytes": 19629
+      },
+      {
+        "path": "build-rt-cts-evidence/physical-ploc-qualified-2026-10-29/0015-triangles-1e760a1f60.guard.jsonl",
+        "sha256": "81e7f5b9a24d2eb08bd0f0933be229b7908175a38a2b514566b3eff58a768cbe",
+        "bytes": 3460
+      },
+      {
+        "path": "build-rt-cts-evidence/physical-ploc-qualified-2026-10-29/0016-aabbs-fea7963476.stdout.txt",
+        "sha256": "5c670a3de4573530752ed54a845b7bff7a3e47910cc35cc2571d2bf758363594",
+        "bytes": 1053
+      },
+      {
+        "path": "build-rt-cts-evidence/physical-ploc-qualified-2026-10-29/0016-aabbs-fea7963476.qpa",
+        "sha256": "683521c486a367288c449b3510750a542333b1a722909ddca2b17c3778b9aea5",
+        "bytes": 19607
+      },
+      {
+        "path": "build-rt-cts-evidence/physical-ploc-qualified-2026-10-29/0016-aabbs-fea7963476.guard.jsonl",
+        "sha256": "1d8457add0b3594fd4dd2fc3763833bfbc372feaefae15db5c9cda7eab87b47d",
+        "bytes": 3459
+      }
+    ]
+  },
+  "native_cts": {
+    "path": "build-rt-cts-evidence/physical-ploc-native-2026-10-29/summary.json",
+    "sha256": "5ae1363dcb694dec9b5e86be279e0f54c5938fb46546838cf8b4ce9f49632f90",
+    "bytes": 47480,
+    "counts": {
+      "pass": 16,
+      "fail": 0,
+      "notSupported": 0,
+      "crash": 0,
+      "timeout": 0,
+      "noresult": 0
+    },
+    "raw_outputs": [
+      {
+        "path": "build-rt-cts-evidence/physical-ploc-native-2026-10-29/0001-ray_payload-4949e25a1f.stdout.txt",
+        "sha256": "0525ded31e4225e8faa5960f18f9ca1dfc52210599636b5c304f40d453508038",
+        "bytes": 556
+      },
+      {
+        "path": "build-rt-cts-evidence/physical-ploc-native-2026-10-29/0001-ray_payload-4949e25a1f.qpa",
+        "sha256": "2f8fe98014f3b7f7946d5aa03ff6fdb12c2bc72f1537eb28a1bd1f8f04fcfe5d",
+        "bytes": 9435
+      },
+      {
+        "path": "build-rt-cts-evidence/physical-ploc-native-2026-10-29/0002-callable_data-ed7af975c2.stdout.txt",
+        "sha256": "ebdbc8f3cb8cebb6bb399ee49e026740232e677499c541bd9a4f281da32bb3e3",
+        "bytes": 560
+      },
+      {
+        "path": "build-rt-cts-evidence/physical-ploc-native-2026-10-29/0002-callable_data-ed7af975c2.qpa",
+        "sha256": "01dd0da486d5206edcf03fee8d24b5595ca638bd1cf7dba94c9e3c31892a72eb",
+        "bytes": 7995
+      },
+      {
+        "path": "build-rt-cts-evidence/physical-ploc-native-2026-10-29/0003-hit_attributes-268c80d9cc.stdout.txt",
+        "sha256": "dce904059941dc2e4f81d6ce67ff84c8bbe196061faf2f5b2958d4978b26f751",
+        "bytes": 562
+      },
+      {
+        "path": "build-rt-cts-evidence/physical-ploc-native-2026-10-29/0003-hit_attributes-268c80d9cc.qpa",
+        "sha256": "48e6b4a3642ec2866228c6efe314a3368771b140b11196cef11d5a26f3bbe9fb",
+        "bytes": 10933
+      },
+      {
+        "path": "build-rt-cts-evidence/physical-ploc-native-2026-10-29/0004-shader_record_buffer_call-bf9b102edb.stdout.txt",
+        "sha256": "83c16bc1bb00d72cb110401044e14f7d724776985ba94bfe5d6b330c354fba1d",
+        "bytes": 584
+      },
+      {
+        "path": "build-rt-cts-evidence/physical-ploc-native-2026-10-29/0004-shader_record_buffer_call-bf9b102edb.qpa",
+        "sha256": "84509bdcf5c4dd2a8802ad5f511cb79e2781687745c68dd67be94124f3548c92",
+        "bytes": 12161
+      },
+      {
+        "path": "build-rt-cts-evidence/physical-ploc-native-2026-10-29/0005-v3uint64-881d824867.stdout.txt",
+        "sha256": "ec4bff5485335ee47762627c9dab51834efbe62a62546fe62548a9ea6aadcab4",
+        "bytes": 548
+      },
+      {
+        "path": "build-rt-cts-evidence/physical-ploc-native-2026-10-29/0005-v3uint64-881d824867.qpa",
+        "sha256": "d4ca68507eb7e0f5c0f78ff868f069607a8efa118bbc4e788c1abe06663a6b3e",
+        "bytes": 12073
+      },
+      {
+        "path": "build-rt-cts-evidence/physical-ploc-native-2026-10-29/0006-v3uint64-a7cc21b95d.stdout.txt",
+        "sha256": "a48a450ff86ef41744c1c20a8265d9401d833e22a942084fe3f1e87d78cfecbd",
+        "bytes": 551
+      },
+      {
+        "path": "build-rt-cts-evidence/physical-ploc-native-2026-10-29/0006-v3uint64-a7cc21b95d.qpa",
+        "sha256": "85ac21e9a0f4380749aed2089a00ec2e810971c57430872eaa14a1777b3b9c1c",
+        "bytes": 15036
+      },
+      {
+        "path": "build-rt-cts-evidence/physical-ploc-native-2026-10-29/0007-rgen_call_call-7963dceca5.stdout.txt",
+        "sha256": "31046193d2f397accb23c33a15023f379bac1bc9bfe0d869111e0c98680c6059",
+        "bytes": 548
+      },
+      {
+        "path": "build-rt-cts-evidence/physical-ploc-native-2026-10-29/0007-rgen_call_call-7963dceca5.qpa",
+        "sha256": "977a5e4baab602248797342e382d5c70c4b44281de304b0251684390ea2b8171",
+        "bytes": 26952
+      },
+      {
+        "path": "build-rt-cts-evidence/physical-ploc-native-2026-10-29/0008-hit_call-39eab150fe.stdout.txt",
+        "sha256": "4b9cc471e6abaf55ba15f06e7e234470ba9ee904b0fe941d165aaa2d35e4b332",
+        "bytes": 536
+      },
+      {
+        "path": "build-rt-cts-evidence/physical-ploc-native-2026-10-29/0008-hit_call-39eab150fe.qpa",
+        "sha256": "a75c7edf7579b69866f69c41cda9f0bba314c498509ca73fe0921499db6f46b6",
+        "bytes": 26953
+      },
+      {
+        "path": "build-rt-cts-evidence/physical-ploc-native-2026-10-29/0009-single_instance-4fae8e8533.stdout.txt",
+        "sha256": "a89f5d7603db920707d1d54d9361f2b39cf96dec245eb55aba047b0d53340298",
+        "bytes": 608
+      },
+      {
+        "path": "build-rt-cts-evidence/physical-ploc-native-2026-10-29/0009-single_instance-4fae8e8533.qpa",
+        "sha256": "82307e761a42ba389eaa0242252f7993d76315b6af10fd2878de5df4e0ea2ff5",
+        "bytes": 12842
+      },
+      {
+        "path": "build-rt-cts-evidence/physical-ploc-native-2026-10-29/0010-multiple_instances-cabd579bfa.stdout.txt",
+        "sha256": "e05739c860488cb5f9db86e1f3c6df4c7596067b1f5495f96ec8f0946929c8dd",
+        "bytes": 619
+      },
+      {
+        "path": "build-rt-cts-evidence/physical-ploc-native-2026-10-29/0010-multiple_instances-cabd579bfa.qpa",
+        "sha256": "4ce6aae17ff82bb7b33b5460737471ae506db8a8eb7f8c2338644194b1f89776",
+        "bytes": 12870
+      },
+      {
+        "path": "build-rt-cts-evidence/physical-ploc-native-2026-10-29/0011-single_instance-639b73d010.stdout.txt",
+        "sha256": "c4f0e8a53b4e38639928e60d95472535f4e70b780394dfe6f01f08ea88c8eb30",
+        "bytes": 613
+      },
+      {
+        "path": "build-rt-cts-evidence/physical-ploc-native-2026-10-29/0011-single_instance-639b73d010.qpa",
+        "sha256": "6c8659d2a7e75adcdd6ee82568c1932d21ad8565c23a74773681339445ba13fc",
+        "bytes": 12858
+      },
+      {
+        "path": "build-rt-cts-evidence/physical-ploc-native-2026-10-29/0012-0_0_0_0-24f7f103f0.stdout.txt",
+        "sha256": "d637860ee5cb4d73aae985e075baa414cccabe42312a64b11ecddc9d93f4d6a3",
+        "bytes": 618
+      },
+      {
+        "path": "build-rt-cts-evidence/physical-ploc-native-2026-10-29/0012-0_0_0_0-24f7f103f0.qpa",
+        "sha256": "dd6f7a96e3b50ab0d8f964e64eac44f4e13c8bdb9e0b6f2f9d13d0aa6e6c266b",
+        "bytes": 19007
+      },
+      {
+        "path": "build-rt-cts-evidence/physical-ploc-native-2026-10-29/0013-fastbuild_update_0_0-c69ec3a25d.stdout.txt",
+        "sha256": "209f007e3700d4f7985421452ed882140d9d8dbe9d32f7f839a6bf75a08ffc2c",
+        "bytes": 647
+      },
+      {
+        "path": "build-rt-cts-evidence/physical-ploc-native-2026-10-29/0013-fastbuild_update_0_0-c69ec3a25d.qpa",
+        "sha256": "5d53cbcb90aaf90ce075e6de5c4092a61c6c82f1c1951342ff182abe921fc3cf",
+        "bytes": 19074
+      },
+      {
+        "path": "build-rt-cts-evidence/physical-ploc-native-2026-10-29/0014-geometry_transform-b16d215aca.stdout.txt",
+        "sha256": "d3a4ca2dd76f6888e126b1264cf4c5e4a06bed49d2a779bd82aab61a7cc5ccc8",
+        "bytes": 605
+      },
+      {
+        "path": "build-rt-cts-evidence/physical-ploc-native-2026-10-29/0014-geometry_transform-b16d215aca.qpa",
+        "sha256": "dae931574bf4ff6e9ee8062c10341e6347849020bb38012b10ead917303caf18",
+        "bytes": 18934
+      },
+      {
+        "path": "build-rt-cts-evidence/physical-ploc-native-2026-10-29/0015-triangles-1e760a1f60.stdout.txt",
+        "sha256": "6534aae4af9f6b3c86640133a93a91c925faba656bc6c35d63c4e658674e8a6d",
+        "bytes": 631
+      },
+      {
+        "path": "build-rt-cts-evidence/physical-ploc-native-2026-10-29/0015-triangles-1e760a1f60.qpa",
+        "sha256": "952de6d5eb6f86293503d9574d9a3765952d29889c30725454fbce0ac9fc23c3",
+        "bytes": 19048
+      },
+      {
+        "path": "build-rt-cts-evidence/physical-ploc-native-2026-10-29/0016-aabbs-fea7963476.stdout.txt",
+        "sha256": "f0e67df0d7e02a786fe04747c357c10fb3ba8eb1d48f649cd24f28439f9680a2",
+        "bytes": 623
+      },
+      {
+        "path": "build-rt-cts-evidence/physical-ploc-native-2026-10-29/0016-aabbs-fea7963476.qpa",
+        "sha256": "3d908f196f5f75f5eca3daf3aaa1a17596dfc91bcc8a993e9add3dbaf6238567",
+        "bytes": 19026
+      }
+    ]
+  },
+  "retained_observations": [
+    {
+      "path": "build-pointer-interfaces-2026-10-29/gpu-before/summary.json",
+      "sha256": "7f3dd5ed8f2c3adb220668ee22e091aeb40cd6cad0b4435e0783f71d7a9730cf",
+      "bytes": 2837
+    },
+    {
+      "path": "build-pointer-interfaces-2026-10-29/gpu-before-observed/summary.json",
+      "sha256": "d5679fb0dc09b8434dd0570c32b3cb2c156e0456044b5834aa6c3eafd05611f8",
+      "bytes": 2855
+    },
+    {
+      "path": "build-pointer-interfaces-2026-10-29/gpu-before-located/summary.json",
+      "sha256": "0416d5efb9b8afdb2ee19ab02a50a504947c13d1dac105a212d852c6b98be68f",
+      "bytes": 2853
+    },
+    {
+      "path": "build-pointer-interfaces-2026-10-29/gpu-native-unvalidated/summary.json",
+      "sha256": "6e503b45926435a70d272b3a8ebc4f65483d5996335d37293c539e75fc25d620",
+      "bytes": 2858
+    },
+    {
+      "path": "build-pointer-interfaces-2026-10-29/gpu-native-optimized/summary.json",
+      "sha256": "d0e43b9b52dc73940fd93a0afab168df4e3c2baa7954da8e6e4c558d5a0bc3d2",
+      "bytes": 3224
+    },
+    {
+      "path": "build-pointer-interfaces-2026-10-29/gpu-integrated/summary.json",
+      "sha256": "e105cb974a87083bd0b6ad1e8a1deef088116ae122362c828c251129b44f6e9c",
+      "bytes": 14659
+    }
+  ],
+  "native_final_debugger": {
+    "path": "build-pointer-interfaces-2026-10-29/native-debug-final/command.json",
+    "sha256": "33002b478d4959c3052c4546e212772b15810c7ed03e70f6ee7f0ee010733a6d",
+    "bytes": 2597,
+    "log": {
+      "path": "build-pointer-interfaces-2026-10-29/native-debug-final/cdb.log",
+      "sha256": "0e6fc78de991a3f5104600d93040e2ffdd2e686947c7b2b43670bc8e8656c484",
+      "bytes": 17150
+    },
+    "result": "Exception c0000005 at nvoglv64+5ccda during public RTP creation, no software layer; debugger q exit0 is not application success; native physical interface control is unqualified."
+  },
+  "final_library": {
+    "path": "build-raytracing-unified/layers/VkLayer_VKRT_SOFTWARE_RAY_QUERY.dll",
+    "sha256": "102f68324b94df3e7a788a8610df6c96cfdeaa6c1706830fe9e65f87e5aaa34f",
+    "bytes": 7415808
+  },
+  "remaining": [
+    "Source VulkanMemoryModel/ShaderCall and remaining memory/execution-mode semantics",
+    "HPLOC and end-to-end32/64-bit Morton variants, PLOC throughput and large/numerical qualification",
+    "Complete public/private resource delivery, heaps and limits",
+    "Complete native logical-stage/query-statistic scopes and replay qualification",
+    "Group/protected execution and physical no-RT/cross-vendor/POSIX qualification"
+  ]
+}

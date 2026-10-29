@@ -66,32 +66,130 @@ static void emit(void *user, uint32_t stage, const void *data, uint32_t size, ui
    }
    c->calls++;
 }
+struct ploc_capture {
+    struct bvh_ir_build_layout layout;
+    uint64_t output, scratch;
+    uint32_t calls, ploc_calls, sort_groups;
+};
+static void emit_ploc(void *user, uint32_t stage, const void *data, uint32_t size, uint32_t groups) {
+    struct ploc_capture *c = user;
+    assert(groups);
+    if (stage == BVH_IR_STAGE_INIT) {
+        assert(c->calls == 0 && size == 24);
+    } else if (stage == BVH_IR_STAGE_SORT) {
+        c->sort_groups = groups;
+    } else if (stage == BVH_IR_STAGE_PLOC) {
+        const struct ploc_args *a = data;
+        uint32_t passes = 0;
+        for (uint32_t n = c->sort_groups - 1; n; n >>= 1) ++passes;
+        assert(size == 48 && groups == 1 && c->sort_groups);
+        assert(a->bvh == c->output + BVH_IR_NODE_OFFSET && a->header == c->output);
+        assert(a->ids_0 == c->scratch + ((passes & 1) ? c->layout.ids_even : c->layout.ids_odd));
+        assert(a->ids_1 == c->scratch + ((passes & 1) ? c->layout.ids_odd : c->layout.ids_even));
+        assert(a->prefix_scan_partitions == c->scratch + c->layout.node_info);
+        assert(a->internal_node_offset == c->layout.nodes - BVH_IR_NODE_OFFSET);
+        ++c->ploc_calls;
+    } else {
+        assert(stage == BVH_IR_STAGE_LEAF); /* Neither LBVH topology stage may leak into PLOC. */
+    }
+    ++c->calls;
+}
+static void ploc_contract(void) {
+    VkPhysicalDeviceLimits limits = {0};
+    limits.maxComputeWorkGroupInvocations = limits.maxComputeWorkGroupSize[0] = 1024;
+    limits.maxComputeSharedMemorySize = BVH_IR_PLOC_SHARED_BYTES;
+    VkPhysicalDeviceSubgroupProperties subgroup = {0};
+    subgroup.supportedStages = VK_SHADER_STAGE_COMPUTE_BIT;
+    subgroup.supportedOperations =
+        VK_SUBGROUP_FEATURE_BASIC_BIT | VK_SUBGROUP_FEATURE_BALLOT_BIT | VK_SUBGROUP_FEATURE_ARITHMETIC_BIT;
+    for (uint32_t size = 32; size <= 128; size *= 2) {
+        subgroup.subgroupSize = size;
+        assert(bvh_ir_ploc_eligible(&limits, &subgroup));
+    }
+    subgroup.subgroupSize = 32;
+    limits.maxComputeWorkGroupInvocations = 128;
+    assert(!bvh_ir_ploc_eligible(&limits, &subgroup));
+    limits.maxComputeWorkGroupInvocations = 1024;
+    limits.maxComputeSharedMemorySize--;
+    assert(!bvh_ir_ploc_eligible(&limits, &subgroup));
+    limits.maxComputeSharedMemorySize++;
+    subgroup.supportedOperations &= ~VK_SUBGROUP_FEATURE_ARITHMETIC_BIT;
+    assert(bvh_ir_ploc_eligible(&limits, &subgroup)); /* Local scan does not use subgroup arithmetic. */
+    subgroup.supportedOperations &= ~VK_SUBGROUP_FEATURE_BALLOT_BIT;
+    assert(!bvh_ir_ploc_eligible(&limits, &subgroup));
+    subgroup.supportedOperations |= VK_SUBGROUP_FEATURE_BALLOT_BIT;
+    subgroup.subgroupSize = 16;
+    assert(bvh_ir_ploc_eligible(&limits, &subgroup));
+    subgroup.subgroupSize = 24;
+    assert(!bvh_ir_ploc_eligible(&limits, &subgroup));
+    VkAccelerationStructureGeometryKHR geometry = {0};
+    geometry.geometryType = VK_GEOMETRY_TYPE_AABBS_KHR;
+    geometry.geometry.aabbs.stride = 24;
+    VkAccelerationStructureBuildGeometryInfoKHR info = {0};
+    info.type = VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR;
+    info.geometryCount = 1;
+    info.pGeometries = &geometry;
+    assert(bvh_ir_choose_backend(&info, 1025, true) == BVH_IR_BACKEND_PLOC);
+    assert(bvh_ir_choose_backend(&info, 1025, false) == BVH_IR_BACKEND_LBVH);
+    assert(bvh_ir_choose_backend(&info, 4, true) == BVH_IR_BACKEND_LBVH);
+    info.flags = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_BUILD_BIT_KHR;
+    assert(bvh_ir_choose_backend(&info, 1025, true) == BVH_IR_BACKEND_LBVH);
+    info.flags = VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_UPDATE_BIT_KHR;
+    assert(bvh_ir_choose_backend(&info, 1025, true) == BVH_IR_BACKEND_LBVH);
+    info.type = VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR;
+    assert(bvh_ir_choose_backend(&info, 1025, true) == BVH_IR_BACKEND_PLOC);
+    info.type = VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR;
+    info.flags = 0;
+    const uint32_t capacities[] = {0, 1, 2, 3, 4, 5, 1024, 1025, 65537, 1u << 20};
+    for (uint32_t i = 0; i < sizeof(capacities) / sizeof(capacities[0]); ++i) {
+        VkAccelerationStructureBuildRangeInfoKHR range = {0};
+        range.primitiveCount = capacities[i];
+        struct ploc_capture c = {0};
+        c.layout = bvh_ir_build_layout(&info, NULL, &range);
+        c.output = UINT64_C(0x100000000);
+        c.scratch = UINT64_C(0x2000000000);
+        uint64_t partitions = ((uint64_t)range.primitiveCount + 1023) / 1024;
+        assert(c.layout.prefix_scan_partitions + partitions * 8 <= c.layout.counts);
+        assert(bvh_ir_record_build_backend(&info, &range, c.output, c.scratch, 0, emit_ploc, &c, BVH_IR_BACKEND_PLOC) ==
+               VK_SUCCESS);
+        assert(c.ploc_calls == 1 && c.calls == (range.primitiveCount ? 4u : 3u));
+    }
+    VkAccelerationStructureBuildRangeInfoKHR range = {0};
+    range.primitiveCount = BVH_IR_MAX_LEAVES;
+    struct ploc_capture c = {0};
+    assert(!bvh_ir_ploc_count_eligible(range.primitiveCount));
+    assert(bvh_ir_choose_backend(&info, range.primitiveCount, true) == BVH_IR_BACKEND_LBVH);
+    assert(bvh_ir_record_build_backend(&info, &range, UINT64_C(0x100000000), UINT64_C(0x2000000000), 0, emit_ploc, &c,
+                                       BVH_IR_BACKEND_PLOC) == VK_ERROR_OUT_OF_DEVICE_MEMORY &&
+           c.calls == 0);
+}
 int main(void) {
-   for (unsigned n = 0; n < 5; ++n) {
-      VkAccelerationStructureGeometryKHR g[2] = {{0}, {0}};
-      for (unsigned i = 0; i < 2; ++i) {
-         g[i].geometryType = VK_GEOMETRY_TYPE_TRIANGLES_KHR;
-         g[i].geometry.triangles.vertexFormat = VK_FORMAT_R32G32B32_SFLOAT;
-         g[i].geometry.triangles.vertexStride = 12;
-         g[i].geometry.triangles.indexType = VK_INDEX_TYPE_NONE_KHR;
-      }
-      VkAccelerationStructureBuildGeometryInfoKHR info = {0};
-      info.geometryCount = 2;
-      info.pGeometries = g;
-      info.type = VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR;
-      VkAccelerationStructureBuildRangeInfoKHR ranges[2] = {{0}, {0}};
-      ranges[0].primitiveCount = n;
-      ranges[1].primitiveCount = 1;
-      struct capture c = {0, 0, 0x100000, 0x200000, 0, n + 1, 68};
-      struct bvh_ir_build_layout l = bvh_ir_build_layout(&info, NULL, ranges);
-      assert(l.nodes == 128 + (n + 1) * 68); // no 8-byte padding between leaves and boxes
-      assert(bvh_ir_record_build(&info, ranges, c.output, c.scratch, 0, emit, &c) == VK_SUCCESS);
-      assert(c.calls == (n ? 6u : 5u));
-      info.mode = VK_BUILD_ACCELERATION_STRUCTURE_MODE_UPDATE_KHR;
-      unsigned before = c.calls;
-      assert(bvh_ir_record_build(&info, ranges, c.output, c.scratch, 0, emit, &c) != VK_SUCCESS);
-      assert(c.calls == before);
-   }
+    ploc_contract();
+    for (unsigned n = 0; n < 5; ++n) {
+        VkAccelerationStructureGeometryKHR g[2] = {{0}, {0}};
+        for (unsigned i = 0; i < 2; ++i) {
+            g[i].geometryType = VK_GEOMETRY_TYPE_TRIANGLES_KHR;
+            g[i].geometry.triangles.vertexFormat = VK_FORMAT_R32G32B32_SFLOAT;
+            g[i].geometry.triangles.vertexStride = 12;
+            g[i].geometry.triangles.indexType = VK_INDEX_TYPE_NONE_KHR;
+        }
+        VkAccelerationStructureBuildGeometryInfoKHR info = {0};
+        info.geometryCount = 2;
+        info.pGeometries = g;
+        info.type = VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR;
+        VkAccelerationStructureBuildRangeInfoKHR ranges[2] = {{0}, {0}};
+        ranges[0].primitiveCount = n;
+        ranges[1].primitiveCount = 1;
+        struct capture c = {0, 0, 0x100000, 0x200000, 0, n + 1, 68};
+        struct bvh_ir_build_layout l = bvh_ir_build_layout(&info, NULL, ranges);
+        assert(l.nodes == 128 + (n + 1) * 68);  // no 8-byte padding between leaves and boxes
+        assert(bvh_ir_record_build(&info, ranges, c.output, c.scratch, 0, emit, &c) == VK_SUCCESS);
+        assert(c.calls == (n ? 6u : 5u));
+        info.mode = VK_BUILD_ACCELERATION_STRUCTURE_MODE_UPDATE_KHR;
+        unsigned before = c.calls;
+        assert(bvh_ir_record_build(&info, ranges, c.output, c.scratch, 0, emit, &c) != VK_SUCCESS);
+        assert(c.calls == before);
+    }
    VkAccelerationStructureGeometryKHR g = {0};
    g.geometryType = VK_GEOMETRY_TYPE_INSTANCES_KHR;
    VkAccelerationStructureBuildGeometryInfoKHR info = {0};

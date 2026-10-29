@@ -20,6 +20,11 @@ BVH_IR_STATIC_ASSERT(offsetof(struct vk_ir_header, dst_leaf_node_offset) == 80,
                      "Mesa encoder leaf offset ABI");
 BVH_IR_STATIC_ASSERT(offsetof(struct leaf_args, primitive_count) == 80, "leaf push ABI");
 BVH_IR_STATIC_ASSERT(sizeof(struct leaf_args) == 96, "wide leaf push ABI");
+BVH_IR_STATIC_ASSERT(sizeof(struct ploc_args) == 48, "wide PLOC push ABI");
+BVH_IR_STATIC_ASSERT(sizeof(struct vk_prefix_scan_partition) == 8, "PLOC partition ABI");
+BVH_IR_STATIC_ASSERT(offsetof(struct vk_ir_header, sync_data) == 44, "Mesa phase sentinel ABI");
+BVH_IR_STATIC_ASSERT(offsetof(struct vk_ir_header, driver_internal) + 5 * sizeof(uint32_t) == BVH_IR_PRODUCER_OFFSET,
+                     "Mesa producer_id ABI");
 
 static inline VkDeviceSize bvh_ir_align_size(VkDeviceSize v, VkDeviceSize a) {
     if (v > UINT64_MAX - (a - 1)) return UINT64_MAX;
@@ -30,7 +35,7 @@ static inline uint32_t bvh_ir_leaf_stride(VkGeometryTypeKHR type) {
 }
 struct bvh_ir_build_layout {
    VkDeviceSize nodes, as_size;
-   VkDeviceSize ids_even, ids_odd, node_info, counts, scratch_size;
+   VkDeviceSize ids_even, ids_odd, node_info, prefix_scan_partitions, counts, scratch_size;
    VkDeviceSize leaf_count;
    bool valid;
 };
@@ -61,6 +66,10 @@ bvh_ir_build_layout(const VkAccelerationStructureBuildGeometryInfoKHR *info, con
    if (l.ids_odd == UINT64_MAX || n * 8 > UINT64_MAX - l.ids_odd) goto invalid;
    l.node_info = bvh_ir_align_size(l.ids_odd + n * 8, 256);
    if (l.node_info == UINT64_MAX || n * 16 > UINT64_MAX - l.node_info) goto invalid;
+   /* Sort has finished before either internal builder runs. The LBVH node
+    * info allocation (16 bytes/leaf) also covers PLOC's 8-byte partition per
+    * 1024 leaves, including the empty build's single allocated slot. */
+   l.prefix_scan_partitions = l.node_info;
    l.counts = bvh_ir_align_size(l.node_info + n * 16, 256);
    if (l.counts > UINT64_MAX - 256) goto invalid;
    l.scratch_size = l.counts + 256;

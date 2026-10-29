@@ -571,11 +571,34 @@ if(BUILD_TESTING)
       list(APPEND VKRT_RTP_PHYSICAL_SPV ${output})
    endforeach()
    add_custom_target(vkrt_rtp_physical_spv DEPENDS ${VKRT_RTP_PHYSICAL_SPV})
+   set(VKRT_RTP_PHYSICAL_INTERFACES_SPV)
+   foreach(stage rgen rmiss rchit rahit rint rcall)
+      set(output ${CMAKE_CURRENT_BINARY_DIR}/rtp_physical_interfaces.${stage}.spv)
+      add_custom_command(OUTPUT ${output}
+         COMMAND ${VKRT_GLSLC} --target-env=vulkan1.1 --target-spv=spv1.4
+            -I ${CMAKE_CURRENT_SOURCE_DIR}/tests
+            ${CMAKE_CURRENT_SOURCE_DIR}/tests/rtp_physical_interfaces.${stage} -o ${output}
+         COMMAND ${VKRT_SPIRV_VAL} --target-env vulkan1.1spv1.4 ${output}
+         DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/tests/rtp_physical_interfaces.${stage}
+            ${CMAKE_CURRENT_SOURCE_DIR}/tests/rtp_physical_interfaces_common.glsl VERBATIM)
+      list(APPEND VKRT_RTP_PHYSICAL_INTERFACES_SPV ${output})
+   endforeach()
+   add_custom_target(vkrt_rtp_physical_interfaces_spv DEPENDS ${VKRT_RTP_PHYSICAL_INTERFACES_SPV})
    add_executable(test_rtp_api tests/test_rtp_api.c)
    target_include_directories(test_rtp_api PRIVATE src ${VKRT_SHARED_HEADERS} ${Vulkan_INCLUDE_DIRS})
    target_link_libraries(test_rtp_api PRIVATE vkrt_cpu_bvh ${Vulkan_LIBRARIES})
    set_target_properties(test_rtp_api PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED ON)
    add_dependencies(test_rtp_api vkrt_rtp_api_spv vkrt_rtp_api11_spv vkrt_rtp_nested_spv vkrt_rtp_physical_spv)
+   add_dependencies(test_rtp_api vkrt_rtp_physical_interfaces_spv)
+   foreach(mode software native)
+      add_test(NAME vkrt.rtp_api.physical_interfaces.${mode} COMMAND test_rtp_api
+         ${VKRT_RTP_PHYSICAL_INTERFACES_SPV} --physical-interfaces)
+      set_tests_properties(vkrt.rtp_api.physical_interfaces.${mode} PROPERTIES
+         LABELS "gpu;typed_rtp" SKIP_RETURN_CODE 77 TIMEOUT 180)
+   endforeach()
+   set_tests_properties(vkrt.rtp_api.physical_interfaces.software PROPERTIES
+      ENVIRONMENT "VK_LAYER_PATH=${CMAKE_BINARY_DIR}/layers;VK_INSTANCE_LAYERS=VK_LAYER_VKRT_SOFTWARE_RAY_QUERY")
+   set_tests_properties(vkrt.rtp_api.physical_interfaces.native PROPERTIES ENVIRONMENT "VK_INSTANCE_LAYERS=")
    foreach(mode software native)
       add_test(NAME vkrt.rtp_api.physical_source.${mode} COMMAND test_rtp_api ${VKRT_RTP_PHYSICAL_SPV} --physical-source)
       set_tests_properties(vkrt.rtp_api.physical_source.${mode} PROPERTIES
@@ -1099,6 +1122,14 @@ if(BUILD_TESTING)
       ENVIRONMENT "VK_INSTANCE_LAYERS=" LABELS "gpu;software_compute;no_native_rt" TIMEOUT 120)
    add_test(NAME vkrt.cpu_fixture COMMAND test_single_tri)
    add_test(NAME vkrt.gpu_build.software COMMAND test_gpu_build)
+   add_test(NAME vkrt.gpu_build.ploc.software COMMAND test_gpu_build --require-ploc)
+   set_tests_properties(vkrt.gpu_build.ploc.software PROPERTIES
+      ENVIRONMENT "VK_LAYER_PATH=${CMAKE_BINARY_DIR}/layers;VK_INSTANCE_LAYERS=VK_LAYER_VKRT_SOFTWARE_RAY_QUERY;ENABLE_VKRT_SOFTWARE_RAY_QUERY=1;VK_LOADER_LAYERS_DISABLE=~implicit~"
+      LABELS "gpu;no_native_rt" TIMEOUT 600 SKIP_RETURN_CODE 77)
+   add_test(NAME vkrt.gpu_build.ploc_small.native COMMAND test_gpu_build --ploc-small)
+   set_tests_properties(vkrt.gpu_build.ploc_small.native PROPERTIES
+      ENVIRONMENT "VK_INSTANCE_LAYERS=;VK_LOADER_LAYERS_DISABLE=~implicit~"
+      LABELS "gpu;native_rt" TIMEOUT 600)
    add_test(NAME vkrt.gpu_build.vulkan11.software COMMAND test_gpu_build --vulkan11)
    set_tests_properties(vkrt.gpu_build.vulkan11.software PROPERTIES
       ENVIRONMENT "VK_LAYER_PATH=${CMAKE_BINARY_DIR}/layers;VK_INSTANCE_LAYERS=VK_LAYER_VKRT_SOFTWARE_RAY_QUERY;ENABLE_VKRT_SOFTWARE_RAY_QUERY=1;VK_LOADER_LAYERS_DISABLE=~implicit~"

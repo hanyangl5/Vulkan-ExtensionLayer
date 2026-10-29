@@ -17,6 +17,9 @@ void main()
    if (i < 3) value = 0x7f800000u;
    else if (i < 6) value = 0x80800000u;
    if (i == 9 || i == 10) value = 1;
+   /* Mesa PLOC's atomicCompSwap claims these phase/task sentinels. Other
+    * builders do not consume sync_data, so the common init serves both. */
+   if (i == 11 || i == 12 || i == 16) value = 0xffffffffu;
    if (i == BVH_IR_MAGIC_OFFSET / 4) value = BVH_IR_MAGIC;
    if (i == BVH_IR_VERSION_OFFSET / 4) value = BVH_IR_INDEXED_VERSION;
    if (i == BVH_IR_LEAF_CAPACITY_OFFSET / 4) value = args.leaf_capacity;

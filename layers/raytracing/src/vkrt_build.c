@@ -9,10 +9,11 @@
 #include "morton_sort.spv.h"
 #include "lbvh_main.spv.h"
 #include "lbvh_generate_ir.spv.h"
+#include "ploc_internal.spv.h"
 #include "vkrt_bvh4_prepare.spv.h"
 #include "bvh4_mesa_encode.spv.h"
 
-enum { INIT, LEAF, SORT, TREE, BOUNDS, PREPARE, ENCODE_0, ENCODE_1, ENCODE_2, ENCODE_3, ENCODE_4, ENCODE_5, ENCODE_6 };
+enum { INIT, LEAF, SORT, TREE, BOUNDS, PREPARE, ENCODE_0, ENCODE_1, ENCODE_2, ENCODE_3, ENCODE_4, ENCODE_5, ENCODE_6, PLOC };
 
 VkResult vkrt_build_init(struct vkrt_device_data *dev)
 {
@@ -22,6 +23,13 @@ VkResult vkrt_build_init(struct vkrt_device_data *dev)
    dev->max_build_dispatch_y = properties.limits.maxComputeWorkGroupCount[1];
    dev->max_build_dispatch_z = properties.limits.maxComputeWorkGroupCount[2];
    if (!dev->max_build_dispatch_x || !dev->max_build_dispatch_y || !dev->max_build_dispatch_z) return VK_ERROR_FEATURE_NOT_PRESENT;
+   dev->build_ploc_subgroup_size = 0;
+   if (dev->instance_data->vtable.GetPhysicalDeviceProperties2) {
+       VkPhysicalDeviceSubgroupProperties subgroup = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SUBGROUP_PROPERTIES};
+       VkPhysicalDeviceProperties2 p = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2, .pNext = &subgroup};
+       dev->instance_data->vtable.GetPhysicalDeviceProperties2(dev->physical_device, &p);
+       if (bvh_ir_ploc_eligible(&p.properties.limits, &subgroup)) dev->build_ploc_subgroup_size = subgroup.subgroupSize;
+   }
    VkPushConstantRange push = {VK_SHADER_STAGE_COMPUTE_BIT, 0, 128};
    VkPipelineLayoutCreateInfo layout = {
       .sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
@@ -36,7 +44,7 @@ VkResult vkrt_build_init(struct vkrt_device_data *dev)
        SHADER(vkrt_init),        SHADER(leaf_bvh4),         SHADER(morton_sort),      SHADER(lbvh_main),
        SHADER(lbvh_generate_ir), SHADER(vkrt_bvh4_prepare), SHADER(bvh4_mesa_encode), SHADER(bvh4_mesa_encode),
        SHADER(bvh4_mesa_encode), SHADER(bvh4_mesa_encode),  SHADER(bvh4_mesa_encode), SHADER(bvh4_mesa_encode),
-       SHADER(bvh4_mesa_encode)
+       SHADER(bvh4_mesa_encode), SHADER(ploc_internal)
 #undef SHADER
    };
    _Static_assert(VKRT_ARRAY_SIZE(shaders) == VKRT_ARRAY_SIZE(dev->build_pipelines), "build pipeline phase table");
@@ -51,10 +59,13 @@ VkResult vkrt_build_init(struct vkrt_device_data *dev)
    entries[6] = (VkSpecializationMapEntry){6, 24, 8};
    VkSpecializationInfo spec = {7, entries, sizeof(values), &values};
    for (uint32_t i = 0; i < VKRT_ARRAY_SIZE(shaders); ++i) {
+       if (i == PLOC && !dev->build_ploc_subgroup_size) continue;
+       bool encode = i >= ENCODE_0 && i <= ENCODE_6;
+       values.values[0] = i == PLOC ? dev->build_ploc_subgroup_size : 64;
        struct {
            uint32_t phase, padding;
            uint64_t context;
-       } encode_values = {i >= ENCODE_0 ? i - ENCODE_0 : 0, 0, vkrt_as_registry_address(dev)};
+       } encode_values = {encode ? i - ENCODE_0 : 0, 0, vkrt_as_registry_address(dev)};
        const VkSpecializationMapEntry encode_entries[] = {{0, 0, 4}, {6, 8, 8}};
        VkSpecializationInfo encode_spec = {2, encode_entries, sizeof(encode_values), &encode_values};
        VkShaderModuleCreateInfo smci = {
@@ -67,7 +78,7 @@ VkResult vkrt_build_init(struct vkrt_device_data *dev)
                                                    .stage = VK_SHADER_STAGE_COMPUTE_BIT,
                                                    .module = sm,
                                                    .pName = "main",
-                                                   .pSpecializationInfo = i >= ENCODE_0 ? &encode_spec : &spec},
+                                                   .pSpecializationInfo = encode ? &encode_spec : &spec},
                                          .layout = dev->build_pipeline_layout};
        r = dev->vtable.CreateComputePipelines(dev->device, VK_NULL_HANDLE, 1, &ci, NULL, &dev->build_pipelines[i]);
        dev->vtable.DestroyShaderModule(dev->device, sm, NULL);
@@ -122,7 +133,7 @@ static void vkrt_build_emit(void *user, uint32_t pass, const void *args,
 {
    struct vkrt_build_emit_context *ctx = user;
    if (ctx->leaf_only && pass > BVH_IR_STAGE_LEAF) return;
-   dispatch(ctx->dev, ctx->cmd, pass, args, size, groups);
+   dispatch(ctx->dev, ctx->cmd, pass == BVH_IR_STAGE_PLOC ? PLOC : pass, args, size, groups);
 }
 
 void vkrt_cmd_build_as(struct vkrt_device_data *dev, VkCommandBuffer cmd, uint32_t count,
@@ -208,7 +219,10 @@ void vkrt_cmd_build_as(struct vkrt_device_data *dev, VkCommandBuffer cmd, uint32
        * and original application IDs drive the separate refit below. */
       VkAccelerationStructureBuildGeometryInfoKHR build = *info;
       build.mode = VK_BUILD_ACCELERATION_STRUCTURE_MODE_BUILD_KHR;
-      VkResult result = bvh_ir_record_build(&build, ranges[i], scratch + l.source, scratch, 0, vkrt_build_emit, &context);
+      enum bvh_ir_backend backend =
+          bvh_ir_choose_backend(&build, (uint32_t)l.leaf_count, !update && dev->build_ploc_subgroup_size != 0);
+      VkResult result =
+          bvh_ir_record_build_backend(&build, ranges[i], scratch + l.source, scratch, 0, vkrt_build_emit, &context, backend);
       if (result != VK_SUCCESS) { cb->record_result = result; break; }
       if (update) {
           VkDeviceAddress source_address = vkrt_as_backing_address(dev, info->srcAccelerationStructure);

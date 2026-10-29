@@ -3,6 +3,8 @@
  * ICD. No BVH bytes are uploaded by the CPU in this fixture.
  */
 #include "bvh4_abi.h"
+#include "bvh_ir_builder.h"
+#include "vkrt_build_layout.h"
 #define VKRT_TEST_FIXTURE_ONLY
 #include <stdbool.h>
 #include <vulkan/vulkan.h>
@@ -42,6 +44,9 @@ static bool g_split_builds;
 static bool g_aligned_values;
 static bool g_pool_pressure;
 static bool g_rejected_builds;
+static bool g_require_ploc;
+static bool g_ploc_small;
+static uint32_t g_active_limit = UINT32_MAX;
 static VkAccelerationStructureKHR g_pressure_views[1023];
 
 /* Bind at the smallest legal nonzero offset. Ordinary translated storage
@@ -130,6 +135,13 @@ static void record_builds(VkCommandBuffer cmd)
       } else vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_ACCELERATION_STRUCTURE_BUILD_BIT_KHR,
          VK_PIPELINE_STAGE_ACCELERATION_STRUCTURE_BUILD_BIT_KHR | VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
          0, 1, &b, 0, NULL, 0, NULL);
+   }
+   if (g_require_ploc) {
+       VkMemoryBarrier host = {.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER,
+                               .srcAccessMask = VK_ACCESS_ACCELERATION_STRUCTURE_WRITE_BIT_KHR,
+                               .dstAccessMask = VK_ACCESS_HOST_READ_BIT};
+       vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_ACCELERATION_STRUCTURE_BUILD_BIT_KHR, VK_PIPELINE_STAGE_HOST_BIT, 0, 1, &host, 0,
+                            NULL, 0, NULL);
    }
 }
 
@@ -279,6 +291,27 @@ static void rejected_builds(const struct built_as *as)
 static void validate_tree(const struct built_as *as, uint32_t expected_leaves)
 {
    if (!g_software) return;
+   if (g_require_ploc) {
+       struct vkrt_build_layout layout = vkrt_build_layout(&as->info, NULL, as->ranges);
+       VkDeviceSize offset = as->info.scratchData.deviceAddress - as->scratch.addr + layout.source;
+       if (!layout.valid || offset > as->scratch.size || sizeof(struct vk_ir_header) > as->scratch.size - offset) {
+           fprintf(stderr, "Invalid diagnostic IR source range\n");
+           ++g_fail;
+           return;
+       }
+       struct vk_ir_header ir;
+       memcpy(&ir, (const uint8_t *)as->scratch.mapped + offset, sizeof(ir));
+       uint32_t expected = layout.leaf_count > 4 ? BVH_IR_PRODUCER_PLOC : 0;
+       expect_u("selected IR producer", ir.driver_internal[5], expected);
+       if (expected) {
+           expect_u("PLOC terminal phase", ir.sync_data.phase_index, expected_leaves > 2 ? UINT32_MAX : 0);
+           expect_u("PLOC active leaves", ir.active_leaf_count, expected_leaves);
+           if (layout.leaf_count > 1024 && ir.sync_data.task_done_counter <= 1) ++g_fail;
+       }
+       printf("IR producer=%08x capacity=%llu active=%u phase=%08x tasks=%u/%u\n", ir.driver_internal[5],
+              (unsigned long long)layout.leaf_count, ir.active_leaf_count, ir.sync_data.phase_index, ir.sync_data.task_done_counter,
+              ir.sync_data.task_started_counter);
+   }
    const uint8_t *bytes = as->output.mapped;
    for (uint32_t i = 0; i < 256; ++i) {
       const uint8_t *scratch = as->scratch.mapped;
@@ -417,6 +450,7 @@ static void triangles_case(uint32_t n, bool inactive, bool indexed, bool two_geo
 {
    printf("GPU BUILD CASE: n=%u inactive=%d indexed=%d multi=%d transform=%d\n",
       n, inactive, indexed, two_geometries, transformed);
+   if (g_ploc_small) printf("Requested active leaves: %u\n", g_active_limit);
    uint32_t count = n ? n : 1;
    struct gpu_buf vertices, indices, transforms, instances;
    buf_create((VkDeviceSize)(count * 3 + 1) * 12, VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR |
@@ -426,7 +460,7 @@ static void triangles_case(uint32_t n, bool inactive, bool indexed, bool two_geo
    for (uint32_t i = 0; i < n; ++i) {
       float x = (float)i * 3;
       float triangle[9] = {x-1,-1,0, x+1,-1,0, x,1,0};
-      if (inactive && i % 7 == 0) triangle[0] = NAN;
+      if ((inactive && i % 7 == 0) || i >= g_active_limit) triangle[0] = NAN;
       memcpy(v + 3 + i * 9, triangle, sizeof(triangle));
    }
    buf_create((VkDeviceSize)(count * 3 + 2) * 2, VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR |
@@ -477,46 +511,47 @@ static void triangles_case(uint32_t n, bool inactive, bool indexed, bool two_geo
    g_before_dispatch = record_builds;
    const VkAccelerationStructureGeometryKHR *pgeoms[] = {&geoms[0], &geoms[1]};
    if (two_geometries) { blas.info.pGeometries = NULL; blas.info.ppGeometries = pgeoms; }
-   uint32_t targets[] = {0, n > 1 ? n - 1 : 0, n / 2};
+   uint32_t targets[] = {0, n > 1 ? n - 1 : 0, g_ploc_small ? 1 : n / 2};
    uint32_t random = 0x12345678;
-   for (uint32_t j = 0; j < 15; ++j) {
-      random = random * 1664525u + 1013904223u;
-      uint32_t target = j < 3 ? targets[j] : random % count;
-      float u = j < 3 ? .25f : .1f + .3f * (float)(random & 65535) / 65535.f;
-      float bv = j < 3 ? .5f : .1f + .3f * (float)(random >> 16) / 65535.f;
-      float direction[] = {j < 3 ? 0 : .137f, j < 3 ? 0 : -.071f, -1};
-      bool outside = j >= 3 && j % 4 == 0;
-      float origin[] = {((float)target * 3 + 2 * u + bv - 1) * (transformed ? 2 : 1) - 2 * direction[0],
-         (outside ? 3 : 2 * bv - 1) + (transformed ? 4.f : 0.f) - 2 * direction[1], 2};
-      struct out_block out;
-      run_ray(tlas.handle, origin, direction, 0, 100, 0, 0xff, &out);
-      bool hit = n && !outside && !(inactive && target % 7 == 0);
-      expect_u("GPU-built hit", out.hit_type, hit);
-      expect_u("GPU-built shadow", out.shadow_hit, hit);
-      if (hit) {
-         uint32_t geom = two_geometries && target >= split;
-         expect_u("original primitive", out.primitive_index, target - (geom ? split : 0));
-         expect_u("geometry", out.geometry_index, geom);
-         expect_u("instance", out.instance_index, 0);
-         expect_u("instance custom", out.instance_custom_index, 42);
-         expect_f("distance", out.t, 2, 1e-4f);
-         expect_f("bary u", out.bary[0], u, 3e-4f);
-         expect_f("bary v", out.bary[1], bv, 3e-4f);
-      }
-      /* Re-recording builds on every ray also tests scratch reinitialization. */
-      if (j == 2) g_before_dispatch = NULL;
+   for (uint32_t j = 0; j < (g_ploc_small ? 3 : 15); ++j) {
+       random = random * 1664525u + 1013904223u;
+       uint32_t target = j < 3 ? targets[j] : random % count;
+       float u = j < 3 ? .25f : .1f + .3f * (float)(random & 65535) / 65535.f;
+       float bv = j < 3 ? .5f : .1f + .3f * (float)(random >> 16) / 65535.f;
+       float direction[] = {j < 3 ? 0 : .137f, j < 3 ? 0 : -.071f, -1};
+       bool outside = j >= 3 && j % 4 == 0;
+       float origin[] = {((float)target * 3 + 2 * u + bv - 1) * (transformed ? 2 : 1) - 2 * direction[0],
+                         (outside ? 3 : 2 * bv - 1) + (transformed ? 4.f : 0.f) - 2 * direction[1], 2};
+       struct out_block out;
+       run_ray(tlas.handle, origin, direction, 0, 100, 0, 0xff, &out);
+       bool hit = n && target < g_active_limit && !outside && !(inactive && target % 7 == 0);
+       expect_u("GPU-built hit", out.hit_type, hit);
+       expect_u("GPU-built shadow", out.shadow_hit, hit);
+       if (hit) {
+           uint32_t geom = two_geometries && target >= split;
+           expect_u("original primitive", out.primitive_index, target - (geom ? split : 0));
+           expect_u("geometry", out.geometry_index, geom);
+           expect_u("instance", out.instance_index, 0);
+           expect_u("instance custom", out.instance_custom_index, 42);
+           expect_f("distance", out.t, 2, 1e-4f);
+           expect_f("bary u", out.bary[0], u, 3e-4f);
+           expect_f("bary v", out.bary[1], bv, 3e-4f);
+       }
+       /* Re-recording builds on every ray also tests scratch reinitialization. */
+       if (j == 2) g_before_dispatch = NULL;
    }
-   if (n && !inactive) {
-      const float origin[] = {0, transformed ? 4.f : 0.f, 2}, direction[] = {0,0,-1};
-      const uint32_t flags[] = {0x40, 0x80, 0x10, 0x20, 0x01, 0x02};
-      const uint32_t expected[] = {n != 1, n == 1, 1, 0, 1, 1};
-      for (uint32_t j = 0; j < ARRAY_SIZE(flags); ++j) {
-         struct out_block out;
-         run_ray(tlas.handle, origin, direction, 0, 100, flags[j], 0xff, &out);
-         expect_u("ray culling/opacity flags", out.hit_type, expected[j]);
-      }
+   if (n && !inactive && !g_ploc_small) {
+       const float origin[] = {0, transformed ? 4.f : 0.f, 2}, direction[] = {0, 0, -1};
+       const uint32_t flags[] = {0x40, 0x80, 0x10, 0x20, 0x01, 0x02};
+       const uint32_t expected[] = {n != 1, n == 1, 1, 0, 1, 1};
+       for (uint32_t j = 0; j < ARRAY_SIZE(flags); ++j) {
+           struct out_block out;
+           run_ray(tlas.handle, origin, direction, 0, 100, flags[j], 0xff, &out);
+           expect_u("ray culling/opacity flags", out.hit_type, expected[j]);
+       }
    }
    uint32_t active = n - (inactive ? (n + 6) / 7 : 0);
+   if (g_ploc_small) active = g_active_limit;
    validate_tree(&blas, active);
    /* A non-null reference to an empty BLAS is a recoverable degenerate instance. */
    validate_tree(&tlas, 1);
@@ -599,6 +634,10 @@ int main(int argc, char **argv) {
     g_pool_pressure = argc == 2 && !strcmp(argv[1], "--pool-pressure");
     g_rejected_builds = argc == 2 && !strcmp(argv[1], "--rejected-builds");
     g_vulkan11 = argc == 2 && !strcmp(argv[1], "--vulkan11");
+    g_require_ploc = argc == 2 && !strcmp(argv[1], "--require-ploc");
+    g_ploc_small = argc == 2 && !strcmp(argv[1], "--ploc-small");
+    g_require_ploc |= g_ploc_small && g_software;
+    if (g_require_ploc && !g_software) return 2;
     if (g_vulkan11) {
         size_t words;
         uint32_t *shader = read_spv("rq_test11.comp.spv", &words);
@@ -610,8 +649,28 @@ int main(int argc, char **argv) {
         free(shader);
     }
     init_vulkan();
+    if (g_require_ploc) {
+        VkPhysicalDeviceSubgroupProperties subgroup = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SUBGROUP_PROPERTIES};
+        VkPhysicalDeviceProperties2 properties = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2, .pNext = &subgroup};
+        vkGetPhysicalDeviceProperties2(g_pdev, &properties);
+        if (!bvh_ir_ploc_eligible(&properties.properties.limits, &subgroup)) {
+            vkDestroyCommandPool(g_dev, g_pool, NULL);
+            vkDestroyDevice(g_dev, NULL);
+            vkDestroyInstance(g_instance, NULL);
+            printf("SKIP: selected device does not qualify for PLOC\n");
+            return 77;
+        }
+    }
     pBuild = (void *)vkGetDeviceProcAddr(g_dev, "vkCmdBuildAccelerationStructuresKHR");
     if (!pBuild) return 1;
+    if (g_ploc_small || g_require_ploc) {
+        bool small_only = g_ploc_small;
+        g_ploc_small = true;
+        for (g_active_limit = 0; g_active_limit <= 2; ++g_active_limit) triangles_case(9, false, false, false, false);
+        g_active_limit = UINT32_MAX;
+        g_ploc_small = false;
+        if (small_only) goto finish;
+    }
     if (g_aligned_values || g_pool_pressure || g_rejected_builds) {
         triangles_case(1, false, false, false, false);
         goto finish;

@@ -504,6 +504,11 @@ static void bind_compute_descriptors(VkCommandBuffer command, VkPipelineLayout l
 #include "rtp_nested_fixture.h"
 #include "rtp_physical_source_fixture.h"
 int main(int argc, char **argv) {
+    setvbuf(stdout, NULL, _IONBF, 0);
+    if (argc == 8 && !strcmp(argv[7], "--physical-interfaces")) {
+        physical_source_mode = vulkan11_mode = true;
+        return run_physical_fixture((const char *const *)(argv + 1), true);
+    }
     if (argc == 4 && !strcmp(argv[3], "--physical-source")) {
         physical_source_mode = vulkan11_mode = true;
         return run_physical_source_fixture(argv[1], argv[2]);

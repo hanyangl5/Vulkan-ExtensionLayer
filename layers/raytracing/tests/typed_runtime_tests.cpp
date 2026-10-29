@@ -430,6 +430,7 @@ bool Execute(bool compile_only, const std::string &dump_path, bool unused_attrib
         Require(gpu.mapped[status / 4 + i] == VEL_RT_STATUS_CONTEXT, "Full-width launch product overflow did not fail closed");
     return true;
 }
+#include "typed_physical_interface_tests.h"
 }  // namespace
 int main(int argc, char **argv) {
     try {
@@ -449,6 +450,7 @@ int main(int argc, char **argv) {
             else
                 throw std::runtime_error("Unknown runtime test argument");
         }
+        PhysicalInterfaceMetadata();
         if (compile_only) {
             SPIRV14ExtensionDeclarations();
             SPIRV14NonUniformStage();

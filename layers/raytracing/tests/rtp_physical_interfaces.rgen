@@ -1,0 +1,49 @@
+// Copyright 2026 The Khronos Group Inc.
+// SPDX-License-Identifier: Apache-2.0
+#version 460
+#extension GL_EXT_ray_tracing : require
+#extension GL_EXT_buffer_reference2 : require
+#extension GL_EXT_shader_explicit_arithmetic_types_int64 : require
+#extension GL_GOOGLE_include_directive : require
+#include "rtp_physical_interfaces_common.glsl"
+layout(set = 0, binding = 0) uniform accelerationStructureEXT scene;
+layout(location = 0) rayPayloadEXT Transfer payload;
+void main() {
+    uint id = sourceInvocation();
+    SourceRecord record = SourceRecords(sourcePush.records).rec[id];
+    payload.groups[0].refs[0] = record.a;
+    payload.groups[0].refs[1] = record.b;
+    payload.groups[0].tag = 0u;
+    payload.groups[0].pad = 0x11111111u;
+    payload.groups[1] = payload.groups[0];
+    payload.groups[1].pad = 0x22222222u;
+    payload.chosen = record.a;
+    payload.index = record.index;
+    payload.total = sourcePush.seed + id;
+    payload.depth = 0u;
+    payload.pad = 0x33333333u;
+    traceRayEXT(scene, 0u, 255u, 0u, 0u, 0u, vec3(id % 3u == 0u ? 4.0 : 0.0, 0.0, 0.0), 0.0, vec3(0, 0, 1), 4.0, 0);
+    payload.chosen.v[payload.index + 4u] += 19u;
+    uint base = id * 32u;
+    SourceOutput outputData = SourceOutput(sourcePush.outputAddress);
+    outputData.v[base] = payload.total;
+    outputData.v[base + 1u] = payload.groups[0].tag;
+    outputData.v[base + 2u] = payload.groups[1].tag;
+    outputData.v[base + 3u] = payload.depth;
+    outputData.v[base + 4u] = uint(uint64_t(payload.chosen));
+    outputData.v[base + 5u] = uint(uint64_t(payload.chosen) >> 32);
+    outputData.v[base + 6u] = uint(uint64_t(payload.groups[0].refs[0]));
+    outputData.v[base + 7u] = uint(uint64_t(payload.groups[0].refs[0]) >> 32);
+    outputData.v[base + 8u] = uint(uint64_t(payload.groups[0].refs[1]));
+    outputData.v[base + 9u] = uint(uint64_t(payload.groups[0].refs[1]) >> 32);
+    outputData.v[base + 10u] = uint(uint64_t(payload.groups[1].refs[0]));
+    outputData.v[base + 11u] = uint(uint64_t(payload.groups[1].refs[0]) >> 32);
+    outputData.v[base + 12u] = id;
+    outputData.v[base + 13u] = sourcePush.seed;
+    outputData.v[base + 14u] = payload.index;
+    outputData.v[base + 15u] = 0x50494643u;
+    outputData.v[base + 16u] = payload.groups[0].pad;
+    outputData.v[base + 17u] = payload.groups[1].pad;
+    outputData.v[base + 18u] = payload.pad;
+    // Per-ray words 19..31 and the allocation tail are host-owned sentinels.
+}

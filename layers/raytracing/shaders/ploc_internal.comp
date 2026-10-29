@@ -24,12 +24,12 @@
 #version 460
 
 #include "vkrt_bvh_preamble.h"
+#define VKRT_BVH_COHERENT
 layout(local_size_x = 1024, local_size_y = 1, local_size_z = 1) in;
 
 #include "vk_bvh_defines.h"
 #define VK_USED_BUILD_FLAGS VK_PLOC_BUILD_FLAGS
 #define USE_GLOBAL_SYNC
-#define VK_USE_PREFIX_SCAN
 #define VK_WORKGROUP_SIZE PLOC_WORKGROUP_SIZE
 #include "vk_bvh_helpers.h"
 
@@ -96,6 +96,48 @@ decode_neighbour_offset(uint32_t encoded_offset)
 
 shared vk_aabb shared_bounds[NUM_PLOC_LDS_ITEMS];
 shared uint32_t nearest_neighbour_indices[NUM_PLOC_LDS_ITEMS];
+shared uint32_t ploc_exclusive_prefix_sum;
+
+/* Keep Mesa's inter-partition scan contract, but compute the local prefix in
+ * logical workgroup order. Public Vulkan does not require local invocation
+ * IDs to follow subgroup lane order (nor full subgroups for SPIR-V 1.4).
+ * Reuse the merge phase's now-dead neighbour array; no extra 1024-word LDS
+ * allocation or additional device feature is needed. */
+uint32_t
+ploc_prefix_scan(bool valid, REF(vk_prefix_scan_partition) partitions, uint32_t index)
+{
+   if (gl_LocalInvocationIndex == 0) {
+      ploc_exclusive_prefix_sum = 0;
+      if (index >= PLOC_WORKGROUP_SIZE) {
+         REF(vk_prefix_scan_partition) current_partition =
+            REF(vk_prefix_scan_partition)(INDEX(vk_prefix_scan_partition, partitions, index / PLOC_WORKGROUP_SIZE));
+         REF(vk_prefix_scan_partition) previous_partition = current_partition - 1;
+         for (;;) {
+            uint32_t inclusive = atomicLoad(DEREF(previous_partition).inclusive_sum, gl_ScopeDevice,
+                                           gl_StorageSemanticsBuffer, gl_SemanticsAcquire | gl_SemanticsMakeVisible);
+            if (inclusive != 0xffffffffu) {
+               ploc_exclusive_prefix_sum += inclusive;
+               break;
+            }
+            ploc_exclusive_prefix_sum += DEREF(previous_partition).aggregate;
+            previous_partition -= 1;
+         }
+         atomicStore(DEREF(current_partition).inclusive_sum,
+                     DEREF(current_partition).aggregate + ploc_exclusive_prefix_sum, gl_ScopeDevice,
+                     gl_StorageSemanticsBuffer, gl_SemanticsRelease | gl_SemanticsMakeAvailable);
+      }
+   }
+   uint32_t lane = gl_LocalInvocationIndex;
+   nearest_neighbour_indices[lane] = valid ? 1u : 0u;
+   barrier();
+   for (uint32_t step = 1; step < PLOC_WORKGROUP_SIZE; step *= 2) {
+      uint32_t preceding = lane >= step ? nearest_neighbour_indices[lane - step] : 0;
+      barrier();
+      nearest_neighbour_indices[lane] += preceding;
+      barrier();
+   }
+   return ploc_exclusive_prefix_sum + nearest_neighbour_indices[lane] - (valid ? 1u : 0u);
+}
 
 uint32_t
 load_id(VOID_REF ids, uint32_t iter, uint32_t index)
@@ -141,6 +183,9 @@ shared uint32_t shared_aggregate_sum;
 void
 main(void)
 {
+   /* A GPU-written marker lets integration tests distinguish the actual
+    * production PLOC dispatch from LBVH without changing runtime BVH4. */
+   if (gl_LocalInvocationIndex == 0) DEREF(args.header).driver_internal[5] = BVH_IR_PRODUCER_PLOC;
    VOID_REF src_ids = args.ids_0;
    VOID_REF dst_ids = args.ids_1;
 
@@ -310,11 +355,7 @@ main(void)
             }
 
             /* Compact - prepare prefix scan */
-            uvec4 ballot = subgroupBallot(has_valid_node);
-
-            uint32_t aggregate_sum = subgroupBallotBitCount(ballot);
-            if (subgroupElect())
-               atomicAdd(shared_aggregate_sum, aggregate_sum);
+            if (has_valid_node) atomicAdd(shared_aggregate_sum, 1);
          }
 
          barrier();
@@ -348,9 +389,7 @@ main(void)
          uint32_t id = task_index < current_task_count
                           ? DEREF(REF(uint32_t)(INDEX(uint32_t, dst_ids, task_index)))
                           : VK_BVH_INVALID_NODE;
-         uvec4 ballot = subgroupBallot(id != VK_BVH_INVALID_NODE);
-
-         uint32_t new_offset = vk_prefix_scan(ballot, partitions, task_index);
+         uint32_t new_offset = ploc_prefix_scan(id != VK_BVH_INVALID_NODE, partitions, task_index);
          if (task_index >= current_task_count)
             continue;
 

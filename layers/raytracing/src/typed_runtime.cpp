@@ -8,6 +8,7 @@
 #include <spirv-tools/optimizer.hpp>
 #include <algorithm>
 #include <cstring>
+#include <functional>
 #include <limits>
 #include <map>
 #include <set>
@@ -30,11 +31,12 @@ uint64_t Mul(uint64_t a, uint64_t b) {
 }
 uint64_t Align(uint64_t a) { return Add(a, 15) & ~UINT64_C(15); }
 // SPIR-V nominal IDs and source locations do not define the Vulkan payload
-// interface. Canonical keys describe the complete scalar/composite structure.
+// interface. Match complete type graphs, including physical-pointer pointees.
+// A visited pair closes recursive pointer graphs coinductively; module-local
+// sharing and declaration order must not change the resulting interface class.
 struct Types {
     std::map<uint32_t, W> types;
     std::map<uint32_t, uint64_t> constants;
-    std::map<uint32_t, std::string> keys;
     uint32_t model = UINT32_MAX;
     explicit Types(const W &words) {
         for (size_t p = 5; p < words.size();) {
@@ -44,7 +46,7 @@ struct Types {
                 Need(model == UINT32_MAX, "selected source must have one entry point");
                 model = words[p + 1];
             }
-            if (op >= spv::OpTypeVoid && op <= spv::OpTypeForwardPointer)
+            if (op >= spv::OpTypeVoid && op < spv::OpTypeForwardPointer)
                 types[words[p + 1]] = W(words.begin() + p, words.begin() + p + n);
             if (op == spv::OpConstant && n >= 4) {
                 uint64_t value = words[p + 3];
@@ -54,40 +56,65 @@ struct Types {
             p += n;
         }
     }
-    std::string Key(uint32_t id) {
-        if (keys.count(id)) return keys.at(id);
+    struct Shape {
+        uint32_t op;
+        std::vector<uint64_t> literals;
+        std::vector<uint32_t> children;
+    };
+    Shape Describe(uint32_t id) const {
         Need(types.count(id) != 0, "missing invocation value type");
         const auto &t = types.at(id);
         auto op = t[0] & 65535;
-        std::string result;
+        Shape result{op, {}, {}};
         switch (op) {
             case spv::OpTypeBool:
-                result = "b";
                 break;
             case spv::OpTypeInt:
-                result = "i" + std::to_string(t[2]) + ":" + std::to_string(t[3]);
+                result.literals = {t[2], t[3]};
                 break;
             case spv::OpTypeFloat:
-                result = "f" + std::to_string(t[2]);
+                result.literals = {t[2]};
                 break;
             case spv::OpTypeVector:
             case spv::OpTypeMatrix:
-                result = std::to_string(op) + "[" + std::to_string(t[3]) + "]" + Key(t[2]);
+                result.literals = {t[3]};
+                result.children = {t[2]};
                 break;
             case spv::OpTypeArray:
                 Need(constants.count(t[3]) != 0, "nonconstant invocation array length");
-                result = "a[" + std::to_string(constants.at(t[3])) + "]" + Key(t[2]);
+                result.literals = {constants.at(t[3])};
+                result.children = {t[2]};
+                break;
+            case spv::OpTypeRuntimeArray:
+                result.children = {t[2]};
                 break;
             case spv::OpTypeStruct:
-                result = "s{";
-                for (size_t i = 2; i < t.size(); ++i) result += Key(t[i]) + ";";
-                result += "}";
+                result.children.assign(t.begin() + 2, t.end());
+                break;
+            case spv::OpTypePointer:
+                Need(t[2] == spv::StorageClassPhysicalStorageBuffer,
+                     "cross-stage logical pointers require a shared provenance ABI");
+                // This remains a pointer type, distinct from uint64 even
+                // though both use eight numeric address bytes in the frame.
+                result.literals = {t[2], 64};
+                result.children = {t[3]};
                 break;
             default:
                 Need(false, "unsupported invocation interface type");
         }
-        keys[id] = result;
         return result;
+    }
+    bool Equivalent(uint32_t id, const Types &other, uint32_t other_id) const {
+        std::set<std::pair<uint32_t, uint32_t>> visited;
+        std::function<bool(uint32_t, uint32_t)> equal = [&](uint32_t left, uint32_t right) {
+            if (!visited.emplace(left, right).second) return true;
+            const auto a = Describe(left), b = other.Describe(right);
+            if (a.op != b.op || a.literals != b.literals || a.children.size() != b.children.size()) return false;
+            for (size_t n = 0; n < a.children.size(); ++n)
+                if (!equal(a.children[n], b.children[n])) return false;
+            return true;
+        };
+        return equal(id, other_id);
     }
 };
 std::string Filter(const char *text, bool traversal = false) {
@@ -164,14 +191,18 @@ TypedRuntimeProgram BuildTypedRuntimeProgram(const std::vector<TypedContinuation
     result.max_ray_recursion_depth = options.max_ray_recursion_depth;
     std::vector<Types> types;
     std::set<std::string> exports;
-    std::map<std::string, uint32_t> canonical;
+    std::vector<std::pair<size_t, uint32_t>> canonical;
     std::vector<std::map<uint32_t, uint32_t>> type_ids(stages.size());
-    auto Intern = [&](const std::string &key) {
-        if (!canonical.count(key)) {
-            Need(canonical.size() < UINT32_MAX - 1, "too many canonical interface types");
-            canonical[key] = uint32_t(canonical.size() + 1);
+    auto Intern = [&](size_t stage, uint32_t type) {
+        // Validate the complete graph even when there is no previous class.
+        Need(types[stage].Equivalent(type, types[stage], type), "invalid invocation type graph");
+        for (size_t n = 0; n < canonical.size(); ++n) {
+            const auto [other_stage, other_type] = canonical[n];
+            if (types[stage].Equivalent(type, types[other_stage], other_type)) return uint32_t(n + 1);
         }
-        return canonical.at(key);
+        Need(canonical.size() < UINT32_MAX - 1, "too many canonical interface types");
+        canonical.emplace_back(stage, type);
+        return uint32_t(canonical.size());
     };
     // Built-in triangle attributes are two float32 barycentrics, rather than
     // a source-defined interface type. GLSL also permits array/block containers
@@ -188,7 +219,9 @@ TypedRuntimeProgram BuildTypedRuntimeProgram(const std::vector<TypedContinuation
         types.emplace_back(s.source);
         result.max_shader_frame_bytes = std::max(result.max_shader_frame_bytes, s.frame_stride_bytes);
         for (const auto &v : s.invocation_variables) {
-            type_ids[i][v.type] = Intern(types.back().Key(v.type));
+            const auto canonical_type = Intern(i, v.type);
+            type_ids[i][v.type] = canonical_type;
+            result.interfaces.push_back({uint32_t(i), v.variable, v.type, v.storage_class, canonical_type, v.offset, v.size});
             if (v.storage_class == spv::StorageClassHitAttributeKHR) {
                 Need(v.size <= UINT32_MAX, "hit attribute size");
                 result.max_hit_attribute_bytes = std::max(result.max_hit_attribute_bytes, uint32_t(v.size));
@@ -264,13 +297,14 @@ TypedRuntimeProgram BuildTypedRuntimeProgram(const std::vector<TypedContinuation
     for (size_t i = 0; i < stages.size(); ++i) {
         out << "case " << i << "u:switch(storage){";
         std::set<uint32_t> seen;
-        for (auto &v : stages[i].invocation_variables) {
+        for (const auto &v : result.interfaces) {
+            if (v.stage != i) continue;
             if (v.storage_class != spv::StorageClassIncomingRayPayloadKHR &&
                 v.storage_class != spv::StorageClassIncomingCallableDataKHR && v.storage_class != spv::StorageClassHitAttributeKHR)
                 continue;
             Need(seen.insert(v.storage_class).second, "multiple incoming/attribute interfaces");
             Need(v.offset <= UINT32_MAX && v.size <= UINT32_MAX, "interface exceeds source frame ABI");
-            out << "case " << v.storage_class << "u:return uvec4(" << v.offset << "u," << v.size << "u," << type_ids[i].at(v.type)
+            out << "case " << v.storage_class << "u:return uvec4(" << v.offset << "u," << v.size << "u," << v.canonical_type
                 << "u,1u);";
         }
         out << "}break;\n";
