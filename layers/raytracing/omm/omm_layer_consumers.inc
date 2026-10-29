@@ -195,20 +195,18 @@ VKAPI_ATTR void VKAPI_CALL CmdBindDescriptorSets(VkCommandBuffer cb, VkPipelineB
     bind_shadow_sets(*state, cb, point, layout, first, count, sets);
     native<PFN_vkCmdBindDescriptorSets>(*state, "vkCmdBindDescriptorSets")(cb, point, layout, first, count, sets, offset_count,
                                                                            offsets);
-    if (state->consumers && point == VK_PIPELINE_BIND_POINT_COMPUTE) refresh_compute(*state, cb);
 }
 VKAPI_ATTR void VKAPI_CALL CmdBindDescriptorSets2(VkCommandBuffer cb, const VkBindDescriptorSetsInfo* info) {
     auto state = device(cb);
     if (info->stageFlags & VK_SHADER_STAGE_COMPUTE_BIT)
         bind_shadow_sets(*state, cb, VK_PIPELINE_BIND_POINT_COMPUTE, info->layout, info->firstSet, info->descriptorSetCount,
                          info->pDescriptorSets);
-    if (info->stageFlags & VK_SHADER_STAGE_ALL_GRAPHICS)
+    if (info->stageFlags & (VK_SHADER_STAGE_ALL_GRAPHICS | VK_SHADER_STAGE_TASK_BIT_EXT | VK_SHADER_STAGE_MESH_BIT_EXT))
         bind_shadow_sets(*state, cb, VK_PIPELINE_BIND_POINT_GRAPHICS, info->layout, info->firstSet, info->descriptorSetCount,
                          info->pDescriptorSets);
     auto call = native<PFN_vkCmdBindDescriptorSets2>(*state, "vkCmdBindDescriptorSets2");
     if (!call) call = native<PFN_vkCmdBindDescriptorSets2>(*state, "vkCmdBindDescriptorSets2KHR");
     call(cb, info);
-    if (state->consumers && (info->stageFlags & VK_SHADER_STAGE_COMPUTE_BIT)) refresh_compute(*state, cb);
 }
 VKAPI_ATTR void VKAPI_CALL CmdPushConstants2(VkCommandBuffer cb, const VkPushConstantsInfo* info) {
     CmdPushConstants(cb, info->layout, info->stageFlags, info->offset, info->size, info->pValues);
@@ -238,13 +236,7 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateGraphicsPipelines(VkDevice handle, VkPipeli
                                                        const VkGraphicsPipelineCreateInfo* infos,
                                                        const VkAllocationCallbacks* allocator, VkPipeline* out) {
     auto state = device(handle);
-    if (state->consumers)
-        for (uint32_t i = 0; i < count; ++i)
-            for (uint32_t j = 0; j < infos[i].stageCount; ++j)
-                if (consumer_shader_uses_query(state->consumers, infos[i].pStages[j])) {
-                    for (uint32_t k = 0; k < count; ++k) out[k] = VK_NULL_HANDLE;
-                    return VK_ERROR_FEATURE_NOT_PRESENT;
-                }
+    if (state->consumers) return consumer_create_graphics(state->consumers, cache, count, infos, allocator, out);
     return native<PFN_vkCreateGraphicsPipelines>(*state, "vkCreateGraphicsPipelines")(handle, cache, count, infos, allocator, out);
 }
 VKAPI_ATTR VkResult VKAPI_CALL CreateRayTracingPipelinesKHR(VkDevice handle, VkDeferredOperationKHR deferred, VkPipelineCache cache,
@@ -295,6 +287,14 @@ VKAPI_ATTR void VKAPI_CALL CmdDispatchIndirect(VkCommandBuffer cb, VkBuffer buff
     auto state = device(cb);
     if (dispatch_ready(*state, cb)) native<PFN_vkCmdDispatchIndirect>(*state, "vkCmdDispatchIndirect")(cb, buffer, offset);
 }
+VKAPI_ATTR void VKAPI_CALL CmdDispatchIndirect2KHR(VkCommandBuffer cb, const VkDispatchIndirect2InfoKHR* info) {
+    auto state = device(cb);
+    if (dispatch_ready(*state, cb)) native<PFN_vkCmdDispatchIndirect2KHR>(*state, "vkCmdDispatchIndirect2KHR")(cb, info);
+}
+VKAPI_ATTR void VKAPI_CALL CmdDispatchTileQCOM(VkCommandBuffer cb, const VkDispatchTileInfoQCOM* info) {
+    auto state = device(cb);
+    if (dispatch_ready(*state, cb)) native<PFN_vkCmdDispatchTileQCOM>(*state, "vkCmdDispatchTileQCOM")(cb, info);
+}
 VKAPI_ATTR void VKAPI_CALL CmdExecuteCommands(VkCommandBuffer cb, uint32_t count, const VkCommandBuffer* children) {
     auto state = device(cb);
     if (state->software) {
@@ -310,9 +310,11 @@ VKAPI_ATTR void VKAPI_CALL CmdExecuteCommands(VkCommandBuffer cb, uint32_t count
                     entry->secondary.push_back(std::move(child));
                 }
                 entry->compute.logical_pipeline = VK_NULL_HANDLE;
+                entry->compute.native_pipeline = VK_NULL_HANDLE;
                 entry->compute.sets.clear();
                 entry->compute.set_layouts.clear();
                 entry->graphics.logical_pipeline = VK_NULL_HANDLE;
+                entry->graphics.native_pipeline = VK_NULL_HANDLE;
                 entry->graphics.sets.clear();
                 entry->graphics.set_layouts.clear();
             }

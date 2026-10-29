@@ -22,6 +22,7 @@ static VkResult layerDevice(VkPhysicalDevice, const VkDeviceCreateInfo*, const V
 
 static std::atomic<unsigned> validationErrors{0}, validationWarnings{0};
 static VkDebugUtilsMessengerEXT validationMessenger{};
+static bool conditionalRenderingAvailable = false, inheritedConditionalRenderingAvailable = false;
 static VKAPI_ATTR VkBool32 VKAPI_CALL validation(VkDebugUtilsMessageSeverityFlagBitsEXT severity,
                                                  VkDebugUtilsMessageTypeFlagsEXT type,
                                                  const VkDebugUtilsMessengerCallbackDataEXT* data, void*) {
@@ -83,12 +84,32 @@ static VkResult layerDevice(VkPhysicalDevice physical, const VkDeviceCreateInfo*
     auto maintenance = init<VkPhysicalDeviceMaintenance4Features>(VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MAINTENANCE_4_FEATURES);
     maintenance.maintenance4 = VK_TRUE;
     maintenance.pNext = &sync;
-    const char* extensions[] = {VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME, VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME,
-                                VK_EXT_OPACITY_MICROMAP_EXTENSION_NAME, VK_KHR_SYNCHRONIZATION_2_EXTENSION_NAME,
-                                VK_KHR_MAINTENANCE_4_EXTENSION_NAME};
-    requested.pNext = &maintenance;
-    requested.enabledExtensionCount = 5;
-    requested.ppEnabledExtensionNames = extensions;
+    std::vector<const char*> extensions{VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME,
+                                        VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME, VK_EXT_OPACITY_MICROMAP_EXTENSION_NAME,
+                                        VK_KHR_SYNCHRONIZATION_2_EXTENSION_NAME, VK_KHR_MAINTENANCE_4_EXTENSION_NAME};
+    uint32_t extensionCount = 0;
+    CHECK(vkEnumerateDeviceExtensionProperties(physical, nullptr, &extensionCount, nullptr));
+    std::vector<VkExtensionProperties> availableExtensions(extensionCount);
+    CHECK(vkEnumerateDeviceExtensionProperties(physical, nullptr, &extensionCount, availableExtensions.data()));
+    bool hasConditionalExtension = false;
+    for (const auto& extension : availableExtensions)
+        hasConditionalExtension |= !std::strcmp(extension.extensionName, VK_EXT_CONDITIONAL_RENDERING_EXTENSION_NAME);
+    auto conditional =
+        init<VkPhysicalDeviceConditionalRenderingFeaturesEXT>(VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_CONDITIONAL_RENDERING_FEATURES_EXT);
+    if (hasConditionalExtension) {
+        auto features = init<VkPhysicalDeviceFeatures2>(VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2);
+        features.pNext = &conditional;
+        vkGetPhysicalDeviceFeatures2(physical, &features);
+    }
+    conditionalRenderingAvailable = conditional.conditionalRendering == VK_TRUE;
+    inheritedConditionalRenderingAvailable = conditionalRenderingAvailable && conditional.inheritedConditionalRendering;
+    if (conditionalRenderingAvailable) {
+        extensions.push_back(VK_EXT_CONDITIONAL_RENDERING_EXTENSION_NAME);
+        conditional.pNext = &maintenance;
+    }
+    requested.pNext = conditionalRenderingAvailable ? static_cast<void*>(&conditional) : static_cast<void*>(&maintenance);
+    requested.enabledExtensionCount = static_cast<uint32_t>(extensions.size());
+    requested.ppEnabledExtensionNames = extensions.data();
     // The selected physical device supports native RT, but no native RQ/RTP
     // feature is requested: automatic consumer instrumentation is still open.
     return vkCreateDevice(physical, &requested, allocator, output);
@@ -283,6 +304,95 @@ void submitPair(Fixture& f, const Api& api, VkCommandBuffer build, VkCommandBuff
     vkDestroyFence(f.device, fence, nullptr);
     vkDestroySemaphore(f.device, semaphore, nullptr);
 }
+void conditionalChecks(Fixture& f, const Api& api, const char* shader, const VkMicromapBuildInfoEXT& buildInfo, Map& source,
+                       const VkCopyMicromapToMemoryInfoEXT& serializeInfo, const std::vector<uint8_t>& expected) {
+    if (!conditionalRenderingAvailable) {
+        std::puts("SKIP conditional producer guards: VK_EXT_conditional_rendering/conditionalRendering is unsupported");
+        return;
+    }
+    const auto beginConditional =
+        reinterpret_cast<PFN_vkCmdBeginConditionalRenderingEXT>(vkGetDeviceProcAddr(f.device, "vkCmdBeginConditionalRenderingEXT"));
+    const auto endConditional =
+        reinterpret_cast<PFN_vkCmdEndConditionalRenderingEXT>(vkGetDeviceProcAddr(f.device, "vkCmdEndConditionalRenderingEXT"));
+    expect(beginConditional && endConditional, "enabled conditional rendering exposes both public entry points");
+    if (!beginConditional || !endConditional) return;
+    auto predicate = f.buffer(4, VK_BUFFER_USAGE_CONDITIONAL_RENDERING_BIT_EXT, true);
+    *static_cast<uint32_t*>(predicate.mapped) = 0;
+    auto conditional = init<VkConditionalRenderingBeginInfoEXT>(VK_STRUCTURE_TYPE_CONDITIONAL_RENDERING_BEGIN_INFO_EXT);
+    conditional.buffer = predicate.handle;
+    for (bool serialization : {false, true}) {
+        auto rejected = f.begin();
+        beginConditional(rejected, &conditional);
+        if (serialization)
+            api.serialize(rejected, &serializeInfo);
+        else
+            api.build(rejected, 1, &buildInfo);
+        // Closing remains necessary even after the layer marks a sticky error;
+        // native EndCB must see a structurally balanced conditional scope.
+        endConditional(rejected);
+        expect(vkEndCommandBuffer(rejected) == VK_ERROR_FEATURE_NOT_PRESENT,
+               serialization ? "conditional MM serialization fails closed before submission"
+                             : "conditional MM build fails closed before submission");
+        vkFreeCommandBuffers(f.device, f.pool, 1, &rejected);
+    }
+    if (inheritedConditionalRenderingAvailable) {
+        auto allocate = init<VkCommandBufferAllocateInfo>(VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO);
+        allocate.commandPool = f.pool;
+        allocate.level = VK_COMMAND_BUFFER_LEVEL_SECONDARY;
+        allocate.commandBufferCount = 1;
+        VkCommandBuffer secondary{};
+        CHECK(vkAllocateCommandBuffers(f.device, &allocate, &secondary));
+        auto inherited = init<VkCommandBufferInheritanceConditionalRenderingInfoEXT>(
+            VK_STRUCTURE_TYPE_COMMAND_BUFFER_INHERITANCE_CONDITIONAL_RENDERING_INFO_EXT);
+        inherited.conditionalRenderingEnable = VK_TRUE;
+        auto inheritance = init<VkCommandBufferInheritanceInfo>(VK_STRUCTURE_TYPE_COMMAND_BUFFER_INHERITANCE_INFO);
+        inheritance.pNext = &inherited;
+        auto begin = init<VkCommandBufferBeginInfo>(VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO);
+        begin.pInheritanceInfo = &inheritance;
+        CHECK(vkBeginCommandBuffer(secondary, &begin));
+        api.build(secondary, 1, &buildInfo);
+        expect(vkEndCommandBuffer(secondary) == VK_ERROR_FEATURE_NOT_PRESENT,
+               "secondary inherited conditional producer fails closed before execution");
+        vkFreeCommandBuffers(f.device, f.pool, 1, &secondary);
+    } else {
+        std::puts("SKIP inherited conditional guard: inheritedConditionalRendering is unsupported");
+    }
+
+    auto output = f.buffer(4, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, true);
+    *static_cast<uint32_t*>(output.mapped) = 0xa5a5a5a5u;
+    Program app(f, shader, output.address, 0);
+    const auto words = constants(0x27182818u);
+    auto predicated = f.begin();
+    api.dependency(predicated, VK_PIPELINE_STAGE_2_HOST_BIT, VK_ACCESS_2_HOST_WRITE_BIT,
+                   VK_PIPELINE_STAGE_2_CONDITIONAL_RENDERING_BIT_EXT, VK_ACCESS_2_CONDITIONAL_RENDERING_READ_BIT_EXT);
+    app.capture(predicated, words);
+    beginConditional(predicated, &conditional);
+    vkCmdDispatch(predicated, 1, 1, 1);
+    endConditional(predicated);
+    api.dependency(predicated, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_ACCESS_2_SHADER_WRITE_BIT, VK_PIPELINE_STAGE_2_HOST_BIT,
+                   VK_ACCESS_2_HOST_READ_BIT);
+    f.submit(predicated);
+    expect(*static_cast<const uint32_t*>(output.mapped) == 0xa5a5a5a5u,
+           "ordinary conditional application dispatch retains native zero-predicate suppression");
+
+    // A closed explicit scope and errors on discarded CBs must not poison a
+    // fresh CB. This performs an actual MM build and an unpredicated app shader.
+    clearMap(source);
+    auto recovered = f.begin();
+    api.dependency(recovered, VK_PIPELINE_STAGE_2_HOST_BIT, VK_ACCESS_2_HOST_WRITE_BIT, VK_PIPELINE_STAGE_2_MICROMAP_BUILD_BIT_EXT,
+                   VK_ACCESS_2_MICROMAP_READ_BIT_EXT | VK_ACCESS_2_MICROMAP_WRITE_BIT_EXT);
+    app.capture(recovered, words);
+    api.build(recovered, 1, &buildInfo);
+    vkCmdDispatch(recovered, 1, 1, 1);
+    api.dependency(recovered, VK_PIPELINE_STAGE_2_MICROMAP_BUILD_BIT_EXT | VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+                   VK_ACCESS_2_MICROMAP_WRITE_BIT_EXT | VK_ACCESS_2_SHADER_WRITE_BIT, VK_PIPELINE_STAGE_2_HOST_BIT,
+                   VK_ACCESS_2_HOST_READ_BIT);
+    f.submit(recovered);
+    expect(compare(source, expected) && *static_cast<const uint32_t*>(output.mapped) == digest(words),
+           "new CB after explicit conditional End executes MM producer and restores ordinary application compute state");
+    release(f, predicate);
+    release(f, output);
+}
 void run(Fixture& f, const Api& api, const char* shader, const char* name, uint32_t count, uint32_t stride, bool fourState,
          bool pointers) {
     std::vector<uint8_t> triangles((count - 1) * stride + 8, 0xcd), data;
@@ -435,6 +545,13 @@ void run(Fixture& f, const Api& api, const char* shader, const char* name, uint3
                     data.size());
     }
     vkFreeCommandBuffers(f.device, f.pool, 2, commands);
+    if (count == 1 && !fourState) {
+        std::vector<uint8_t> conditionalExpected;
+        expect(storage_build({triangles.data(), triangles.size(), count, stride, data.data(), data.size()}, &conditionalExpected) ==
+                   StorageResult::Success,
+               "conditional recovery uses an independent canonical oracle");
+        conditionalChecks(f, api, shader, info, source, toMemory, conditionalExpected);
+    }
     // Build products must survive legal input/scratch destruction. The copy
     // below is recorded only after those buffers no longer exist.
     release(f, triangleBuffer);

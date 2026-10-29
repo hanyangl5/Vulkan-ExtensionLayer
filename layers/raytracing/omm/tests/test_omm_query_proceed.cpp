@@ -37,7 +37,6 @@ std::string base(const std::string& body, const std::string& helper = {}, const 
            "%2001 = OpConstantComposite %v2u %u1 %u0\n%query = OpTypeRayQueryKHR\n"
            "%pFQ = OpTypePointer Function %query\n%pPQ = OpTypePointer Private %query\n"
            "%array = OpTypeArray %query %u2\n%pFA = OpTypePointer Function %array\n"
-           "%struct = OpTypeStruct %u %array\n%pFS = OpTypePointer Function %struct\n"
            "%pPA = OpTypePointer Private %array\n%as = OpTypeAccelerationStructureKHR\n"
            "%pAS = OpTypePointer UniformConstant %as\n%scene = OpVariable %pAS UniformConstant\n"
            "%fn = OpTypeFunction %void\n%fnClassify = OpTypeFunction %u %v2u %u %u %u %v2f %bool %u\n" +
@@ -51,8 +50,8 @@ std::string base(const std::string& body, const std::string& helper = {}, const 
 const char* initialize = "OpRayQueryInitializeKHR %q %loaded %u1 %u255 %origin %f0 %direction %f1\n";
 
 QueryStateModule run(const std::string& name, const std::string& text, uint32_t initializes, uint32_t proceeds,
-                     bool explicit_metadata = false) {
-    spvtools::SpirvTools tools(SPV_ENV_VULKAN_1_2);
+                     bool explicit_metadata = false, bool ir_only = false) {
+    spvtools::SpirvTools tools(ir_only ? SPV_ENV_UNIVERSAL_1_5 : SPV_ENV_VULKAN_1_2);
     std::string diagnostic;
     tools.SetMessageConsumer(
         [&](spv_message_level_t, const char*, const spv_position_t&, const char* message) { diagnostic = message; });
@@ -68,6 +67,25 @@ QueryStateModule run(const std::string& name, const std::string& text, uint32_t 
             if (spv::Op(input[offset] & 0xffffu) == spv::OpRayQueryInitializeKHR)
                 options.initialization_metadata.push_back({offset, 2001});
     QueryStateModule output;
+    if (ir_only) {
+        // VUID-StandaloneSpirv-None-04667 prohibits a struct containing an
+        // opaque ray query, including through an array. This is only a general
+        // SPIR-V aggregate/aliasing proof, never a legal Vulkan shader or GPU
+        // fixture. Some older linked SPIRV-Tools versions missed this rule.
+        spvtools::SpirvTools vulkan(SPV_ENV_VULKAN_1_2);
+        std::string vulkan_diagnostic;
+        vulkan.SetMessageConsumer(
+            [&](spv_message_level_t, const char*, const spv_position_t&, const char* message) { vulkan_diagnostic = message; });
+        if (!vulkan.Validate(input)) {
+            require(vulkan_diagnostic.find("opaque") != std::string::npos, name + " Vulkan rejects the opaque aggregate");
+            output.words = {123, 456};
+            require(rewrite_query_consumers(input, options, &output, &diagnostic) == QueryRewriteStatus::InvalidModule &&
+                        output.words == std::vector<uint32_t>({123, 456}),
+                    name + " prohibited Vulkan input rejected atomically");
+            std::printf("PASS IR-only aggregate: %s (Vulkan input rejected; not GPU coverage)\n", name.c_str());
+            return output;
+        }
+    }
     require(rewrite_query_consumers(input, options, &output, &diagnostic) == QueryRewriteStatus::Success,
             name + " transform: " + diagnostic);
     require(tools.Validate(output.words), name + " output validation: " + diagnostic);
@@ -85,7 +103,10 @@ QueryStateModule run(const std::string& name, const std::string& text, uint32_t 
         }
     }
     require(native_proceeds == proceeds && scalar_calls == proceeds, name + " native query retained and classifier injected");
-    std::printf("PASS automatic Proceed graph: %s\n", name.c_str());
+    if (ir_only)
+        std::printf("PASS IR-only aggregate: %s (legacy validator; not legal Vulkan input or GPU coverage)\n", name.c_str());
+    else
+        std::printf("PASS automatic Proceed graph: %s\n", name.c_str());
     return output;
 }
 void rejection_tests() {
@@ -515,8 +536,9 @@ int main(int argc, char** argv) {
     run("Function struct/array element",
         base("%queries = OpVariable %pFS Function\n%loaded = OpLoad %as %scene\n"
              "%q = OpAccessChain %pFQ %queries %u1 %u0\n" +
-             std::string(initialize) + "%p = OpRayQueryProceedKHR %bool %q\nOpReturn"),
-        1, 1);
+                 std::string(initialize) + "%p = OpRayQueryProceedKHR %bool %q\nOpReturn",
+             {}, "%struct = OpTypeStruct %u %array\n%pFS = OpTypePointer Function %struct\n"),
+        1, 1, false, true);
     run("Private array element",
         base("%loaded = OpLoad %as %scene\n%q = OpAccessChain %pPQ %queries %u1\n" + std::string(initialize) +
                  "%p = OpRayQueryProceedKHR %bool %q\nOpReturn",

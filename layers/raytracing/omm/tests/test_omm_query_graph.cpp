@@ -1,6 +1,7 @@
 // Copyright 2026 The Khronos Group Inc.
 // SPDX-License-Identifier: Apache-2.0
-// Independent valid-IR graph and publication tests for the query-state preparation pass.
+// Independent Vulkan graph tests, plus separately labeled non-Vulkan aggregate
+// IR proofs, for the query-state preparation pass.
 #include "../omm_query_rewrite.h"
 #include <spirv-tools/libspirv.hpp>
 #define SPV_ENABLE_UTILITY_CODE
@@ -16,6 +17,7 @@ using vel::omm::QueryRewriteStatus;
 using vel::omm::QueryStateModule;
 namespace {
 unsigned failures = 0, checks = 0;
+unsigned vulkan_graphs = 0, ir_only_graphs = 0, prohibited_pointer_graphs = 0;
 void expect(bool condition, const std::string& message) {
     ++checks;
     if (!condition) {
@@ -179,8 +181,14 @@ void graph_invariants(const Graph& source, const QueryStateModule& module, bool 
     expect(module.initializations == initializations && module.flag_getters == getters, name + ": honest operation counts");
 }
 void run(const std::string& name, const std::string& assembly, unsigned expectedInitializations, unsigned expectedGetters,
-         bool invalidInput = false) {
-    spvtools::SpirvTools tools(SPV_ENV_VULKAN_1_2);
+         bool invalidInput = false, bool irOnly = false) {
+    if (invalidInput)
+        ++prohibited_pointer_graphs;
+    else if (irOnly)
+        ++ir_only_graphs;
+    else
+        ++vulkan_graphs;
+    spvtools::SpirvTools tools(irOnly ? SPV_ENV_UNIVERSAL_1_5 : SPV_ENV_VULKAN_1_2);
     std::string diagnostic;
     tools.SetMessageConsumer(
         [&](spv_message_level_t, const char*, const spv_position_t&, const char* message) { diagnostic = message; });
@@ -206,16 +214,41 @@ void run(const std::string& name, const std::string& assembly, unsigned expected
         expect(false, name + ": independent input must validate: " + diagnostic);
         return;
     }
+    if (irOnly) {
+        // Universal SPIR-V permits these aggregate shapes, but Vulkan's
+        // VUID-StandaloneSpirv-None-04667 prohibits opaque query members,
+        // including queries nested through arrays/structs. Old linked
+        // validators missed this rule; their transformation result below is
+        // only an IR proof, never admission or executable Vulkan coverage.
+        spvtools::SpirvTools vulkan(SPV_ENV_VULKAN_1_2);
+        std::string vulkan_diagnostic;
+        vulkan.SetMessageConsumer(
+            [&](spv_message_level_t, const char*, const spv_position_t&, const char* message) { vulkan_diagnostic = message; });
+        if (!vulkan.Validate(input)) {
+            expect(vulkan_diagnostic.find("opaque") != std::string::npos,
+                   name + ": Vulkan rejects the opaque aggregate after Universal IR validation");
+            const auto saved = input;
+            const QueryStateModule sentinel{{0xfeedbeefu}, {{11, 12}}, 99, 88};
+            for (bool expose : {false, true}) {
+                auto output = sentinel;
+                expect(vel::omm::prepare_query_state(input, expose, &output, &diagnostic) == QueryRewriteStatus::InvalidModule &&
+                           equal(output, sentinel) && input == saved,
+                       name + ": prohibited Vulkan aggregate rejected atomically in both preparation modes");
+            }
+            std::printf("Checked IR-only aggregate: %s (Universal IR validated; Vulkan input rejected)\n", name.c_str());
+            return;
+        }
+    }
     const auto saved = input;
     Graph graph(input);
     for (bool expose : {false, true}) {
         const QueryStateModule sentinel{{0xfeedbeefu}, {{11, 12}}, 99, 88};
         QueryStateModule output = sentinel;
         const auto status = vel::omm::prepare_query_state(input, expose, &output, &diagnostic);
-        expect(status == QueryRewriteStatus::Success, name + ": valid graph supported: " + diagnostic);
+        expect(status == QueryRewriteStatus::Success, name + ": graph transformation supported: " + diagnostic);
         expect(input == saved, name + ": input immutable");
         if (status != QueryRewriteStatus::Success) {
-            expect(equal(output, sentinel), name + ": valid unsupported graph leaves output atomic");
+            expect(equal(output, sentinel), name + ": unsupported graph leaves output atomic");
             continue;
         }
         expect(tools.Validate(output.words), name + ": independent output validator: " + diagnostic);
@@ -223,7 +256,10 @@ void run(const std::string& name, const std::string& assembly, unsigned expected
                name + ": expected source operation inventory");
         graph_invariants(graph, output, expose, name);
     }
-    std::printf("Checked valid IR graph: %s\n", name.c_str());
+    if (irOnly)
+        std::printf("Checked IR-only aggregate: %s (legacy validator; not legal Vulkan input or GPU coverage)\n", name.c_str());
+    else
+        std::printf("Checked valid Vulkan IR graph: %s\n", name.c_str());
 }
 }  // namespace
 int main() {
@@ -250,7 +286,8 @@ int main() {
         const auto body = (privateStorage ? std::string() : variable) + load + "%member = OpAccessChain " +
                           (privateStorage ? "%pPQ" : "%pFQ") + " %object %u0\n" + initialize("%member", "%u1") +
                           "%memberFlags = OpRayQueryGetRayFlagsKHR %u %member\n";
-        run(privateStorage ? "Private struct query member" : "Function struct query member", base(globals, body), 1, 1);
+        run(privateStorage ? "Private struct query member" : "Function struct query member", base(globals, body), 1, 1, false,
+            true);
     }
     for (bool privateStorage : {false, true}) {
         const auto storage = privateStorage ? "Private" : "Function";
@@ -267,7 +304,7 @@ int main() {
                           "%nestedFlags = OpRayQueryGetRayFlagsKHR %u %nestedMember\n"
                           "%arrayFlags = OpRayQueryGetRayFlagsKHR %u %arrayMember\n";
         run(privateStorage ? "Private arrays of mixed nested structs" : "Function arrays of mixed nested structs",
-            base(globals, body), 2, 2);
+            base(globals, body), 2, 2, false, true);
     }
     for (bool privateStorage : {false, true}) {
         const std::string pointer = privateStorage ? "%pPN" : "%pFN", scalar = privateStorage ? "%pPQ" : "%pFQ";
@@ -401,6 +438,9 @@ int main() {
         expect(vel::omm::prepare_query_state(ordinary, expose, nullptr) == QueryRewriteStatus::InvalidModule,
                "null output rejected");
     }
-    std::printf("Independent query graph suite: %u checks, %u failures\n", checks, failures);
+    std::printf(
+        "Independent query graph suite: %u checks, %u failures; %u Vulkan-valid shapes, %u IR-only opaque aggregates, "
+        "%u prohibited Vulkan pointer graphs\n",
+        checks, failures, vulkan_graphs, ir_only_graphs, prohibited_pointer_graphs);
     return failures ? 1 : 0;
 }

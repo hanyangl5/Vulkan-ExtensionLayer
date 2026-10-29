@@ -36,9 +36,13 @@ struct Instance {
 };
 struct Command {
     VkCommandPool pool{};
+    VkCommandBufferLevel level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
     uint32_t queue_family = UINT32_MAX;
     CommandState state;
     ConsumerBindingState compute, graphics;
+    bool transform_feedback_active = false;
+    bool conditional_rendering_active = false;
+    bool inherited_conditional_rendering = false;
     std::vector<AccelerationRecordingRef> accelerations;
     std::vector<PropertyRecordingRef> properties;
     std::vector<std::shared_ptr<Command>> secondary;
@@ -46,6 +50,9 @@ struct Command {
         state.reset();
         compute.reset();
         graphics.reset();
+        transform_feedback_active = false;
+        conditional_rendering_active = false;
+        inherited_conditional_rendering = false;
         accelerations.clear();
         properties.clear();
         secondary.clear();
@@ -150,6 +157,7 @@ void finish_internal(Device& dev, VkCommandBuffer cb, VkResult result) {
     if (result == VK_SUCCESS) state->state.restore(cb, compute_dispatch(dev));
 }
 void fail_command(Device& dev, VkCommandBuffer cb, VkResult result);
+bool internal_compute_ready(Device& dev, VkCommandBuffer cb);
 void fail_device(Device& dev, VkResult result) {
     int32_t expected = VK_SUCCESS;
     dev.error.compare_exchange_strong(expected, result);
@@ -159,7 +167,7 @@ VkResult resolve_as(void* data, VkAccelerationStructureKHR handle, DescriptorASI
     return acceleration_reference(dev.accelerations, handle, &identity->identity_cell_address, &identity->root_cell_address,
                                   &identity->lifetime);
 }
-void refresh_compute(Device& dev, VkCommandBuffer cb) {
+void refresh_compute(Device& dev, VkCommandBuffer cb, bool public_bind = false) {
     if (!dev.consumers) return;
     auto entry = command(dev, cb);
     if (!entry || entry->state.status() != VK_SUCCESS || !entry->compute.logical_pipeline) return;
@@ -169,12 +177,44 @@ void refresh_compute(Device& dev, VkCommandBuffer cb) {
         entry->state.fail(result);
         return;
     }
-    native<PFN_vkCmdBindPipeline>(dev, "vkCmdBindPipeline")(cb, VK_PIPELINE_BIND_POINT_COMPUTE, actual);
-    entry->state.bind_pipeline(VK_PIPELINE_BIND_POINT_COMPUTE, actual);
+    if (public_bind || actual != entry->compute.native_pipeline) {
+        if (entry->transform_feedback_active) {
+            entry->state.fail(VK_ERROR_FEATURE_NOT_PRESENT);
+            return;
+        }
+        native<PFN_vkCmdBindPipeline>(dev, "vkCmdBindPipeline")(cb, VK_PIPELINE_BIND_POINT_COMPUTE, actual);
+        entry->compute.native_pipeline = actual;
+        entry->state.bind_pipeline(VK_PIPELINE_BIND_POINT_COMPUTE, actual);
+    }
+}
+
+bool refresh_graphics(Device& dev, VkCommandBuffer cb, bool public_bind = false) {
+    if (!dev.software) return true;
+    auto entry = command(dev, cb);
+    if (!entry || dev.error.load() != VK_SUCCESS || entry->state.status() != VK_SUCCESS) return false;
+    if (!dev.consumers || !entry->graphics.logical_pipeline) return true;
+    VkPipeline actual{};
+    const auto result = consumer_pipeline(dev.consumers, entry->graphics, entry->graphics.logical_pipeline, &actual);
+    if (result != VK_SUCCESS) {
+        entry->state.fail(result);
+        return false;
+    }
+    if (public_bind || actual != entry->graphics.native_pipeline) {
+        // Binding a pipeline during active transform feedback is forbidden.
+        // Context changes in that interval need a separate transport path.
+        if (entry->transform_feedback_active) {
+            entry->state.fail(VK_ERROR_FEATURE_NOT_PRESENT);
+            return false;
+        }
+        native<PFN_vkCmdBindPipeline>(dev, "vkCmdBindPipeline")(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, actual);
+        entry->graphics.native_pipeline = actual;
+    }
+    return true;
 }
 
 template <typename Call>
 void record_property(Device& dev, VkCommandBuffer cb, Call&& call) {
+    if (!internal_compute_ready(dev, cb)) return;
     auto entry = command(dev, cb);
     if (!entry || !dev.properties) {
         fail_command(dev, cb, VK_ERROR_FEATURE_NOT_PRESENT);
@@ -591,6 +631,7 @@ VKAPI_ATTR VkResult VKAPI_CALL AllocateCommandBuffers(VkDevice handle, const VkC
         for (uint32_t i = 0; i < info->commandBufferCount; ++i) {
             auto entry = std::make_shared<Command>();
             entry->pool = info->commandPool;
+            entry->level = info->level;
             const auto family = state->pool_families.find(info->commandPool);
             if (family != state->pool_families.end()) entry->queue_family = family->second;
             state->commands.emplace(out[i], std::move(entry));
@@ -642,7 +683,13 @@ VKAPI_ATTR VkResult VKAPI_CALL BeginCommandBuffer(VkCommandBuffer cb, const VkCo
     auto state = device(cb);
     VkResult result = native<PFN_vkBeginCommandBuffer>(*state, "vkBeginCommandBuffer")(cb, info);
     if (result == VK_SUCCESS && state->software)
-        if (auto entry = command(*state, cb)) entry->reset();
+        if (auto entry = command(*state, cb)) {
+            entry->reset();
+            if (entry->level == VK_COMMAND_BUFFER_LEVEL_SECONDARY && info->pInheritanceInfo)
+                if (const auto* conditional = vku::FindStructInPNextChain<VkCommandBufferInheritanceConditionalRenderingInfoEXT>(
+                        info->pInheritanceInfo->pNext))
+                    entry->inherited_conditional_rendering = conditional->conditionalRenderingEnable;
+        }
     return result;
 }
 VKAPI_ATTR VkResult VKAPI_CALL ResetCommandBuffer(VkCommandBuffer cb, VkCommandBufferResetFlags flags) {
@@ -664,7 +711,12 @@ VKAPI_ATTR void VKAPI_CALL CmdBindPipeline(VkCommandBuffer cb, VkPipelineBindPoi
     auto state = device(cb);
     if (state->consumers && point == VK_PIPELINE_BIND_POINT_COMPUTE) {
         if (auto entry = command(*state, cb)) entry->compute.logical_pipeline = pipeline;
-        refresh_compute(*state, cb);
+        refresh_compute(*state, cb, true);
+        return;
+    }
+    if (state->consumers && point == VK_PIPELINE_BIND_POINT_GRAPHICS) {
+        if (auto entry = command(*state, cb)) entry->graphics.logical_pipeline = pipeline;
+        refresh_graphics(*state, cb, true);
         return;
     }
     native<PFN_vkCmdBindPipeline>(*state, "vkCmdBindPipeline")(cb, point, pipeline);
@@ -676,7 +728,19 @@ VKAPI_ATTR void VKAPI_CALL CmdBindShadersEXT(VkCommandBuffer cb, uint32_t count,
     auto state = device(cb);
     native<PFN_vkCmdBindShadersEXT>(*state, "vkCmdBindShadersEXT")(cb, count, stages, shaders);
     if (state->software)
-        if (auto entry = command(*state, cb)) entry->state.bind_shaders(count, stages, shaders);
+        if (auto entry = command(*state, cb)) {
+            entry->state.bind_shaders(count, stages, shaders);
+            for (uint32_t i = 0; i < count; ++i) {
+                if (stages[i] == VK_SHADER_STAGE_COMPUTE_BIT) {
+                    entry->compute.logical_pipeline = VK_NULL_HANDLE;
+                    entry->compute.native_pipeline = VK_NULL_HANDLE;
+                }
+                if (stages[i] & (VK_SHADER_STAGE_ALL_GRAPHICS | VK_SHADER_STAGE_TASK_BIT_EXT | VK_SHADER_STAGE_MESH_BIT_EXT)) {
+                    entry->graphics.logical_pipeline = VK_NULL_HANDLE;
+                    entry->graphics.native_pipeline = VK_NULL_HANDLE;
+                }
+            }
+        }
 }
 VKAPI_ATTR VkResult VKAPI_CALL CreatePipelineLayout(VkDevice handle, const VkPipelineLayoutCreateInfo* info,
                                                     const VkAllocationCallbacks* allocator, VkPipelineLayout* out) {
@@ -783,6 +847,7 @@ VKAPI_ATTR void VKAPI_CALL GetMicromapBuildSizesEXT(VkDevice handle, VkAccelerat
 }
 VKAPI_ATTR void VKAPI_CALL CmdBuildMicromapsEXT(VkCommandBuffer cb, uint32_t count, const VkMicromapBuildInfoEXT* infos) {
     auto state = device(cb);
+    if (!internal_compute_ready(*state, cb)) return;
     if (state->software)
         finish_internal(*state, cb, device_cmd_build(state->backend, cb, count, infos));
     else
@@ -790,6 +855,7 @@ VKAPI_ATTR void VKAPI_CALL CmdBuildMicromapsEXT(VkCommandBuffer cb, uint32_t cou
 }
 VKAPI_ATTR void VKAPI_CALL CmdCopyMicromapEXT(VkCommandBuffer cb, const VkCopyMicromapInfoEXT* info) {
     auto state = device(cb);
+    if (!internal_compute_ready(*state, cb)) return;
     if (state->software)
         finish_internal(*state, cb, device_cmd_copy(state->backend, cb, info));
     else
@@ -805,6 +871,7 @@ VKAPI_ATTR void VKAPI_CALL GetDeviceMicromapCompatibilityEXT(VkDevice handle, co
 }
 VKAPI_ATTR void VKAPI_CALL CmdCopyMicromapToMemoryEXT(VkCommandBuffer cb, const VkCopyMicromapToMemoryInfoEXT* info) {
     auto state = device(cb);
+    if (!internal_compute_ready(*state, cb)) return;
     if (state->software)
         finish_internal(*state, cb, device_cmd_serialize(state->backend, cb, info));
     else
@@ -812,6 +879,7 @@ VKAPI_ATTR void VKAPI_CALL CmdCopyMicromapToMemoryEXT(VkCommandBuffer cb, const 
 }
 VKAPI_ATTR void VKAPI_CALL CmdCopyMemoryToMicromapEXT(VkCommandBuffer cb, const VkCopyMemoryToMicromapInfoEXT* info) {
     auto state = device(cb);
+    if (!internal_compute_ready(*state, cb)) return;
     if (state->software)
         finish_internal(*state, cb, device_cmd_deserialize(state->backend, cb, info));
     else
@@ -1072,6 +1140,7 @@ VKAPI_ATTR void VKAPI_CALL CmdBuildAccelerationStructuresKHR(VkCommandBuffer cb,
                                                              const VkAccelerationStructureBuildGeometryInfoKHR* infos,
                                                              const VkAccelerationStructureBuildRangeInfoKHR* const* ranges) {
     auto state = device(cb);
+    if (!internal_compute_ready(*state, cb)) return;
     if (state->software) {
         auto entry = command(*state, cb);
         if (!entry || !state->accelerations) {
@@ -1139,6 +1208,8 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateQueryPool(VkDevice handle, const VkQueryPoo
 }
 
 #include "omm_layer_consumers.inc"
+#include "omm_layer_graphics.inc"
+#include "omm_layer_conditional.inc"
 
 VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL GetInstanceProcAddr(VkInstance, const char*);
 VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL GetDeviceProcAddr(VkDevice, const char*);
@@ -1174,12 +1245,58 @@ const Hook hooks[] = {
     HOOK(DestroyShaderModule),
     HOOK(CreateComputePipelines),
     HOOK(CreateGraphicsPipelines),
+    HOOK(CmdPreprocessGeneratedCommandsNV),
+    HOOK(CmdPreprocessGeneratedCommandsEXT),
+    HOOK(CmdExecuteGeneratedCommandsNV),
+    HOOK(CmdExecuteGeneratedCommandsEXT),
+    HOOK(CmdBindPipelineShaderGroupNV),
+    HOOK(CmdBeginConditionalRenderingEXT),
+    HOOK(CmdBeginConditionalRendering2EXT),
+    HOOK(CmdEndConditionalRenderingEXT),
+    HOOK(CreateRenderPass),
+    HOOK(CreateRenderPass2),
+    HOOK(DestroyRenderPass),
+    HOOK(CmdDraw),
+    HOOK(CmdDrawIndexed),
+    HOOK(CmdDrawIndirect),
+    HOOK(CmdDrawIndexedIndirect),
+    HOOK(CmdDrawMeshTasksIndirectNV),
+    HOOK(CmdDrawMeshTasksIndirectEXT),
+    HOOK(CmdDrawMeshTasksIndirectCountNV),
+    HOOK(CmdDrawMeshTasksIndirectCountEXT),
+    HOOK(CmdDrawMeshTasksNV),
+    HOOK(CmdDrawMeshTasksEXT),
+    HOOK(CmdDrawClusterHUAWEI),
+    HOOK(CmdDrawClusterIndirectHUAWEI),
+    HOOK(CmdDrawMultiEXT),
+    HOOK(CmdDrawMultiIndexedEXT),
+    HOOK(CmdDrawIndirectByteCountEXT),
+    HOOK(CmdDrawIndirect2KHR),
+    HOOK(CmdDrawIndexedIndirect2KHR),
+    HOOK(CmdDrawMeshTasksIndirect2EXT),
+    HOOK(CmdDrawIndirectCount2KHR),
+    HOOK(CmdDrawIndexedIndirectCount2KHR),
+    HOOK(CmdDrawMeshTasksIndirectCount2EXT),
+    HOOK(CmdDrawIndirectByteCount2EXT),
+    HOOK(CmdDrawIndirectCount),
+    HOOK(CmdDrawIndexedIndirectCount),
+    HOOK(CmdBeginTransformFeedbackEXT),
+    HOOK(CmdEndTransformFeedbackEXT),
+    HOOK(CmdBeginTransformFeedback2EXT),
+    HOOK(CmdEndTransformFeedback2EXT),
+    {"vkCreateRenderPass2KHR", reinterpret_cast<PFN_vkVoidFunction>(CreateRenderPass2)},
+    {"vkCmdDrawIndirectCountKHR", reinterpret_cast<PFN_vkVoidFunction>(CmdDrawIndirectCount)},
+    {"vkCmdDrawIndirectCountAMD", reinterpret_cast<PFN_vkVoidFunction>(CmdDrawIndirectCount)},
+    {"vkCmdDrawIndexedIndirectCountKHR", reinterpret_cast<PFN_vkVoidFunction>(CmdDrawIndexedIndirectCount)},
+    {"vkCmdDrawIndexedIndirectCountAMD", reinterpret_cast<PFN_vkVoidFunction>(CmdDrawIndexedIndirectCount)},
     HOOK(CreateRayTracingPipelinesKHR),
     HOOK(CreateShadersEXT),
     HOOK(DestroyPipeline),
     HOOK(CmdDispatch),
     HOOK(CmdDispatchBase),
     HOOK(CmdDispatchIndirect),
+    HOOK(CmdDispatchIndirect2KHR),
+    HOOK(CmdDispatchTileQCOM),
     HOOK(CmdExecuteCommands),
     HOOK(CreateDescriptorUpdateTemplate),
     HOOK(WaitForFences),

@@ -14,6 +14,7 @@
 #include <mutex>
 #include <new>
 #include <set>
+#include <type_traits>
 #include <unordered_map>
 
 namespace vel::omm {
@@ -41,11 +42,23 @@ struct Shader {
     std::vector<uint32_t> words;
     DescriptorContextRef placeholder_context;
 };
+struct SubpassUse {
+    bool color = false, depth_stencil = false;
+};
+struct RenderPass {
+    Native native;
+    VkRenderPass handle = VK_NULL_HANDLE;
+    std::vector<SubpassUse> subpasses;
+    ~RenderPass() {
+        if (handle) native.get<PFN_vkDestroyRenderPass>("vkDestroyRenderPass")(native.device, handle, native.allocation());
+    }
+};
 struct Variant {
     Native native;
     VkPipeline pipeline = VK_NULL_HANDLE;
     DescriptorContextRef context;
     std::shared_ptr<const ConsumerLayout> layout;
+    std::shared_ptr<const RenderPass> render_pass;
     ~Variant() {
         if (pipeline) native.get<PFN_vkDestroyPipeline>("vkDestroyPipeline")(native.device, pipeline, native.allocation());
     }
@@ -103,9 +116,13 @@ struct ConsumerLayout {
     }
 };
 struct ConsumerPipeline {
+    VkPipelineBindPoint bind_point = VK_PIPELINE_BIND_POINT_COMPUTE;
     vku::safe_VkComputePipelineCreateInfo info;
+    vku::safe_VkGraphicsPipelineCreateInfo graphics;
     std::shared_ptr<ConsumerLayout> layout;
+    std::shared_ptr<RenderPass> render_pass;
     std::vector<uint32_t> source;
+    std::vector<std::vector<uint32_t>> stage_sources;
     DescriptorContextRef base_context;
     std::map<VkDeviceAddress, std::weak_ptr<Variant>> variants;
 };
@@ -119,6 +136,7 @@ struct ConsumerBackend {
     std::map<std::vector<uint64_t>, std::weak_ptr<SetDefinition>> definitions;
     uint64_t unique_key = 0;
     std::unordered_map<VkPipelineLayout, Entry<ConsumerLayout>> layouts;
+    std::unordered_map<VkRenderPass, Entry<RenderPass>> render_passes;
     std::unordered_map<VkShaderModule, Entry<Shader>> shaders;
     std::unordered_map<VkPipeline, Entry<ConsumerPipeline>> pipelines;
 };
@@ -153,6 +171,117 @@ void copy_feedback(const void* from_chain, const void* to_chain) noexcept {
                     std::min(to->pipelineStageCreationFeedbackCount, from->pipelineStageCreationFeedbackCount),
                     to->pPipelineStageCreationFeedbacks);
 }
+bool dynamic(const VkGraphicsPipelineCreateInfo& info, VkDynamicState state) {
+    if (!info.pDynamicState) return false;
+    const auto& states = *info.pDynamicState;
+    for (uint32_t i = 0; i < states.dynamicStateCount; ++i)
+        if (states.pDynamicStates[i] == state) return true;
+    return false;
+}
+vku::PNextCopyState graphics_copy_state(const VkGraphicsPipelineCreateInfo& info) {
+    vku::PNextCopyState copy;
+    copy.init = [legacy_render_pass = bool(info.renderPass)](VkBaseOutStructure* to, const VkBaseOutStructure* from) {
+        // This entire structure is ignored with a legacy render pass. In
+        // particular its format array need not point at accessible memory.
+        if (legacy_render_pass && from->sType == VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO) {
+            VkPipelineRenderingCreateInfo ignored{VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO};
+            reinterpret_cast<vku::safe_VkPipelineRenderingCreateInfo*>(to)->initialize(&ignored);
+            return true;
+        }
+        return false;
+    };
+    return copy;
+}
+void snapshot_graphics(vku::safe_VkGraphicsPipelineCreateInfo& output, const VkGraphicsPipelineCreateInfo& info,
+                       const SubpassUse& use) {
+    auto normalized = info;
+    bool mesh = false;
+    for (uint32_t i = 0; i < info.stageCount; ++i)
+        mesh |= (info.pStages[i].stage & (VK_SHADER_STAGE_MESH_BIT_EXT | VK_SHADER_STAGE_TASK_BIT_EXT)) != 0;
+    if (mesh || dynamic(info, VK_DYNAMIC_STATE_VERTEX_INPUT_EXT)) normalized.pVertexInputState = nullptr;
+    if (mesh) normalized.pInputAssemblyState = nullptr;
+    const bool rasterization = dynamic(info, VK_DYNAMIC_STATE_RASTERIZER_DISCARD_ENABLE) || !info.pRasterizationState ||
+                               !info.pRasterizationState->rasterizerDiscardEnable;
+    VkPipelineViewportStateCreateInfo viewport{};
+    if (rasterization && info.pViewportState) {
+        viewport = *info.pViewportState;
+        if (dynamic(info, VK_DYNAMIC_STATE_VIEWPORT_WITH_COUNT)) {
+            viewport.viewportCount = 0;
+            viewport.pViewports = nullptr;
+        }
+        if (dynamic(info, VK_DYNAMIC_STATE_SCISSOR_WITH_COUNT)) {
+            viewport.scissorCount = 0;
+            viewport.pScissors = nullptr;
+        }
+        normalized.pViewportState = &viewport;
+    }
+    VkPipelineMultisampleStateCreateInfo multisample{};
+    if (rasterization && info.pMultisampleState && dynamic(info, VK_DYNAMIC_STATE_SAMPLE_MASK_EXT)) {
+        multisample = *info.pMultisampleState;
+        multisample.pSampleMask = nullptr;
+        normalized.pMultisampleState = &multisample;
+    }
+    VkPipelineColorBlendStateCreateInfo blend{};
+    if (rasterization && use.color && info.pColorBlendState && dynamic(info, VK_DYNAMIC_STATE_COLOR_BLEND_ENABLE_EXT) &&
+        dynamic(info, VK_DYNAMIC_STATE_COLOR_BLEND_EQUATION_EXT) && dynamic(info, VK_DYNAMIC_STATE_COLOR_WRITE_MASK_EXT)) {
+        blend = *info.pColorBlendState;
+        blend.pAttachments = nullptr;
+        normalized.pColorBlendState = &blend;
+    }
+    auto copy = graphics_copy_state(info);
+    output.initialize(&normalized, use.color, use.depth_stencil, &copy);
+}
+VkResult graphics_environment(ConsumerBackend& backend, const VkGraphicsPipelineCreateInfo& info,
+                              std::shared_ptr<RenderPass>* retained, SubpassUse* use) {
+    if (info.renderPass) {
+        const auto found = backend.render_passes.find(info.renderPass);
+        if (found == backend.render_passes.end() || info.subpass >= found->second.object->subpasses.size())
+            return VK_ERROR_FEATURE_NOT_PRESENT;
+        *retained = found->second.object;
+        *use = (*retained)->subpasses[info.subpass];
+    } else if (const auto* rendering = vku::FindStructInPNextChain<VkPipelineRenderingCreateInfo>(info.pNext)) {
+        use->depth_stencil =
+            rendering->depthAttachmentFormat != VK_FORMAT_UNDEFINED || rendering->stencilAttachmentFormat != VK_FORMAT_UNDEFINED;
+        for (uint32_t i = 0; i < rendering->colorAttachmentCount; ++i)
+            use->color |= rendering->pColorAttachmentFormats[i] != VK_FORMAT_UNDEFINED;
+    }
+    return VK_SUCCESS;
+}
+template <typename Info, typename SafeInfo, typename Create>
+VkResult track_render_pass(ConsumerBackend& backend, VkRenderPass handle, const Info& info, Create create) {
+    try {
+        std::lock_guard<std::mutex> lock(backend.mutex);
+        const auto existing = backend.render_passes.find(handle);
+        if (existing != backend.render_passes.end()) {
+            ++existing->second.creations;
+            return VK_SUCCESS;
+        }
+        auto pass = std::make_shared<RenderPass>();
+        pass->native = backend.native;
+        pass->subpasses.resize(info.subpassCount);
+        for (uint32_t i = 0; i < info.subpassCount; ++i) {
+            const auto& subpass = info.pSubpasses[i];
+            auto& use = pass->subpasses[i];
+            use.depth_stencil =
+                subpass.pDepthStencilAttachment && subpass.pDepthStencilAttachment->attachment != VK_ATTACHMENT_UNUSED;
+            for (uint32_t j = 0; j < subpass.colorAttachmentCount; ++j)
+                use.color |= subpass.pColorAttachments[j].attachment != VK_ATTACHMENT_UNUSED;
+        }
+        SafeInfo owned(&info);
+        // These report only the application's original create. Private clone
+        // creation must not repeat feedback or retain any output destination.
+        vku::RemoveFromPnext(owned, VK_STRUCTURE_TYPE_RENDER_PASS_CREATION_FEEDBACK_CREATE_INFO_EXT);
+        if constexpr (std::is_same_v<Info, VkRenderPassCreateInfo2>)
+            for (uint32_t i = 0; i < owned.subpassCount; ++i)
+                vku::RemoveFromPnext(owned.pSubpasses[i], VK_STRUCTURE_TYPE_RENDER_PASS_SUBPASS_FEEDBACK_CREATE_INFO_EXT);
+        const auto result = create(owned.ptr(), &pass->handle);
+        if (result != VK_SUCCESS) return result;
+        backend.render_passes.emplace(handle, Entry<RenderPass>{pass});
+        return VK_SUCCESS;
+    } catch (const std::bad_alloc&) {
+        return VK_ERROR_OUT_OF_HOST_MEMORY;
+    }
+}
 VkResult transform_shader(ConsumerBackend& backend, const std::vector<uint32_t>& source, const DescriptorContextRef& context,
                           std::vector<uint32_t>* output) {
     auto exports = backend.exports;
@@ -185,9 +314,60 @@ VkResult transform_shader(ConsumerBackend& backend, const std::vector<uint32_t>&
     *output = std::move(rewritten.words);
     return VK_SUCCESS;
 }
+VkResult create_graphics_variant(ConsumerBackend& backend, ConsumerPipeline& pipeline, const DescriptorContextRef& context,
+                                 VkPipelineCache cache, const VkAllocationCallbacks* allocator, VkPipeline* out,
+                                 const VkGraphicsPipelineCreateInfo* public_info = nullptr) {
+    vku::safe_VkGraphicsPipelineCreateInfo owned(pipeline.graphics);
+    owned.layout = pipeline.layout->handle;
+    owned.renderPass = pipeline.render_pass ? pipeline.render_pass->handle : VK_NULL_HANDLE;
+    struct Modules {
+        Native native;
+        std::vector<VkShaderModule> handles;
+        ~Modules() {
+            for (const auto handle : handles)
+                if (handle)
+                    native.get<PFN_vkDestroyShaderModule>("vkDestroyShaderModule")(native.device, handle, native.allocation());
+        }
+    } modules{backend.native, std::vector<VkShaderModule>(owned.stageCount)};
+    for (uint32_t i = 0; i < owned.stageCount; ++i) {
+        const auto& source = pipeline.stage_sources[i];
+        std::vector<uint32_t> code;
+        if (has_query(source)) {
+            const auto result = transform_shader(backend, source, context, &code);
+            if (result != VK_SUCCESS) return result;
+        } else
+            code = sanitize_declarations(source.data(), source.size() * 4);
+        VkShaderModuleCreateInfo module_info{VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO};
+        module_info.codeSize = code.size() * 4;
+        module_info.pCode = code.data();
+        const auto result = backend.native.get<PFN_vkCreateShaderModule>("vkCreateShaderModule")(
+            backend.native.device, &module_info, backend.native.allocation(), &modules.handles[i]);
+        if (result != VK_SUCCESS) return result;
+        auto& stage = owned.pStages[i];
+        stage.module = modules.handles[i];
+        vku::RemoveFromPnext(stage, VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO);
+        vku::RemoveFromPnext(stage, VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_MODULE_IDENTIFIER_CREATE_INFO_EXT);
+    }
+    if (!public_info) {
+        constexpr auto remove = VK_PIPELINE_CREATE_DERIVATIVE_BIT | VK_PIPELINE_CREATE_FAIL_ON_PIPELINE_COMPILE_REQUIRED_BIT;
+        owned.flags &= ~remove;
+        if (auto* flags = const_cast<VkPipelineCreateFlags2CreateInfo*>(
+                vku::FindStructInPNextChain<VkPipelineCreateFlags2CreateInfo>(owned.pNext)))
+            flags->flags &= ~VkPipelineCreateFlags2(remove);
+        owned.basePipelineHandle = VK_NULL_HANDLE;
+        owned.basePipelineIndex = -1;
+        vku::RemoveFromPnext(owned, VK_STRUCTURE_TYPE_PIPELINE_CREATION_FEEDBACK_CREATE_INFO);
+    }
+    const auto result = backend.native.get<PFN_vkCreateGraphicsPipelines>("vkCreateGraphicsPipelines")(
+        backend.native.device, cache, 1, owned.ptr(), allocator, out);
+    if (public_info) copy_feedback(owned.pNext, public_info->pNext);
+    return result;
+}
 VkResult create_variant(ConsumerBackend& backend, ConsumerPipeline& pipeline, const DescriptorContextRef& context,
                         VkPipelineCache cache, const VkAllocationCallbacks* allocator, VkPipeline* out,
                         const VkComputePipelineCreateInfo* public_info = nullptr) {
+    if (pipeline.bind_point == VK_PIPELINE_BIND_POINT_GRAPHICS)
+        return create_graphics_variant(backend, pipeline, context, cache, allocator, out);
     std::vector<uint32_t> transformed;
     const auto transformed_result = transform_shader(backend, pipeline.source, context, &transformed);
     if (transformed_result != VK_SUCCESS) return transformed_result;
@@ -348,6 +528,27 @@ void consumer_untrack_layout(ConsumerBackend* backend, VkPipelineLayout handle) 
     auto found = backend->layouts.find(handle);
     if (found != backend->layouts.end() && --found->second.creations == 0) backend->layouts.erase(found);
 }
+VkResult consumer_track_render_pass(ConsumerBackend* backend, VkRenderPass handle, const VkRenderPassCreateInfo* info) {
+    return track_render_pass<VkRenderPassCreateInfo, vku::safe_VkRenderPassCreateInfo>(
+        *backend, handle, *info, [&](const VkRenderPassCreateInfo* owned, VkRenderPass* out) {
+            return backend->native.get<PFN_vkCreateRenderPass>("vkCreateRenderPass")(backend->native.device, owned,
+                                                                                     backend->native.allocation(), out);
+        });
+}
+VkResult consumer_track_render_pass2(ConsumerBackend* backend, VkRenderPass handle, const VkRenderPassCreateInfo2* info) {
+    return track_render_pass<VkRenderPassCreateInfo2, vku::safe_VkRenderPassCreateInfo2>(
+        *backend, handle, *info, [&](const VkRenderPassCreateInfo2* owned, VkRenderPass* out) {
+            auto create = backend->native.get<PFN_vkCreateRenderPass2>("vkCreateRenderPass2");
+            if (!create) create = backend->native.get<PFN_vkCreateRenderPass2>("vkCreateRenderPass2KHR");
+            if (!create) return VK_ERROR_FEATURE_NOT_PRESENT;
+            return create(backend->native.device, owned, backend->native.allocation(), out);
+        });
+}
+void consumer_untrack_render_pass(ConsumerBackend* backend, VkRenderPass handle) {
+    std::lock_guard<std::mutex> lock(backend->mutex);
+    const auto found = backend->render_passes.find(handle);
+    if (found != backend->render_passes.end() && --found->second.creations == 0) backend->render_passes.erase(found);
+}
 VkResult consumer_create_shader(ConsumerBackend* backend, const VkShaderModuleCreateInfo* info,
                                 const VkAllocationCallbacks* allocator, VkShaderModule* out) {
     try {
@@ -500,6 +701,112 @@ VkResult consumer_create_compute(ConsumerBackend* backend, VkPipelineCache cache
         return VK_ERROR_OUT_OF_HOST_MEMORY;
     }
 }
+VkResult consumer_create_graphics(ConsumerBackend* backend, VkPipelineCache cache, uint32_t count,
+                                  const VkGraphicsPipelineCreateInfo* infos, const VkAllocationCallbacks* allocator,
+                                  VkPipeline* out) {
+    for (uint32_t i = 0; i < count; ++i) out[i] = VK_NULL_HANDLE;
+    VkResult overall = VK_SUCCESS;
+    try {
+        std::lock_guard<std::mutex> lock(backend->mutex);
+        for (uint32_t i = 0; i < count; ++i) {
+            auto info = infos[i];
+            const auto* flags2 = vku::FindStructInPNextChain<VkPipelineCreateFlags2CreateInfo>(info.pNext);
+            const auto effective_flags = flags2 ? flags2->flags : VkPipelineCreateFlags2(info.flags);
+            const auto* libraries = vku::FindStructInPNextChain<VkPipelineLibraryCreateInfoKHR>(info.pNext);
+            VkResult result = VK_SUCCESS;
+            // Libraries may hide every query stage from the final pStages.
+            // Until their dependency graph is retained and rewritten together,
+            // neither a library nor a linked pipeline can safely pass through.
+            // NV shader groups also carry independent modules and referenced
+            // pipelines. Replacing only the parent stages would additionally
+            // violate the required parent/group-zero state equivalence.
+            if ((effective_flags & VK_PIPELINE_CREATE_LIBRARY_BIT_KHR) || (libraries && libraries->libraryCount) ||
+                vku::FindStructInPNextChain<VkGraphicsPipelineLibraryCreateInfoEXT>(info.pNext) ||
+                vku::FindStructInPNextChain<VkGraphicsPipelineShaderGroupsCreateInfoNV>(info.pNext))
+                result = VK_ERROR_FEATURE_NOT_PRESENT;
+            vku::safe_VkGraphicsPipelineCreateInfo independent;
+            bool independent_compilation = false;
+            if (result == VK_SUCCESS && (effective_flags & VK_PIPELINE_CREATE_DERIVATIVE_BIT) && !info.basePipelineHandle &&
+                info.basePipelineIndex >= 0) {
+                if (uint32_t(info.basePipelineIndex) >= i) return VK_ERROR_FEATURE_NOT_PRESENT;
+                info.basePipelineHandle = out[info.basePipelineIndex];
+                info.basePipelineIndex = -1;
+                if (!info.basePipelineHandle) {
+                    // Only copy the pNext chain here: ordinary graphics need
+                    // not have a retained render pass, and their ignored state
+                    // pointers must not be visited to remove a reuse hint.
+                    auto copy = graphics_copy_state(info);
+                    independent.pNext = vku::SafePnextCopy(info.pNext, &copy);
+                    info.pNext = independent.pNext;
+                    info.flags &= ~VK_PIPELINE_CREATE_DERIVATIVE_BIT;
+                    if (auto* flags = const_cast<VkPipelineCreateFlags2CreateInfo*>(
+                            vku::FindStructInPNextChain<VkPipelineCreateFlags2CreateInfo>(info.pNext)))
+                        flags->flags &= ~VkPipelineCreateFlags2(VK_PIPELINE_CREATE_DERIVATIVE_BIT);
+                    independent_compilation = true;
+                }
+            }
+            std::shared_ptr<ConsumerPipeline> pipeline;
+            if (result == VK_SUCCESS) {
+                std::vector<std::vector<uint32_t>> sources;
+                sources.reserve(info.stageCount);
+                bool query = false, missing_source = false;
+                for (uint32_t stage = 0; stage < info.stageCount; ++stage) {
+                    auto source = source_for(*backend, info.pStages[stage]);
+                    missing_source |= source.empty();
+                    query |= source.empty() || has_query(source);
+                    sources.push_back(std::move(source));
+                }
+                if (!query)
+                    result = backend->native.get<PFN_vkCreateGraphicsPipelines>("vkCreateGraphicsPipelines")(
+                        backend->native.device, cache, 1, &info, allocator, &out[i]);
+                else {
+                    const auto layout = backend->layouts.find(info.layout);
+                    if (missing_source || layout == backend->layouts.end() ||
+                        vku::FindStructInPNextChain<VkPipelineBinaryInfoKHR>(info.pNext))
+                        result = VK_ERROR_FEATURE_NOT_PRESENT;
+                    else {
+                        pipeline = std::make_shared<ConsumerPipeline>();
+                        pipeline->bind_point = VK_PIPELINE_BIND_POINT_GRAPHICS;
+                        pipeline->layout = layout->second.object;
+                        pipeline->stage_sources = std::move(sources);
+                        SubpassUse use;
+                        result = graphics_environment(*backend, info, &pipeline->render_pass, &use);
+                        if (result == VK_SUCCESS) {
+                            snapshot_graphics(pipeline->graphics, info, use);
+                            DescriptorContextRef empty;
+                            result = descriptor_build_context(backend->descriptors, {}, &empty);
+                            if (result == VK_SUCCESS) {
+                                pipeline->base_context = empty;
+                                result = create_graphics_variant(*backend, *pipeline, empty, cache, allocator, &out[i], &info);
+                            }
+                        }
+                    }
+                }
+            }
+            if (independent_compilation) copy_feedback(info.pNext, infos[i].pNext);
+            if (result == VK_SUCCESS && pipeline) {
+                try {
+                    const auto existing = backend->pipelines.find(out[i]);
+                    if (existing != backend->pipelines.end())
+                        ++existing->second.creations;
+                    else
+                        backend->pipelines.emplace(out[i], Entry<ConsumerPipeline>{pipeline});
+                } catch (...) {
+                    backend->native.get<PFN_vkDestroyPipeline>("vkDestroyPipeline")(backend->native.device, out[i], allocator);
+                    out[i] = VK_NULL_HANDLE;
+                    throw;
+                }
+            }
+            if (result != VK_SUCCESS) {
+                if (overall == VK_SUCCESS) overall = result;
+                if (effective_flags & VK_PIPELINE_CREATE_EARLY_RETURN_ON_FAILURE_BIT) break;
+            }
+        }
+        return overall;
+    } catch (const std::bad_alloc&) {
+        return VK_ERROR_OUT_OF_HOST_MEMORY;
+    }
+}
 void consumer_destroy_pipeline(ConsumerBackend* backend, VkPipeline pipeline, const VkAllocationCallbacks* allocator) {
     {
         std::lock_guard<std::mutex> lock(backend->mutex);
@@ -578,6 +885,7 @@ VkResult consumer_pipeline(ConsumerBackend* backend, ConsumerBindingState& state
             created->native = backend->native;
             created->context = context;
             created->layout = pipeline->layout;
+            created->render_pass = pipeline->render_pass;
             result = create_variant(*backend, *pipeline, context, VK_NULL_HANDLE, backend->native.allocation(), &created->pipeline);
             if (result != VK_SUCCESS) return result;
             variant = std::move(created);

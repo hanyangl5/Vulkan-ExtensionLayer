@@ -9,7 +9,8 @@ Updated 2026-10-29. The active goal is the complete native-RT EXT implementation
 in [the specification](opacity_micromap_layer.md), following
 [the implementation plan](opacity_micromap_plan.md). No full milestone is complete.
 The experimental loader now connects public micromap build/copy/query operations,
-native AS metadata and descriptor-sourced compute Ray Query consumers. Default
+native AS metadata and descriptor-sourced compute and monolithic graphics Ray
+Query consumers. Default
 operation remains native pass-through. The layer does not add
 OMM discovery to devices without native OMM while the full consumer contract is
 unfinished. The complete application-facing adapter remains in progress.
@@ -34,7 +35,7 @@ there is no `vkrt_layer` hierarchy or fallback build dependency.
 | Native RQ mechanism proof | Actual native BLAS/TLAS builds and traversal; transparent filtering, opaque auto-confirm, logical culling, unknown/force-two-state, ordinary triangles and AABB candidates |
 | Native RTP mechanism proof | Native TraceRay, injected Any-Hit, procedural Intersection guarding, payload/attributes, Ignore/Terminate and legal zero triangle hit groups |
 | Query compiler preparation | SPIR-V shadow state for query objects, fixed arrays/structs and function parameters; logical flags saved at initialization and restored by getter rewriting |
-| Automatic RQ consumer | Typed parallel state, inline Proceed filtering and flags/AABB getter restoration; production descriptor provenance and bound-set pipeline variants now connect compute RQ |
+| Automatic RQ consumer | Typed parallel state, inline Proceed filtering and flags/AABB getter restoration; production descriptor provenance and bound-set pipeline variants connect compute and monolithic graphics RQ, including dynamic rendering |
 | Native metadata component | Checked BVH-independent RootCell/TLAS/BLAS layout, normalized 64-bit association, GPU-owned OMM snapshots, native AS interception and GPU root publication |
 | Packed classifier composition | Resource-free classifier closure linked into ordinary application SPIR-V; actual GPU packed-data/native-RQ chain passes 4,506 traces with explicit scene RootCell |
 | Experimental public API | Public create/destroy/sizes/build/clone/compact, size queries, GPU serialization/deserialization and compatibility, buffer/state/synchronization translation |
@@ -122,33 +123,37 @@ See [the metadata/classifier report](omm_metadata_classifier_2026-10-27.md) and
 The earlier loader/device checkpoint is documented in
 [the 2026-10-27 report](omm_layer_api_2026-10-27.md). Its consumer-device admission
 gate has now been replaced by operation-level guards. Explicit experimental mode
-admits native RQ/RTP features and supports descriptor-sourced compute RQ through
-the public API. Graphics RQ, RTP pipelines and shader objects still fail closed at
-their respective creation boundaries. These are temporary implementation gaps,
-not a smaller final goal. See the current
+admits native RQ/RTP features and supports descriptor-sourced compute and
+monolithic graphics RQ through the public API. RTP pipelines, graphics libraries,
+NV shader groups and shader objects still fail closed at their respective
+creation boundaries. Generated commands and transform-feedback context changes
+also remain guarded. These are temporary implementation gaps, not a smaller
+final goal. See the earlier
 [consumer integration report](omm_consumer_integration_2026-10-28.md).
 
-Independent query graph tests pass 720 checks across 15 valid graph shapes and
-four Vulkan-prohibited pointer graphs. Coverage includes Function/Private mixed
-structs and nested arrays, helper signatures, signed flags, vertex, fragment and
-ray-generation entry points. Array/helper/reinitialization behavior also executes
-on the GPU. Mixed-struct runtime coverage is still open: this glslang build emits
-an invalid UniformConstant object for the attempted GLSL struct fixture. The
-invalid output is retained; valid hand-assembled struct inputs exercise the
-compiler preparation without accepting that invalid frontend output.
+Independent query graph tests report 720 checks across 11 Vulkan-valid shapes,
+four non-Vulkan opaque-aggregate IR shapes, and four Vulkan-prohibited pointer
+graphs. Query-containing structs are forbidden by VUID 04667; earlier reports
+incorrectly grouped these IR cases with legal Vulkan inputs. They are not missing
+legal runtime coverage. Arrays, helper signatures, signed flags and graphics/RT
+entry points remain covered. The actual GPU arrays/helper/reinitialization fixture
+also contained unused opaque-struct declarations rejected by VVL 1.4.366; those
+declarations have been removed without reducing its 1,020 dispatches/2,040 traces.
+Original validation diagnostics are retained in the graphics checkpoint evidence.
 
 ## Verification and external CTS
 
-Standalone CMake build with LLVM 20.1.3 and Vulkan SDK 1.4.357.0 has passing
-coverage for 27 non-loader component CTests (12 offline, 15 GPU). The first bounded
-frozen attempt produced 25 Pass and two native-proof Timeouts; both passed a
-targeted retry with unchanged executables. Original failures are retained. The
-public loader test separately passes 93 checks in each layer order with both SDK
-VVL 1.4.357 and the compatible VVL 1.4.366 nightly. Parent VEL configuration builds the new
-OMM targets and passes 12 offline targets; the host-only configuration passes three without
-Vulkan dependencies. The native GPU proofs pass with `VK_LAYER_KHRONOS_validation` and
-`VK_LAYER_VALIDATE_SYNC=1`, with no validation or synchronization diagnostics.
-The generated SPIR-V is checked with the SDK validator.
+Standalone CMake with LLVM 20.1.3 and Vulkan SDK 1.4.357.0 now covers 28 non-loader
+component CTests (12 offline, 16 GPU). With VVL 1.4.366, 27 passed the initial run;
+the remaining GPU fixture exposed the illegal unused opaque struct described
+above, and passed a targeted rerun after correction. The new graphics component
+passes 200 checks across 24 native pipelines. Public loader tests pass 100 MM/API
+checks and eight graphics results in each layer order, with zero validation
+errors or warnings. Parent VEL builds all OMM targets and passes 12 offline
+targets; the host-only configuration passes three without Vulkan dependencies.
+Generated SPIR-V is checked with the SDK validator. Exact current evidence and
+retained failed attempts are in the
+[graphics checkpoint](omm_graphics_consumers_2026-10-29.md).
 
 Evidence is retained under `build-omm` and `build-omm-proof`. The first native
 proof run revealed missing BDA usage on the AS storage fixture; that setup error
@@ -175,7 +180,7 @@ level 12 in both formats. `VK_VEL_OMM_EXPERIMENTAL_SOFTWARE=1` explicitly select
 development backend when the EXT extension is enabled. The mode is captured at
 instance creation. Its software API fixture checks canonical storage magic to
 confirm emulation. The earlier 596.49 native-through-layer CTS retained the 8 Pass/2 Fail
-baseline. Current 621.01 software reruns pass 36/36 exact cases in each
+baseline. The lifecycle checkpoint passed 36/36 exact cases in each
 validation-layer order with VVL 1.4.366: 34 compute RQ cases and two micromap size queries. In an
 earlier below-order run, 34 passed and the final two level-12 processes could not
 initialize during Windows logoff
@@ -186,7 +191,11 @@ and 2 Fail: both actual RTP rendering cases still return
 `VK_ERROR_FEATURE_NOT_PRESENT`. The size queries live in the RTP namespace but
 exercise no RTP shader. The pinned CTS `copy.compact` case actually records
 CLONE; it is not external COMPACT coverage. These results establish the tested
-compute RQ path, not complete EXT conformance.
+compute RQ path, not complete EXT conformance. The newer graphics checkpoint
+extends that exact matrix to 69/69 Pass in each layer order: another 26 vertex OMM
+cases and seven ordinary fragment/geometry/tessellation RQ cases. The final DLL
+and all validation/QPA results are pinned in its separate manifest. Fragment OMM
+has an actual component GPU fixture; the pinned OMM CTS has no fragment form.
 
 The first current CTS attempt with older SDK VVL 1.4.357 returned 36 InternalError
 results because it does not recognize the newly advertised
@@ -196,7 +205,8 @@ nightly was copied into this worktree for the passing reruns; the CTS source,
 cases, validation categories and driver capabilities were not filtered or changed.
 The same frozen OMM DLL is used in both failed and passing attempts.
 See the [lifecycle/serialization report](omm_lifecycle_serialization_2026-10-29.md)
-and its hash manifest for current results, runtime provenance and exact evidence.
+and its hash manifest for that checkpoint's results and runtime provenance. The
+new graphics report records the current artifact; historical hashes are unchanged.
 
 ## Open milestone gates
 
@@ -212,7 +222,8 @@ and its hash manifest for current results, runtime provenance and exact evidence
   barriers/events/queues, replay, feature interaction and lifetime matrix.
 - [ ] M5: complete supported-contract CTS/regressions and unmodified applications.
 
-Next, implement integer-derived AS runtime lookup and graphics RQ, then extend
+Next, implement integer-derived AS runtime lookup and the remaining graphics
+library/transform-feedback/generated-command interactions, then extend
 native RTP context transport to general SBT, nested/callable/indirect execution.
 Complete AS update/copy/serialization/relocation and the full
 synchronization/lifetime matrix. The current AS registry snapshot also needs a
@@ -241,7 +252,7 @@ cmake -S layers/raytracing -B build-omm-integration -G Ninja `
   -DCMAKE_BUILD_TYPE=Release -DVulkan_ROOT=C:/VulkanSDK/1.4.357.0
 cmake --build build-omm-integration --parallel 8
 $env:VK_INSTANCE_LAYERS = 'VK_LAYER_KHRONOS_validation'
-$env:VK_LAYER_PATH = 'C:/VulkanSDK/1.4.357.0/Bin'
+$env:VK_LAYER_PATH = (Resolve-Path 'build-omm-cts-evidence/lifecycle-validation-1.4.366').Path
 Remove-Item Env:VK_LAYER_ENABLES -ErrorAction SilentlyContinue
 $env:VK_LAYER_VALIDATE_SYNC = '1'
 $env:VK_LOADER_LAYERS_DISABLE = '~implicit~'

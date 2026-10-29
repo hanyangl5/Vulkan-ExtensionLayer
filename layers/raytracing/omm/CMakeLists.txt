@@ -246,6 +246,35 @@ if(OMM_BUILD_NATIVE_PROOFS)
         ${CMAKE_CURRENT_BINARY_DIR}/consumer_application.comp.spv)
     set_tests_properties(omm_consumers PROPERTIES LABELS "gpu;native_rt;omm;experimental" SKIP_RETURN_CODE 77
         FAIL_REGULAR_EXPRESSION "Validation Error;SYNC-HAZARD")
+    add_executable(test_omm_graphics_consumers tests/test_omm_graphics_consumers.cpp)
+    target_link_libraries(test_omm_graphics_consumers PRIVATE vel_omm_consumers vel_omm_metadata)
+    set(omm_graphics_shader_dir ${CMAKE_CURRENT_BINARY_DIR}/graphics_consumer)
+    set(omm_graphics_shader_outputs)
+    set(omm_graphics_shader_commands)
+    foreach(shader query.vert query.frag plain.vert plain.frag)
+        list(APPEND omm_graphics_shader_outputs ${omm_graphics_shader_dir}/${shader}.spv)
+        list(APPEND omm_graphics_shader_commands
+            COMMAND Vulkan::glslangValidator -V --target-env vulkan1.2 --keep-uncalled ${omm_graphics_shader_dir}/${shader}
+                -o ${omm_graphics_shader_dir}/${shader}.spv
+            COMMAND ${OMM_SPIRV_VALIDATOR} --target-env vulkan1.2 ${omm_graphics_shader_dir}/${shader}.spv)
+    endforeach()
+    add_custom_command(OUTPUT ${omm_graphics_shader_outputs}
+        COMMAND ${CMAKE_COMMAND} -E make_directory ${omm_graphics_shader_dir}
+        COMMAND test_omm_graphics_consumers --write-shaders ${omm_graphics_shader_dir}
+        ${omm_graphics_shader_commands}
+        DEPENDS test_omm_graphics_consumers VERBATIM)
+    add_custom_target(omm_graphics_consumer_spv ALL DEPENDS ${omm_graphics_shader_outputs})
+    add_test(NAME omm_graphics_consumers COMMAND test_omm_graphics_consumers
+        ${CMAKE_CURRENT_BINARY_DIR}/classifier_library.comp.spv ${omm_graphics_shader_outputs})
+    set_tests_properties(omm_graphics_consumers PROPERTIES LABELS "gpu;native_rt;omm;experimental" SKIP_RETURN_CODE 77
+        FAIL_REGULAR_EXPRESSION "Validation Error;SYNC-HAZARD")
+    add_executable(test_omm_graphics_layer tests/test_omm_graphics_layer.cpp)
+    target_compile_definitions(test_omm_graphics_layer PRIVATE NOMINMAX)
+    target_link_libraries(test_omm_graphics_layer PRIVATE Vulkan::Vulkan)
+    add_dependencies(test_omm_graphics_layer omm_graphics_consumer_spv)
+    add_test(NAME omm_graphics_layer COMMAND test_omm_graphics_layer ${omm_graphics_shader_outputs})
+    set_tests_properties(omm_graphics_layer PROPERTIES LABELS "gpu;native_rt;omm;experimental;loader" SKIP_RETURN_CODE 77
+        FAIL_REGULAR_EXPRESSION "Validation Error;SYNC-HAZARD")
     add_library(VkLayer_VEL_opacity_micromap MODULE omm_layer.cpp ${CMAKE_CURRENT_BINARY_DIR}/omm_kernels.h)
     if(WIN32)
         target_sources(VkLayer_VEL_opacity_micromap PRIVATE omm_layer.def)
