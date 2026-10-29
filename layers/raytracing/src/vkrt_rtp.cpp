@@ -76,19 +76,15 @@ struct Allocator {
     }
 };
 template <class T, class... A>
-T *ScopedToken(const VkAllocationCallbacks *allocator, VkSystemAllocationScope scope, A &&...args) {
+T *Token(const VkAllocationCallbacks *allocator, A &&...args) {
     Allocator a(allocator);
-    void *p = a.allocate(sizeof(T), alignof(T), scope);
+    void *p = a.allocate(sizeof(T), alignof(T), VK_SYSTEM_ALLOCATION_SCOPE_OBJECT);
     try {
         return new (p) T(a, std::forward<A>(args)...);
     } catch (...) {
         a.free(p);
         throw;
     }
-}
-template <class T, class... A>
-T *Token(const VkAllocationCallbacks *allocator, A &&...args) {
-    return ScopedToken<T>(allocator, VK_SYSTEM_ALLOCATION_SCOPE_OBJECT, std::forward<A>(args)...);
 }
 template <class T>
 void FreeToken(T *p) {
@@ -152,17 +148,16 @@ void FreeShader(vkrt_device_data *dev, ShaderToken *token, Allocator allocator) 
 }
 struct LayoutToken {
     Allocator allocator;
-    Allocator public_allocator;
     std::shared_ptr<Layout> value;
-    VkPipelineLayout public_layout{};
-    LayoutToken *next = nullptr;
-    LayoutToken(Allocator owner, Allocator object, std::shared_ptr<Layout> v)
-        : allocator(owner), public_allocator(object), value(std::move(v)) {}
+    VkPipelineLayout native_public{};
+    LayoutToken(Allocator owner, std::shared_ptr<Layout> v, VkPipelineLayout native)
+        : allocator(owner), value(std::move(v)), native_public(native) {}
 };
-struct LayoutRecord {
-    std::shared_ptr<Layout> canonical;
-    LayoutToken *tokens = nullptr;
-};
+void FreeLayoutToken(LayoutToken *token, Allocator allocator) {
+    if (!token) return;
+    token->~LayoutToken();
+    allocator.free(token);
+}
 struct Variant {
     vkrt_device_data *dev = nullptr;
     TypedRuntimeProgram program;
@@ -224,7 +219,7 @@ struct vkrt_rtp_state {
     vkrt_device_data *dev;
     std::mutex lock;
     std::unordered_map<uint64_t, ShaderToken *> shaders;
-    std::unordered_map<uint64_t, LayoutRecord> layouts;
+    std::unordered_map<uint64_t, LayoutToken *> layouts;
     std::unordered_map<uint64_t, PipelineToken *> pipelines;
     std::unordered_map<uint64_t, DescriptorLayoutRecord> descriptor_layouts;
     std::atomic<uint64_t> next_identity{1};
@@ -296,7 +291,7 @@ std::shared_ptr<Layout> FindLayout(vkrt_device_data *d, VkPipelineLayout h) {
     if (!d->rtp) return {};
     std::lock_guard<std::mutex> lock(d->rtp->lock);
     auto i = d->rtp->layouts.find(VKRT_HKEY(h));
-    return i == d->rtp->layouts.end() ? nullptr : i->second.canonical;
+    return i == d->rtp->layouts.end() ? nullptr : i->second->value;
 }
 std::shared_ptr<Layout> FindCommandLayout(vkrt_cmd_buffer_data *cb, VkPipelineLayout h) {
     if (!cb->replaying) return FindLayout(cb->device_data, h);
@@ -342,17 +337,6 @@ bool Compatible(const Layout &a, const Layout &b, uint32_t last) {
             a.pushes[i].size != b.pushes[i].size)
             return false;
     for (uint32_t i = 0; i <= last; ++i)
-        if (a.sets[i] != b.sets[i] && (!a.sets[i] || !b.sets[i] || !(*a.sets[i] == *b.sets[i]))) return false;
-    return true;
-}
-bool SameLayoutDefinition(const Layout &a, const Layout &b) {
-    if (a.sets.size() != b.sets.size() || a.pushes.size() != b.pushes.size() || a.independent_sets != b.independent_sets)
-        return false;
-    for (size_t i = 0; i < a.pushes.size(); ++i)
-        if (a.pushes[i].stageFlags != b.pushes[i].stageFlags || a.pushes[i].offset != b.pushes[i].offset ||
-            a.pushes[i].size != b.pushes[i].size)
-            return false;
-    for (size_t i = 0; i < a.sets.size(); ++i)
         if (a.sets[i] != b.sets[i] && (!a.sets[i] || !b.sets[i] || !(*a.sets[i] == *b.sets[i]))) return false;
     return true;
 }
@@ -477,11 +461,10 @@ VKAPI_ATTR VkResult VKAPI_CALL CreatePipelineLayout(VkDevice device, const VkPip
         auto local = *ci;
         local.pushConstantRangeCount = uint32_t(native.size());
         local.pPushConstantRanges = native.data();
-        // Keep a genuine native public handle for every unhooked ordinary
-        // consumer (templates, push descriptors, maintenance6, and others).
-        // The independently allocated compatible copy outlives the public
-        // object's callbacks when recorded CBs retain it.
-        // Serialize native public-handle creation/publication with retirement.
+        // Keep the native public reference private to its unique token. Native
+        // aliases cannot identify different original RT push definitions.
+        // Independent private clones outlive the public object's callbacks.
+        // Serialize native reference creation/publication with retirement.
         // v was declared before this lock, so its private native owners unwind
         // only after unlocking if any later operation fails.
         std::unique_lock<std::mutex> mutation(d->rtp->lock);
@@ -495,12 +478,6 @@ VKAPI_ATTR VkResult VKAPI_CALL CreatePipelineLayout(VkDevice device, const VkPip
                 if (handle) dev->vtable.DestroyPipelineLayout(dev->device, handle, allocator);
             }
         } public_guard{d, public_layout, a};
-        auto alias = d->rtp->layouts.find(VKRT_HKEY(public_layout));
-        // Stripping RT ranges can make different public definitions identical
-        // to the ICD. A numeric native alias cannot identify both definitions.
-        // Until all public consumers support virtual layout handles, reject
-        // that ambiguity rather than silently replacing recorded semantics.
-        Need(alias == d->rtp->layouts.end() || SameLayoutDefinition(*alias->second.canonical, *v));
         VkPipelineLayout native_layout{};
         Check(d->vtable.CreatePipelineLayout(device, &local, nullptr, &native_layout));
         v->native = native_layout;
@@ -515,24 +492,17 @@ VKAPI_ATTR VkResult VKAPI_CALL CreatePipelineLayout(VkDevice device, const VkPip
         VkPipelineLayout native_rt{};
         Check(d->vtable.CreatePipelineLayout(device, &rt_layout, nullptr, &native_rt));
         v->rt_native = native_rt;
-        // Alias bookkeeping can outlive any particular object's callbacks.
-        // Native public objects still use their caller's OBJECT allocator.
-        const VkAllocationCallbacks *owner = d->rtp->allocator.custom ? &d->rtp->allocator.callbacks : nullptr;
-        if (!owner && d->instance_data && d->instance_data->has_allocator) owner = &d->instance_data->allocator;
-        auto token = ScopedToken<LayoutToken>(owner, VK_SYSTEM_ALLOCATION_SCOPE_DEVICE, Allocator(a), v);
-        token->public_layout = public_layout;
+        // Recording retains v, not this public object or its callback context.
+        auto token = Token<LayoutToken>(a, v, public_layout);
+        const auto identity = Handle<VkPipelineLayout>(token);
         try {
-            auto result = d->rtp->layouts.emplace(VKRT_HKEY(public_layout), LayoutRecord{v, token});
-            if (!result.second) {
-                token->next = result.first->second.tokens;
-                result.first->second.tokens = token;
-            }
+            d->rtp->layouts.emplace(VKRT_HKEY(identity), token);
         } catch (...) {
             FreeToken(token);
             throw;
         }
         public_guard.handle = VK_NULL_HANDLE;
-        *out = public_layout;
+        *out = identity;
         return VK_SUCCESS;
     });
 }
@@ -540,26 +510,20 @@ VKAPI_ATTR void VKAPI_CALL DestroyPipelineLayout(VkDevice device, VkPipelineLayo
     Guard([&] {
         auto d = Device(device);
         LayoutToken *token = nullptr;
-        std::shared_ptr<Layout> retired_canonical;
         if (d->rtp) {
             std::lock_guard<std::mutex> lock(d->rtp->lock);
             auto i = d->rtp->layouts.find(VKRT_HKEY(h));
             if (i != d->rtp->layouts.end()) {
-                token = i->second.tokens;
-                i->second.tokens = token->next;
-                if (!i->second.tokens) {
-                    retired_canonical = std::move(i->second.canonical);
-                    d->rtp->layouts.erase(i);
-                }
+                token = i->second;
+                d->rtp->layouts.erase(i);
+                d->vtable.DestroyPipelineLayout(device, token->native_public, a);
             }
-            // Compatibility is semantic, not callback-structure identity. Use
-            // this call's allocator; a previously retired alias's context may
-            // already be gone. Bookkeeping itself has DEVICE lifetime.
-            if (h) d->vtable.DestroyPipelineLayout(device, h, a);
         } else if (h)
             d->vtable.DestroyPipelineLayout(device, h, a);
-        // Private Layout destruction must not run under the metadata lock.
-        FreeToken(token);
+        if (token) vkrt_debug_object_forget(d, VK_OBJECT_TYPE_PIPELINE_LAYOUT, VKRT_HKEY(h));
+        // Public destruction may supply compatible callbacks with another
+        // context. Private Layout destruction must run outside the lock.
+        FreeLayoutToken(token, Allocator(a));
         return VK_SUCCESS;
     });
 }
@@ -646,6 +610,7 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateComputePipelines(VkDevice device, VkPipelin
             Need(!FindPipeline(d, c.basePipelineHandle));
             c.stage = modules.Translate(c.stage);
             auto ref = FindLayout(d, c.layout);
+            Need(!d->rtp || !c.layout || ref != nullptr);
             if (ref) {
                 c.layout = ref->native;
                 refs.push_back(ref);
@@ -671,6 +636,7 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateGraphicsPipelines(VkDevice device, VkPipeli
             for (auto &stage : stages[n]) stage = modules.Translate(stage);
             c.pStages = stages[n].data();
             auto ref = FindLayout(d, c.layout);
+            Need(!d->rtp || !c.layout || ref != nullptr);
             if (ref) {
                 c.layout = ref->native;
                 refs.push_back(ref);
@@ -1385,14 +1351,12 @@ extern "C" void vkrt_rtp_finish(vkrt_device_data *dev) {
         vkrt_debug_object_forget(dev, VK_OBJECT_TYPE_SHADER_MODULE, p.first);
         FreeShader(dev, p.second, p.second->allocator);
     }
-    for (auto &p : s->layouts) {
-        for (auto token = p.second.tokens; token;) {
-            auto next = token->next;
-            dev->vtable.DestroyPipelineLayout(dev->device, token->public_layout,
-                                              token->public_allocator.custom ? &token->public_allocator.callbacks : nullptr);
-            FreeToken(token);
-            token = next;
-        }
+    for (auto p : s->layouts) {
+        auto token = p.second;
+        vkrt_debug_object_forget(dev, VK_OBJECT_TYPE_PIPELINE_LAYOUT, p.first);
+        dev->vtable.DestroyPipelineLayout(dev->device, token->native_public,
+                                          token->allocator.custom ? &token->allocator.callbacks : nullptr);
+        FreeToken(token);
     }
     Allocator a = s->allocator;
     s->~vkrt_rtp_state();
@@ -1551,6 +1515,7 @@ extern "C" bool vkrt_rtp_debug_owns(vkrt_device_data *dev, VkObjectType type, ui
     std::lock_guard<std::mutex> lock(dev->rtp->lock);
     if (type == VK_OBJECT_TYPE_PIPELINE) return dev->rtp->pipelines.count(handle) != 0;
     if (type == VK_OBJECT_TYPE_SHADER_MODULE) return dev->rtp->shaders.count(handle) != 0;
+    if (type == VK_OBJECT_TYPE_PIPELINE_LAYOUT) return dev->rtp->layouts.count(handle) != 0;
     return false;
 }
 extern "C" void vkrt_rtp_reset_command(vkrt_cmd_buffer_data *cb) {
@@ -1558,7 +1523,8 @@ extern "C" void vkrt_rtp_reset_command(vkrt_cmd_buffer_data *cb) {
     cb->rtp = nullptr;
 }
 extern "C" VkPipelineLayout vkrt_rtp_native_layout(vkrt_device_data *dev, VkPipelineLayout h) {
-    VkPipelineLayout result = h;
+    if (!dev || !dev->rtp) return h;
+    VkPipelineLayout result = VK_NULL_HANDLE;
     Guard([&] {
         auto p = FindLayout(dev, h);
         if (p) result = p->native;
@@ -1567,11 +1533,14 @@ extern "C" VkPipelineLayout vkrt_rtp_native_layout(vkrt_device_data *dev, VkPipe
     return result;
 }
 extern "C" VkPipelineLayout vkrt_rtp_command_native_layout(vkrt_cmd_buffer_data *cb, VkPipelineLayout h) {
-    VkPipelineLayout result = h;
+    if (!cb || !cb->device_data) return VK_NULL_HANDLE;
+    if (!cb->device_data->rtp) return h;
+    VkPipelineLayout result = VK_NULL_HANDLE;
     VkResult status = Guard([&] {
+        if (!h) return VK_SUCCESS;
         auto owner = FindCommandLayout(cb, h);
-        if (cb->replaying) Need(owner != nullptr);
-        if (owner) result = owner->native;
+        Need(owner != nullptr);
+        result = owner->native;
         return VK_SUCCESS;
     });
     if (status != VK_SUCCESS) cb->record_result = status;

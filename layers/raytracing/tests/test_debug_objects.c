@@ -44,21 +44,31 @@ static VKAPI_ATTR void VKAPI_CALL release(void *user, void *memory) {
     ++a->frees;
     free(allocation);
 }
-static const VkObjectType kinds[] = {
-    VK_OBJECT_TYPE_ACCELERATION_STRUCTURE_KHR, VK_OBJECT_TYPE_PIPELINE,   VK_OBJECT_TYPE_SHADER_MODULE,
-    VK_OBJECT_TYPE_DESCRIPTOR_UPDATE_TEMPLATE, VK_OBJECT_TYPE_QUERY_POOL, VK_OBJECT_TYPE_DEFERRED_OPERATION_KHR};
+static const VkObjectType kinds[] = {VK_OBJECT_TYPE_ACCELERATION_STRUCTURE_KHR,
+                                     VK_OBJECT_TYPE_PIPELINE,
+                                     VK_OBJECT_TYPE_SHADER_MODULE,
+                                     VK_OBJECT_TYPE_PIPELINE_LAYOUT,
+                                     VK_OBJECT_TYPE_DESCRIPTOR_UPDATE_TEMPLATE,
+                                     VK_OBJECT_TYPE_QUERY_POOL,
+                                     VK_OBJECT_TYPE_DEFERRED_OPERATION_KHR};
 static const VkDebugReportObjectTypeEXT marker_kinds[] = {VK_DEBUG_REPORT_OBJECT_TYPE_ACCELERATION_STRUCTURE_KHR_EXT,
                                                           VK_DEBUG_REPORT_OBJECT_TYPE_PIPELINE_EXT,
                                                           VK_DEBUG_REPORT_OBJECT_TYPE_SHADER_MODULE_EXT,
+                                                          VK_DEBUG_REPORT_OBJECT_TYPE_PIPELINE_LAYOUT_EXT,
                                                           VK_DEBUG_REPORT_OBJECT_TYPE_DESCRIPTOR_UPDATE_TEMPLATE_EXT,
                                                           VK_DEBUG_REPORT_OBJECT_TYPE_QUERY_POOL_EXT,
                                                           VK_DEBUG_REPORT_OBJECT_TYPE_UNKNOWN_EXT};
-static bool live[6] = {true, true, true, true, true, true};
+static bool live[7] = {true, true, true, true, true, true, true};
 /* Two independently owned public modules may share a native module, whose
  * numeric value may also equal a different raw-RT public token. */
 static const struct {
     uint64_t token, native;
 } shader_aliases[] = {{UINT64_C(0x8100000000000101), 17}, {UINT64_C(0x8100000000000102), 17}};
+static const struct {
+    uint64_t token, native;
+} layout_aliases[] = {{UINT64_C(0x8200000000000101), 17},
+                      {UINT64_C(0x8200000000000102), 17},
+                      {UINT64_C(0x8200000000000103), UINT64_C(0x8200000000000101)}};
 static const uint64_t parallel_handles[] = {100, 101, 102, 103};
 static bool owns(struct vkrt_device_data *dev, VkObjectType type, uint64_t handle) {
     if (dev == &second) return type == VK_OBJECT_TYPE_PIPELINE && handle == 17;
@@ -66,6 +76,9 @@ static bool owns(struct vkrt_device_data *dev, VkObjectType type, uint64_t handl
     if (type == VK_OBJECT_TYPE_SHADER_MODULE)
         for (unsigned i = 0; i < VKRT_ARRAY_SIZE(shader_aliases); ++i)
             if (handle == shader_aliases[i].token) return true;
+    if (type == VK_OBJECT_TYPE_PIPELINE_LAYOUT)
+        for (unsigned i = 0; i < VKRT_ARRAY_SIZE(layout_aliases); ++i)
+            if (handle == layout_aliases[i].token) return true;
     for (unsigned i = 0; i < VKRT_ARRAY_SIZE(kinds); ++i)
         if (type == kinds[i] && handle == 17 && live[i]) return true;
     // Distinct live objects used by the parallel host test, not a handle rule
@@ -285,52 +298,77 @@ static uint64_t private_value_of(VkDevice device, VkObjectType type, uint64_t ha
     get_private[alias](device, type, handle, slot, &data);
     return data;
 }
-static void shader_module_alias_annotations(void) {
-    CHECK(shader_aliases[0].token != shader_aliases[1].token && shader_aliases[0].native == shader_aliases[1].native &&
-          shader_aliases[0].native == 17);
-    const uint64_t tokens[] = {shader_aliases[0].token, shader_aliases[1].token, 17};
-    const char *names[] = {"first native wrapper", "second native wrapper", "raw RT token"};
+static void public_alias_annotations(VkObjectType type, VkDebugReportObjectTypeEXT marker_type, const uint64_t tokens[3]) {
+    const char *names[] = {"first public identity", "second public identity", "third public identity"};
     const unsigned before_calls = native_calls, before_lookups = native_lookups;
     const unsigned before_sets = private_native.sets, before_gets = private_native.gets;
-    for (unsigned i = 0; i < VKRT_ARRAY_SIZE(tokens); ++i) {
+    for (unsigned i = 0; i < 3; ++i) {
         unsigned char bytes[] = {(unsigned char)i, 0, 255};
-        CHECK(name_object(first.device, VK_OBJECT_TYPE_SHADER_MODULE, tokens[i], names[i]) == VK_SUCCESS);
-        CHECK(tag_object(first.device, VK_OBJECT_TYPE_SHADER_MODULE, tokens[i], 77, sizeof(bytes), bytes) == VK_SUCCESS);
+        CHECK(name_object(first.device, type, tokens[i], names[i]) == VK_SUCCESS);
+        CHECK(tag_object(first.device, type, tokens[i], 77, sizeof(bytes), bytes) == VK_SUCCESS);
         bytes[0] = 99;
-        CHECK(set_private[i & 1](first.device, VK_OBJECT_TYPE_SHADER_MODULE, tokens[i], slot_a, 100 + i) == VK_SUCCESS);
-        CHECK(private_value_of(first.device, VK_OBJECT_TYPE_SHADER_MODULE, tokens[i], slot_a, (i + 1) & 1) == 100 + i);
-        const struct object_annotation *object = annotation(&first, VK_OBJECT_TYPE_SHADER_MODULE, tokens[i]);
+        CHECK(set_private[i & 1](first.device, type, tokens[i], slot_a, 100 + i) == VK_SUCCESS);
+        CHECK(private_value_of(first.device, type, tokens[i], slot_a, (i + 1) & 1) == 100 + i);
+        const struct object_annotation *object = annotation(&first, type, tokens[i]);
         CHECK(object && !strcmp(object->name, names[i]) && object->tags && object->tags->bytes[0] == i);
     }
-    VkDebugMarkerObjectNameInfoEXT name = {VK_STRUCTURE_TYPE_DEBUG_MARKER_OBJECT_NAME_INFO_EXT, NULL,
-                                           VK_DEBUG_REPORT_OBJECT_TYPE_SHADER_MODULE_EXT, tokens[0], "renamed wrapper"};
+    VkDebugMarkerObjectNameInfoEXT name = {VK_STRUCTURE_TYPE_DEBUG_MARKER_OBJECT_NAME_INFO_EXT, NULL, marker_type, tokens[0],
+                                           "renamed wrapper"};
     const unsigned char bytes[] = {42, 0, 13};
-    VkDebugMarkerObjectTagInfoEXT tag = {VK_STRUCTURE_TYPE_DEBUG_MARKER_OBJECT_TAG_INFO_EXT,
-                                         NULL,
-                                         VK_DEBUG_REPORT_OBJECT_TYPE_SHADER_MODULE_EXT,
-                                         tokens[1],
-                                         77,
-                                         sizeof(bytes),
-                                         bytes};
-    CHECK(marker_name(first.device, &name) == VK_SUCCESS && marker_tag(first.device, &tag) == VK_SUCCESS);
-    const struct object_annotation *a = annotation(&first, VK_OBJECT_TYPE_SHADER_MODULE, tokens[0]);
-    const struct object_annotation *b = annotation(&first, VK_OBJECT_TYPE_SHADER_MODULE, tokens[1]);
-    const struct object_annotation *c = annotation(&first, VK_OBJECT_TYPE_SHADER_MODULE, tokens[2]);
+    VkDebugMarkerObjectTagInfoEXT tag = {
+        VK_STRUCTURE_TYPE_DEBUG_MARKER_OBJECT_TAG_INFO_EXT, NULL, marker_type, tokens[1], 77, sizeof(bytes), bytes};
+    expected_info = &name;
+    CHECK(marker_name(first.device, &name) == VK_SUCCESS);
+    expected_info = &tag;
+    CHECK(marker_tag(first.device, &tag) == VK_SUCCESS);
+    const struct object_annotation *a = annotation(&first, type, tokens[0]);
+    const struct object_annotation *b = annotation(&first, type, tokens[1]);
+    const struct object_annotation *c = annotation(&first, type, tokens[2]);
     CHECK(a && a->name && !strcmp(a->name, "renamed wrapper"));
     CHECK(b && b->name && !strcmp(b->name, names[1]));
     CHECK(c && c->name && !strcmp(c->name, names[2]));
     CHECK(b && b->tags && b->tags->bytes[0] == 42);
     CHECK(c && c->tags && c->tags->bytes[0] == 2);
-    CHECK(set_private[1](first.device, VK_OBJECT_TYPE_SHADER_MODULE, tokens[0], slot_a, 0) == VK_SUCCESS);
-    CHECK(private_value_of(first.device, VK_OBJECT_TYPE_SHADER_MODULE, tokens[0], slot_a, 0) == 0);
-    vkrt_debug_object_forget(&first, VK_OBJECT_TYPE_SHADER_MODULE, tokens[0]);
-    CHECK(!annotation(&first, VK_OBJECT_TYPE_SHADER_MODULE, tokens[0]));
-    CHECK(private_value_of(first.device, VK_OBJECT_TYPE_SHADER_MODULE, tokens[1], slot_a, 0) == 101);
-    CHECK(private_value_of(first.device, VK_OBJECT_TYPE_SHADER_MODULE, tokens[2], slot_a, 1) == 102);
+    CHECK(set_private[1](first.device, type, tokens[0], slot_a, 0) == VK_SUCCESS);
+    CHECK(private_value_of(first.device, type, tokens[0], slot_a, 0) == 0);
+    vkrt_debug_object_forget(&first, type, tokens[0]);
+    CHECK(!annotation(&first, type, tokens[0]));
+    CHECK(private_value_of(first.device, type, tokens[1], slot_a, 0) == 101);
+    CHECK(private_value_of(first.device, type, tokens[2], slot_a, 1) == 102);
     CHECK(native_calls == before_calls && native_lookups == before_lookups && private_native.sets == before_sets &&
           private_native.gets == before_gets);
-    vkrt_debug_object_forget(&first, VK_OBJECT_TYPE_SHADER_MODULE, tokens[1]);
-    vkrt_debug_object_forget(&first, VK_OBJECT_TYPE_SHADER_MODULE, tokens[2]);
+    vkrt_debug_object_forget(&first, type, tokens[1]);
+    vkrt_debug_object_forget(&first, type, tokens[2]);
+}
+static void shader_module_alias_annotations(void) {
+    CHECK(shader_aliases[0].token != shader_aliases[1].token && shader_aliases[0].native == shader_aliases[1].native &&
+          shader_aliases[0].native == 17);
+    const uint64_t tokens[] = {shader_aliases[0].token, shader_aliases[1].token, 17};
+    public_alias_annotations(VK_OBJECT_TYPE_SHADER_MODULE, VK_DEBUG_REPORT_OBJECT_TYPE_SHADER_MODULE_EXT, tokens);
+}
+static void pipeline_layout_alias_annotations(void) {
+    CHECK(layout_aliases[0].token != layout_aliases[1].token && layout_aliases[0].native == layout_aliases[1].native &&
+          layout_aliases[2].native == layout_aliases[0].token);
+    const uint64_t tokens[] = {layout_aliases[0].token, layout_aliases[1].token, layout_aliases[2].token};
+    public_alias_annotations(VK_OBJECT_TYPE_PIPELINE_LAYOUT, VK_DEBUG_REPORT_OBJECT_TYPE_PIPELINE_LAYOUT_EXT, tokens);
+    /* Ordinary native devices can legally use the same numeric value as a
+     * different device's public token. Keep their original debug parameters. */
+    const unsigned before_calls = native_calls, before_lookups = native_lookups;
+    VkDebugMarkerObjectNameInfoEXT name = {VK_STRUCTURE_TYPE_DEBUG_MARKER_OBJECT_NAME_INFO_EXT, NULL,
+                                           VK_DEBUG_REPORT_OBJECT_TYPE_PIPELINE_LAYOUT_EXT, tokens[0], "native layout"};
+    expected_info = &name;
+    CHECK(marker_name(ordinary.device, &name) == native_result);
+    const uint32_t data = 0x12345678;
+    VkDebugMarkerObjectTagInfoEXT tag = {VK_STRUCTURE_TYPE_DEBUG_MARKER_OBJECT_TAG_INFO_EXT,
+                                         NULL,
+                                         VK_DEBUG_REPORT_OBJECT_TYPE_PIPELINE_LAYOUT_EXT,
+                                         tokens[0],
+                                         88,
+                                         sizeof(data),
+                                         &data};
+    expected_info = &tag;
+    CHECK(marker_tag(ordinary.device, &tag) == native_result);
+    CHECK(native_calls == before_calls + 2 && native_lookups == before_lookups + 2);
 }
 static void private_data_values(void) {
     for (unsigned i = 0; i < VKRT_ARRAY_SIZE(kinds); ++i) {
@@ -473,6 +511,7 @@ int main(void) {
     allocation_failures();
     private_data_values();
     shader_module_alias_annotations();
+    pipeline_layout_alias_annotations();
     if (failures) {
         vkrt_debug_objects_finish(&first);
         vkrt_debug_objects_finish(&second);

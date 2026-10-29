@@ -18,8 +18,11 @@ work prioritizes the mandatory AS/RQ/RTP baseline; known newer-feature exclusion
 must be explicit. CTS/regression outcomes remain categorized evidence, with no
 requirement to make unrelated optional suites all pass. See the goal's
 [compatibility and test scope](ray_tracing_fallback_goal.md#compatibility-and-test-scope).
-The latest slice is the [ShaderModule ownership and header qualification checkpoint](rt_shader_ownership_2026-10-29.md).
-It resolves the ShaderModule P1 from the
+The latest slice is the [PipelineLayout ownership checkpoint](rt_layout_ownership_2026-10-29.md).
+It removes the rejection of differing original RT layouts with identical native
+definitions and qualifies retained layout replay and typed metadata consumers.
+The preceding [ShaderModule ownership and header qualification checkpoint](rt_shader_ownership_2026-10-29.md)
+resolves the ShaderModule P1 from the
 [ub-mode branch review and HPLOC/memory-model checkpoint](rt_ub_review_2026-10-29.md).
 The [physical RT interfaces and production Mesa PLOC checkpoint](rt_pointer_interfaces_ploc_2026-10-29.md)
 is its preceding baseline.
@@ -92,6 +95,7 @@ the final layout, passing build/local checks and the 16-case external CTS rechec
 - [x] Support the tested GLSL450/Vulkan source memory-model paths, mixed native/RT entries and conservative slab intervals; repair reproduced registry and discovery contracts.
 - [x] Review branch-wide code/build/tooling contracts under ub-mode, retaining independent controls, tool limits and remaining quality debt.
 - [x] Unify source/native ShaderModule identities, verify public allocator/rollback/consumer behavior, and preserve newer compatible feature prefixes using matching header/registry metadata.
+- [x] Preserve distinct public PipelineLayout definitions across native aliases, with compatible object callbacks, retained replay and typed debug/PrivateData ownership.
 - [ ] M0: complete all capability, no-native-RT, resource ABI, and continuation proofs.
 - [ ] M1: integrate Mesa builders, GPU BVH4 encoding/refit, and shared AS objects.
 - [ ] M2: complete Ray Query lowering and state semantics.
@@ -110,7 +114,7 @@ Component checkmarks do not complete M0/M1/M2 or the full goal.
 | RQ host translation | Consume AS/RQ device requirements; translate resource/synchronization masks and explicit RT buffer queries; lifetime-owned AS address cells with allocator/flush/failure handling and enabled-queue-family sharing; private SSBO indexing/variable-pointer prerequisites | Complete emulation capability/limit reporting on no-RT ICDs, future unknown buffer chains, full-layout descriptor transport and private allocation budgets |
 | AS operations and host dependency | GPU CLONE/COMPACT, serialization/UUID/BLAS relocation, topology-preserving UPDATE/refit; public property pools with per-execution primary/secondary replay, payload/native completion acquisition and reuse/reset/free publication; synchronous deferred operations; owned command-capture and logical-stage planning components | Native logical-stage executor, remaining replay schemas and native-query interaction, true shrinking compaction, refit performance and full resource budgets |
 | RQ compiler compatibility | Actual per-query AS roots from scalar/array descriptors and integer conversions; helper/value/Phi flow; direct/grouped NonUniform propagation; preserve application workgroup/specialization metadata and remove native RT declarations | Full resource-limit transparency, complete opcode/stage coverage and full shared traversal qualification |
-| RTP API compatibility | Canonical shader/pipeline/SBT/stack/Trace path; cached native variants/private context push; public layouts with retained private copies; copied descriptor definitions; nested pipeline libraries; maintenance6 and compute pipeline/shader-object state restoration | Remaining pipeline options and optional library-handle contracts, remaining descriptor disturbance/interoperability paths, complete mandatory API/resource qualification |
+| RTP API compatibility | Canonical shader/pipeline/SBT/stack/Trace path; cached native variants/private context push; independent public layout tokens with original definitions, retained private copies and typed metadata; copied descriptor definitions; nested pipeline libraries; maintenance6 and compute pipeline/shader-object state restoration | Remaining pipeline options and optional library-handle contracts, remaining descriptor disturbance/interoperability paths, complete mandatory API/resource qualification |
 | Base RQ SBT offset | Lower opcode 6021; select candidate/committed instance; return only the low 24 offset bits; shared-BVH4 helper and CTS evidence | Complete required getter/stage and shared-consumer qualification remain open |
 | AABB opacity | Apply the existing ray-over-instance-over-geometry precedence before opacity culling and expose the correct candidate opacity | Does not complete all RQ traversal or no-native-RT layer behavior |
 
@@ -832,7 +836,7 @@ The following are exit checks, not implemented-feature claims.
 
 | Priority | Deliverable | Evidence needed before closing it |
 | --- | --- | --- |
-| Next object qualification | Complete other public object namespaces and consumers | ShaderModule ownership is unified and its public lifetime/forwarding/rollback controls pass. Qualify mixed native/software Pipeline and PipelineLayout identities and the remaining resource/interoperability paths; the supplemental Pipeline reproduction has no execution evidence |
+| Next object qualification | Complete other public object namespaces and consumers | ShaderModule and PipelineLayout ownership now preserve per-object semantics and public lifetime/forwarding/rollback controls. Qualify mixed native/software Pipeline, DescriptorSetLayout original-definition identity and remaining resource/interoperability paths; the supplemental Pipeline reproduction has no execution evidence |
 | 1 | Complete mandatory profile/resource qualification | Qualify protected execution, multi-device groups and pool-specific native query scopes; account for private/native resource budgets without reducing the mandatory public contract |
 | Parallel M4 | Complete logical-stage synchronization semantics | Source semaphore/barrier/event/ownership scopes, native-query interactions and qualified queues/groups. Query COPY uses the proved native bridge. CPU schedules and early-signal timing alone establish neither a correctness failure nor a requirement for a general queue worker |
 | Parallel M0/M1 | Complete no-RT resource and construction contract | Extend the shared software candidate profile to complete resource budgets and queue qualification; qualify production indexed construction and XYZ dispatch, then physical no-RT execution |

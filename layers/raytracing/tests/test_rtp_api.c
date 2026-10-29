@@ -770,6 +770,7 @@ int main(int argc, char **argv) {
                                       .pPushConstantRanges = ranges};
     VkPipelineLayout layout;
     CHECK(vkCreatePipelineLayout(g_dev, &lci, NULL, &layout));
+    annotate_object(VK_OBJECT_TYPE_PIPELINE_LAYOUT, OBJECT_HANDLE(layout), "public RT pipeline layout");
     VkPipelineLayout compute_layout = layout;
     VkDescriptorSetLayout compute_dsl = VK_NULL_HANDLE;
     VkPipelineLayoutCreateInfo ordinary = lci;
@@ -789,6 +790,7 @@ int main(int argc, char **argv) {
             ordinary.pSetLayouts = &compute_dsl;
         }
         CHECK(vkCreatePipelineLayout(g_dev, &ordinary, NULL, &compute_layout));
+        annotate_object(VK_OBJECT_TYPE_PIPELINE_LAYOUT, OBJECT_HANDLE(compute_layout), "public compute pipeline layout");
     }
     compute_public_layout = compute_layout;
     compute_inline_layout = &ordinary;
@@ -1002,6 +1004,7 @@ int main(int argc, char **argv) {
         if (iteration) {
             CHECK(vkResetCommandBuffer(command, 0));
             CHECK(vkCreatePipelineLayout(g_dev, &lci, NULL, &layout));
+            annotate_object(VK_OBJECT_TYPE_PIPELINE_LAYOUT, OBJECT_HANDLE(layout), "replacement RT pipeline layout");
         }
         memset(output.mapped, 0xa5, (size_t)output.size);
         VkCommandBufferBeginInfo begin = {.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
@@ -1082,6 +1085,7 @@ int main(int argc, char **argv) {
     vkFreeCommandBuffers(g_dev, g_pool, 1, &command);
     if (second_queue) {
         CHECK(vkCreatePipelineLayout(g_dev, &lci, NULL, &layout));
+        annotate_object(VK_OBJECT_TYPE_PIPELINE_LAYOUT, OBJECT_HANDLE(layout), "two queue RT pipeline layout");
         ca.commandBufferCount = 2;
         VkCommandBuffer concurrent[2];
         CHECK(vkAllocateCommandBuffers(g_dev, &ca, concurrent));
@@ -1190,10 +1194,10 @@ int main(int argc, char **argv) {
             "descriptor rebinding: %s\n",
             descriptor_mode, maintenance6_mode, dynamic_layout, descriptor_core, g_fail ? "FAIL" : "PASS");
     if (debug_names_mode)
-        printf("Debug-utils name/tag on virtual AS/RTP/shader/template/query/deferred and native compute objects: %s\n",
+        printf("Debug-utils name/tag on virtual AS/RTP/shader/layout/template/query/deferred and native compute objects: %s\n",
                g_fail ? "FAIL" : "PASS");
     if (private_data_mode)
-        printf("PrivateData on virtual AS/RTP/shader/template/query/deferred and native compute objects; native slots: %s\n",
+        printf("PrivateData on virtual AS/RTP/shader/layout/template/query/deferred and native compute objects; native slots: %s\n",
                g_fail ? "FAIL" : "PASS");
     if (vulkan11_mode) printf("Vulkan1.1 application with genuine SPIR-V1.4 shader inputs: %s\n", g_fail ? "FAIL" : "PASS");
     if (derivatives_mode)

@@ -24,11 +24,11 @@ struct object_annotation {
     struct object_tag *tags;
     struct private_value *private_data;
 };
-/* Every owned shader module uses its public identity here, including modules
- * backed by a native shader. Native module values can alias each other or a
- * raw RT token, so annotation/private-data sidecars must not unwrap or merge
- * them. The typed ownership callback covers both kinds; no token reaches ICD
- * debug/private-data calls. */
+/* Owned shader modules and pipeline layouts use their public identity here.
+ * Native values can alias each other or a different public token, so
+ * annotation/private-data sidecars must not unwrap or merge them. The typed
+ * ownership callback covers both native-backed and software objects; no token
+ * reaches ICD debug/private-data calls. */
 struct debug_objects {
     struct debug_objects *next;
     struct vkrt_device_data *dev;
@@ -390,6 +390,8 @@ static VkObjectType marker_type(VkDebugReportObjectTypeEXT type) {
             return VK_OBJECT_TYPE_ACCELERATION_STRUCTURE_KHR;
         case VK_DEBUG_REPORT_OBJECT_TYPE_PIPELINE_EXT:
             return VK_OBJECT_TYPE_PIPELINE;
+        case VK_DEBUG_REPORT_OBJECT_TYPE_PIPELINE_LAYOUT_EXT:
+            return VK_OBJECT_TYPE_PIPELINE_LAYOUT;
         case VK_DEBUG_REPORT_OBJECT_TYPE_SHADER_MODULE_EXT:
             return VK_OBJECT_TYPE_SHADER_MODULE;
         case VK_DEBUG_REPORT_OBJECT_TYPE_DESCRIPTOR_UPDATE_TEMPLATE_EXT:

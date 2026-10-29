@@ -30,6 +30,10 @@ VkResult vkrt_rtp_wrap_native_shader(struct vkrt_device_data *dev, VkShaderModul
 bool vkrt_rtp_native_shader(struct vkrt_device_data *dev, VkShaderModule module, VkShaderModule *native);
 bool vkrt_rtp_destroy_shader(struct vkrt_device_data *dev, VkShaderModule module, const VkAllocationCallbacks *allocator);
 void vkrt_rtp_reset_command(struct vkrt_cmd_buffer_data *cb);
+/* Borrow a private native view of an owned public layout. Without RTP, native
+ * handles pass through. On an RTP device, NULL/untracked handles return NULL.
+ * The command helper also rejects a missing nonzero public/replay identity via
+ * record_result. Private implementation handles must bypass these accessors. */
 VkPipelineLayout vkrt_rtp_native_layout(struct vkrt_device_data *dev, VkPipelineLayout layout);
 VkPipelineLayout vkrt_rtp_command_native_layout(struct vkrt_cmd_buffer_data *cb, VkPipelineLayout layout);
 /* Record immutable semantic identities before public layout destruction or
