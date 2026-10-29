@@ -115,9 +115,12 @@ struct DescriptorLayout {
     bool known = true;
     bool operator==(const DescriptorLayout &b) const { return known && b.known && flags == b.flags && bindings == b.bindings; }
 };
-struct DescriptorLayoutRecord {
+struct DescriptorLayoutToken {
+    Allocator allocator;
+    VkDescriptorSetLayout native{};
     std::shared_ptr<const DescriptorLayout> definition;
-    uint64_t references = 1;
+    DescriptorLayoutToken(Allocator owner, VkDescriptorSetLayout layout, std::shared_ptr<const DescriptorLayout> value)
+        : allocator(owner), native(layout), definition(std::move(value)) {}
 };
 struct Layout {
     vkrt_device_data *dev;
@@ -221,7 +224,7 @@ struct vkrt_rtp_state {
     std::unordered_map<uint64_t, ShaderToken *> shaders;
     std::unordered_map<uint64_t, LayoutToken *> layouts;
     std::unordered_map<uint64_t, PipelineToken *> pipelines;
-    std::unordered_map<uint64_t, DescriptorLayoutRecord> descriptor_layouts;
+    std::unordered_map<uint64_t, DescriptorLayoutToken *> descriptor_layouts;
     std::atomic<uint64_t> next_identity{1};
     uint32_t max_push = 0, max_dispatch = 0;
     vkrt_rtp_state(Allocator a, vkrt_device_data *d) : allocator(a), dev(d) {}
@@ -434,16 +437,19 @@ VKAPI_ATTR VkResult VKAPI_CALL CreatePipelineLayout(VkDevice device, const VkPip
         auto v = std::make_shared<Layout>();
         v->dev = d;
         v->independent_sets = (ci->flags & VK_PIPELINE_LAYOUT_CREATE_INDEPENDENT_SETS_BIT_EXT) != 0;
+        std::vector<VkDescriptorSetLayout> native_sets;
         {
             std::lock_guard<std::mutex> lock(d->rtp->lock);
             for (uint32_t i = 0; i < ci->setLayoutCount; ++i) {
                 if (!ci->pSetLayouts[i]) {
                     v->sets.push_back(nullptr);
+                    native_sets.push_back(VK_NULL_HANDLE);
                     continue;
                 }
                 auto definition = d->rtp->descriptor_layouts.find(VKRT_HKEY(ci->pSetLayouts[i]));
                 Need(definition != d->rtp->descriptor_layouts.end());
-                v->sets.push_back(definition->second.definition);
+                v->sets.push_back(definition->second->definition);
+                native_sets.push_back(definition->second->native);
             }
         }
         if (ci->pushConstantRangeCount)
@@ -459,6 +465,7 @@ VKAPI_ATTR VkResult VKAPI_CALL CreatePipelineLayout(VkDevice device, const VkPip
             if (r.stageFlags) native.push_back(r);
         }
         auto local = *ci;
+        if (ci->setLayoutCount) local.pSetLayouts = native_sets.data();
         local.pushConstantRangeCount = uint32_t(native.size());
         local.pPushConstantRanges = native.data();
         // Keep the native public reference private to its unique token. Native
@@ -487,6 +494,7 @@ VKAPI_ATTR VkResult VKAPI_CALL CreatePipelineLayout(VkDevice device, const VkPip
         // it now, while the caller's descriptor-set layout handles are valid.
         VkPushConstantRange context_range{VK_SHADER_STAGE_COMPUTE_BIT, 0, 16};
         auto rt_layout = *ci;
+        rt_layout.pSetLayouts = local.pSetLayouts;
         rt_layout.pushConstantRangeCount = 1;
         rt_layout.pPushConstantRanges = &context_range;
         VkPipelineLayout native_rt{};
@@ -1358,77 +1366,113 @@ extern "C" void vkrt_rtp_finish(vkrt_device_data *dev) {
                                           token->allocator.custom ? &token->allocator.callbacks : nullptr);
         FreeToken(token);
     }
+    for (auto p : s->descriptor_layouts) {
+        auto token = p.second;
+        vkrt_debug_object_forget(dev, VK_OBJECT_TYPE_DESCRIPTOR_SET_LAYOUT, p.first);
+        dev->vtable.DestroyDescriptorSetLayout(dev->device, token->native,
+                                               token->allocator.custom ? &token->allocator.callbacks : nullptr);
+        FreeToken(token);
+    }
     Allocator a = s->allocator;
     s->~vkrt_rtp_state();
     a.free(s);
     dev->rtp = nullptr;
 }
-extern "C" VkResult vkrt_rtp_track_descriptor_layout(vkrt_device_data *dev, VkDescriptorSetLayout layout,
-                                                     const VkDescriptorSetLayoutCreateInfo *info) {
-    return Guard([&] {
-        if (!dev->rtp) return VK_SUCCESS;
-        auto value = std::make_shared<DescriptorLayout>();
-        value->flags = info->flags;
-        const VkDescriptorSetLayoutBindingFlagsCreateInfo *flags = nullptr;
-        const VkMutableDescriptorTypeCreateInfoEXT *mutable_info = nullptr;
-        for (auto next = static_cast<const VkBaseInStructure *>(info->pNext); next; next = next->pNext) {
-            if (next->sType == VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_BINDING_FLAGS_CREATE_INFO)
-                flags = reinterpret_cast<const VkDescriptorSetLayoutBindingFlagsCreateInfo *>(next);
-            else if (next->sType == VK_STRUCTURE_TYPE_MUTABLE_DESCRIPTOR_TYPE_CREATE_INFO_EXT)
-                mutable_info = reinterpret_cast<const VkMutableDescriptorTypeCreateInfoEXT *>(next);
-            else
-                // Preserve ordinary native creation of future extensions. An
-                // unrecognized definition can only prove identity with its own
-                // retained snapshot, never with another unknown definition.
-                value->known = false;
+namespace {
+std::shared_ptr<const DescriptorLayout> CaptureDescriptorLayout(const VkDescriptorSetLayoutCreateInfo *info) {
+    auto value = std::make_shared<DescriptorLayout>();
+    value->flags = info->flags;
+    const VkDescriptorSetLayoutBindingFlagsCreateInfo *flags = nullptr;
+    const VkMutableDescriptorTypeCreateInfoEXT *mutable_info = nullptr;
+    for (auto next = static_cast<const VkBaseInStructure *>(info->pNext); next; next = next->pNext) {
+        if (next->sType == VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_BINDING_FLAGS_CREATE_INFO)
+            flags = reinterpret_cast<const VkDescriptorSetLayoutBindingFlagsCreateInfo *>(next);
+        else if (next->sType == VK_STRUCTURE_TYPE_MUTABLE_DESCRIPTOR_TYPE_CREATE_INFO_EXT)
+            mutable_info = reinterpret_cast<const VkMutableDescriptorTypeCreateInfoEXT *>(next);
+        else
+            // Preserve ordinary native creation of future extensions. An
+            // unrecognized definition can only prove identity with its own
+            // retained snapshot, never with another unknown definition.
+            value->known = false;
+    }
+    for (uint32_t i = 0; i < info->bindingCount; ++i) {
+        const auto &source = info->pBindings[i];
+        DescriptorBinding binding{source.binding, source.descriptorCount, source.descriptorType, source.stageFlags, 0, {}, {}};
+        if (flags && i < flags->bindingCount) binding.flags = flags->pBindingFlags[i];
+        if (source.descriptorCount && source.pImmutableSamplers &&
+            (source.descriptorType == VK_DESCRIPTOR_TYPE_SAMPLER ||
+             source.descriptorType == VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER))
+            binding.samplers.assign(source.pImmutableSamplers, source.pImmutableSamplers + source.descriptorCount);
+        if (source.descriptorType == VK_DESCRIPTOR_TYPE_MUTABLE_EXT && mutable_info &&
+            i < mutable_info->mutableDescriptorTypeListCount) {
+            const auto &types = mutable_info->pMutableDescriptorTypeLists[i];
+            if (types.descriptorTypeCount)
+                binding.mutable_types.assign(types.pDescriptorTypes, types.pDescriptorTypes + types.descriptorTypeCount);
+            std::sort(binding.mutable_types.begin(), binding.mutable_types.end());
         }
-        for (uint32_t i = 0; i < info->bindingCount; ++i) {
-            const auto &source = info->pBindings[i];
-            DescriptorBinding binding{source.binding, source.descriptorCount, source.descriptorType, source.stageFlags, 0, {}, {}};
-            if (flags && i < flags->bindingCount) binding.flags = flags->pBindingFlags[i];
-            if (source.descriptorCount && source.pImmutableSamplers &&
-                (source.descriptorType == VK_DESCRIPTOR_TYPE_SAMPLER ||
-                 source.descriptorType == VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER))
-                binding.samplers.assign(source.pImmutableSamplers, source.pImmutableSamplers + source.descriptorCount);
-            if (source.descriptorType == VK_DESCRIPTOR_TYPE_MUTABLE_EXT && mutable_info &&
-                i < mutable_info->mutableDescriptorTypeListCount) {
-                const auto &types = mutable_info->pMutableDescriptorTypeLists[i];
-                if (types.descriptorTypeCount)
-                    binding.mutable_types.assign(types.pDescriptorTypes, types.pDescriptorTypes + types.descriptorTypeCount);
-                std::sort(binding.mutable_types.begin(), binding.mutable_types.end());
-            }
-            value->bindings.push_back(std::move(binding));
-        }
-        std::sort(value->bindings.begin(), value->bindings.end(),
-                  [](const auto &a, const auto &b) { return std::tie(a.binding, a.stages) < std::tie(b.binding, b.stages); });
-        std::lock_guard<std::mutex> lock(dev->rtp->lock);
-        auto old = dev->rtp->descriptor_layouts.find(VKRT_HKEY(layout));
-        if (old == dev->rtp->descriptor_layouts.end()) {
-            dev->rtp->descriptor_layouts.emplace(VKRT_HKEY(layout), DescriptorLayoutRecord{std::move(value), 1});
-        } else {
-            if (old->second.references == UINT64_MAX) return VK_ERROR_OUT_OF_HOST_MEMORY;
-            if (!(*old->second.definition == *value)) {
-                // Different public definitions may lower to the same native
-                // handle. Keep every existing pipeline snapshot immutable;
-                // this new snapshot cannot prove compatibility by definition.
-                // Distinguishing their public identities needs proxy handles.
-                value->known = false;
-                old->second.definition = std::move(value);
-            }
-            ++old->second.references;
-        }
-        return VK_SUCCESS;
-    });
+        value->bindings.push_back(std::move(binding));
+    }
+    std::sort(value->bindings.begin(), value->bindings.end(),
+              [](const auto &a, const auto &b) { return std::tie(a.binding, a.stages) < std::tie(b.binding, b.stages); });
+    return value;
 }
-extern "C" void vkrt_rtp_forget_descriptor_layout(vkrt_device_data *dev, VkDescriptorSetLayout layout) {
-    Guard([&] {
-        if (dev->rtp) {
+}  // namespace
+extern "C" VkResult vkrt_rtp_wrap_descriptor_layout(vkrt_device_data *dev, VkDescriptorSetLayout native,
+                                                    const VkDescriptorSetLayoutCreateInfo *info,
+                                                    const VkAllocationCallbacks *allocator, VkDescriptorSetLayout *out) {
+    *out = VK_NULL_HANDLE;
+    if (!dev->rtp) {
+        *out = native;
+        return VK_SUCCESS;
+    }
+    const auto result = Guard([&] {
+        auto value = CaptureDescriptorLayout(info);
+        auto token = Token<DescriptorLayoutToken>(allocator, native, std::move(value));
+        try {
             std::lock_guard<std::mutex> lock(dev->rtp->lock);
-            auto old = dev->rtp->descriptor_layouts.find(VKRT_HKEY(layout));
-            if (old != dev->rtp->descriptor_layouts.end() && --old->second.references == 0) dev->rtp->descriptor_layouts.erase(old);
+            dev->rtp->descriptor_layouts.emplace(VKRT_HKEY(Handle<VkDescriptorSetLayout>(token)), token);
+        } catch (...) {
+            FreeToken(token);
+            throw;
+        }
+        *out = Handle<VkDescriptorSetLayout>(token);
+        return VK_SUCCESS;
+    });
+    if (result != VK_SUCCESS) dev->vtable.DestroyDescriptorSetLayout(dev->device, native, allocator);
+    return result;
+}
+extern "C" bool vkrt_rtp_destroy_descriptor_layout(vkrt_device_data *dev, VkDescriptorSetLayout layout,
+                                                   const VkAllocationCallbacks *allocator) {
+    if (!dev->rtp) return false;
+    DescriptorLayoutToken *token = nullptr;
+    const auto status = Guard([&] {
+        std::lock_guard<std::mutex> lock(dev->rtp->lock);
+        auto i = dev->rtp->descriptor_layouts.find(VKRT_HKEY(layout));
+        if (i != dev->rtp->descriptor_layouts.end()) {
+            token = i->second;
+            dev->rtp->descriptor_layouts.erase(i);
         }
         return VK_SUCCESS;
     });
+    if (token) {
+        vkrt_debug_object_forget(dev, VK_OBJECT_TYPE_DESCRIPTOR_SET_LAYOUT, VKRT_HKEY(layout));
+        dev->vtable.DestroyDescriptorSetLayout(dev->device, token->native, allocator);
+        Allocator owner(allocator);
+        token->~DescriptorLayoutToken();
+        owner.free(token);
+    }
+    return token != nullptr || status != VK_SUCCESS;
+}
+extern "C" VkDescriptorSetLayout vkrt_rtp_native_descriptor_layout(vkrt_device_data *dev, VkDescriptorSetLayout layout) {
+    if (!dev || !dev->rtp) return layout;
+    VkDescriptorSetLayout native = VK_NULL_HANDLE;
+    Guard([&] {
+        std::lock_guard<std::mutex> lock(dev->rtp->lock);
+        auto i = dev->rtp->descriptor_layouts.find(VKRT_HKEY(layout));
+        if (i != dev->rtp->descriptor_layouts.end()) native = i->second->native;
+        return VK_SUCCESS;
+    });
+    return native;
 }
 extern "C" bool vkrt_rtp_layout_compatible(vkrt_device_data *dev, VkPipelineLayout a, VkPipelineLayout b, uint32_t last_set) {
     bool result = false;
@@ -1516,6 +1560,7 @@ extern "C" bool vkrt_rtp_debug_owns(vkrt_device_data *dev, VkObjectType type, ui
     if (type == VK_OBJECT_TYPE_PIPELINE) return dev->rtp->pipelines.count(handle) != 0;
     if (type == VK_OBJECT_TYPE_SHADER_MODULE) return dev->rtp->shaders.count(handle) != 0;
     if (type == VK_OBJECT_TYPE_PIPELINE_LAYOUT) return dev->rtp->layouts.count(handle) != 0;
+    if (type == VK_OBJECT_TYPE_DESCRIPTOR_SET_LAYOUT) return dev->rtp->descriptor_layouts.count(handle) != 0;
     return false;
 }
 extern "C" void vkrt_rtp_reset_command(vkrt_cmd_buffer_data *cb) {

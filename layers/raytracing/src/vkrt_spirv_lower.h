@@ -40,6 +40,14 @@ int vkrt_spirv_lower_with_context(const uint32_t *user_words, size_t user_word_c
 void
 vkrt_spirv_lower_free(uint32_t *words);
 
+/* Select an ordinary entry from a mixed RT/native source before classifying or
+ * lowering it. Keep its interface, execution modes and specialization constants.
+ * On success return a malloc buffer released with vkrt_spirv_lower_free().
+ * Failure clears both outputs; allocation failures return OUT_OF_HOST_MEMORY,
+ * and unsupported or invalid source returns FEATURE_NOT_PRESENT. */
+VkResult vkrt_spirv_select_native_entry(const uint32_t *words, size_t word_count, const char *name, VkShaderStageFlagBits stage,
+                                        uint32_t **out_words, size_t *out_word_count);
+
 /* Validate a transported source module before turning opaque binary input
  * into native SPIR-V. Layout checks remain native feature-dependent. */
 int vkrt_spirv_validate_source(const uint32_t *words, size_t word_count);

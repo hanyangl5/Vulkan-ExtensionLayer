@@ -11,6 +11,8 @@ extern "C" {
 #include "vkrt_deferred.h"
 #include "vkrt_rtp.h"
 #include "vkrt_debug_objects.h"
+#include "vkrt_descriptor_layout.h"
+#include "vkrt_shader_interface.h"
 #include "typed_runtime_abi.h"
 struct vkrt_global vkrt_global = VKRT_GLOBAL_INITIALIZER;
 }
@@ -64,6 +66,30 @@ std::map<VkPipelineLayout, NativeLayout> layouts;
 std::set<VkPipelineLayout> destroyed;
 std::mutex native_layout_lock;
 uintptr_t next_layout = 100;
+std::set<VkDescriptorSetLayout> native_descriptor_layouts;
+uintptr_t next_descriptor_layout = 0x700000;
+VKAPI_ATTR VkResult VKAPI_CALL CreateDescriptorLayout(VkDevice d, const VkDescriptorSetLayoutCreateInfo *ci,
+                                                      const VkAllocationCallbacks *allocator, VkDescriptorSetLayout *out) {
+    CHECK(d == device && ci && !allocator);
+    *out = Handle<VkDescriptorSetLayout>(next_descriptor_layout++);
+    CHECK(native_descriptor_layouts.insert(*out).second);
+    return VK_SUCCESS;
+}
+VKAPI_ATTR void VKAPI_CALL DestroyDescriptorLayout(VkDevice d, VkDescriptorSetLayout layout,
+                                                   const VkAllocationCallbacks *allocator) {
+    CHECK(d == device && !allocator && native_descriptor_layouts.erase(layout) == 1);
+}
+VkDescriptorSetLayout MakeDescriptorLayout(const VkDescriptorSetLayoutCreateInfo &ci) {
+    auto make = reinterpret_cast<PFN_vkCreateDescriptorSetLayout>(vkrt_descriptor_sets_proc("vkCreateDescriptorSetLayout"));
+    VkDescriptorSetLayout layout{};
+    CHECK(make && make(device, &ci, nullptr, &layout) == VK_SUCCESS && layout);
+    return layout;
+}
+void DropDescriptorLayout(VkDescriptorSetLayout layout) {
+    auto drop = reinterpret_cast<PFN_vkDestroyDescriptorSetLayout>(vkrt_descriptor_sets_proc("vkDestroyDescriptorSetLayout"));
+    CHECK(drop);
+    drop(device, layout, nullptr);
+}
 VkPipelineLayout alias_handle{};
 bool alias_private = false;
 struct CallbackOwner {
@@ -433,7 +459,6 @@ std::vector<DescriptorEvent> InstallDescriptorHistory() {
     auto destroy = (PFN_vkDestroyPipelineLayout)vkrt_rtp_proc("vkDestroyPipelineLayout");
     std::array<VkPipelineLayout, 6> identity{}, native{};
     for (uint32_t n = 0; n < identity.size(); ++n) {
-        const auto set = Handle<VkDescriptorSetLayout>(4000 + n);
         VkSampler samplers[] = {Handle<VkSampler>(4100), Handle<VkSampler>(4101)};
         VkDescriptorSetLayoutBinding binding{0,
                                              n == 0             ? VK_DESCRIPTOR_TYPE_STORAGE_BUFFER_DYNAMIC
@@ -449,7 +474,7 @@ std::vector<DescriptorEvent> InstallDescriptorHistory() {
         if (n == 3 || n == 5) definition.flags |= VK_DESCRIPTOR_SET_LAYOUT_CREATE_EMBEDDED_IMMUTABLE_SAMPLERS_BIT_EXT;
         definition.bindingCount = 1;
         definition.pBindings = &binding;
-        CHECK(vkrt_rtp_track_descriptor_layout(&dev, set, &definition) == VK_SUCCESS);
+        const auto set = MakeDescriptorLayout(definition);
         VkPushConstantRange push{VK_SHADER_STAGE_COMPUTE_BIT, 0, 256};
         VkPipelineLayoutCreateInfo ci{VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO};
         ci.setLayoutCount = 1;
@@ -463,7 +488,7 @@ std::vector<DescriptorEvent> InstallDescriptorHistory() {
         // Replay must retain the immutable original definition after both
         // public objects and their caller-owned creation inputs disappear.
         destroy(device, layout, nullptr);
-        vkrt_rtp_forget_descriptor_layout(&dev, set);
+        DropDescriptorLayout(set);
         std::memset(&binding, 0xa5, sizeof(binding));
         std::memset(samplers, 0xa5, sizeof(samplers));
     }
@@ -859,16 +884,14 @@ OpFunctionEnd
 void DescriptorDefinitions() {
     auto make = (PFN_vkCreatePipelineLayout)vkrt_rtp_proc("vkCreatePipelineLayout");
     auto destroy = (PFN_vkDestroyPipelineLayout)vkrt_rtp_proc("vkDestroyPipelineLayout");
-    const auto a = Handle<VkDescriptorSetLayout>(2000), b = Handle<VkDescriptorSetLayout>(2001);
+    VkDescriptorSetLayout a{}, b{};
     VkDescriptorSetLayoutBinding binding{3, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 4, VK_SHADER_STAGE_RAYGEN_BIT_KHR, nullptr};
     VkDescriptorSetLayoutCreateInfo definition{VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO};
     definition.bindingCount = 1;
     definition.pBindings = &binding;
-    auto track = [&](VkDescriptorSetLayout handle) {
-        // A changed definition here models a fresh native object reusing a
-        // retired handle, rather than another simultaneously live reference.
-        vkrt_rtp_forget_descriptor_layout(&dev, handle);
-        CHECK(vkrt_rtp_track_descriptor_layout(&dev, handle, &definition) == VK_SUCCESS);
+    auto recreate = [&](VkDescriptorSetLayout &handle) {
+        if (handle) DropDescriptorLayout(handle);
+        handle = MakeDescriptorLayout(definition);
     };
     auto layout = [&](VkDescriptorSetLayout set, VkPipelineLayoutCreateFlags flags = 0) {
         VkPushConstantRange push{VK_SHADER_STAGE_COMPUTE_BIT, 0, 256};
@@ -887,40 +910,34 @@ void DescriptorDefinitions() {
         owned.push_back(layout(set, flags));
         return owned.back();
     };
-    track(a);
-    track(b);
+    recreate(a);
+    recreate(b);
     auto first = keep(a), second = keep(b);
     CHECK(vkrt_rtp_layout_compatible(&dev, first, second, 0));
-    // An implementation may return the same non-dispatchable handle for two
-    // live creates. The first destruction must preserve the remaining alias,
-    // including the immutable identity held by already-created pipelines.
-    CHECK(vkrt_rtp_track_descriptor_layout(&dev, a, &definition) == VK_SUCCESS);
-    auto alias = keep(a);
-    vkrt_rtp_forget_descriptor_layout(&dev, a);
+    // Public objects stay independent, even when original definitions agree.
+    // The native-alias scenario is separately tested with equal lowered CIs.
+    const auto identical = MakeDescriptorLayout(definition);
+    auto equal_original = keep(identical);
+    DropDescriptorLayout(identical);
     auto surviving = keep(a);
-    CHECK(vkrt_rtp_layout_compatible(&dev, first, alias, 0));
+    CHECK(vkrt_rtp_layout_compatible(&dev, first, equal_original, 0));
     CHECK(vkrt_rtp_layout_compatible(&dev, first, surviving, 0));
-    // Distinct public definitions collapsing to one native handle stay
-    // successful, but cannot retroactively rewrite retained pipeline snapshots.
+    // Changes in descriptor count require a fresh object/native definition;
+    // retained pipeline layouts preserve the old original after public destroy.
     binding.descriptorCount = 5;
-    CHECK(vkrt_rtp_track_descriptor_layout(&dev, a, &definition) == VK_SUCCESS);
-    auto ambiguous = keep(a);
-    CHECK(!vkrt_rtp_layout_compatible(&dev, first, ambiguous, 0));
+    recreate(a);
+    auto count_five = keep(a);
+    CHECK(!vkrt_rtp_layout_compatible(&dev, first, count_five, 0));
     CHECK(vkrt_rtp_layout_compatible(&dev, first, second, 0));
-    vkrt_rtp_forget_descriptor_layout(&dev, a);
-    auto ambiguous_surviving = keep(a);
-    CHECK(vkrt_rtp_layout_compatible(&dev, ambiguous, ambiguous_surviving, 0));
-    // Creation inputs and DSL handles can both disappear or be reused while
-    // pipeline layouts retain their immutable definitions.
     binding.descriptorCount = 8;
-    vkrt_rtp_forget_descriptor_layout(&dev, a);
-    track(a);
+    recreate(a);
     auto changed = keep(a);
-    vkrt_rtp_forget_descriptor_layout(&dev, b);
+    DropDescriptorLayout(b);
+    b = VK_NULL_HANDLE;
     CHECK(vkrt_rtp_layout_compatible(&dev, first, second, 0));
     CHECK(!vkrt_rtp_layout_compatible(&dev, first, changed, 0));
     binding.descriptorCount = 4;
-    track(a);
+    recreate(a);
     auto independent = keep(a, VK_PIPELINE_LAYOUT_CREATE_INDEPENDENT_SETS_BIT_EXT);
     CHECK(!vkrt_rtp_layout_compatible(&dev, first, independent, 0));
     VkDescriptorBindingFlags flags = VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT;
@@ -928,10 +945,10 @@ void DescriptorDefinitions() {
     binding_flags.bindingCount = 1;
     binding_flags.pBindingFlags = &flags;
     definition.pNext = &binding_flags;
-    track(a);
+    recreate(a);
     auto flagged = keep(a);
     flags = 0;
-    track(b);
+    recreate(b);
     auto unflagged = keep(b);
     CHECK(!vkrt_rtp_layout_compatible(&dev, flagged, unflagged, 0));
     CHECK(vkrt_rtp_layout_compatible(&dev, first, unflagged, 0));
@@ -940,12 +957,12 @@ void DescriptorDefinitions() {
     binding.descriptorType = VK_DESCRIPTOR_TYPE_SAMPLER;
     binding.descriptorCount = 1;
     binding.pImmutableSamplers = &sampler;
-    track(a);
-    track(b);
+    recreate(a);
+    recreate(b);
     auto sampler_a = keep(a), sampler_b = keep(b);
     CHECK(vkrt_rtp_layout_compatible(&dev, sampler_a, sampler_b, 0));
     sampler = Handle<VkSampler>(3001);
-    track(b);
+    recreate(b);
     auto other_sampler = keep(b);
     CHECK(!vkrt_rtp_layout_compatible(&dev, sampler_a, other_sampler, 0));
     VkDescriptorType types[] = {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE};
@@ -956,25 +973,24 @@ void DescriptorDefinitions() {
     binding.descriptorType = VK_DESCRIPTOR_TYPE_MUTABLE_EXT;
     binding.pImmutableSamplers = nullptr;
     definition.pNext = &mutable_info;
-    track(a);
-    track(b);
+    recreate(a);
+    recreate(b);
     auto mutable_a = keep(a), mutable_b = keep(b);
     CHECK(vkrt_rtp_layout_compatible(&dev, mutable_a, mutable_b, 0));
     types[1] = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
-    track(b);
+    recreate(b);
     auto other_mutable = keep(b);
     CHECK(!vkrt_rtp_layout_compatible(&dev, mutable_a, other_mutable, 0));
     for (auto handle : owned) destroy(device, handle, nullptr);
-    vkrt_rtp_forget_descriptor_layout(&dev, a);
-    vkrt_rtp_forget_descriptor_layout(&dev, b);
+    DropDescriptorLayout(a);
+    DropDescriptorLayout(b);
     CHECK(layouts.empty());
 }
 void ReplayLayoutLifetimes() {
     auto make = (PFN_vkCreatePipelineLayout)vkrt_rtp_proc("vkCreatePipelineLayout");
     auto destroy = (PFN_vkDestroyPipelineLayout)vkrt_rtp_proc("vkDestroyPipelineLayout");
-    const auto set = Handle<VkDescriptorSetLayout>(99000);
     VkDescriptorSetLayoutCreateInfo definition{VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO};
-    CHECK(vkrt_rtp_track_descriptor_layout(&dev, set, &definition) == VK_SUCCESS);
+    const auto set = MakeDescriptorLayout(definition);
     VkPushConstantRange pushes[] = {{VK_SHADER_STAGE_COMPUTE_BIT, 0, 16}, {VK_SHADER_STAGE_RAYGEN_BIT_KHR, 16, 4}};
     VkPipelineLayoutCreateInfo ci{VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO};
     ci.setLayoutCount = 1;
@@ -996,7 +1012,7 @@ void ReplayLayoutLifetimes() {
     if (distinct_result != VK_SUCCESS) {
         destroy(device, public_layout, nullptr);
         vkrt_rtp_reset_command(&cb);
-        vkrt_rtp_forget_descriptor_layout(&dev, set);
+        DropDescriptorLayout(set);
         alias_handle = VK_NULL_HANDLE;
         alias_private = false;
         return;
@@ -1005,7 +1021,7 @@ void ReplayLayoutLifetimes() {
     CHECK(vkrt_rtp_replay_layout_capture(&cb, distinct, &second) == VK_SUCCESS && second && second != first);
     destroy(device, public_layout, nullptr);
     destroy(device, distinct, nullptr);
-    vkrt_rtp_forget_descriptor_layout(&dev, set);
+    DropDescriptorLayout(set);
     CHECK(!layouts.empty() && layouts.count(alias_handle));
     const auto retained_references = layouts.at(alias_handle).references;
     vkrt_cmd_buffer_data execution{};
@@ -1069,13 +1085,12 @@ void DescriptorHistoryAllocationFailures(CallbackOwner &allocator) {
     auto make = (PFN_vkCreatePipelineLayout)vkrt_rtp_proc("vkCreatePipelineLayout");
     auto destroy = (PFN_vkDestroyPipelineLayout)vkrt_rtp_proc("vkDestroyPipelineLayout");
     auto push = (PFN_vkCmdPushDescriptorSetKHR)vkrt_rtp_proc("vkCmdPushDescriptorSetKHR");
-    const auto set = Handle<VkDescriptorSetLayout>(90001);
     VkDescriptorSetLayoutBinding binding{0, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 2, VK_SHADER_STAGE_COMPUTE_BIT, nullptr};
     VkDescriptorSetLayoutCreateInfo definition{VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO};
     definition.flags = VK_DESCRIPTOR_SET_LAYOUT_CREATE_PUSH_DESCRIPTOR_BIT_KHR;
     definition.bindingCount = 1;
     definition.pBindings = &binding;
-    CHECK(vkrt_rtp_track_descriptor_layout(&dev, set, &definition) == VK_SUCCESS);
+    const auto set = MakeDescriptorLayout(definition);
     VkPipelineLayoutCreateInfo ci{VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO};
     ci.setLayoutCount = 1;
     ci.pSetLayouts = &set;
@@ -1123,7 +1138,7 @@ void DescriptorHistoryAllocationFailures(CallbackOwner &allocator) {
         CHECK(!std::memcmp(&write, saved.data(), sizeof(write)));
     }
     CHECK(succeeded && failures_seen >= 4);
-    vkrt_rtp_forget_descriptor_layout(&dev, set);
+    DropDescriptorLayout(set);
     std::printf("Compute descriptor history: owned nested payload, ordered repeated restore, allocation failures %u\n",
                 failures_seen);
 }
@@ -1131,6 +1146,7 @@ void DescriptorHistoryAllocationFailures(CallbackOwner &allocator) {
 void PipelineLayoutAliases() { LayoutOwnership::Run(); }
 #include "rtp_mixed_entry_tests.h"
 #include "rtp_shader_ownership_tests.h"
+#include "rtp_descriptor_layout_ownership_tests.h"
 }  // namespace
 // One-shot, thread-local fault in the real C++ ownership-map allocation. Normal
 // allocations retain the same malloc/free contract throughout this CPU fixture.
@@ -1230,10 +1246,13 @@ extern "C" vkrt_replay_context *vkrt_replay_lookup_context(VkCommandBuffer comma
 int main() {
     instance.vtable.GetPhysicalDeviceProperties = Properties;
     dev.device = device;
+    dev.virtual_rt = true;
     dev.physical_device = physical;
     dev.instance_data = &instance;
     dev.vtable.CreatePipelineLayout = CreateLayout;
     dev.vtable.DestroyPipelineLayout = DestroyLayout;
+    dev.vtable.CreateDescriptorSetLayout = CreateDescriptorLayout;
+    dev.vtable.DestroyDescriptorSetLayout = DestroyDescriptorLayout;
     dev.vtable.CmdBindDescriptorSets2 = Bind2;
     dev.vtable.CmdBindDescriptorSets = BindLegacy;
     dev.vtable.CreateShaderModule = CreateNativeShader;
@@ -1253,6 +1272,7 @@ int main() {
     DescriptorDefinitions();
     MixedEntryPipelines();
     ShaderOwnership::Run();
+    DescriptorLayoutOwnership::Run();
     PipelineDerivatives();
     const std::string bank_source = R"spv(
 OpCapability Shader
@@ -1302,9 +1322,9 @@ OpFunctionEnd
     auto core = (PFN_vkCmdBindDescriptorSets2)vkrt_rtp_proc("vkCmdBindDescriptorSets2");
     auto khr = (PFN_vkCmdBindDescriptorSets2)vkrt_rtp_proc("vkCmdBindDescriptorSets2KHR");
     CHECK(core && khr);
-    const VkDescriptorSetLayout set_layouts[] = {Handle<VkDescriptorSetLayout>(40), Handle<VkDescriptorSetLayout>(41)};
+    VkDescriptorSetLayout set_layouts[2]{};
     VkDescriptorSetLayoutCreateInfo empty_definition{VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO};
-    for (auto handle : set_layouts) CHECK(vkrt_rtp_track_descriptor_layout(&dev, handle, &empty_definition) == VK_SUCCESS);
+    for (auto &handle : set_layouts) handle = MakeDescriptorLayout(empty_definition);
     const VkPushConstantRange ranges[] = {{VK_SHADER_STAGE_COMPUTE_BIT, 0, 256}, {VK_SHADER_STAGE_RAYGEN_BIT_KHR, 0, 4}};
     VkPipelineLayoutCreateInfo ci{VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO};
     ci.setLayoutCount = 2;
@@ -1371,6 +1391,7 @@ OpFunctionEnd
     Reset();
 
     ReplayLayoutLifetimes();
+    for (auto handle : set_layouts) DropDescriptorLayout(handle);
     vkrt_rtp_finish(&dev);
     PipelineLayoutAliases();
     passthrough = &info;
@@ -1378,6 +1399,7 @@ OpFunctionEnd
     core(command, &info);
     CHECK(cb.record_result == VK_SUCCESS && forwarded == before + 1 && !cb.rtp && layouts.empty());
     CHECK(!std::memcmp(&unknown, saved_unknown.data(), sizeof(unknown)));
+    CHECK(native_descriptor_layouts.empty());
     vkrt_unmap_object(VKRT_HKEY(command));
     vkrt_unmap_object(VKRT_HKEY(device));
     std::printf("RTP bindings/pipeline derivation host contracts %s\n", failures ? "FAIL" : "PASS");

@@ -18,8 +18,11 @@ work prioritizes the mandatory AS/RQ/RTP baseline; known newer-feature exclusion
 must be explicit. CTS/regression outcomes remain categorized evidence, with no
 requirement to make unrelated optional suites all pass. See the goal's
 [compatibility and test scope](ray_tracing_fallback_goal.md#compatibility-and-test-scope).
-The latest slice is the [PipelineLayout ownership checkpoint](rt_layout_ownership_2026-10-29.md).
-It removes the rejection of differing original RT layouts with identical native
+The latest slice is the [DescriptorSetLayout ownership checkpoint](rt_descriptor_layout_ownership_2026-10-29.md).
+It preserves different original descriptor definitions across native aliases,
+including compatible trace recording and portable shader-interface recipes.
+The preceding [PipelineLayout ownership checkpoint](rt_layout_ownership_2026-10-29.md)
+removes the rejection of differing original RT layouts with identical native
 definitions and qualifies retained layout replay and typed metadata consumers.
 The preceding [ShaderModule ownership and header qualification checkpoint](rt_shader_ownership_2026-10-29.md)
 resolves the ShaderModule P1 from the
@@ -96,6 +99,7 @@ the final layout, passing build/local checks and the 16-case external CTS rechec
 - [x] Review branch-wide code/build/tooling contracts under ub-mode, retaining independent controls, tool limits and remaining quality debt.
 - [x] Unify source/native ShaderModule identities, verify public allocator/rollback/consumer behavior, and preserve newer compatible feature prefixes using matching header/registry metadata.
 - [x] Preserve distinct public PipelineLayout definitions across native aliases, with compatible object callbacks, retained replay and typed debug/PrivateData ownership.
+- [x] Preserve distinct public DescriptorSetLayout definitions and portable recipes across native aliases; translate native layout/allocation/query/shader-object consumers and qualify rollback/lifetime behavior.
 - [ ] M0: complete all capability, no-native-RT, resource ABI, and continuation proofs.
 - [ ] M1: integrate Mesa builders, GPU BVH4 encoding/refit, and shared AS objects.
 - [ ] M2: complete Ray Query lowering and state semantics.
@@ -836,7 +840,7 @@ The following are exit checks, not implemented-feature claims.
 
 | Priority | Deliverable | Evidence needed before closing it |
 | --- | --- | --- |
-| Next object qualification | Complete other public object namespaces and consumers | ShaderModule and PipelineLayout ownership now preserve per-object semantics and public lifetime/forwarding/rollback controls. Qualify mixed native/software Pipeline, DescriptorSetLayout original-definition identity and remaining resource/interoperability paths; the supplemental Pipeline reproduction has no execution evidence |
+| Next object qualification | Complete other public object namespaces and consumers | ShaderModule, PipelineLayout and DescriptorSetLayout ownership now preserve per-object semantics and public lifetime/forwarding/rollback controls. Qualify mixed native/software Pipeline and remaining resource/interoperability paths; the supplemental Pipeline reproduction has no execution evidence |
 | 1 | Complete mandatory profile/resource qualification | Qualify protected execution, multi-device groups and pool-specific native query scopes; account for private/native resource budgets without reducing the mandatory public contract |
 | Parallel M4 | Complete logical-stage synchronization semantics | Source semaphore/barrier/event/ownership scopes, native-query interactions and qualified queues/groups. Query COPY uses the proved native bridge. CPU schedules and early-signal timing alone establish neither a correctness failure nor a requirement for a general queue worker |
 | Parallel M0/M1 | Complete no-RT resource and construction contract | Extend the shared software candidate profile to complete resource budgets and queue qualification; qualify production indexed construction and XYZ dispatch, then physical no-RT execution |

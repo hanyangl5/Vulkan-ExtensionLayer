@@ -48,6 +48,7 @@ static const VkObjectType kinds[] = {VK_OBJECT_TYPE_ACCELERATION_STRUCTURE_KHR,
                                      VK_OBJECT_TYPE_PIPELINE,
                                      VK_OBJECT_TYPE_SHADER_MODULE,
                                      VK_OBJECT_TYPE_PIPELINE_LAYOUT,
+                                     VK_OBJECT_TYPE_DESCRIPTOR_SET_LAYOUT,
                                      VK_OBJECT_TYPE_DESCRIPTOR_UPDATE_TEMPLATE,
                                      VK_OBJECT_TYPE_QUERY_POOL,
                                      VK_OBJECT_TYPE_DEFERRED_OPERATION_KHR};
@@ -55,10 +56,11 @@ static const VkDebugReportObjectTypeEXT marker_kinds[] = {VK_DEBUG_REPORT_OBJECT
                                                           VK_DEBUG_REPORT_OBJECT_TYPE_PIPELINE_EXT,
                                                           VK_DEBUG_REPORT_OBJECT_TYPE_SHADER_MODULE_EXT,
                                                           VK_DEBUG_REPORT_OBJECT_TYPE_PIPELINE_LAYOUT_EXT,
+                                                          VK_DEBUG_REPORT_OBJECT_TYPE_DESCRIPTOR_SET_LAYOUT_EXT,
                                                           VK_DEBUG_REPORT_OBJECT_TYPE_DESCRIPTOR_UPDATE_TEMPLATE_EXT,
                                                           VK_DEBUG_REPORT_OBJECT_TYPE_QUERY_POOL_EXT,
                                                           VK_DEBUG_REPORT_OBJECT_TYPE_UNKNOWN_EXT};
-static bool live[7] = {true, true, true, true, true, true, true};
+static bool live[8] = {true, true, true, true, true, true, true, true};
 /* Two independently owned public modules may share a native module, whose
  * numeric value may also equal a different raw-RT public token. */
 static const struct {
@@ -69,6 +71,11 @@ static const struct {
 } layout_aliases[] = {{UINT64_C(0x8200000000000101), 17},
                       {UINT64_C(0x8200000000000102), 17},
                       {UINT64_C(0x8200000000000103), UINT64_C(0x8200000000000101)}};
+static const struct {
+    uint64_t token, native;
+} descriptor_layout_aliases[] = {{UINT64_C(0x8300000000000101), 17},
+                                 {UINT64_C(0x8300000000000102), 17},
+                                 {UINT64_C(0x8300000000000103), UINT64_C(0x8300000000000101)}};
 static const uint64_t parallel_handles[] = {100, 101, 102, 103};
 static bool owns(struct vkrt_device_data *dev, VkObjectType type, uint64_t handle) {
     if (dev == &second) return type == VK_OBJECT_TYPE_PIPELINE && handle == 17;
@@ -79,6 +86,9 @@ static bool owns(struct vkrt_device_data *dev, VkObjectType type, uint64_t handl
     if (type == VK_OBJECT_TYPE_PIPELINE_LAYOUT)
         for (unsigned i = 0; i < VKRT_ARRAY_SIZE(layout_aliases); ++i)
             if (handle == layout_aliases[i].token) return true;
+    if (type == VK_OBJECT_TYPE_DESCRIPTOR_SET_LAYOUT)
+        for (unsigned i = 0; i < VKRT_ARRAY_SIZE(descriptor_layout_aliases); ++i)
+            if (handle == descriptor_layout_aliases[i].token) return true;
     for (unsigned i = 0; i < VKRT_ARRAY_SIZE(kinds); ++i)
         if (type == kinds[i] && handle == 17 && live[i]) return true;
     // Distinct live objects used by the parallel host test, not a handle rule
@@ -370,6 +380,14 @@ static void pipeline_layout_alias_annotations(void) {
     CHECK(marker_tag(ordinary.device, &tag) == native_result);
     CHECK(native_calls == before_calls + 2 && native_lookups == before_lookups + 2);
 }
+static void descriptor_layout_alias_annotations(void) {
+    CHECK(descriptor_layout_aliases[0].token != descriptor_layout_aliases[1].token &&
+          descriptor_layout_aliases[0].native == descriptor_layout_aliases[1].native &&
+          descriptor_layout_aliases[2].native == descriptor_layout_aliases[0].token);
+    const uint64_t tokens[] = {descriptor_layout_aliases[0].token, descriptor_layout_aliases[1].token,
+                               descriptor_layout_aliases[2].token};
+    public_alias_annotations(VK_OBJECT_TYPE_DESCRIPTOR_SET_LAYOUT, VK_DEBUG_REPORT_OBJECT_TYPE_DESCRIPTOR_SET_LAYOUT_EXT, tokens);
+}
 static void private_data_values(void) {
     for (unsigned i = 0; i < VKRT_ARRAY_SIZE(kinds); ++i) {
         unsigned before = owner.calls;
@@ -512,6 +530,7 @@ int main(void) {
     private_data_values();
     shader_module_alias_annotations();
     pipeline_layout_alias_annotations();
+    descriptor_layout_alias_annotations();
     if (failures) {
         vkrt_debug_objects_finish(&first);
         vkrt_debug_objects_finish(&second);

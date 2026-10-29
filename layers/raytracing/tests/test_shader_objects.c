@@ -6,6 +6,7 @@
 #include "vkrt_as_registry.h"
 #include "vkrt_spirv_lower.h"
 #include "vkrt_rt_capabilities.h"
+#include "vkrt_rtp.h"
 #include <stdatomic.h>
 
 /* Native shader compilation and SPIR-V rewriting are spies; the actual interface
@@ -31,6 +32,9 @@ static VkResult temporary_result = VK_SUCCESS, final_result = VK_SUCCESS, binary
 static unsigned temporary_successes = UINT32_MAX, final_successes = UINT32_MAX;
 static bool bridge, expect_temporary;
 static bool leave_rt_dependency;
+static uint32_t selection_failure_tag;
+static VkResult selection_failure_result;
+static unsigned selected_buffers;
 static VkResult layout_result = VK_SUCCESS;
 static const VkShaderCreateInfoEXT *outer;
 static uint32_t outer_count;
@@ -40,6 +44,25 @@ static VkShaderEXT force_public, force_temporary;
 static uint32_t force_temporary_index;
 static const VkAllocationCallbacks *public_allocator;
 static unsigned next_handle = 100, next_layout = 10000;
+static unsigned public_layout_lookups;
+static bool namespace_test;
+static const VkDescriptorSetLayout public_layouts[] = {H(VkDescriptorSetLayout, UINT64_C(0x8300000000000201)),
+                                                       H(VkDescriptorSetLayout, UINT64_C(0x8300000000000202)),
+                                                       H(VkDescriptorSetLayout, UINT64_C(0x8300000000000203))};
+static const VkDescriptorSetLayout native_layouts[] = {H(VkDescriptorSetLayout, 71), H(VkDescriptorSetLayout, 71),
+                                                       H(VkDescriptorSetLayout, UINT64_C(0x8300000000000201))};
+static const VkDescriptorSetLayout *expected_native_layouts = native_layouts;
+/* The production token registry is exercised by canonical RTP tests. This
+ * boundary spy supplies borrowed native views and rejects private handles. */
+VkDescriptorSetLayout vkrt_rtp_native_descriptor_layout(struct vkrt_device_data *device, VkDescriptorSetLayout layout) {
+    CHECK(device == &dev);
+    if (!device->rtp) return layout;
+    if (!layout) return VK_NULL_HANDLE;
+    ++public_layout_lookups;
+    for (unsigned i = 0; i < VKRT_ARRAY_SIZE(public_layouts); ++i)
+        if (layout == public_layouts[i]) return native_layouts[i];
+    return VK_NULL_HANDLE;
+}
 struct native_shader {
     VkShaderEXT handle;
     unsigned references;
@@ -157,6 +180,29 @@ static bool has_query(const uint32_t *p, size_t count) {
     }
     return false;
 }
+/* This codec/ICD-spy fixture keeps its synthetic source words unchanged.
+ * test_shader_objects_mixed links the actual selector and real rewriter. */
+VkResult vkrt_spirv_select_native_entry(const uint32_t *words, size_t count, const char *name, VkShaderStageFlagBits stage,
+                                        uint32_t **out, size_t *out_count) {
+    (void)name;
+    (void)stage;
+    *out = NULL;
+    *out_count = 0;
+    if (count > 2 && words[2] == selection_failure_tag) return selection_failure_result;
+    *out = malloc(count * sizeof(**out));
+    if (!*out) return VK_ERROR_OUT_OF_HOST_MEMORY;
+    ++selected_buffers;
+    memcpy(*out, words, count * sizeof(**out));
+    *out_count = count;
+    return VK_SUCCESS;
+}
+void vkrt_spirv_lower_free(uint32_t *words) {
+    if (words) {
+        CHECK(selected_buffers != 0);
+        --selected_buffers;
+    }
+    free(words);
+}
 int vkrt_spirv_validate_source(const uint32_t *p, size_t count) {
     if (count < 5 || p[0] != 0x07230203 || p[4]) return 0;
     for (size_t i = 5; i < count;) {
@@ -209,7 +255,13 @@ static void check_outer(const VkShaderCreateInfoEXT *info, uint32_t i) {
     const VkShaderCreateInfoEXT *source = &outer[i];
     CHECK(info->stage == source->stage && info->nextStage == source->nextStage && info->flags == source->flags);
     CHECK(info->pName == source->pName && info->pSpecializationInfo == source->pSpecializationInfo && info->pNext == source->pNext);
-    CHECK(info->setLayoutCount == source->setLayoutCount && info->pSetLayouts == source->pSetLayouts);
+    CHECK(info->setLayoutCount == source->setLayoutCount);
+    if (namespace_test && dev.rtp && source->setLayoutCount && source->pSetLayouts) {
+        CHECK(info->pSetLayouts && info->pSetLayouts != source->pSetLayouts);
+        for (uint32_t j = 0; info->pSetLayouts && j < source->setLayoutCount; ++j)
+            CHECK(info->pSetLayouts[j] == expected_native_layouts[j]);
+    } else
+        CHECK(info->pSetLayouts == source->pSetLayouts);
     uint32_t count = 0;
     for (uint32_t j = 0; j < source->pushConstantRangeCount; ++j) {
         VkPushConstantRange p = source->pPushConstantRanges[j];
@@ -271,6 +323,10 @@ static VKAPI_ATTR VkResult VKAPI_CALL native_create(VkDevice device, uint32_t co
             CHECK(((const uint32_t *)infos[i].pCode)[2] ==
                   (((const uint32_t *)saved_group[i].pCode)[2] |
                    (has_query(saved_group[i].pCode, saved_group[i].codeSize / 4) ? 0x10000000u : 0)));
+            if (namespace_test && saved_group_count == 1) {
+                CHECK(infos[i].setLayoutCount == VKRT_ARRAY_SIZE(native_layouts));
+                for (unsigned j = 0; j < VKRT_ARRAY_SIZE(native_layouts); ++j) CHECK(infos[i].pSetLayouts[j] == native_layouts[j]);
+            }
             if (i == 1) {
                 CHECK(specialization(&infos[i]) == saved_specialization);
                 CHECK(infos[i].setLayoutCount == 1 && infos[i].pSetLayouts &&
@@ -398,6 +454,8 @@ static void plan(const VkShaderCreateInfoEXT *infos, uint32_t count, const VkAll
     expect_temporary = false;
     layout_result = VK_SUCCESS;
     leave_rt_dependency = false;
+    selection_failure_tag = 0;
+    selection_failure_result = VK_SUCCESS;
     force_temporary_index = 0;
     get_fail_size = 0;
 }
@@ -492,6 +550,97 @@ static struct blob plain_case(const VkAllocationCallbacks *allocator) {
     free(copy);
     destroy(dev.device, shader, allocator);
     return b;
+}
+static void descriptor_layout_namespace(const struct blob *rq, const VkAllocationCallbacks *allocator) {
+    uint32_t words[64];
+    VkDescriptorSetLayout layouts[3];
+    memcpy(layouts, public_layouts, sizeof(layouts));
+    VkShaderCreateInfoEXT infos[2] = {{.sType = VK_STRUCTURE_TYPE_SHADER_CREATE_INFO_EXT,
+                                       .stage = VK_SHADER_STAGE_COMPUTE_BIT,
+                                       .codeType = VK_SHADER_CODE_TYPE_SPIRV_EXT,
+                                       .pName = "main",
+                                       .pCode = words,
+                                       .codeSize = make_source(words, 5, 17, false),
+                                       .setLayoutCount = VKRT_ARRAY_SIZE(layouts),
+                                       .pSetLayouts = layouts}};
+    namespace_test = true;
+    dev.rtp = (void *)(uintptr_t)1;
+    unsigned lookups = public_layout_lookups;
+    VkShaderEXT shaders[2];
+    plan(infos, 1, allocator, false);
+    CHECK(create(dev.device, 1, infos, allocator, shaders) == VK_SUCCESS && shaders[0]);
+    CHECK(public_layout_lookups == lookups + 3 && !memcmp(layouts, public_layouts, sizeof(layouts)));
+    struct blob plain = export_shader(shaders[0]);
+    destroy_all(shaders, 1);
+    infos[1] = binary_info(&plain, VK_SHADER_STAGE_COMPUTE_BIT);
+    infos[1].setLayoutCount = VKRT_ARRAY_SIZE(layouts);
+    infos[1].pSetLayouts = layouts;
+    VkShaderCreateInfoEXT saved[2];
+    memcpy(saved, infos, sizeof(saved));
+    VkShaderCreateInfoEXT previous_group[2];
+    memcpy(previous_group, saved_group, sizeof(previous_group));
+    uint32_t previous_count = saved_group_count;
+    saved_group[0] = infos[0];
+    saved_group_count = 1;
+    plan(infos, 2, allocator, true);
+    expect_temporary = true;
+    lookups = public_layout_lookups;
+    CHECK(create(dev.device, 2, infos, allocator, shaders) == VK_SUCCESS && shaders[0] && shaders[1]);
+    CHECK(public_layout_lookups == lookups + 9 && !memcmp(infos, saved, sizeof(saved)) &&
+          !memcmp(layouts, public_layouts, sizeof(layouts)));
+    destroy_all(shaders, 2);
+    memcpy(saved_group, previous_group, sizeof(previous_group));
+    saved_group_count = previous_count;
+    free(plain.bytes);
+    /* RQ binary rebuild materializes private native layouts. The strict spy
+     * would reject those if the consumer tried public lookup a second time. */
+    namespace_test = false;
+    VkShaderCreateInfoEXT imported = binary_info(rq, VK_SHADER_STAGE_FRAGMENT_BIT);
+    plan(&imported, 1, allocator, true);
+    expect_temporary = true;
+    lookups = public_layout_lookups;
+    CHECK(create(dev.device, 1, &imported, allocator, shaders) == VK_SUCCESS && shaders[0]);
+    CHECK(public_layout_lookups == lookups);
+    destroy_all(shaders, 1);
+    /* Independent shader interfaces permit NULL layout slots and arrays. */
+    VkDescriptorSetLayout holes[] = {public_layouts[0], VK_NULL_HANDLE, public_layouts[2]};
+    const VkDescriptorSetLayout native_holes[] = {H(VkDescriptorSetLayout, 71), VK_NULL_HANDLE,
+                                                  H(VkDescriptorSetLayout, UINT64_C(0x8300000000000201))};
+    expected_native_layouts = native_holes;
+    namespace_test = true;
+    infos[0].stage = VK_SHADER_STAGE_VERTEX_BIT;
+    infos[0].flags = VK_SHADER_CREATE_INDEPENDENT_SETS_BIT_KHR;
+    infos[0].codeSize = make_source(words, 0, 17, false);
+    infos[0].pSetLayouts = holes;
+    plan(infos, 1, allocator, false);
+    CHECK(create(dev.device, 1, infos, allocator, shaders) == VK_SUCCESS && shaders[0]);
+    CHECK(public_layout_lookups == lookups + 2 && !holes[1]);
+    destroy_all(shaders, 1);
+    infos[0].pSetLayouts = NULL;
+    lookups = public_layout_lookups;
+    plan(infos, 1, allocator, false);
+    CHECK(create(dev.device, 1, infos, allocator, shaders) == VK_SUCCESS && shaders[0]);
+    CHECK(public_layout_lookups == lookups);
+    destroy_all(shaders, 1);
+    expected_native_layouts = native_layouts;
+    namespace_test = false;
+    /* Count zero leaves its ignored array untouched, even on an RTP device. */
+    infos[0] = saved[0];
+    infos[0].codeSize = make_source(words, 5, 17, false);
+    infos[0].setLayoutCount = 0;
+    infos[0].pSetLayouts = (void *)(uintptr_t)1;
+    plan(infos, 1, allocator, false);
+    CHECK(create(dev.device, 1, infos, allocator, shaders) == VK_SUCCESS && shaders[0]);
+    CHECK(public_layout_lookups == lookups);
+    destroy_all(shaders, 1);
+    dev.rtp = NULL;
+    /* An ordinary native profile passes through the caller's array, including
+     * values numerically equal to another profile's public tokens. */
+    infos[0] = saved[0];
+    plan(infos, 1, allocator, false);
+    CHECK(create(dev.device, 1, infos, allocator, shaders) == VK_SUCCESS && shaders[0]);
+    CHECK(public_layout_lookups == lookups);
+    destroy_all(shaders, 1);
 }
 static struct blob linked_case(const VkAllocationCallbacks *allocator) {
     static uint32_t words[2][64];
@@ -814,6 +963,36 @@ static void prefixes(const struct blob *blob, const VkAllocationCallbacks *alloc
     }
     dev.virtual_rt = true;
 }
+static void selection_prefix_failures(const VkAllocationCallbacks *allocator) {
+    uint32_t words[3][64];
+    VkShaderCreateInfoEXT infos[3];
+    const VkResult errors[] = {VK_ERROR_OUT_OF_HOST_MEMORY, VK_ERROR_FEATURE_NOT_PRESENT};
+    for (unsigned linked = 0; linked < 2; ++linked) {
+        for (unsigned i = 0; i < 3; ++i) {
+            VkShaderStageFlagBits stage =
+                linked && i ? (i == 1 ? VK_SHADER_STAGE_VERTEX_BIT : VK_SHADER_STAGE_FRAGMENT_BIT) : VK_SHADER_STAGE_COMPUTE_BIT;
+            infos[i] =
+                (VkShaderCreateInfoEXT){.sType = VK_STRUCTURE_TYPE_SHADER_CREATE_INFO_EXT,
+                                        .flags = linked && i ? VK_SHADER_CREATE_LINK_STAGE_BIT_EXT : 0,
+                                        .stage = stage,
+                                        .nextStage = linked && i == 1 ? VK_SHADER_STAGE_FRAGMENT_BIT : 0,
+                                        .codeType = VK_SHADER_CODE_TYPE_SPIRV_EXT,
+                                        .pName = "main",
+                                        .pCode = words[i],
+                                        .codeSize = make_source(words[i], linked && i ? (i == 1 ? 0 : 4) : 5, 71 + i, i != 0)};
+        }
+        for (unsigned error = 0; error < VKRT_ARRAY_SIZE(errors); ++error) {
+            plan(infos, 3, allocator, false);
+            selection_failure_tag = linked ? 73 : 72;
+            selection_failure_result = errors[error];
+            unsigned calls = native_calls;
+            VkShaderEXT shaders[3] = {0};
+            CHECK(create(dev.device, 3, infos, allocator, shaders) == errors[error]);
+            CHECK(shaders[0] && !shaders[1] && !shaders[2] && native_calls == calls + 1 && !selected_buffers);
+            destroy_all(shaders, 3);
+        }
+    }
+}
 static void linked_prefixes(const struct blob *compute, const VkAllocationCallbacks *allocator) {
     struct blob graphics[2];
     const VkShaderStageFlagBits stages[] = {VK_SHADER_STAGE_VERTEX_BIT, VK_SHADER_STAGE_FRAGMENT_BIT};
@@ -1042,9 +1221,11 @@ int main(void) {
     opaque_import(&plain, &allocator);
     unused_specialization(&allocator);
     struct blob rq = linked_case(&allocator);
+    descriptor_layout_namespace(&rq, &allocator);
     rq_import(&rq, &allocator);
     malformed(&rq, &allocator);
     prefixes(&plain, &allocator);
+    selection_prefix_failures(&allocator);
     linked_prefixes(&plain, &allocator);
     aliases(&plain);
     mixed_and_temporary_alias(&plain, &rq, &allocator);

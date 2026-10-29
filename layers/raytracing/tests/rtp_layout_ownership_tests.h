@@ -6,9 +6,8 @@ namespace LayoutOwnership {
 void TwoDefinitionsAndAnnotations() {
     auto make = reinterpret_cast<PFN_vkCreatePipelineLayout>(vkrt_rtp_proc("vkCreatePipelineLayout"));
     auto drop = reinterpret_cast<PFN_vkDestroyPipelineLayout>(vkrt_rtp_proc("vkDestroyPipelineLayout"));
-    const auto set = Handle<VkDescriptorSetLayout>(0x62000);
     VkDescriptorSetLayoutCreateInfo definition{VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO};
-    CHECK(vkrt_rtp_track_descriptor_layout(&dev, set, &definition) == VK_SUCCESS);
+    auto set = MakeDescriptorLayout(definition);
     VkPushConstantRange pushes[] = {{VK_SHADER_STAGE_COMPUTE_BIT, 0, 32}, {VK_SHADER_STAGE_RAYGEN_BIT_KHR, 16, 4}};
     VkPipelineLayoutCreateInfo ci{VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO};
     ci.setLayoutCount = 1;
@@ -32,7 +31,7 @@ void TwoDefinitionsAndAnnotations() {
     CHECK(result == VK_SUCCESS && second && second != first);
     if (result != VK_SUCCESS) {
         drop(device, first, &a);
-        vkrt_rtp_forget_descriptor_layout(&dev, set);
+        DropDescriptorLayout(set);
         alias_handle = VK_NULL_HANDLE;
         alias_private = false;
         return;
@@ -89,7 +88,7 @@ void TwoDefinitionsAndAnnotations() {
     drop(device, second, &b);
     const auto other_calls = other.calls;
     other.live = false;
-    vkrt_rtp_forget_descriptor_layout(&dev, set);
+    DropDescriptorLayout(set);
     vkrt_cmd_buffer_data execution{};
     execution.device_data = &dev;
     execution.cmd = command;
@@ -167,9 +166,8 @@ void Run() {
     auto device_callbacks = Callbacks(device_owner);
     CHECK(vkrt_rtp_init(&dev, &device_callbacks) == VK_SUCCESS);
     TwoDefinitionsAndAnnotations();
-    const auto set = Handle<VkDescriptorSetLayout>(90000);
     VkDescriptorSetLayoutCreateInfo definition{VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO};
-    CHECK(vkrt_rtp_track_descriptor_layout(&dev, set, &definition) == VK_SUCCESS);
+    auto set = MakeDescriptorLayout(definition);
     VkPushConstantRange push{VK_SHADER_STAGE_COMPUTE_BIT, 0, 16};
     VkPipelineLayoutCreateInfo ci{VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO};
     ci.setLayoutCount = 1;
@@ -248,7 +246,7 @@ void Run() {
     instance.has_allocator = true;
     instance.allocator = Callbacks(instance_owner);
     CHECK(vkrt_rtp_init(&dev, nullptr) == VK_SUCCESS);
-    CHECK(vkrt_rtp_track_descriptor_layout(&dev, set, &definition) == VK_SUCCESS);
+    set = MakeDescriptorLayout(definition);
     CHECK(make(device, &ci, &a, &survivor) == VK_SUCCESS);
     CHECK(make(device, &ci, &b, &recreated) == VK_SUCCESS);
     vkrt_rtp_finish(&dev);

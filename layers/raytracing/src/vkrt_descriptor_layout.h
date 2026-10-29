@@ -20,6 +20,7 @@ VkResult vkrt_prepare_descriptor_layout(bool virtual_rt, const VkDescriptorSetLa
 VkResult vkrt_prepare_descriptor_pool(bool virtual_rt, const VkDescriptorPoolCreateInfo *source, VkDescriptorPoolCreateInfo *native,
                                       VkDescriptorPoolSize **owned);
 PFN_vkVoidFunction vkrt_descriptor_layout_proc(const char *name);
+PFN_vkVoidFunction vkrt_descriptor_sets_proc(const char *name);
 #ifdef __cplusplus
 }
 #endif

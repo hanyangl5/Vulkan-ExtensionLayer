@@ -453,49 +453,6 @@ static VKAPI_ATTR void VKAPI_CALL vkrt_DestroySamplerYcbcrConversion(VkDevice de
 /* a tiny cell holding the BVHIR root address -- see vkrt_as_addr_buffer.*/
 /* ================================================================== */
 
-static VKAPI_ATTR VkResult VKAPI_CALL
-vkrt_CreateDescriptorSetLayout(VkDevice device,
-                               const VkDescriptorSetLayoutCreateInfo *pCreateInfo,
-                               const VkAllocationCallbacks *pAllocator,
-                               VkDescriptorSetLayout *pSetLayout)
-{
-   struct vkrt_device_data *data = VKRT_FIND(struct vkrt_device_data, device);
-   if (!data)
-      return VK_ERROR_INITIALIZATION_FAILED;
-
-   VkDescriptorSetLayoutCreateInfo native;
-   VkDescriptorSetLayoutBinding *bindings;
-   VkResult result = vkrt_prepare_descriptor_layout(data->virtual_rt, pCreateInfo, &native, &bindings);
-   if (result != VK_SUCCESS) return result;
-   vkrt_shader_interface_lock(data);
-   result = data->vtable.CreateDescriptorSetLayout(device, data->virtual_rt ? &native : pCreateInfo, pAllocator, pSetLayout);
-   free(bindings);
-   if (result == VK_SUCCESS) {
-       result = vkrt_shader_interface_track_layout_locked(data, *pSetLayout, pCreateInfo);
-       if (result == VK_SUCCESS) {
-           result = vkrt_rtp_track_descriptor_layout(data, *pSetLayout, pCreateInfo);
-           if (result != VK_SUCCESS) vkrt_shader_interface_forget_layout_locked(data, *pSetLayout);
-       }
-       if (result != VK_SUCCESS) {
-           data->vtable.DestroyDescriptorSetLayout(device, *pSetLayout, pAllocator);
-           *pSetLayout = VK_NULL_HANDLE;
-       }
-   }
-   vkrt_shader_interface_unlock(data);
-   return result;
-}
-
-static VKAPI_ATTR void VKAPI_CALL vkrt_DestroyDescriptorSetLayout(VkDevice device, VkDescriptorSetLayout layout,
-                                                                  const VkAllocationCallbacks *allocator) {
-    struct vkrt_device_data *data = VKRT_FIND(struct vkrt_device_data, device);
-    if (!data) return;
-    vkrt_shader_interface_lock(data);
-    vkrt_rtp_forget_descriptor_layout(data, layout);
-    data->vtable.DestroyDescriptorSetLayout(device, layout, allocator);
-    vkrt_shader_interface_forget_layout_locked(data, layout);
-    vkrt_shader_interface_unlock(data);
-}
-
 /* The set layout's AS bindings were rewritten to STORAGE_BUFFER, so the
  * pool has to offer STORAGE_BUFFER slots -- leaving an AS pool size here
  * makes vkAllocateDescriptorSets fail with a layout/pool mismatch. */
@@ -651,6 +608,8 @@ vkrt_find_device_fn(const char *name)
     if (command) return (void *)command;
     command = vkrt_descriptor_template_proc(name);
     if (command) return (void *)command;
+    command = vkrt_descriptor_sets_proc(name);
+    if (command) return (void *)command;
     command = vkrt_descriptor_layout_proc(name);
     if (command) return (void *)command;
     if (strncmp(name, "vkGetPhysicalDevice", strlen("vkGetPhysicalDevice"))) {
@@ -681,8 +640,6 @@ vkrt_find_device_fn(const char *name)
         {"vkCreateSamplerYcbcrConversionKHR", (void *)vkrt_CreateSamplerYcbcrConversion},
         {"vkDestroySamplerYcbcrConversion", (void *)vkrt_DestroySamplerYcbcrConversion},
         {"vkDestroySamplerYcbcrConversionKHR", (void *)vkrt_DestroySamplerYcbcrConversion},
-        {"vkCreateDescriptorSetLayout", (void *)vkrt_CreateDescriptorSetLayout},
-        {"vkDestroyDescriptorSetLayout", (void *)vkrt_DestroyDescriptorSetLayout},
         {"vkCreateDescriptorPool", (void *)vkrt_CreateDescriptorPool},
         {"vkUpdateDescriptorSets", (void *)vkrt_UpdateDescriptorSets},
         {"vkAllocateMemory", (void *)vkrt_AllocateMemory},

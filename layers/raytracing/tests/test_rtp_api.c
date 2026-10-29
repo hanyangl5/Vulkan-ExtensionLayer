@@ -715,9 +715,11 @@ int main(int argc, char **argv) {
         .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO, .bindingCount = 2, .pBindings = bindings};
     VkDescriptorSetLayout dsl;
     CHECK(vkCreateDescriptorSetLayout(g_dev, &dslci, NULL, &dsl));
+    annotate_object(VK_OBJECT_TYPE_DESCRIPTOR_SET_LAYOUT, OBJECT_HANDLE(dsl), "public RT descriptor layout");
     VkDescriptorSetLayout empty_layout;
     VkDescriptorSetLayoutCreateInfo empty_info = {.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO};
     CHECK(vkCreateDescriptorSetLayout(g_dev, &empty_info, NULL, &empty_layout));
+    annotate_object(VK_OBJECT_TYPE_DESCRIPTOR_SET_LAYOUT, OBJECT_HANDLE(empty_layout), "public empty descriptor layout");
     // Occupy every advertised set slot, and the complete native compute push
     // range below. The private context must fit without an appended slot/range.
     uint32_t layout_count = device_properties.limits.maxBoundDescriptorSets;
@@ -786,6 +788,7 @@ int main(int argc, char **argv) {
                                                       .bindingCount = 1,
                                                       .pBindings = &binding};
             CHECK(vkCreateDescriptorSetLayout(g_dev, &create, NULL, &compute_dsl));
+            annotate_object(VK_OBJECT_TYPE_DESCRIPTOR_SET_LAYOUT, OBJECT_HANDLE(compute_dsl), "public compute descriptor layout");
             ordinary.setLayoutCount = 1;
             ordinary.pSetLayouts = &compute_dsl;
         }

@@ -182,14 +182,13 @@ void MixedEntryPipelines() {
     VkShaderModule module{};
     bool handled = false;
     CHECK(vkrt_rtp_create_shader(&dev, &info, nullptr, &module, &handled) == VK_SUCCESS && handled);
-    const auto set = Handle<VkDescriptorSetLayout>(0x6d697865);
     VkDescriptorSetLayoutBinding binding{3, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1,
                                          VK_SHADER_STAGE_COMPUTE_BIT | VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
                                          nullptr};
     VkDescriptorSetLayoutCreateInfo set_info{VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO};
     set_info.bindingCount = 1;
     set_info.pBindings = &binding;
-    CHECK(vkrt_rtp_track_descriptor_layout(&dev, set, &set_info) == VK_SUCCESS);
+    const auto set = MakeDescriptorLayout(set_info);
     VkPipelineLayoutCreateInfo layout_info{VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO};
     layout_info.setLayoutCount = 1;
     layout_info.pSetLayouts = &set;
@@ -248,7 +247,7 @@ void MixedEntryPipelines() {
     CHECK(selected_graphics == 1 && results[0] && selected_modules.empty() && selected_destroys == 7);
     CHECK(selected_rewrites == selected_creates && source == MixedEntriesSource());
     drop_layout(device, layout, nullptr);
-    vkrt_rtp_forget_descriptor_layout(&dev, set);
+    DropDescriptorLayout(set);
     CHECK(vkrt_rtp_destroy_shader(&dev, module, nullptr));
     dev.vtable.CreateShaderModule = create_shader;
     dev.vtable.DestroyShaderModule = destroy_shader;

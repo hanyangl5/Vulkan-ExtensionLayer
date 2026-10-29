@@ -24,7 +24,7 @@ struct object_annotation {
     struct object_tag *tags;
     struct private_value *private_data;
 };
-/* Owned shader modules and pipeline layouts use their public identity here.
+/* Owned shaders and layouts use their public identity here.
  * Native values can alias each other or a different public token, so
  * annotation/private-data sidecars must not unwrap or merge them. The typed
  * ownership callback covers both native-backed and software objects; no token
@@ -392,6 +392,8 @@ static VkObjectType marker_type(VkDebugReportObjectTypeEXT type) {
             return VK_OBJECT_TYPE_PIPELINE;
         case VK_DEBUG_REPORT_OBJECT_TYPE_PIPELINE_LAYOUT_EXT:
             return VK_OBJECT_TYPE_PIPELINE_LAYOUT;
+        case VK_DEBUG_REPORT_OBJECT_TYPE_DESCRIPTOR_SET_LAYOUT_EXT:
+            return VK_OBJECT_TYPE_DESCRIPTOR_SET_LAYOUT;
         case VK_DEBUG_REPORT_OBJECT_TYPE_SHADER_MODULE_EXT:
             return VK_OBJECT_TYPE_SHADER_MODULE;
         case VK_DEBUG_REPORT_OBJECT_TYPE_DESCRIPTOR_UPDATE_TEMPLATE_EXT:

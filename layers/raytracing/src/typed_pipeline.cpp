@@ -1,6 +1,7 @@
 // Copyright 2026 The Khronos Group Inc.
 // SPDX-License-Identifier: Apache-2.0
 #include "typed_pipeline.h"
+#include "vkrt_spirv_lower.h"
 #include "spirv_environment.h"
 #include "spirv_memory_model.h"
 #include <spirv-tools/libspirv.hpp>
@@ -8,8 +9,12 @@
 #include <spirv-tools/optimizer.hpp>
 #include <spirv/unified1/spirv.hpp>
 #include <algorithm>
+#include <cstddef>
+#include <cstdlib>
 #include <cstring>
+#include <limits>
 #include <map>
+#include <new>
 #include <set>
 #include <stdexcept>
 #include <unordered_map>
@@ -491,3 +496,27 @@ Words LinkTypedPipelineProgram(const Words &scheduler, const std::vector<TypedCo
     return result;
 }
 }  // namespace vel::rt
+
+extern "C" VkResult vkrt_spirv_select_native_entry(const uint32_t *words, size_t word_count, const char *name,
+                                                   VkShaderStageFlagBits stage, uint32_t **out_words, size_t *out_word_count) {
+    if (out_words) *out_words = nullptr;
+    if (out_word_count) *out_word_count = 0;
+    if (!out_words || !out_word_count || !words || !name || word_count < 5 || word_count > SIZE_MAX / sizeof(*words) ||
+        word_count > static_cast<size_t>(std::numeric_limits<std::ptrdiff_t>::max()) / sizeof(*words))
+        return VK_ERROR_FEATURE_NOT_PRESENT;
+    try {
+        const std::vector<uint32_t> source(words, words + word_count);
+        const auto selected = vel::rt::SelectNativeShaderEntry(source, name, stage);
+        if (selected.size() > SIZE_MAX / sizeof(*words)) return VK_ERROR_OUT_OF_HOST_MEMORY;
+        auto copy = static_cast<uint32_t *>(std::malloc(selected.size() * sizeof(*words)));
+        if (!copy) return VK_ERROR_OUT_OF_HOST_MEMORY;
+        std::memcpy(copy, selected.data(), selected.size() * sizeof(*words));
+        *out_words = copy;
+        *out_word_count = selected.size();
+        return VK_SUCCESS;
+    } catch (const std::bad_alloc &) {
+        return VK_ERROR_OUT_OF_HOST_MEMORY;
+    } catch (...) {
+        return VK_ERROR_FEATURE_NOT_PRESENT;
+    }
+}

@@ -6,6 +6,7 @@
 #include "vkrt_as_registry.h"
 #include "vkrt_spirv_lower.h"
 #include "vkrt_shader_interface.h"
+#include "vkrt_rtp.h"
 
 /* Envelope fields and interface recipes contain no host pointers or handles.
  * Only proven NoRT groups retain opaque native code; RQ groups rebuild source
@@ -77,6 +78,7 @@ struct decoded {
     struct vkrt_shader_interface *owned_interface;
     void *rewritten;
     VkPushConstantRange *ranges;
+    VkDescriptorSetLayout *native_layouts;
 };
 struct group {
     uint32_t count, target;
@@ -431,6 +433,24 @@ static bool same_group(const VkShaderCreateInfoEXT *infos, uint32_t target, uint
     return target == index || ((infos[target].flags & VK_SHADER_CREATE_LINK_STAGE_BIT_EXT) &&
                                (infos[index].flags & VK_SHADER_CREATE_LINK_STAGE_BIT_EXT));
 }
+static VkResult prepare_source_group(uint32_t count, const VkShaderCreateInfoEXT *original, uint32_t target,
+                                     VkShaderCreateInfoEXT *views, uint32_t **selected) {
+    if (!views) return VK_SUCCESS;
+    uint32_t begin = (original[target].flags & VK_SHADER_CREATE_LINK_STAGE_BIT_EXT) ? 0 : target;
+    uint32_t end = (original[target].flags & VK_SHADER_CREATE_LINK_STAGE_BIT_EXT) ? count : target + 1;
+    for (uint32_t i = begin; i < end; ++i) {
+        if (!same_group(original, target, i) || views[i].codeType != VK_SHADER_CODE_TYPE_SPIRV_EXT || selected[i] ||
+            !rq_source(&views[i]))
+            continue;
+        size_t words = 0;
+        VkResult result = vkrt_spirv_select_native_entry(views[i].pCode, views[i].codeSize / 4, views[i].pName, views[i].stage,
+                                                         &selected[i], &words);
+        if (result != VK_SUCCESS) return result;
+        views[i].pCode = selected[i];
+        views[i].codeSize = words * sizeof(uint32_t);
+    }
+    return VK_SUCCESS;
+}
 static VkResult stage_blob(struct vkrt_device_data *dev, struct shader_record *record, const VkShaderCreateInfoEXT *info,
                            bool rebuildable) {
     uint32_t subgroup = 0;
@@ -561,6 +581,7 @@ static void group_finish(struct vkrt_device_data *dev, struct group *group) {
         free(stage->colors);
         free(stage->rewritten);
         free(stage->ranges);
+        free(stage->native_layouts);
         vkrt_shader_interface_destroy(dev, stage->owned_interface);
     }
     free(group->stages);
@@ -815,6 +836,22 @@ static VkResult ensure_resolver(struct vkrt_device_data *dev) {
     vkrt_mutex_unlock(&state->lock);
     return result;
 }
+static VkResult translate_set_layouts(struct vkrt_device_data *dev, VkShaderCreateInfoEXT *info, VkDescriptorSetLayout **owned) {
+    *owned = NULL;
+    if (!dev->rtp || !info->setLayoutCount || !info->pSetLayouts) return VK_SUCCESS;
+    if ((uint64_t)info->setLayoutCount * sizeof(**owned) > SIZE_MAX) return VK_ERROR_OUT_OF_HOST_MEMORY;
+    VkDescriptorSetLayout *layouts = malloc((size_t)info->setLayoutCount * sizeof(*layouts));
+    if (!layouts) return VK_ERROR_OUT_OF_HOST_MEMORY;
+    for (uint32_t i = 0; i < info->setLayoutCount; ++i) {
+        layouts[i] = vkrt_rtp_native_descriptor_layout(dev, info->pSetLayouts[i]);
+        if (info->pSetLayouts[i] && !layouts[i]) {
+            free(layouts);
+            return VK_ERROR_INITIALIZATION_FAILED;
+        }
+    }
+    info->pSetLayouts = *owned = layouts;
+    return VK_SUCCESS;
+}
 static VkResult rewrite_source(struct vkrt_device_data *dev, VkShaderCreateInfoEXT *info, void **owned) {
     bool rq = rq_source(info);
     if (rq) {
@@ -911,6 +948,12 @@ static VkResult compile_group(struct vkrt_device_data *dev, struct group *group,
         }
         result = rewrite_source(dev, &stage->info, &stage->rewritten);
         if (result != VK_SUCCESS) goto done;
+        /* RQ reconstruction already materialized private native layouts.
+         * Original NoRT groups still carry the application's public array. */
+        if (!stage->owned_interface) {
+            result = translate_set_layouts(dev, &stage->info, &stage->native_layouts);
+            if (result != VK_SUCCESS) goto done;
+        }
         infos[i] = stage->info;
     }
     /* Compile complete original linked groups, not an isolated exported stage.
@@ -943,12 +986,19 @@ static VKAPI_ATTR VkResult VKAPI_CALL CreateShadersEXT(VkDevice device, uint32_t
     VkShaderCreateInfoEXT *native = calloc(count, sizeof(*native));
     void **codes = calloc(count, sizeof(*codes));
     VkPushConstantRange **ranges = calloc(count, sizeof(*ranges));
+    VkDescriptorSetLayout **layouts = dev->rtp ? calloc(count, sizeof(*layouts)) : NULL;
+    VkShaderCreateInfoEXT *source_views = dev->virtual_rt ? calloc(count, sizeof(*source_views)) : NULL;
+    uint32_t **selected = dev->virtual_rt ? calloc(count, sizeof(*selected)) : NULL;
     struct shader_record **records = calloc(count, sizeof(*records)), **stages = calloc(count, sizeof(*stages));
-    bool bridge = false, changed = dev->virtual_rt;
+    bool bridge = false, changed = dev->virtual_rt || dev->rtp != NULL;
     for (uint32_t i = 0; i < count; ++i) bridge |= infos[i].codeType == VK_SHADER_CODE_TYPE_BINARY_EXT;
     VkResult result = VK_ERROR_OUT_OF_HOST_MEMORY, pending = VK_SUCCESS;
     uint32_t prepared = 0;
-    if (count && (!native || !codes || !ranges || !records || !stages)) goto cleanup;
+    if (count && (!native || !codes || !ranges || !records || !stages || (dev->rtp && !layouts) ||
+                  (dev->virtual_rt && (!source_views || !selected))))
+        goto cleanup;
+    if (source_views) memcpy(source_views, infos, (size_t)count * sizeof(*source_views));
+    const VkShaderCreateInfoEXT *sources = source_views ? source_views : infos;
     for (uint32_t i = 0; i < count; ++i) {
         struct group group = {0};
         native[i] = infos[i];
@@ -956,6 +1006,11 @@ static VKAPI_ATTR VkResult VKAPI_CALL CreateShadersEXT(VkDevice device, uint32_t
         result = records[i] ? VK_SUCCESS : VK_ERROR_OUT_OF_HOST_MEMORY;
         if (result == VK_SUCCESS && ((infos[i].stage | infos[i].nextStage) & VKRT_RTP_SHADER_STAGES))
             result = VK_ERROR_FEATURE_NOT_PRESENT;
+        /* Classify and cache the selected, unlowered source. Preparing only
+         * this failure unit preserves earlier independent prefix successes. */
+        if (result == VK_SUCCESS && infos[i].codeType == VK_SHADER_CODE_TYPE_SPIRV_EXT)
+            result = prepare_source_group(count, infos, i, source_views, selected);
+        if (result == VK_SUCCESS) native[i] = sources[i];
         if (result == VK_SUCCESS && infos[i].codeType == VK_SHADER_CODE_TYPE_BINARY_EXT) {
             result = envelope(&infos[i]) ? decode(state, &infos[i], &group) : VK_ERROR_INCOMPATIBLE_SHADER_BINARY_EXT;
             if (result == VK_SUCCESS) {
@@ -982,7 +1037,7 @@ static VKAPI_ATTR VkResult VKAPI_CALL CreateShadersEXT(VkDevice device, uint32_t
             }
             changed = true;
         } else if (result == VK_SUCCESS) {
-            result = source_blob(dev, state, count, infos, i, stages, records[i]);
+            result = source_blob(dev, state, count, sources, i, stages, records[i]);
             if (result == VK_SUCCESS && bridge) {
                 if (word(records[i]->blob, W_RQ)) {
                     VkShaderCreateInfoEXT source = infos[i];
@@ -990,7 +1045,7 @@ static VKAPI_ATTR VkResult VKAPI_CALL CreateShadersEXT(VkDevice device, uint32_t
                     source.codeSize = records[i]->size;
                     result = decode(state, &source, &group);
                 } else
-                    result = original_group(dev, count, infos, i, &group);
+                    result = original_group(dev, count, sources, i, &group);
                 size_t binary_size = 0;
                 if (result == VK_SUCCESS) result = compile_group(dev, &group, records[i], (uint8_t **)&codes[i], &binary_size);
                 if (result == VK_SUCCESS) {
@@ -1005,6 +1060,7 @@ static VKAPI_ATTR VkResult VKAPI_CALL CreateShadersEXT(VkDevice device, uint32_t
         }
         group_finish(dev, &group);
         if (result == VK_SUCCESS) result = translate_push_ranges(dev, &native[i], &ranges[i]);
+        if (result == VK_SUCCESS && layouts) result = translate_set_layouts(dev, &native[i], &layouts[i]);
         if (result != VK_SUCCESS) {
             pending = result;
             break;
@@ -1072,10 +1128,15 @@ cleanup:
                 free(codes[i]);
         }
         if (ranges) free(ranges[i]);
+        if (layouts) free(layouts[i]);
+        if (selected) vkrt_spirv_lower_free(selected[i]);
         if (records) free_record(records[i]);
         if (stages) free_record(stages[i]);
     }
     free(ranges);
+    free(layouts);
+    free(source_views);
+    free(selected);
     free(codes);
     free(native);
     free(records);

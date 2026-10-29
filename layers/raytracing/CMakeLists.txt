@@ -75,6 +75,7 @@ add_library(${VKRT_LAYER_NAME} SHARED
    src/vkrt_software_profile.c
    src/vkrt_descriptor_template.c
    src/vkrt_descriptor_layout.c
+   src/vkrt_descriptor_sets.c
    src/vkrt_memory_queries.c
    src/vkrt_query_pool.c
    src/vkrt_execution_replay.c
@@ -934,6 +935,15 @@ if(BUILD_TESTING)
    target_link_libraries(test_shader_objects PRIVATE Threads::Threads)
    set_target_properties(test_shader_objects PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED ON)
    add_test(NAME vkrt.shader_objects COMMAND test_shader_objects)
+   add_executable(test_shader_objects_mixed tests/test_shader_objects_mixed.cpp tests/shader_object_mixed_source_host.c
+      src/vkrt_shader_objects.c src/vkrt_shader_interface.c src/vkrt_spirv.c src/vkrt_spirv_lower.cpp src/vkrt_spirv_ids.cpp)
+   target_include_directories(test_shader_objects_mixed PRIVATE src ${CMAKE_CURRENT_BINARY_DIR} ${Vulkan_INCLUDE_DIRS}
+      ${VKRT_SPIRV_HEADERS_INCLUDE_DIR})
+   target_link_libraries(test_shader_objects_mixed PRIVATE vkrt_typed_compiler ${VKRT_SPIRV_LIBRARIES} Threads::Threads)
+   set_target_properties(test_shader_objects_mixed PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED ON CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
+   add_dependencies(test_shader_objects_mixed vkrt_traversal_spv)
+   add_test(NAME vkrt.shader_objects.mixed_entry COMMAND test_shader_objects_mixed)
+   set_tests_properties(vkrt.shader_objects.mixed_entry PROPERTIES LABELS "offline;no_native_rt;compiler")
    set_tests_properties(vkrt.shader_objects PROPERTIES LABELS "offline;no_native_rt")
    add_executable(test_shader_interface tests/test_shader_interface.c src/vkrt_shader_interface.c)
    target_include_directories(test_shader_interface PRIVATE src ${CMAKE_CURRENT_BINARY_DIR} ${Vulkan_INCLUDE_DIRS})
@@ -1045,7 +1055,8 @@ if(BUILD_TESTING)
    add_test(NAME vkrt.dsl_lifetime.retained.native COMMAND test_dsl_lifetime ${VKRT_DSL_LIFETIME_SPV} --retain-dsl)
    set_tests_properties(vkrt.dsl_lifetime.native vkrt.dsl_lifetime.retained.native PROPERTIES
       ENVIRONMENT "VK_INSTANCE_LAYERS=" LABELS "gpu;no_native_rt" SKIP_RETURN_CODE 77 TIMEOUT 120)
-   add_executable(test_rtp_bindings tests/test_rtp_bindings.cpp src/vkrt_rtp.cpp src/vkrt_debug_objects.c src/vkrt_shader.c)
+   add_executable(test_rtp_bindings tests/test_rtp_bindings.cpp src/vkrt_rtp.cpp src/vkrt_debug_objects.c src/vkrt_shader.c
+      src/vkrt_descriptor_sets.c src/vkrt_descriptor_layout.c src/vkrt_shader_interface.c)
    target_include_directories(test_rtp_bindings PRIVATE src ${CMAKE_CURRENT_BINARY_DIR} ${Vulkan_INCLUDE_DIRS} ${VKRT_SPIRV_HEADERS_INCLUDE_DIR})
    target_link_libraries(test_rtp_bindings PRIVATE vkrt_typed_compiler vkrt_command_replay Threads::Threads)
    target_compile_definitions(test_rtp_bindings PRIVATE NOMINMAX _CRT_SECURE_NO_WARNINGS)
@@ -1060,6 +1071,18 @@ if(BUILD_TESTING)
    set_tests_properties(vkrt.rtp_api.shader_object PROPERTIES
       ENVIRONMENT "VK_LAYER_PATH=${CMAKE_BINARY_DIR}/layers;VK_INSTANCE_LAYERS=VK_LAYER_VKRT_SOFTWARE_RAY_QUERY"
       LABELS "gpu;typed_rtp" SKIP_RETURN_CODE 77 TIMEOUT 600)
+   foreach(mode software native)
+      add_test(NAME vkrt.rtp_api.shader_object_mixed.${mode} COMMAND test_rtp_api
+         ${VKRT_MIXED_API_SPV} ${CMAKE_CURRENT_BINARY_DIR}/rtp_api11.rmiss.spv
+         ${CMAKE_CURRENT_BINARY_DIR}/rtp_api11.rchit.spv ${VKRT_MIXED_API_SPV} --shader-object)
+      set_tests_properties(vkrt.rtp_api.shader_object_mixed.${mode} PROPERTIES
+         LABELS "gpu;typed_rtp" SKIP_RETURN_CODE 77 TIMEOUT 600)
+   endforeach()
+   set_tests_properties(vkrt.rtp_api.shader_object_mixed.software PROPERTIES
+      ENVIRONMENT "VK_LAYER_PATH=${CMAKE_BINARY_DIR}/layers;VK_INSTANCE_LAYERS=VK_LAYER_VKRT_SOFTWARE_RAY_QUERY;ENABLE_VKRT_SOFTWARE_RAY_QUERY=1;VK_LOADER_LAYERS_DISABLE=~implicit~")
+   set_tests_properties(vkrt.rtp_api.shader_object_mixed.native PROPERTIES ENVIRONMENT "VK_INSTANCE_LAYERS=")
+   set_property(TEST vkrt.rtp_api.shader_object_mixed.software APPEND PROPERTY LABELS no_native_rt)
+   set_property(TEST vkrt.rtp_api.shader_object_mixed.native APPEND PROPERTY LABELS native_rt)
    add_test(NAME vkrt.rtp_api.derivatives.software COMMAND test_rtp_api ${VKRT_RTP_API_SPV} --derivatives)
    set_tests_properties(vkrt.rtp_api.derivatives.software PROPERTIES
       ENVIRONMENT "VK_LAYER_PATH=${CMAKE_BINARY_DIR}/layers;VK_INSTANCE_LAYERS=VK_LAYER_VKRT_SOFTWARE_RAY_QUERY"
