@@ -6,6 +6,15 @@
 
 namespace vel::omm {
 struct AccelerationBackend;
+// Cell at RootCell+64 in the same owned allocation. Only build GPU commands
+// publish state/native/root; creating or binding an AS never mutates a pending
+// descriptor shadow. The app's AS construction dependencies cover its readers.
+constexpr uint32_t kAccelerationIdentityMagic = 0x494d4d4f;  // LE "OMMI".
+struct AccelerationIdentityCell {
+    uint32_t magic, version, state, reserved;
+    uint64_t native_address, root_cell_address;
+};
+static_assert(sizeof(AccelerationIdentityCell) == 32);
 struct AccelerationRecording;
 using AccelerationRecordingRef = std::shared_ptr<AccelerationRecording>;
 struct AccelerationBackendCreateInfo {
@@ -32,6 +41,11 @@ void acceleration_backend_destroy(AccelerationBackend*);
 // The native handle and native AS address are never substituted.
 VkResult acceleration_track(AccelerationBackend*, VkAccelerationStructureKHR, const VkAccelerationStructureCreateInfoKHR*);
 void acceleration_untrack(AccelerationBackend*, VkAccelerationStructureKHR);
+// Stable reference is available before binding/construction and never queries a
+// native address. This is the application descriptor resolver entry point.
+VkResult acceleration_reference(AccelerationBackend*, VkAccelerationStructureKHR, VkDeviceAddress* identity_cell_address,
+                                VkDeviceAddress* root_address, std::shared_ptr<void>* lifetime = nullptr);
+// Diagnostic/native-address resolution requires tracked, bound backing storage.
 VkResult acceleration_identity(AccelerationBackend*, VkAccelerationStructureKHR, VkDeviceAddress* native_address,
                                VkDeviceAddress* root_address, std::shared_ptr<void>* lifetime = nullptr);
 VkResult acceleration_root_from_address(AccelerationBackend*, VkDeviceAddress native_address, VkDeviceAddress* root_address,

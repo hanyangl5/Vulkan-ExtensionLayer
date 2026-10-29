@@ -1,0 +1,47 @@
+// Copyright 2026 The Khronos Group Inc.
+// SPDX-License-Identifier: Apache-2.0
+#version 460
+#extension GL_EXT_buffer_reference2 : require
+#extension GL_EXT_shader_explicit_arithmetic_types_int64 : require
+
+// Public serialization is a pointer-free envelope: driverUUID, storage format
+// UUID, and the execution-time canonical active span. No native BVH is accessed.
+layout(local_size_x = 64) in;
+layout(buffer_reference, std430, buffer_reference_align = 4) readonly buffer Source { uint words[]; };
+layout(buffer_reference, std430, buffer_reference_align = 4) buffer Destination { uint words[]; };
+layout(push_constant, std430) uniform Serialize {
+    uint64_t source, destination, sourceCapacity, destinationCapacity;
+    uint version[8];
+    uint64_t deserialize;
+} p;
+
+uint r32(uint64_t address, uint64_t offset) { return Source(address + offset).words[0]; }
+uint64_t r64(uint64_t address, uint64_t offset) {
+    return uint64_t(r32(address, offset)) | (uint64_t(r32(address, offset + 4ul)) << 32u);
+}
+
+void main() {
+    const uint64_t maximum = 0xfffffffffffffffful;
+    bool restoring = p.deserialize != 0ul;
+    uint64_t sourcePrefix = restoring ? 32ul : 0ul, destinationPrefix = restoring ? 0ul : 32ul;
+    if (p.source == 0ul || p.destination == 0ul || (p.source & (restoring ? 255ul : 3ul)) != 0ul ||
+        (p.destination & (restoring ? 3ul : 255ul)) != 0ul || p.sourceCapacity < sourcePrefix + 64ul ||
+        p.destinationCapacity < destinationPrefix + 64ul || p.sourceCapacity > maximum - p.source ||
+        p.destinationCapacity > maximum - p.destination) return;
+    if (restoring)
+        for (uint i = 0u; i < 8u; ++i)
+            if (r32(p.source, uint64_t(i) * 4ul) != p.version[i]) return;
+    uint64_t canonical = p.source + sourcePrefix;
+    if (r32(canonical, 0ul) != 0x4f4c4556u || r32(canonical, 4ul) != 0x00004d4du || r32(canonical, 8ul) != 1u ||
+        r32(canonical, 12ul) != 64u || r64(canonical, 32ul) != 64ul || r64(canonical, 48ul) != 0ul ||
+        r64(canonical, 56ul) != 0ul) return;
+    uint64_t activeSize = r64(canonical, 16ul), count = r64(canonical, 24ul), dataOffset = r64(canonical, 40ul);
+    if (activeSize < 64ul || (activeSize & 15ul) != 0ul || activeSize > p.sourceCapacity - sourcePrefix ||
+        activeSize > p.destinationCapacity - destinationPrefix || count > (maximum - 79ul) / 24ul ||
+        dataOffset != ((64ul + count * 24ul + 15ul) & ~15ul) || dataOffset > activeSize ||
+        (p.source < p.destination + destinationPrefix + activeSize && p.destination < p.source + sourcePrefix + activeSize)) return;
+    uint64_t word = uint64_t(gl_GlobalInvocationID.x), step = uint64_t(gl_NumWorkGroups.x) * 64ul;
+    if (!restoring && word < 8ul) Destination(p.destination).words[uint(word)] = p.version[uint(word)];
+    for (; word < (activeSize >> 2u); word += step)
+        Destination(p.destination + destinationPrefix + word * 4ul).words[0] = r32(canonical, word * 4ul);
+}

@@ -348,8 +348,7 @@ VkResult descriptor_prepare_allocate_sets(DescriptorBackend* backend, const VkDe
             if (count > SIZE_MAX / sizeof(DescriptorASIdentity) || count > UINT64_MAX / 16) return VK_ERROR_OUT_OF_HOST_MEMORY;
             set->identities.resize(size_t(count));
             set->staging.resize(size_t(count));
-            // A reserved invalid pair distinguishes an unwritten descriptor
-            // from an explicitly written valid robustness2 NULL pair {0,0}.
+            // CPU sentinel and wire state distinguish unwritten from null.
             for (auto& identity : set->identities) identity.native_address = UINT64_MAX;
             if (count) {
                 VkResult result = make_storage(backend->native, count * 16, &set->storage);
@@ -357,7 +356,7 @@ VkResult descriptor_prepare_allocate_sets(DescriptorBackend* backend, const VkDe
             }
             if (count) {
                 auto* records = static_cast<DescriptorShadowRecord*>(set->storage->mapped);
-                for (size_t item = 0; item < size_t(count); ++item) records[item] = {UINT64_MAX, 0};
+                for (size_t item = 0; item < size_t(count); ++item) records[item] = {0, 0};
             }
             // Allocate the exact node type/allocator used by the destination
             // map. The temporary numeric key is replaced after native success.
@@ -482,7 +481,8 @@ VkResult descriptor_update(DescriptorBackend* backend, uint32_t write_count, con
                 if (structures->pAccelerationStructures[j]) {
                     result = backend->resolver(backend->resolver_user_data, structures->pAccelerationStructures[j], &identity);
                     if (result != VK_SUCCESS) return result;
-                    if (!identity.native_address || !identity.root_cell_address || (identity.root_cell_address & 15))
+                    if (!identity.identity_cell_address || (identity.identity_cell_address & 15) || !identity.root_cell_address ||
+                        (identity.root_cell_address & 15))
                         return invalid;
                 }
                 destination[size_t(destination_span.next())] = std::move(identity);
@@ -514,8 +514,12 @@ VkResult descriptor_update(DescriptorBackend* backend, uint32_t write_count, con
             std::lock_guard<std::mutex> set_lock(set.mutex);
             set.identities.swap(set.staging);
             auto* records = static_cast<DescriptorShadowRecord*>(set.storage->mapped);
-            for (size_t i = 0; i < set.identities.size(); ++i)
-                records[i] = {set.identities[i].native_address, set.identities[i].root_cell_address};
+            for (size_t i = 0; i < set.identities.size(); ++i) {
+                const auto& identity = set.identities[i];
+                records[i] = {identity.identity_cell_address, identity.identity_cell_address          ? 2u
+                                                              : identity.native_address == UINT64_MAX ? 0u
+                                                                                                      : 1u};
+            }
         }
         return VK_SUCCESS;
     } catch (const std::bad_alloc&) {
@@ -560,7 +564,7 @@ VkResult descriptor_build_context(DescriptorBackend* backend, const std::vector<
         const uint64_t bytes = 32 + uint64_t(context->entries.size()) * 32;
         VkResult result = make_storage(backend->native, bytes, &context->storage);
         if (result != VK_SUCCESS) return result;
-        DescriptorContextHeader header{kDescriptorContextMagic, 1, uint32_t(context->entries.size()), 32, bytes, 0};
+        DescriptorContextHeader header{kDescriptorContextMagic, 2, uint32_t(context->entries.size()), 32, bytes, 0};
         std::memcpy(context->storage->mapped, &header, sizeof(header));
         auto* bindings = reinterpret_cast<DescriptorContextBinding*>(static_cast<uint8_t*>(context->storage->mapped) + 32);
         for (size_t i = 0; i < context->entries.size(); ++i) {
@@ -583,7 +587,9 @@ VkResult descriptor_context_fetch(const DescriptorContextRef& context, uint32_t 
         if (index >= entry.count) return invalid;
         std::lock_guard<std::mutex> lock(entry.source->mutex);
         const auto& identity = entry.source->identities[size_t(entry.base + index)];
-        if ((!identity.native_address || !identity.root_cell_address) && (identity.native_address || identity.root_cell_address))
+        if (identity.native_address == UINT64_MAX ||
+            (identity.identity_cell_address ? !identity.root_cell_address
+                                            : (identity.native_address || identity.root_cell_address)))
             return invalid;
         *output = identity;
         return VK_SUCCESS;

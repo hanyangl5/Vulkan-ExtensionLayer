@@ -361,6 +361,28 @@ VKAPI_ATTR void VKAPI_CALL DestroyFence(VkDevice handle, VkFence fence, const Vk
     } else
         native<PFN_vkDestroyFence>(*state, "vkDestroyFence")(handle, fence, allocator);
 }
+VKAPI_ATTR VkResult VKAPI_CALL GetFenceFdKHR(VkDevice handle, const VkFenceGetFdInfoKHR* info, int* out) {
+    auto state = device(handle);
+    return state->submissions ? submissions_get_fence_fd(state->submissions, info, out)
+                              : native<PFN_vkGetFenceFdKHR>(*state, "vkGetFenceFdKHR")(handle, info, out);
+}
+VKAPI_ATTR VkResult VKAPI_CALL ImportFenceFdKHR(VkDevice handle, const VkImportFenceFdInfoKHR* info) {
+    auto state = device(handle);
+    return state->submissions ? submissions_import_fence_fd(state->submissions, info)
+                              : native<PFN_vkImportFenceFdKHR>(*state, "vkImportFenceFdKHR")(handle, info);
+}
+#ifdef VK_USE_PLATFORM_WIN32_KHR
+VKAPI_ATTR VkResult VKAPI_CALL GetFenceWin32HandleKHR(VkDevice handle, const VkFenceGetWin32HandleInfoKHR* info, HANDLE* out) {
+    auto state = device(handle);
+    return state->submissions ? submissions_get_fence_win32_handle(state->submissions, info, out)
+                              : native<PFN_vkGetFenceWin32HandleKHR>(*state, "vkGetFenceWin32HandleKHR")(handle, info, out);
+}
+VKAPI_ATTR VkResult VKAPI_CALL ImportFenceWin32HandleKHR(VkDevice handle, const VkImportFenceWin32HandleInfoKHR* info) {
+    auto state = device(handle);
+    return state->submissions ? submissions_import_fence_win32_handle(state->submissions, info)
+                              : native<PFN_vkImportFenceWin32HandleKHR>(*state, "vkImportFenceWin32HandleKHR")(handle, info);
+}
+#endif
 VKAPI_ATTR VkResult VKAPI_CALL QueueWaitIdle(VkQueue queue) {
     auto state = device(queue);
     return state->submissions ? submissions_queue_wait_idle(state->submissions, queue)

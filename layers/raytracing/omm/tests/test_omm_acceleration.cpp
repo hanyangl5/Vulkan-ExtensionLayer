@@ -4,7 +4,9 @@
 #include "../omm_acceleration.h"
 #include "../omm_submissions.h"
 #include "../omm_storage.h"
+#include "../omm_descriptors.h"
 #include <string>
+#include <unordered_map>
 using namespace vel::omm;
 namespace {
 unsigned assertions = 0, native_builds = 0, sanitized_queries = 0;
@@ -17,6 +19,12 @@ PFN_vkCreateBuffer native_create_buffer{};
 PFN_vkDestroyBuffer native_destroy_buffer{};
 PFN_vkAllocateMemory native_allocate_memory{};
 PFN_vkFreeMemory native_free_memory{};
+PFN_vkCreateAccelerationStructureKHR native_create_as{};
+PFN_vkGetAccelerationStructureDeviceAddressKHR native_as_address{};
+std::unordered_map<VkAccelerationStructureKHR, VkAccelerationStructureCreateInfoKHR> creations;
+DeviceBackend* tracked_buffers{};
+unsigned address_queries = 0;
+bool fail_private_buffer = false;
 VkDeviceAddress original_instances{};
 void require(bool value, const char* reason) {
     ++assertions;
@@ -24,6 +32,19 @@ void require(bool value, const char* reason) {
         std::fprintf(stderr, "FAIL acceleration: %s\n", reason);
         std::exit(1);
     }
+}
+VKAPI_ATTR VkResult VKAPI_CALL spy_create_as(VkDevice device, const VkAccelerationStructureCreateInfoKHR* info,
+                                             const VkAllocationCallbacks* allocator, VkAccelerationStructureKHR* out) {
+    const auto result = native_create_as(device, info, allocator, out);
+    if (result == VK_SUCCESS) creations[*out] = *info;
+    return result;
+}
+VKAPI_ATTR VkDeviceAddress VKAPI_CALL spy_as_address(VkDevice device, const VkAccelerationStructureDeviceAddressInfoKHR* info) {
+    const auto& creation = creations.at(info->accelerationStructure);
+    require(device_buffer_as_address_span(tracked_buffers, creation.buffer, creation.offset, creation.size) == VK_SUCCESS,
+            "backend queries native AS addresses only for legal backing storage");
+    ++address_queries;
+    return native_as_address(device, info);
 }
 VKAPI_ATTR void VKAPI_CALL spy_build(VkCommandBuffer cb, uint32_t count, const VkAccelerationStructureBuildGeometryInfoKHR* infos,
                                      const VkAccelerationStructureBuildRangeInfoKHR* const* ranges) {
@@ -55,6 +76,7 @@ VKAPI_ATTR void VKAPI_CALL spy_sizes(VkDevice device, VkAccelerationStructureBui
 }
 VKAPI_ATTR VkResult VKAPI_CALL spy_create_buffer(VkDevice device, const VkBufferCreateInfo* info,
                                                  const VkAllocationCallbacks* allocator, VkBuffer* output) {
+    if (fail_private_buffer) return VK_ERROR_OUT_OF_DEVICE_MEMORY;
     const auto result = native_create_buffer(device, info, allocator, output);
     require((physical_family_count > 1 && info->sharingMode == VK_SHARING_MODE_CONCURRENT &&
              info->queueFamilyIndexCount == physical_family_count) ||
@@ -84,6 +106,8 @@ VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL proc(VkDevice device, const char* name)
     if (!std::strcmp(name, "vkDestroyBuffer")) return reinterpret_cast<PFN_vkVoidFunction>(spy_destroy_buffer);
     if (!std::strcmp(name, "vkAllocateMemory")) return reinterpret_cast<PFN_vkVoidFunction>(spy_allocate_memory);
     if (!std::strcmp(name, "vkFreeMemory")) return reinterpret_cast<PFN_vkVoidFunction>(spy_free_memory);
+    if (!std::strcmp(name, "vkGetAccelerationStructureDeviceAddressKHR"))
+        return reinterpret_cast<PFN_vkVoidFunction>(spy_as_address);
     return vkGetDeviceProcAddr(device, name);
 }
 std::vector<uint32_t> shader(const std::string& path) {
@@ -102,10 +126,56 @@ void track(DeviceBackend* b, const Buffer& value, uint64_t size, VkBufferUsageFl
     CHECK(device_track_buffer(b, value.handle, &info, size));
     device_buffer_bound(b, value.handle);
 }
-void track_as(AccelerationBackend* b, const Acceleration& value, VkAccelerationStructureTypeKHR type) {
-    auto info = init<VkAccelerationStructureCreateInfoKHR>(VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_CREATE_INFO_KHR);
-    info.type = type;
+void storage_address_spans(DeviceBackend* backend) {
+    // These are tracker-only identities. No native sparse buffer, binding or
+    // address query is involved, so this does not qualify GPU sparse binding.
+    const uint64_t sparse_bits = 0x51a50001u, ordinary_bits = 0x51a50002u;
+    VkBuffer sparse{}, ordinary{};
+    std::memcpy(&sparse, &sparse_bits, sizeof(sparse));
+    std::memcpy(&ordinary, &ordinary_bits, sizeof(ordinary));
+    auto info = init<VkBufferCreateInfo>(VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO);
+    info.flags = VK_BUFFER_CREATE_SPARSE_BINDING_BIT;
+    info.size = 4096;
+    info.usage = VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
+    const auto before = address_queries;
+    CHECK(device_track_buffer(backend, sparse, &info));
+    require(device_buffer_bound_span(backend, sparse, 0, info.size) == VK_ERROR_VALIDATION_FAILED_EXT,
+            "strict bound span does not claim a tracker-only sparse buffer is bound");
+    require(device_buffer_as_address_span(backend, sparse, 0, info.size) == VK_SUCCESS &&
+                device_buffer_as_address_span(backend, sparse, info.size, 0) == VK_SUCCESS,
+            "sparse AS address query permits full and empty-end logical spans without BindBufferMemory");
+    require(device_buffer_as_address_span(backend, sparse, info.size - 1, 2) == VK_ERROR_VALIDATION_FAILED_EXT &&
+                device_buffer_as_address_span(backend, sparse, info.size + 1, 0) == VK_ERROR_VALIDATION_FAILED_EXT &&
+                device_buffer_as_address_span(backend, sparse, UINT64_MAX, UINT64_MAX) == VK_ERROR_VALIDATION_FAILED_EXT &&
+                device_buffer_as_address_span(backend, sparse, 1, UINT64_MAX) == VK_ERROR_VALIDATION_FAILED_EXT,
+            "sparse exemption retains checked logical range and overflow rejection");
+    info.flags = 0;
+    CHECK(device_track_buffer(backend, ordinary, &info));
+    require(device_buffer_as_address_span(backend, ordinary, 0, info.size) == VK_ERROR_VALIDATION_FAILED_EXT,
+            "ordinary AS address span still rejects unbound storage");
+    device_buffer_bound(backend, ordinary);
+    require(device_buffer_as_address_span(backend, ordinary, 0, info.size) == VK_SUCCESS &&
+                device_buffer_as_address_span(backend, ordinary, info.size, 0) == VK_SUCCESS &&
+                device_buffer_as_address_span(backend, ordinary, info.size - 1, 2) == VK_ERROR_VALIDATION_FAILED_EXT,
+            "ordinary AS address span requires binding and retains logical bounds");
+    device_untrack_buffer(backend, sparse);
+    device_untrack_buffer(backend, ordinary);
+    require(device_buffer_as_address_span(backend, sparse, 0, 1) == VK_ERROR_VALIDATION_FAILED_EXT &&
+                device_buffer_as_address_span(backend, VK_NULL_HANDLE, 0, 1) == VK_ERROR_VALIDATION_FAILED_EXT &&
+                address_queries == before,
+            "unknown AS storage rejects without querying native AS addresses");
+}
+void track_as(DeviceBackend* mm, AccelerationBackend* b, const Acceleration& value, VkAccelerationStructureTypeKHR type) {
+    const auto info = creations.at(value.handle);
+    require(info.type == type, "fixture AS type matches real create info");
+    auto storage = init<VkBufferCreateInfo>(VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO);
+    storage.size = info.offset + info.size;
+    storage.usage = VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
+    CHECK(device_track_buffer(mm, info.buffer, &storage));
+    device_buffer_bound(mm, info.buffer);
+    const auto before = address_queries;
     CHECK(acceleration_track(b, value.handle, &info));
+    require(address_queries == before, "tracking an AS allocates identity without native address queries");
     VkDeviceAddress native{}, root{};
     CHECK(acceleration_identity(b, value.handle, &native, &root));
     require(native == value.address && root != native && root != 0, "native AS identity unchanged, private root tracked");
@@ -146,6 +216,214 @@ void submit_build(Fixture& f, SubmissionTracker* tracker, VkCommandBuffer comman
     submit_finished(f, tracker, command, recordings, private_fence);
     vkFreeCommandBuffers(f.device, f.pool, 1, &command);
 }
+VkResult resolve_reference(void* user, VkAccelerationStructureKHR handle, DescriptorASIdentity* result) {
+    return acceleration_reference(static_cast<AccelerationBackend*>(user), handle, &result->identity_cell_address,
+                                  &result->root_cell_address, &result->lifetime);
+}
+Acceleration unbound_as(Fixture& f, DeviceBackend* mm, AccelerationBackend* as, VkAccelerationStructureTypeKHR type,
+                        const VkAccelerationStructureGeometryKHR& geometry, Buffer* backing) {
+    Acceleration value{};
+    value.build =
+        init<VkAccelerationStructureBuildGeometryInfoKHR>(VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_GEOMETRY_INFO_KHR);
+    value.build.type = type;
+    value.build.mode = VK_BUILD_ACCELERATION_STRUCTURE_MODE_BUILD_KHR;
+    value.build.geometryCount = 1;
+    value.build.pGeometries = &geometry;
+    value.range.primitiveCount = 1;
+    const uint32_t count = 1;
+    auto sizes = init<VkAccelerationStructureBuildSizesInfoKHR>(VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_SIZES_INFO_KHR);
+    f.sizesAS(f.device, VK_ACCELERATION_STRUCTURE_BUILD_TYPE_DEVICE_KHR, &value.build, &count, &sizes);
+    auto info = init<VkBufferCreateInfo>(VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO);
+    info.size = sizes.accelerationStructureSize;
+    info.usage = VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
+    CHECK(vkCreateBuffer(f.device, &info, nullptr, &backing->handle));
+    CHECK(device_track_buffer(mm, backing->handle, &info));
+    auto create = init<VkAccelerationStructureCreateInfoKHR>(VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_CREATE_INFO_KHR);
+    create.buffer = backing->handle;
+    create.size = info.size;
+    create.type = type;
+    CHECK(f.createAS(f.device, &create, nullptr, &value.handle));
+    f.structures.push_back(value.handle);
+    const auto queries = address_queries, buffers = live_private_buffers;
+    fail_private_buffer = true;
+    const auto failed = acceleration_track(as, value.handle, &create);
+    fail_private_buffer = false;
+    require(failed == VK_ERROR_OUT_OF_DEVICE_MEMORY && live_private_buffers == buffers && address_queries == queries,
+            "identity allocation OOM leaves native AS unqueried and no private allocation");
+    CHECK(acceleration_track(as, value.handle, &create));
+    require(address_queries == queries, "unbound CreateAS and identity allocation issue no native AS address query");
+    VkDeviceAddress native = 7, root = 8;
+    require(acceleration_identity(as, value.handle, &native, &root) == VK_ERROR_VALIDATION_FAILED_EXT && native == 7 && root == 8 &&
+                address_queries == queries,
+            "unbound legacy identity fails without native query or changing outputs");
+    auto scratch = f.buffer(sizes.buildScratchSize + f.scratchAlignment - 1,
+                            VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, false);
+    value.build.scratchData.deviceAddress = (scratch.address + f.scratchAlignment - 1) & ~(f.scratchAlignment - 1);
+    value.build.dstAccelerationStructure = value.handle;
+    return value;
+}
+void bind_backing(Fixture& f, DeviceBackend* mm, Buffer* buffer, bool bind2) {
+    VkMemoryRequirements requirements;
+    vkGetBufferMemoryRequirements(f.device, buffer->handle, &requirements);
+    uint32_t type = 0;
+    while (!(requirements.memoryTypeBits & (1u << type))) ++type;
+    auto flags = init<VkMemoryAllocateFlagsInfo>(VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_FLAGS_INFO);
+    flags.flags = VK_MEMORY_ALLOCATE_DEVICE_ADDRESS_BIT;
+    auto allocate = init<VkMemoryAllocateInfo>(VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO);
+    allocate.pNext = &flags;
+    allocate.allocationSize = requirements.size;
+    allocate.memoryTypeIndex = type;
+    CHECK(vkAllocateMemory(f.device, &allocate, nullptr, &buffer->memory));
+    if (bind2) {
+        auto bind = init<VkBindBufferMemoryInfo>(VK_STRUCTURE_TYPE_BIND_BUFFER_MEMORY_INFO);
+        bind.buffer = buffer->handle;
+        bind.memory = buffer->memory;
+        CHECK(vkBindBufferMemory2(f.device, 1, &bind));
+    } else
+        CHECK(vkBindBufferMemory(f.device, buffer->handle, buffer->memory, 0));
+    device_buffer_bound(mm, buffer->handle);
+    f.buffers.push_back(*buffer);
+}
+void unbound_descriptor_query(Fixture& f, DeviceBackend* mm, AccelerationBackend* as, SubmissionTracker* submissions,
+                              VkPipeline pipeline, VkPipelineLayout layout, const Buffer& output) {
+    const VkBufferUsageFlags usage =
+        VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
+    for (bool bind2 : {false, true}) {
+        auto vertices = f.buffer(36, usage, true);
+        const float triangle[] = {0, 0, 0, 1, 0, 0, 0, 1, 0};
+        std::memcpy(vertices.mapped, triangle, sizeof(triangle));
+        auto geometry = init<VkAccelerationStructureGeometryKHR>(VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR);
+        geometry.geometryType = VK_GEOMETRY_TYPE_TRIANGLES_KHR;
+        geometry.flags = VK_GEOMETRY_OPAQUE_BIT_KHR;
+        geometry.geometry.triangles = init<VkAccelerationStructureGeometryTrianglesDataKHR>(
+            VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_TRIANGLES_DATA_KHR);
+        geometry.geometry.triangles.vertexFormat = VK_FORMAT_R32G32B32_SFLOAT;
+        geometry.geometry.triangles.vertexData.deviceAddress = vertices.address;
+        geometry.geometry.triangles.vertexStride = 12;
+        geometry.geometry.triangles.maxVertex = 2;
+        geometry.geometry.triangles.indexType = VK_INDEX_TYPE_NONE_KHR;
+        auto blas = f.acceleration(VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR, geometry);
+        track_as(mm, as, blas, VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR);
+        // A never-bound unrelated BLAS must not be queried by TLAS snapshotting.
+        Buffer unused_storage{};
+        auto unused = unbound_as(f, mm, as, VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR, geometry, &unused_storage);
+        auto instances = f.buffer(64, usage, true);
+        track(mm, instances, 64, usage);
+        original_instances = instances.address;
+        VkAccelerationStructureInstanceKHR instance{};
+        for (uint32_t axis = 0; axis < 3; ++axis) instance.transform.matrix[axis][axis] = 1;
+        instance.mask = 255;
+        instance.instanceCustomIndex = 77;
+        instance.accelerationStructureReference = blas.address;
+        std::memcpy(instances.mapped, &instance, sizeof(instance));
+        auto tlas_geometry = init<VkAccelerationStructureGeometryKHR>(VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR);
+        tlas_geometry.geometryType = VK_GEOMETRY_TYPE_INSTANCES_KHR;
+        tlas_geometry.geometry.instances = init<VkAccelerationStructureGeometryInstancesDataKHR>(
+            VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_INSTANCES_DATA_KHR);
+        tlas_geometry.geometry.instances.data.deviceAddress = instances.address;
+        Buffer storage{};
+        auto tlas = unbound_as(f, mm, as, VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR, tlas_geometry, &storage);
+        DescriptorBackend* descriptors{};
+        CHECK(descriptor_backend_create({f.physical, f.device, vkGetDeviceProcAddr, nullptr, resolve_reference, as}, &descriptors));
+        VkDescriptorSetLayoutBinding binding{0, VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR, 1, VK_SHADER_STAGE_COMPUTE_BIT,
+                                             nullptr};
+        auto layout_info = init<VkDescriptorSetLayoutCreateInfo>(VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO);
+        layout_info.bindingCount = 1;
+        layout_info.pBindings = &binding;
+        VkDescriptorSetLayout set_layout{};
+        CHECK(vkCreateDescriptorSetLayout(f.device, &layout_info, nullptr, &set_layout));
+        CHECK(descriptor_track_layout(descriptors, set_layout, &layout_info));
+        VkDescriptorPoolSize pool_size{VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR, 1};
+        auto pool_info = init<VkDescriptorPoolCreateInfo>(VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO);
+        pool_info.maxSets = 1;
+        pool_info.poolSizeCount = 1;
+        pool_info.pPoolSizes = &pool_size;
+        VkDescriptorPool pool{};
+        CHECK(vkCreateDescriptorPool(f.device, &pool_info, nullptr, &pool));
+        CHECK(descriptor_track_pool(descriptors, pool, &pool_info));
+        auto sets_info = init<VkDescriptorSetAllocateInfo>(VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO);
+        sets_info.descriptorPool = pool;
+        sets_info.descriptorSetCount = 1;
+        sets_info.pSetLayouts = &set_layout;
+        VkDescriptorSet set{};
+        CHECK(vkAllocateDescriptorSets(f.device, &sets_info, &set));
+        CHECK(descriptor_allocate_sets(descriptors, &sets_info, &set));
+        auto as_write =
+            init<VkWriteDescriptorSetAccelerationStructureKHR>(VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET_ACCELERATION_STRUCTURE_KHR);
+        as_write.accelerationStructureCount = 1;
+        as_write.pAccelerationStructures = &tlas.handle;
+        auto write = init<VkWriteDescriptorSet>(VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET);
+        write.pNext = &as_write;
+        write.dstSet = set;
+        write.descriptorCount = 1;
+        write.descriptorType = VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR;
+        const auto queries = address_queries;
+        CHECK(descriptor_update(descriptors, 1, &write, 0, nullptr));
+        vkUpdateDescriptorSets(f.device, 1, &write, 0, nullptr);
+        DescriptorContextRef context;
+        CHECK(descriptor_build_context(descriptors, {set}, &context));
+        DescriptorASIdentity reference;
+        CHECK(descriptor_context_fetch(context, 0, 0, 0, &reference));
+        require(reference.identity_cell_address && reference.root_cell_address && !reference.native_address &&
+                    address_queries == queries,
+                "descriptor write/context before bind retains unresolved stable cell without native address query");
+        auto query = f.begin();
+        const uint64_t push[] = {0, context.address, output.address};
+        vkCmdBindPipeline(query, VK_PIPELINE_BIND_POINT_COMPUTE, pipeline);
+        vkCmdPushConstants(query, layout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(push), push);
+        vkCmdDispatch(query, 1, 1, 1);
+        Fixture::barrier(query, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_ACCESS_SHADER_WRITE_BIT, VK_PIPELINE_STAGE_HOST_BIT,
+                         VK_ACCESS_HOST_READ_BIT);
+        CHECK(vkEndCommandBuffer(query));
+        submit_finished(f, submissions, query, {});
+        require(static_cast<const uint32_t*>(output.mapped)[1] != 0,
+                "unresolved non-null identity fails checked fetch without native traversal");
+        auto build = f.begin();
+        AccelerationRecordingRef first, second;
+        const auto* tlas_range = &tlas.range;
+        require(acceleration_cmd_build(as, build, 1, &tlas.build, &tlas_range, &second) == VK_ERROR_VALIDATION_FAILED_EXT &&
+                    address_queries == queries,
+                "unbound build fails before native address or command prefix");
+        bind_backing(f, mm, &storage, bind2);
+        fail_private_buffer = true;
+        const auto* blas_range = &blas.range;
+        const auto builds = native_builds;
+        require(acceleration_cmd_build(as, build, 1, &blas.build, &blas_range, &first) == VK_ERROR_OUT_OF_DEVICE_MEMORY &&
+                    native_builds == builds,
+                "build allocation OOM publishes no identity and no native prefix");
+        fail_private_buffer = false;
+        CHECK(acceleration_cmd_build(as, build, 1, &blas.build, &blas_range, &first));
+        CHECK(acceleration_cmd_build(as, build, 1, &tlas.build, &tlas_range, &second));
+        CHECK(vkEndCommandBuffer(build));
+        submit_finished(f, submissions, build, {first, second});
+        submit_finished(f, submissions, build, {first, second});  // Replay republishes the same cell.
+        vkFreeCommandBuffers(f.device, f.pool, 1, &build);
+        first.reset();
+        second.reset();
+        release(f, mm, instances);
+        release(f, mm, vertices);
+        for (unsigned replay = 0; replay < 2; ++replay) {
+            submit_finished(f, submissions, query, {});
+            const auto* result = static_cast<const uint32_t*>(output.mapped);
+            require(result[0] == 1 && result[1] == 0 && result[2] == 1 && result[3] == 1 && result[4] == 77 && result[6] == 1,
+                    "unchanged pre-bind descriptor/context/CB executes native RQ after build, replay and source destruction");
+        }
+        vkFreeCommandBuffers(f.device, f.pool, 1, &query);
+        acceleration_untrack(as, unused.handle);
+        device_untrack_buffer(mm, unused_storage.handle);
+        f.buffers.push_back(unused_storage);
+        acceleration_untrack(as, tlas.handle);
+        acceleration_untrack(as, blas.handle);
+        require(live_private_buffers == 4, "descriptor identity retains TLAS, active body and its BLAS dependency");
+        reference = {};
+        context = {};
+        descriptor_backend_destroy(descriptors);
+        require(live_private_buffers == 0 && live_private_memory == 0,
+                "last descriptor reference retires every private identity/body");
+        vkDestroyDescriptorPool(f.device, pool, nullptr);
+        vkDestroyDescriptorSetLayout(f.device, set_layout, nullptr);
+    }
+}
 }  // namespace
 int main(int argc, char** argv) {
     if (argc != 2) return 1;
@@ -161,10 +439,15 @@ int main(int argc, char** argv) {
     native_destroy_buffer = vkDestroyBuffer;
     native_allocate_memory = vkAllocateMemory;
     native_free_memory = vkFreeMemory;
+    native_create_as = f.createAS;
+    native_as_address = f.addressAS;
+    f.createAS = spy_create_as;
     vkGetPhysicalDeviceQueueFamilyProperties(f.physical, &physical_family_count, nullptr);
     DeviceBackend* mm{};
     CHECK(device_backend_create(
         {f.physical, f.device, vkGetDeviceProcAddr, nullptr, build.data(), build.size() * 4, copy.data(), copy.size() * 4}, &mm));
+    tracked_buffers = mm;
+    storage_address_spans(mm);
     AccelerationBackend* as{};
     CHECK(acceleration_backend_create({f.physical, f.device, proc, mm, nullptr, metadata.data(), metadata.size() * 4,
                                        instances.data(), instances.size() * 4, publish.data(), publish.size() * 4},
@@ -208,7 +491,7 @@ int main(int argc, char** argv) {
         geometry.geometry.triangles.maxVertex = 2;
         geometry.geometry.triangles.indexType = VK_INDEX_TYPE_NONE_KHR;
         auto blas = f.acceleration(VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR, geometry);
-        track_as(as, blas, VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR);
+        track_as(mm, as, blas, VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR);
         auto input = f.buffer(128, input_usage, false);
         track(mm, input, 128, input_usage);
         original_instances = input.address;
@@ -219,7 +502,7 @@ int main(int argc, char** argv) {
         instance_geometry.geometry.instances.data.deviceAddress = input.address;
         auto tlas = f.acceleration(VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR, instance_geometry);
         tlas.range.primitiveOffset = 64;  // Exercise logical range offset, not custom index.
-        track_as(as, tlas, VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR);
+        track_as(mm, as, tlas, VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR);
         VkAccelerationStructureInstanceKHR instance{};
         for (uint32_t axis = 0; axis < 3; ++axis) instance.transform.matrix[axis][axis] = 1;
         instance.instanceCustomIndex = 77;
@@ -404,6 +687,7 @@ int main(int argc, char** argv) {
     }
     require(native_builds == 216 && sanitized_queries == 4,
             "all 200 discarded plus sixteen submitted builds and four sanitized size queries reached native API");
+    unbound_descriptor_query(f, mm, as, submissions, pipeline, layout, output);
     CHECK(vkDeviceWaitIdle(f.device));
     acceleration_collect_idle(as);
     submissions_destroy(submissions);

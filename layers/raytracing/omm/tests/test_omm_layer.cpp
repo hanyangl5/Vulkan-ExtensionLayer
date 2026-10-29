@@ -109,6 +109,9 @@ struct Api {
     PFN_vkDestroyMicromapEXT destroy;
     PFN_vkCmdBuildMicromapsEXT build;
     PFN_vkCmdCopyMicromapEXT copy;
+    PFN_vkCmdCopyMicromapToMemoryEXT serialize;
+    PFN_vkCmdCopyMemoryToMicromapEXT deserialize;
+    PFN_vkGetDeviceMicromapCompatibilityEXT compatibility;
     PFN_vkCmdPipelineBarrier2KHR barrier;
     PFN_vkQueueSubmit2KHR submit;
     explicit Api(VkDevice device) {
@@ -120,6 +123,9 @@ struct Api {
         LOAD(destroy, vkDestroyMicromapEXT);
         LOAD(build, vkCmdBuildMicromapsEXT);
         LOAD(copy, vkCmdCopyMicromapEXT);
+        LOAD(serialize, vkCmdCopyMicromapToMemoryEXT);
+        LOAD(deserialize, vkCmdCopyMemoryToMicromapEXT);
+        LOAD(compatibility, vkGetDeviceMicromapCompatibilityEXT);
         LOAD(barrier, vkCmdPipelineBarrier2KHR);
         LOAD(submit, vkQueueSubmit2KHR);
 #undef LOAD
@@ -314,7 +320,18 @@ void run(Fixture& f, const Api& api, const char* shader, const char* name, uint3
     api.sizes(f.device, VK_ACCELERATION_STRUCTURE_BUILD_TYPE_DEVICE_KHR, &info, &sizes);
     expect(sizes.micromapSize >= 64 && sizes.buildScratchSize >= 4, "public build size query returns bounded storage and scratch");
     auto source = createMap(f, api, sizes.micromapSize), clone = createMap(f, api, sizes.micromapSize),
-         compact = createMap(f, api, sizes.micromapSize);
+         compact = createMap(f, api, sizes.micromapSize), restored = createMap(f, api, sizes.micromapSize);
+    const auto serializedBytes = 512 + sizes.micromapSize + 32 + 64;
+    auto serialized = f.buffer(serializedBytes, VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, true);
+    const uint64_t serializedOffset = 256 + ((256 - (serialized.address & 255)) & 255);
+    auto toMemory = init<VkCopyMicromapToMemoryInfoEXT>(VK_STRUCTURE_TYPE_COPY_MICROMAP_TO_MEMORY_INFO_EXT);
+    toMemory.src = compact.handle;
+    toMemory.dst.deviceAddress = serialized.address + serializedOffset;
+    toMemory.mode = VK_COPY_MICROMAP_MODE_SERIALIZE_EXT;
+    auto fromMemory = init<VkCopyMemoryToMicromapInfoEXT>(VK_STRUCTURE_TYPE_COPY_MEMORY_TO_MICROMAP_INFO_EXT);
+    fromMemory.src.deviceAddress = toMemory.dst.deviceAddress;
+    fromMemory.dst = restored.handle;
+    fromMemory.mode = VK_COPY_MICROMAP_MODE_DESERIALIZE_EXT;
     auto scratch = f.buffer(sizes.buildScratchSize + std::max<VkDeviceSize>(256, f.scratchAlignment) - 1,
                             VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, true);
     info.data.deviceAddress = dataBuffer.address;
@@ -349,9 +366,14 @@ void run(Fixture& f, const Api& api, const char* shader, const char* name, uint3
         compactInfo.dst = compact.handle;
         compactInfo.mode = VK_COPY_MICROMAP_MODE_COMPACT_EXT;
         api.copy(copy, &compactInfo);
-        vkCmdDispatch(copy, 1, 1, 1);  // Both internal copy kernels must restore app state.
-        api.dependency(copy, micro | VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, write | VK_ACCESS_2_SHADER_WRITE_BIT,
-                       VK_PIPELINE_STAGE_2_HOST_BIT, VK_ACCESS_2_HOST_READ_BIT);
+        api.dependency(copy, micro, write, micro, read);
+        api.serialize(copy, &toMemory);
+        api.dependency(copy, micro, VK_ACCESS_2_TRANSFER_WRITE_BIT, micro, VK_ACCESS_2_TRANSFER_READ_BIT);
+        api.deserialize(copy, &fromMemory);
+        vkCmdDispatch(copy, 1, 1, 1);  // Copy and serialization kernels must restore app state.
+        api.dependency(copy, micro | VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+                       write | VK_ACCESS_2_SHADER_WRITE_BIT | VK_ACCESS_2_TRANSFER_WRITE_BIT, VK_PIPELINE_STAGE_2_HOST_BIT,
+                       VK_ACCESS_2_HOST_READ_BIT);
         CHECK(vkEndCommandBuffer(copy));
     };
     VkCommandBuffer commands[] = {f.begin(), f.begin()};
@@ -372,6 +394,8 @@ void run(Fixture& f, const Api& api, const char* shader, const char* name, uint3
         clearMap(source);
         clearMap(clone);
         clearMap(compact);
+        clearMap(restored);
+        std::memset(serialized.mapped, 0xa5, static_cast<size_t>(serializedBytes));
         std::memset(result.mapped, 0xff, 8);
         std::vector<uint8_t> expected;
         expect(storage_build({triangles.data(), triangles.size(), count, stride, data.data(), data.size()}, &expected) ==
@@ -381,6 +405,24 @@ void run(Fixture& f, const Api& api, const char* shader, const char* name, uint3
         expect(compare(source, expected), "public build canonical bytes and guards match CPU reference");
         expect(compare(clone, expected) && compare(compact, expected),
                "public clone/compact consume execution-time built data and preserve guards");
+        expect(compare(restored, expected), "public serialized roundtrip restores execution-time canonical bytes and guards");
+        auto* envelope = static_cast<const uint8_t*>(serialized.mapped) + serializedOffset;
+        bool serializedCorrect = !std::memcmp(envelope + 32, expected.data(), expected.size());
+        const auto* allBytes = static_cast<const uint8_t*>(serialized.mapped);
+        for (uint64_t i = 0; i < serializedOffset; ++i) serializedCorrect &= allBytes[i] == 0xa5;
+        for (uint64_t i = serializedOffset + 32 + expected.size(); i < serializedBytes; ++i)
+            serializedCorrect &= allBytes[i] == 0xa5;
+        expect(serializedCorrect, "public serialization writes exactly UUID envelope plus canonical active span");
+        auto version = init<VkMicromapVersionInfoEXT>(VK_STRUCTURE_TYPE_MICROMAP_VERSION_INFO_EXT);
+        version.pVersionData = envelope;
+        VkAccelerationStructureCompatibilityKHR compatible{};
+        api.compatibility(f.device, &version, &compatible);
+        expect(compatible == VK_ACCELERATION_STRUCTURE_COMPATIBILITY_COMPATIBLE_KHR, "public serialized identity is compatible");
+        VkPhysicalDeviceIDProperties id = init<VkPhysicalDeviceIDProperties>(VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ID_PROPERTIES);
+        auto physicalProperties = init<VkPhysicalDeviceProperties2>(VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2);
+        physicalProperties.pNext = &id;
+        vkGetPhysicalDeviceProperties2(f.physical, &physicalProperties);
+        expect(!std::memcmp(envelope, id.driverUUID, VK_UUID_SIZE), "serialization begins with actual physical driver UUID");
         expect(*static_cast<const uint32_t*>(result.mapped) == digest(words0) &&
                    static_cast<const uint32_t*>(result.mapped)[1] == digest(words1),
                "public kernels restore app pipeline and ALL128 push history after public layouts are destroyed");
@@ -413,9 +455,27 @@ void run(Fixture& f, const Api& api, const char* shader, const char* name, uint3
     std::vector<uint8_t> expected;
     storage_build({triangles.data(), triangles.size(), count, stride, data.data(), data.size()}, &expected);
     expect(compare(clone, expected), "public copy remains correct after all build input and scratch buffers are destroyed");
-    api.destroy(f.device, compact.handle, nullptr);
+    toMemory.src = clone.handle;
+    auto save = f.begin();
+    api.dependency(save, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, VK_ACCESS_2_MEMORY_WRITE_BIT,
+                   VK_PIPELINE_STAGE_2_MICROMAP_BUILD_BIT_EXT, VK_ACCESS_2_MICROMAP_READ_BIT_EXT);
+    api.serialize(save, &toMemory);
+    api.dependency(save, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT,
+                   VK_PIPELINE_STAGE_2_MICROMAP_BUILD_BIT_EXT, VK_ACCESS_2_TRANSFER_READ_BIT);
+    f.submit(save);
     api.destroy(f.device, clone.handle, nullptr);
+    release(f, clone.storage);
     api.destroy(f.device, source.handle, nullptr);
+    release(f, source.storage);
+    clearMap(restored);
+    auto load = f.begin();
+    api.deserialize(load, &fromMemory);
+    api.dependency(load, VK_PIPELINE_STAGE_2_MICROMAP_BUILD_BIT_EXT, VK_ACCESS_2_MICROMAP_WRITE_BIT_EXT,
+                   VK_PIPELINE_STAGE_2_HOST_BIT, VK_ACCESS_2_HOST_READ_BIT);
+    f.submit(load);
+    expect(compare(restored, expected), "public deserialization survives original micromap and backing-buffer destruction");
+    api.destroy(f.device, restored.handle, nullptr);
+    api.destroy(f.device, compact.handle, nullptr);
 }
 }  // namespace
 int main(int argc, char** argv) {

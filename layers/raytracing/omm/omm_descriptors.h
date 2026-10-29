@@ -13,6 +13,10 @@ struct DescriptorASIdentity {
     VkDeviceAddress native_address = 0;
     VkDeviceAddress root_cell_address = 0;
     std::shared_ptr<void> lifetime;
+    // Required for non-null descriptors. Native address may still be zero when
+    // written before binding/construction; GPU build publishes this stable cell.
+    // Numeric fields above are CPU diagnostic snapshots only.
+    VkDeviceAddress identity_cell_address = 0;
 };
 using DescriptorASResolver = VkResult (*)(void*, VkAccelerationStructureKHR, DescriptorASIdentity*);
 
@@ -34,7 +38,7 @@ struct DescriptorContextRef {
     std::shared_ptr<const DescriptorContext> resource;
 };
 
-// Runtime BDA wire ABI v1; no application binding or push-constant allocation.
+// Runtime BDA wire ABI v2; no application binding or push-constant allocation.
 constexpr uint32_t kDescriptorContextMagic = 0x444d4d4f;  // LE "OMMD".
 struct DescriptorContextHeader {
     uint32_t magic, version, binding_count, binding_stride;
@@ -45,7 +49,7 @@ struct DescriptorContextBinding {
     uint64_t records_address, record_count, records_bytes;
 };
 struct DescriptorShadowRecord {
-    uint64_t native_address, root_cell_address;
+    uint64_t identity_cell_address, state;  // 0=unwritten, 1=explicit null, 2=cell.
 };
 static_assert(sizeof(DescriptorContextHeader) == 32 && sizeof(DescriptorContextBinding) == 32 &&
               sizeof(DescriptorShadowRecord) == 16);
@@ -85,11 +89,16 @@ VkResult descriptor_build_context(DescriptorBackend*, const std::vector<VkDescri
 // Checked CPU mirror for diagnostics/fixtures. Unwritten/out-of-range records
 // fail explicitly. An explicitly written robustness2 NULL descriptor succeeds
 // with native/root {0,0}, preserving native null traversal behavior.
+// A non-null reference may have native_address=0 before build; the returned
+// identity_cell_address, root and lifetime remain stable. This mirror never
+// reads GPU-owned cell bytes to guess completion.
 VkResult descriptor_context_fetch(const DescriptorContextRef&, uint32_t, uint32_t, uint64_t, DescriptorASIdentity*);
 
 // Publication contract: HOST_VISIBLE|HOST_COHERENT BDA storage is written before
-// queue submission; Vulkan submission publishes preceding host writes. Only
-// ordinary descriptor updates are supported. AS UPDATE_AFTER_BIND and
+// queue submission; Vulkan submission publishes preceding host writes. The
+// referenced identity cell is published by GPU AS build commands under
+// translated AS construction dependencies; late binding never rewrites shadows.
+// Only ordinary descriptor updates are supported. AS UPDATE_AFTER_BIND and
 // UPDATE_UNUSED_WHILE_PENDING are rejected: a 16-byte pair has no assumed host/
 // device atomicity. Descriptor templates, push descriptors, descriptor buffers,
 // mutable AS bindings, and integer-address resolution require separate adapters.

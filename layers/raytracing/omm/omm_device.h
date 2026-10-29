@@ -17,6 +17,11 @@ struct DeviceBackendCreateInfo {
     size_t build_code_size;  // Bytes, omm_build.comp; 96-byte push ABI.
     const uint32_t* copy_code;
     size_t copy_code_size;  // Bytes, omm_copy.comp; 32-byte push ABI.
+    const uint32_t* serialize_code = nullptr;
+    size_t serialize_code_size = 0;  // Bytes, omm_serialize.comp; 72-byte push ABI.
+    // Required with serialize_code. A downstream physical-device callback is
+    // necessary because loader-wrapped physical handles cannot use global dispatch.
+    PFN_vkGetPhysicalDeviceProperties2 get_properties2 = nullptr;
 };
 
 struct MicromapStorage {
@@ -40,6 +45,12 @@ VkResult device_track_buffer(DeviceBackend* backend, VkBuffer buffer, const VkBu
                              VkDeviceSize accessible_size = 0, VkBufferUsageFlags2 native_usage = 0);
 void device_buffer_bound(DeviceBackend* backend, VkBuffer buffer);
 void device_untrack_buffer(DeviceBackend* backend, VkBuffer buffer);
+// Allocation-free logical range check; never obtains a device address.
+VkResult device_buffer_bound_span(DeviceBackend* backend, VkBuffer buffer, VkDeviceSize offset, VkDeviceSize size);
+// Native AS address legality: unlike the strict bound check above, sparse
+// buffers do not require a successful BindBufferMemory notification. This only
+// validates tracked flags/range and never queries an address or sparse residency.
+VkResult device_buffer_as_address_span(DeviceBackend* backend, VkBuffer buffer, VkDeviceSize offset, VkDeviceSize size);
 
 VkResult device_create_micromap(DeviceBackend* backend, const VkMicromapCreateInfoEXT* info, const VkAllocationCallbacks* allocator,
                                 VkMicromapEXT* micromap);
@@ -58,10 +69,12 @@ VkResult device_address_span(DeviceBackend* backend, VkDeviceAddress address, Vk
 VkResult device_cmd_build(DeviceBackend* backend, VkCommandBuffer command_buffer, uint32_t info_count,
                           const VkMicromapBuildInfoEXT* infos);
 VkResult device_cmd_copy(DeviceBackend* backend, VkCommandBuffer command_buffer, const VkCopyMicromapInfoEXT* info);
+VkResult device_cmd_serialize(DeviceBackend* backend, VkCommandBuffer command_buffer, const VkCopyMicromapToMemoryInfoEXT* info);
+VkResult device_cmd_deserialize(DeviceBackend* backend, VkCommandBuffer command_buffer, const VkCopyMemoryToMicromapInfoEXT* info);
 
-// Public Vulkan serialization is not implemented yet, so every public version
-// identity is incompatible. Do not confuse the internal reference blob identity
-// with VkMicromapVersionInfoEXT's Vulkan-defined serialization header.
+// Public envelope: native driverUUID, layer storage compatibility UUID, then the
+// pointer-free canonical active span. Both UUIDs must match for compatibility.
+// Only reads the explicitly supplied host version header, never device memory.
 void device_get_compatibility(DeviceBackend* backend, const VkMicromapVersionInfoEXT* info,
                               VkAccelerationStructureCompatibilityKHR* compatibility);
 

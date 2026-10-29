@@ -22,10 +22,13 @@ VkAccessFlags map_access(VkAccessFlags accesses) noexcept;
 // AS-access buffer barriers additionally produce global metadata memory barriers:
 // their original VkBuffers do not cover separate private sidecar allocations.
 // The original buffer ranges and queue-family ownership indices are preserved.
+// Serialized-buffer transfer accesses in MICROMAP_BUILD (or ALL_COMMANDS on a
+// compute queue) also cover private shaders. Pass the actual queue capability
+// so ALL_COMMANDS on transfer/graphics-only queues retains valid access scopes.
 class TranslatedDependency {
   public:
     TranslatedDependency() noexcept;
-    VkResult assign(const VkDependencyInfo& source) noexcept;
+    VkResult assign(const VkDependencyInfo& source, bool compute_queue = true) noexcept;
     VkDependencyInfo view() const noexcept;
 
   private:
@@ -50,7 +53,8 @@ class TranslatedLegacyBarriers {
   public:
     VkResult assign(VkPipelineStageFlags source_stages, VkPipelineStageFlags destination_stages, VkDependencyFlags flags,
                     uint32_t memory_count, const VkMemoryBarrier* memory, uint32_t buffer_count,
-                    const VkBufferMemoryBarrier* buffers, uint32_t image_count, const VkImageMemoryBarrier* images) noexcept;
+                    const VkBufferMemoryBarrier* buffers, uint32_t image_count, const VkImageMemoryBarrier* images,
+                    bool compute_queue = true) noexcept;
     LegacyBarrierView view() const noexcept;
 
   private:

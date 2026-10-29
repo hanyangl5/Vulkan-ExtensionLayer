@@ -4,14 +4,14 @@
 #define VEL_OMM_CONTEXT_GLSL
 #include "omm_lookup.glsl"
 
-// omm_descriptors.h wire ABI v1. The caller supplies a known, layer-owned
+// omm_descriptors.h wire ABI v2. The caller supplies a known, layer-owned
 // readable context allocation, embedded as an ordinary per-variant constant.
-// Every loaded AS identity and RootCell originate in ONE shadow record. Native
+// Every loaded AS identity and RootCell originate in ONE stable cell. Native
 // descriptor bytes/BVH data are neither loaded nor interpreted here.
 uint ommFetchDescriptorChecked(uint64_t context, uint descriptorSet, uint binding, uvec2 flatIndex,
                                inout uvec4 identity) {
     if (!ommLookupSpanValid(context, 32ul)) return OMM_LOOKUP_INVALID;
-    if (ommLookupRead32(context, 0ul) != 0x444d4d4fu || ommLookupRead32(context, 4ul) != 1u)
+    if (ommLookupRead32(context, 0ul) != 0x444d4d4fu || ommLookupRead32(context, 4ul) != 2u)
         return OMM_LOOKUP_INCOMPATIBLE;
     uint count = ommLookupRead32(context, 8ul);
     uint64_t bytes = ommLookupRead64(context, 16ul);
@@ -27,13 +27,18 @@ uint ommFetchDescriptorChecked(uint64_t context, uint descriptorSet, uint bindin
         uint64_t span = ommLookupRead64(context, offset + 24ul);
         if (index >= records || records > span / 16ul || !ommLookupSpanValid(address, span)) return OMM_LOOKUP_BOUNDS;
         uint64_t item = index * 16ul;
-        uvec4 pair = uvec4(ommLookupRead32(address, item), ommLookupRead32(address, item + 4ul),
-                           ommLookupRead32(address, item + 8ul), ommLookupRead32(address, item + 12ul));
+        uint64_t cell = ommLookupRead64(address, item), state = ommLookupRead64(address, item + 8ul);
+        if (state == 1ul && cell == 0ul) { identity = uvec4(0u); return OMM_LOOKUP_SUCCESS; }
+        if (state != 2ul || !ommLookupSpanValid(cell, 32ul) || (cell & 15ul) != 0ul) return OMM_LOOKUP_INVALID;
+        if (ommLookupRead32(cell, 0ul) != 0x494d4d4fu || ommLookupRead32(cell, 4ul) != 1u ||
+            ommLookupRead32(cell, 8ul) != 1u || ommLookupRead32(cell, 12ul) != 0u) return OMM_LOOKUP_INVALID;
+        uvec4 pair = uvec4(ommLookupRead32(cell, 16ul), ommLookupRead32(cell, 20ul),
+                           ommLookupRead32(cell, 24ul), ommLookupRead32(cell, 28ul));
         bool nativeNull = all(equal(pair.xy, uvec2(0u)));
         bool rootNull = all(equal(pair.zw, uvec2(0u)));
         // Explicit robustness2 null AS descriptors remain native NULL. They
         // produce no candidates, so no classifier ever dereferences RootCell0.
-        if (nativeNull != rootNull) return OMM_LOOKUP_INVALID;
+        if (nativeNull || rootNull) return OMM_LOOKUP_INVALID;
         identity = pair;
         return OMM_LOOKUP_SUCCESS;
     }

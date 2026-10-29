@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #include "native_fixture.h"
 #include "../omm_descriptors.h"
+#include "../omm_acceleration.h"
 #include <memory>
 #include <atomic>
 #include <new>
@@ -127,6 +128,11 @@ void main() {
     outputData.data[3] = uvec4(ommFetchDescriptorChecked(context,0u,2u,uvec2(2u,0u),sentinel),
                               ommFetchDescriptorChecked(context,0u,2u,uvec2(0u,1u),sentinel),
                               ommFetchDescriptorChecked(context,1u,0u,uvec2(0u),sentinel),sentinel.x);
+    uvec4 nullValue=uvec4(9u), unwrittenValue=uvec4(0xabcdef01u), cellValue=uvec4(9u);
+    uint ns=ommFetchDescriptorChecked(context,0u,0u,uvec2(0u),nullValue);
+    uint us=ommFetchDescriptorChecked(context,0u,2u,uvec2(0u),unwrittenValue);
+    uint cs=ommFetchDescriptorChecked(context,0u,2u,uvec2(1u,0u),cellValue);
+    outputData.data[4]=uvec4(ns,us,cs,unwrittenValue.x);
 }
 )GLSL";
 VkPipeline pipeline(Fixture& fixture, VkPipelineLayout layout, const std::vector<uint32_t>& original, uint64_t context) {
@@ -179,8 +185,12 @@ int main(int argc, char** argv) {
             init<VkAccelerationStructureDeviceAddressInfoKHR>(VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_DEVICE_ADDRESS_INFO_KHR);
         address.accelerationStructure = handle;
         auto root = fixture.buffer(64, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, true);
-        resolver.values.push_back(
-            {handle, {fixture.addressAS(fixture.device, &address), root.address, std::make_shared<unsigned>(i)}});
+        auto cell = fixture.buffer(sizeof(AccelerationIdentityCell),
+                                   VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, true);
+        const auto native = fixture.addressAS(fixture.device, &address);
+        const AccelerationIdentityCell payload{kAccelerationIdentityMagic, 1, 1, 0, native, root.address};
+        std::memcpy(cell.mapped, &payload, sizeof(payload));
+        resolver.values.push_back({handle, {native, root.address, std::make_shared<unsigned>(i), cell.address}});
     }
     DescriptorBackend* backend{};
     uint32_t family_count = 0;
@@ -447,10 +457,10 @@ int main(int argc, char** argv) {
     auto code = words(argv[1]);
     VkPipeline pipelines[] = {pipeline(fixture, pipeline_layout, code, first.address),
                               pipeline(fixture, pipeline_layout, code, second.address)};
-    Buffer output[] = {fixture.buffer(64, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, true),
-                       fixture.buffer(64, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, true)};
+    Buffer output[] = {fixture.buffer(80, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, true),
+                       fixture.buffer(80, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, true)};
     for (unsigned i = 0; i < 2; ++i) {
-        VkDescriptorBufferInfo buffer{output[i].handle, 0, 64};
+        VkDescriptorBufferInfo buffer{output[i].handle, 0, 80};
         auto update = init<VkWriteDescriptorSet>(VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET);
         update.dstSet = sets[i];
         update.dstBinding = 3;
@@ -488,6 +498,60 @@ int main(int argc, char** argv) {
                 "GPU bounds fail explicitly without touching result");
     }
     vkFreeCommandBuffers(fixture.device, fixture.pool, 2, commands);
+    // A provider-only dispatch can distinguish logical NULL from unwritten
+    // without enabling nullDescriptor: the native shader only uses binding 3.
+    auto status_layout_info = init<VkDescriptorSetLayoutCreateInfo>(VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO);
+    status_layout_info.bindingCount = 4;
+    status_layout_info.pBindings = bindings;
+    CHECK(descriptor_track_layout(backend, layout, &status_layout_info));
+    VkDescriptorPoolSize status_sizes[] = {{VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR, 3},
+                                           {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1}};
+    auto status_pool_info = init<VkDescriptorPoolCreateInfo>(VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO);
+    status_pool_info.maxSets = 1;
+    status_pool_info.poolSizeCount = 2;
+    status_pool_info.pPoolSizes = status_sizes;
+    VkDescriptorPool status_pool{};
+    CHECK(vkCreateDescriptorPool(fixture.device, &status_pool_info, nullptr, &status_pool));
+    CHECK(descriptor_track_pool(backend, status_pool, &status_pool_info));
+    auto status_allocate = init<VkDescriptorSetAllocateInfo>(VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO);
+    status_allocate.descriptorPool = status_pool;
+    status_allocate.descriptorSetCount = 1;
+    status_allocate.pSetLayouts = &layout;
+    VkDescriptorSet status_set{};
+    CHECK(vkAllocateDescriptorSets(fixture.device, &status_allocate, &status_set));
+    CHECK(descriptor_allocate_sets(backend, &status_allocate, &status_set));
+    auto null_write = noalloc_write;
+    null_write.dstSet = status_set;
+    null_write.dstBinding = 0;
+    null_write.pNext = &noalloc_as;
+    CHECK(descriptor_update(backend, 1, &null_write, 0, nullptr));
+    write(backend, fixture, status_set, 2, 1, {resolver.values[0].first});
+    DescriptorContextRef status_context;
+    CHECK(descriptor_build_context(backend, {status_set}, &status_context));
+    const auto status_pipeline = pipeline(fixture, pipeline_layout, code, status_context.address);
+    VkDescriptorBufferInfo status_buffer{output[0].handle, 0, 80};
+    auto output_write = init<VkWriteDescriptorSet>(VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET);
+    output_write.dstSet = status_set;
+    output_write.dstBinding = 3;
+    output_write.descriptorCount = 1;
+    output_write.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+    output_write.pBufferInfo = &status_buffer;
+    vkUpdateDescriptorSets(fixture.device, 1, &output_write, 0, nullptr);
+    auto status_command = fixture.begin();
+    vkCmdBindPipeline(status_command, VK_PIPELINE_BIND_POINT_COMPUTE, status_pipeline);
+    vkCmdBindDescriptorSets(status_command, VK_PIPELINE_BIND_POINT_COMPUTE, pipeline_layout, 0, 1, &status_set, 0, nullptr);
+    vkCmdDispatch(status_command, 1, 1, 1);
+    Fixture::barrier(status_command, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_ACCESS_SHADER_WRITE_BIT, VK_PIPELINE_STAGE_HOST_BIT,
+                     VK_ACCESS_HOST_READ_BIT);
+    fixture.submit(status_command);
+    const auto* cell_status = static_cast<const uint32_t*>(output[0].mapped) + 16;
+    require(cell_status[0] == 0 && cell_status[1] == 1 && cell_status[2] == 0 && cell_status[3] == 0xabcdef01u,
+            "GPU cell ABI distinguishes explicit null/unwritten/ready and preserves failure output");
+    vkDestroyPipeline(fixture.device, status_pipeline, nullptr);
+    status_context = {};
+    descriptor_untrack_pool(backend, status_pool);
+    descriptor_untrack_layout(backend, layout);
+    vkDestroyDescriptorPool(fixture.device, status_pool, nullptr);
     for (auto value : pipelines) vkDestroyPipeline(fixture.device, value, nullptr);
     vkDestroyPipelineLayout(fixture.device, pipeline_layout, nullptr);
     vkDestroyDescriptorSetLayout(fixture.device, empty, nullptr);

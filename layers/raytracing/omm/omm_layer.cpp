@@ -66,11 +66,14 @@ struct Device {
     PropertyBackend* properties{};
     std::atomic<int32_t> error{VK_SUCCESS};
     bool software = false;
+    bool timeline_semaphore = false;
+    uint64_t max_timeline_value_difference = UINT64_MAX;
     VkAllocationCallbacks allocator{};
     bool has_allocator = false;
     std::mutex mutex;
     std::unordered_map<VkCommandBuffer, std::shared_ptr<Command>> commands;
     std::unordered_map<VkCommandPool, uint32_t> pool_families;
+    std::vector<VkQueueFlags> queue_flags;
     std::unordered_map<VkPipelineLayout, LayoutEntry> layouts;
     const VkAllocationCallbacks* allocation() const { return has_allocator ? &allocator : nullptr; }
     void finish() {
@@ -115,6 +118,10 @@ std::shared_ptr<Command> command(Device& dev, VkCommandBuffer handle) {
     const auto found = dev.commands.find(handle);
     return found == dev.commands.end() ? nullptr : found->second;
 }
+bool command_supports_compute(Device& dev, VkCommandBuffer handle) {
+    auto entry = command(dev, handle);
+    return entry && entry->queue_family < dev.queue_flags.size() && (dev.queue_flags[entry->queue_family] & VK_QUEUE_COMPUTE_BIT);
+}
 template <typename Fn>
 Fn native(const Device& dev, const char* symbol) {
     return reinterpret_cast<Fn>(dev.next(dev.handle, symbol));
@@ -149,8 +156,8 @@ void fail_device(Device& dev, VkResult result) {
 }
 VkResult resolve_as(void* data, VkAccelerationStructureKHR handle, DescriptorASIdentity* identity) {
     auto& dev = *static_cast<Device*>(data);
-    return acceleration_identity(dev.accelerations, handle, &identity->native_address, &identity->root_cell_address,
-                                 &identity->lifetime);
+    return acceleration_reference(dev.accelerations, handle, &identity->identity_cell_address, &identity->root_cell_address,
+                                  &identity->lifetime);
 }
 void refresh_compute(Device& dev, VkCommandBuffer cb) {
     if (!dev.consumers) return;
@@ -288,7 +295,17 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateDevice(VkPhysicalDevice physical, const VkD
             // own creation/recording boundary, not for an unused enabled feature.
             if (micromap && (micromap->micromapCaptureReplay || micromap->micromapHostCommands))
                 return VK_ERROR_FEATURE_NOT_PRESENT;
-            VkPhysicalDeviceBufferDeviceAddressFeatures bda{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_BUFFER_DEVICE_ADDRESS_FEATURES};
+            const auto families = reinterpret_cast<PFN_vkGetPhysicalDeviceQueueFamilyProperties>(
+                parent->next(parent->handle, "vkGetPhysicalDeviceQueueFamilyProperties"));
+            uint32_t family_count = 0;
+            families(physical, &family_count, nullptr);
+            std::vector<VkQueueFamilyProperties> family_properties(family_count);
+            families(physical, &family_count, family_properties.data());
+            state->queue_flags.reserve(family_count);
+            for (uint32_t i = 0; i < family_count; ++i) state->queue_flags.push_back(family_properties[i].queueFlags);
+            VkPhysicalDeviceTimelineSemaphoreFeatures timeline{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_TIMELINE_SEMAPHORE_FEATURES};
+            VkPhysicalDeviceBufferDeviceAddressFeatures bda{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_BUFFER_DEVICE_ADDRESS_FEATURES,
+                                                            &timeline};
             VkPhysicalDeviceFeatures2 features{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2, &bda};
             auto get =
                 reinterpret_cast<PFN_vkGetPhysicalDeviceFeatures2>(parent->next(parent->handle, "vkGetPhysicalDeviceFeatures2"));
@@ -297,6 +314,16 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateDevice(VkPhysicalDevice physical, const VkD
                     parent->next(parent->handle, "vkGetPhysicalDeviceFeatures2KHR"));
             if (!get) return VK_ERROR_FEATURE_NOT_PRESENT;
             get(physical, &features);
+            state->timeline_semaphore = timeline.timelineSemaphore;
+            if (state->timeline_semaphore) {
+                VkPhysicalDeviceTimelineSemaphoreProperties limits{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_TIMELINE_SEMAPHORE_PROPERTIES};
+                VkPhysicalDeviceProperties2 native_properties{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2, &limits};
+                auto get_properties = reinterpret_cast<PFN_vkGetPhysicalDeviceProperties2>(
+                    parent->next(parent->handle, "vkGetPhysicalDeviceProperties2"));
+                if (!get_properties) return VK_ERROR_FEATURE_NOT_PRESENT;
+                get_properties(physical, &native_properties);
+                state->max_timeline_value_difference = limits.maxTimelineSemaphoreValueDifference;
+            }
             if (!bda.bufferDeviceAddress || !features.features.shaderInt64) return VK_ERROR_FEATURE_NOT_PRESENT;
             vku::safe_VkDeviceCreateInfo local(info);
             vku::RemoveExtension(local, VK_EXT_OPACITY_MICROMAP_EXTENSION_NAME);
@@ -321,6 +348,16 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateDevice(VkPhysicalDevice physical, const VkD
                 bda.pNext = nullptr;
                 vku::AddToPnext(local, bda);
             }
+            if (state->timeline_semaphore) {
+                if (twelve)
+                    twelve->timelineSemaphore = VK_TRUE;
+                else if (auto* existing = mutable_next<VkPhysicalDeviceTimelineSemaphoreFeatures>(local.pNext))
+                    existing->timelineSemaphore = VK_TRUE;
+                else {
+                    timeline.pNext = nullptr;
+                    vku::AddToPnext(local, timeline);
+                }
+            }
             result = create(physical, local.ptr(), allocator, out);
         } else
             result = create(physical, info, allocator, out);
@@ -336,7 +373,11 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateDevice(VkPhysicalDevice physical, const VkD
                                                       vel_omm_build_spv,
                                                       sizeof(vel_omm_build_spv),
                                                       vel_omm_copy_spv,
-                                                      sizeof(vel_omm_copy_spv)};
+                                                      sizeof(vel_omm_copy_spv),
+                                                      vel_omm_serialize_spv,
+                                                      sizeof(vel_omm_serialize_spv),
+                                                      reinterpret_cast<PFN_vkGetPhysicalDeviceProperties2>(
+                                                          parent->next(parent->handle, "vkGetPhysicalDeviceProperties2"))};
                 result = device_backend_create(backend, &state->backend);
                 if (result == VK_SUCCESS) {
                     const AccelerationBackendCreateInfo acceleration{
@@ -381,7 +422,9 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateDevice(VkPhysicalDevice physical, const VkD
                     result = consumer_backend_create(consumers, &state->consumers);
                 }
                 if (result == VK_SUCCESS) {
-                    const SubmissionTrackerCreateInfo submissions{*out, next, state->accelerations, state->allocation()};
+                    SubmissionTrackerCreateInfo submissions{*out, next, state->accelerations, state->allocation(),
+                                                            state->timeline_semaphore};
+                    submissions.max_timeline_value_difference = state->max_timeline_value_difference;
                     result = submissions_create(submissions, &state->submissions);
                 }
                 if (result == VK_SUCCESS) {
@@ -762,16 +805,16 @@ VKAPI_ATTR void VKAPI_CALL GetDeviceMicromapCompatibilityEXT(VkDevice handle, co
 }
 VKAPI_ATTR void VKAPI_CALL CmdCopyMicromapToMemoryEXT(VkCommandBuffer cb, const VkCopyMicromapToMemoryInfoEXT* info) {
     auto state = device(cb);
-    if (state->software) {
-        if (auto entry = command(*state, cb)) entry->state.fail(VK_ERROR_FEATURE_NOT_PRESENT);
-    } else
+    if (state->software)
+        finish_internal(*state, cb, device_cmd_serialize(state->backend, cb, info));
+    else
         native<PFN_vkCmdCopyMicromapToMemoryEXT>(*state, "vkCmdCopyMicromapToMemoryEXT")(cb, info);
 }
 VKAPI_ATTR void VKAPI_CALL CmdCopyMemoryToMicromapEXT(VkCommandBuffer cb, const VkCopyMemoryToMicromapInfoEXT* info) {
     auto state = device(cb);
-    if (state->software) {
-        if (auto entry = command(*state, cb)) entry->state.fail(VK_ERROR_FEATURE_NOT_PRESENT);
-    } else
+    if (state->software)
+        finish_internal(*state, cb, device_cmd_deserialize(state->backend, cb, info));
+    else
         native<PFN_vkCmdCopyMemoryToMicromapEXT>(*state, "vkCmdCopyMemoryToMicromapEXT")(cb, info);
 }
 VKAPI_ATTR void VKAPI_CALL CmdWriteMicromapsPropertiesEXT(VkCommandBuffer cb, uint32_t count, const VkMicromapEXT* micromaps,
@@ -829,7 +872,7 @@ VKAPI_ATTR void VKAPI_CALL CmdPipelineBarrier2(VkCommandBuffer cb, const VkDepen
         return;
     }
     TranslatedDependency translated;
-    VkResult result = translated.assign(*info);
+    VkResult result = translated.assign(*info, command_supports_compute(*state, cb));
     if (result != VK_SUCCESS) {
         fail_command(*state, cb, result);
         return;
@@ -848,7 +891,8 @@ VKAPI_ATTR void VKAPI_CALL CmdPipelineBarrier(VkCommandBuffer cb, VkPipelineStag
         return;
     }
     TranslatedLegacyBarriers translated;
-    VkResult result = translated.assign(src, dst, flags, memory_count, memory, buffer_count, buffers, image_count, images);
+    VkResult result = translated.assign(src, dst, flags, memory_count, memory, buffer_count, buffers, image_count, images,
+                                        command_supports_compute(*state, cb));
     if (result != VK_SUCCESS) {
         fail_command(*state, cb, result);
         return;
@@ -866,7 +910,7 @@ VKAPI_ATTR void VKAPI_CALL CmdSetEvent2(VkCommandBuffer cb, VkEvent event, const
         return;
     }
     TranslatedDependency translated;
-    VkResult result = translated.assign(*info);
+    VkResult result = translated.assign(*info, command_supports_compute(*state, cb));
     if (result != VK_SUCCESS) {
         fail_command(*state, cb, result);
         return;
@@ -887,7 +931,7 @@ VKAPI_ATTR void VKAPI_CALL CmdWaitEvents2(VkCommandBuffer cb, uint32_t count, co
         std::vector<TranslatedDependency> translated(count);
         std::vector<VkDependencyInfo> views(count);
         for (uint32_t i = 0; i < count; ++i) {
-            VkResult result = translated[i].assign(infos[i]);
+            VkResult result = translated[i].assign(infos[i], command_supports_compute(*state, cb));
             if (result != VK_SUCCESS) {
                 fail_command(*state, cb, result);
                 return;
@@ -932,7 +976,8 @@ VKAPI_ATTR void VKAPI_CALL CmdWaitEvents(VkCommandBuffer cb, uint32_t count, con
         return;
     }
     TranslatedLegacyBarriers translated;
-    VkResult result = translated.assign(src, dst, 0, memory_count, memory, buffer_count, buffers, image_count, images);
+    VkResult result = translated.assign(src, dst, 0, memory_count, memory, buffer_count, buffers, image_count, images,
+                                        command_supports_compute(*state, cb));
     if (result != VK_SUCCESS) {
         fail_command(*state, cb, result);
         return;
@@ -1141,6 +1186,12 @@ const Hook hooks[] = {
     HOOK(GetFenceStatus),
     HOOK(ResetFences),
     HOOK(DestroyFence),
+    HOOK(GetFenceFdKHR),
+    HOOK(ImportFenceFdKHR),
+#ifdef VK_USE_PLATFORM_WIN32_KHR
+    HOOK(GetFenceWin32HandleKHR),
+    HOOK(ImportFenceWin32HandleKHR),
+#endif
     HOOK(QueueWaitIdle),
     HOOK(DeviceWaitIdle),
     HOOK(CmdCopyAccelerationStructureKHR),

@@ -13,6 +13,9 @@ namespace vel::omm {
 namespace {
 constexpr uint32_t kMaximumSubdivision = 12;
 constexpr VkDeviceSize kScratchSize = 256;
+// Bump this UUID when the pointer-free canonical storage contract changes.
+constexpr uint8_t kStorageCompatibilityUuid[VK_UUID_SIZE] = {0xe8, 0xf6, 0x8c, 0x3a, 0xbd, 0x19, 0x4d, 0x79,
+                                                             0x92, 0x8b, 0x53, 0x2e, 0x01, 0x00, 0x00, 0x01};
 
 struct Allocation {
     VkAllocationCallbacks callbacks{};
@@ -44,6 +47,7 @@ struct BufferRecord {
     BufferRecord* next = nullptr;
     VkBuffer handle{};
     VkDeviceSize size = 0, accessible = 0;
+    VkBufferCreateFlags flags = 0;
     VkBufferUsageFlags2KHR usage = 0, native_usage = 0;
     bool bound = false;
 };
@@ -61,7 +65,12 @@ struct BuildPush {
 struct CopyPush {
     uint64_t source, destination, source_capacity, destination_capacity;
 };
-static_assert(sizeof(BuildPush) == 96 && sizeof(CopyPush) == 32);
+struct SerializePush {
+    uint64_t source, destination, source_capacity, destination_capacity;
+    uint32_t version[2 * VK_UUID_SIZE / sizeof(uint32_t)];
+    uint64_t deserialize;
+};
+static_assert(sizeof(BuildPush) == 96 && sizeof(CopyPush) == 32 && sizeof(SerializePush) == 72);
 
 bool add(uint64_t a, uint64_t b, uint64_t* output) {
     if (b > UINT64_MAX - a) return false;
@@ -113,8 +122,9 @@ struct DeviceBackend {
     std::mutex mutex;
     BufferRecord* buffers = nullptr;
     Micromap* micromaps = nullptr;
-    VkPipeline build_pipeline{}, copy_pipeline{};
-    VkPipelineLayout build_layout{}, copy_layout{};
+    VkPipeline build_pipeline{}, copy_pipeline{}, serialize_pipeline{};
+    VkPipelineLayout build_layout{}, copy_layout{}, serialize_layout{};
+    uint8_t serialization_version[2 * VK_UUID_SIZE]{};
     PFN_vkCreateShaderModule create_shader{};
     PFN_vkDestroyShaderModule destroy_shader{};
     PFN_vkCreatePipelineLayout create_layout{};
@@ -147,15 +157,23 @@ struct DeviceBackend {
         return *address && entry->accessible <= UINT64_MAX - *address;
     }
     bool address_range(VkDeviceAddress address, VkDeviceSize* logical, VkDeviceSize* accessible) {
+        VkDeviceSize largest_logical = 0, selected_accessible = 0;
         for (auto* entry = buffers; entry; entry = entry->next) {
             VkDeviceAddress base;
             if (!buffer_address(entry, &base) || address < base || address - base >= entry->size) continue;
             const uint64_t offset = address - base;
-            *logical = entry->size - offset;
-            *accessible = entry->accessible - offset;
-            return true;
+            // Aliased buffers may have overlapping device addresses. Vulkan
+            // selects a buffer that satisfies valid usage when one exists; an
+            // earlier small alias must not truncate a later valid large span.
+            if (entry->size - offset > largest_logical) {
+                largest_logical = entry->size - offset;
+                selected_accessible = entry->accessible - offset;
+            }
         }
-        return false;
+        if (!largest_logical) return false;
+        *logical = largest_logical;
+        *accessible = selected_accessible;
+        return true;
     }
     VkResult storage(VkMicromapEXT handle, MicromapStorage* output) {
         auto* object = micromap(handle);
@@ -171,6 +189,12 @@ struct DeviceBackend {
         memory.dstAccessMask = destination;
         barrier(command, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 1, &memory, 0, nullptr, 0,
                 nullptr);
+    }
+    void record_serialization(VkCommandBuffer command, SerializePush& push) {
+        std::memcpy(push.version, serialization_version, sizeof(push.version));
+        bind_pipeline(command, VK_PIPELINE_BIND_POINT_COMPUTE, serialize_pipeline);
+        push_constants(command, serialize_layout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(push), &push);
+        dispatch(command, 128, 1, 1);
     }
     VkResult prepare_build(const VkMicromapBuildInfoEXT& info, BuildPush* push) {
         StorageLayout layout;
@@ -248,7 +272,9 @@ VkResult make_pipeline(DeviceBackend* backend, const uint32_t* code, size_t byte
 
 VkResult device_backend_create(const DeviceBackendCreateInfo& info, DeviceBackend** output) {
     if (!output || !info.physical_device || !info.device || !info.get_device_proc_addr || !info.build_code || !info.copy_code ||
-        !info.build_code_size || info.build_code_size % 4 || !info.copy_code_size || info.copy_code_size % 4)
+        !info.build_code_size || info.build_code_size % 4 || !info.copy_code_size || info.copy_code_size % 4 ||
+        (info.serialize_code && (!info.serialize_code_size || info.serialize_code_size % 4 || !info.get_properties2)) ||
+        (!info.serialize_code && info.serialize_code_size))
         return VK_ERROR_INITIALIZATION_FAILED;
     const auto allocator = allocation(info.allocator);
     void* memory = allocate(allocator, sizeof(DeviceBackend), alignof(DeviceBackend), VK_SYSTEM_ALLOCATION_SCOPE_DEVICE);
@@ -257,7 +283,10 @@ VkResult device_backend_create(const DeviceBackendCreateInfo& info, DeviceBacken
     backend->allocator = allocator;
     backend->physical = info.physical_device;
     backend->device = info.device;
-#define LOAD(member, name) backend->member = reinterpret_cast<PFN_##name>(info.get_device_proc_addr(info.device, #name))
+#define LOAD(member, name)                                                                             \
+    do {                                                                                               \
+        backend->member = reinterpret_cast<PFN_##name>(info.get_device_proc_addr(info.device, #name)); \
+    } while (false)
     LOAD(create_shader, vkCreateShaderModule);
     LOAD(destroy_shader, vkDestroyShaderModule);
     LOAD(create_layout, vkCreatePipelineLayout);
@@ -281,6 +310,15 @@ VkResult device_backend_create(const DeviceBackendCreateInfo& info, DeviceBacken
     if (result == VK_SUCCESS)
         result = make_pipeline(backend, info.copy_code, info.copy_code_size, sizeof(CopyPush), &backend->copy_layout,
                                &backend->copy_pipeline);
+    if (result == VK_SUCCESS && info.serialize_code) {
+        VkPhysicalDeviceIDProperties identifiers{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ID_PROPERTIES};
+        VkPhysicalDeviceProperties2 properties{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2, &identifiers};
+        info.get_properties2(info.physical_device, &properties);
+        std::memcpy(backend->serialization_version, identifiers.driverUUID, VK_UUID_SIZE);
+        std::memcpy(backend->serialization_version + VK_UUID_SIZE, kStorageCompatibilityUuid, VK_UUID_SIZE);
+        result = make_pipeline(backend, info.serialize_code, info.serialize_code_size, sizeof(SerializePush),
+                               &backend->serialize_layout, &backend->serialize_pipeline);
+    }
     if (result != VK_SUCCESS) {
         device_backend_destroy(backend);
         return result;
@@ -305,9 +343,13 @@ void device_backend_destroy(DeviceBackend* backend) {
     }
     if (backend->copy_pipeline)
         backend->destroy_pipeline(backend->device, backend->copy_pipeline, callback_pointer(backend->allocator));
+    if (backend->serialize_pipeline)
+        backend->destroy_pipeline(backend->device, backend->serialize_pipeline, callback_pointer(backend->allocator));
     if (backend->build_pipeline)
         backend->destroy_pipeline(backend->device, backend->build_pipeline, callback_pointer(backend->allocator));
     if (backend->copy_layout) backend->destroy_layout(backend->device, backend->copy_layout, callback_pointer(backend->allocator));
+    if (backend->serialize_layout)
+        backend->destroy_layout(backend->device, backend->serialize_layout, callback_pointer(backend->allocator));
     if (backend->build_layout)
         backend->destroy_layout(backend->device, backend->build_layout, callback_pointer(backend->allocator));
     const auto allocator = backend->allocator;
@@ -328,6 +370,7 @@ VkResult device_track_buffer(DeviceBackend* backend, VkBuffer handle, const VkBu
     entry->handle = handle;
     entry->size = info->size;
     entry->accessible = accessible ? accessible : info->size;
+    entry->flags = info->flags;
     entry->usage = info->usage;
     for (auto* next = reinterpret_cast<const VkBaseInStructure*>(info->pNext); next; next = next->pNext)
         if (next->sType == VK_STRUCTURE_TYPE_BUFFER_USAGE_FLAGS_2_CREATE_INFO_KHR)
@@ -352,6 +395,22 @@ void device_untrack_buffer(DeviceBackend* backend, VkBuffer handle) {
         *link = entry->next;
         release(backend->allocator, entry);
     }
+}
+VkResult device_buffer_bound_span(DeviceBackend* backend, VkBuffer handle, VkDeviceSize offset, VkDeviceSize size) {
+    if (!backend) return VK_ERROR_VALIDATION_FAILED_EXT;
+    std::lock_guard<std::mutex> lock(backend->mutex);
+    auto* entry = backend->buffer(handle);
+    return entry && entry->bound && offset <= entry->size && size <= entry->size - offset ? VK_SUCCESS
+                                                                                          : VK_ERROR_VALIDATION_FAILED_EXT;
+}
+VkResult device_buffer_as_address_span(DeviceBackend* backend, VkBuffer handle, VkDeviceSize offset, VkDeviceSize size) {
+    if (!backend) return VK_ERROR_VALIDATION_FAILED_EXT;
+    std::lock_guard<std::mutex> lock(backend->mutex);
+    auto* entry = backend->buffer(handle);
+    return entry && (entry->bound || (entry->flags & VK_BUFFER_CREATE_SPARSE_BINDING_BIT)) && offset <= entry->size &&
+                   size <= entry->size - offset
+               ? VK_SUCCESS
+               : VK_ERROR_VALIDATION_FAILED_EXT;
 }
 
 VkResult device_create_micromap(DeviceBackend* backend, const VkMicromapCreateInfoEXT* info, const VkAllocationCallbacks* callbacks,
@@ -461,8 +520,55 @@ VkResult device_cmd_copy(DeviceBackend* backend, VkCommandBuffer command, const 
     backend->dispatch(command, 128, 1, 1);
     return VK_SUCCESS;
 }
-void device_get_compatibility(DeviceBackend*, const VkMicromapVersionInfoEXT*,
+VkResult device_cmd_serialize(DeviceBackend* backend, VkCommandBuffer command, const VkCopyMicromapToMemoryInfoEXT* info) {
+    if (!backend || !command || !info || info->sType != VK_STRUCTURE_TYPE_COPY_MICROMAP_TO_MEMORY_INFO_EXT)
+        return VK_ERROR_VALIDATION_FAILED_EXT;
+    if (info->pNext || info->mode != VK_COPY_MICROMAP_MODE_SERIALIZE_EXT) return VK_ERROR_FEATURE_NOT_PRESENT;
+    std::lock_guard<std::mutex> lock(backend->mutex);
+    if (!backend->serialize_pipeline) return VK_ERROR_FEATURE_NOT_PRESENT;
+    MicromapStorage source;
+    auto result = backend->storage(info->src, &source);
+    if (result != VK_SUCCESS) return result;
+    SerializePush push{};
+    push.source = source.address;
+    push.source_capacity = source.capacity;
+    push.destination = info->dst.deviceAddress;
+    VkDeviceSize accessible;
+    if ((push.source & 3) || (push.destination & 255) ||
+        !backend->address_range(push.destination, &push.destination_capacity, &accessible) ||
+        push.destination_capacity < 2 * VK_UUID_SIZE + kStorageHeaderSize)
+        return VK_ERROR_VALIDATION_FAILED_EXT;
+    backend->record_serialization(command, push);
+    return VK_SUCCESS;
+}
+VkResult device_cmd_deserialize(DeviceBackend* backend, VkCommandBuffer command, const VkCopyMemoryToMicromapInfoEXT* info) {
+    if (!backend || !command || !info || info->sType != VK_STRUCTURE_TYPE_COPY_MEMORY_TO_MICROMAP_INFO_EXT)
+        return VK_ERROR_VALIDATION_FAILED_EXT;
+    if (info->pNext || info->mode != VK_COPY_MICROMAP_MODE_DESERIALIZE_EXT) return VK_ERROR_FEATURE_NOT_PRESENT;
+    std::lock_guard<std::mutex> lock(backend->mutex);
+    if (!backend->serialize_pipeline) return VK_ERROR_FEATURE_NOT_PRESENT;
+    MicromapStorage destination;
+    auto result = backend->storage(info->dst, &destination);
+    if (result != VK_SUCCESS) return result;
+    SerializePush push{};
+    push.source = info->src.deviceAddress;
+    push.destination = destination.address;
+    push.destination_capacity = destination.capacity;
+    push.deserialize = 1;
+    VkDeviceSize accessible;
+    if ((push.source & 255) || (push.destination & 3) || !backend->address_range(push.source, &push.source_capacity, &accessible) ||
+        push.source_capacity < 2 * VK_UUID_SIZE + kStorageHeaderSize)
+        return VK_ERROR_VALIDATION_FAILED_EXT;
+    backend->record_serialization(command, push);
+    return VK_SUCCESS;
+}
+void device_get_compatibility(DeviceBackend* backend, const VkMicromapVersionInfoEXT* info,
                               VkAccelerationStructureCompatibilityKHR* compatibility) {
-    if (compatibility) *compatibility = VK_ACCELERATION_STRUCTURE_COMPATIBILITY_INCOMPATIBLE_KHR;
+    if (!compatibility) return;
+    *compatibility = VK_ACCELERATION_STRUCTURE_COMPATIBILITY_INCOMPATIBLE_KHR;
+    if (backend && backend->serialize_pipeline && info && info->sType == VK_STRUCTURE_TYPE_MICROMAP_VERSION_INFO_EXT &&
+        !info->pNext && info->pVersionData &&
+        !std::memcmp(info->pVersionData, backend->serialization_version, sizeof(backend->serialization_version)))
+        *compatibility = VK_ACCELERATION_STRUCTURE_COMPATIBILITY_COMPATIBLE_KHR;
 }
 }  // namespace vel::omm

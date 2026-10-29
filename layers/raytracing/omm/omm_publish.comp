@@ -5,7 +5,7 @@
 #extension GL_EXT_shader_explicit_arithmetic_types_int64 : require
 layout(local_size_x=1) in;
 layout(buffer_reference,std430,buffer_reference_align=4) buffer Words { uint w[]; };
-layout(push_constant,std430) uniform Publish { uint64_t root, body, capacity, status; uint kind, reserved; } p;
+layout(push_constant,std430) uniform Publish { uint64_t root, body, capacity, status, nativeAddress; uint kind, reserved; } p;
 uint r32(uint64_t a,uint o) { return Words(a+uint64_t(o)).w[0]; }
 uint64_t r64(uint64_t a,uint o) { return uint64_t(r32(a,o))|uint64_t(r32(a,o+4u))<<32u; }
 void w32(uint o,uint v) { Words(p.root+uint64_t(o)).w[0]=v; }
@@ -14,6 +14,11 @@ void main() {
     // Invalidate even when GPU validation failed; stale metadata must never
     // classify a newly built native AS.
     for(uint i=0u;i<16u;++i) w32(i*4u,0u);
+    // Identity is stable for this native AS object, including across replay and
+    // rebuild. Publication is GPU work synchronized with native AS construction.
+    // Invalid metadata still names the original native AS and an unready root.
+    w32(64u,0x494d4d4fu); w32(68u,1u); w32(72u,0u); w32(76u,0u);
+    w64(80u,p.nativeAddress); w64(88u,p.root); w32(72u,1u);
     if(r32(p.status,0u)!=0u || r32(p.body,0u)!=0x424d4d4fu || r32(p.body,4u)!=1u ||
        r32(p.body,8u)!=p.kind || r32(p.body,52u)!=0u) return;
     uint64_t activeBytes=r64(p.body,16u), capacity=r64(p.body,24u);

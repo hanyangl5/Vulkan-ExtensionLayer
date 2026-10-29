@@ -286,14 +286,17 @@ void failuresAndLegacy() {
     expect(legacy.assign(source, destination, VK_DEPENDENCY_BY_REGION_BIT, 1, &memory, 1, &buffer, 1, &image) == VK_SUCCESS,
            "legacy helper clones all barrier arrays");
     const auto view = legacy.view();
-    expect(view.src_stage_mask == (VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_HOST_BIT) &&
+    expect(view.src_stage_mask ==
+                   (VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_HOST_BIT | VK_PIPELINE_STAGE_TRANSFER_BIT) &&
                view.dst_stage_mask == destination && view.dependency_flags == VK_DEPENDENCY_BY_REGION_BIT,
            "legacy outer stage masks translated and flags preserved");
+    auto expectedLegacyBuffer = savedLegacyBuffer;
+    expectedLegacyBuffer.srcAccessMask |= VK_ACCESS_SHADER_WRITE_BIT;
     expect(view.memory_barriers != &memory && view.buffer_memory_barriers != &buffer && view.image_memory_barriers != &image &&
                !std::memcmp(view.memory_barriers, &savedLegacyMemory, sizeof(memory)) &&
-               !std::memcmp(view.buffer_memory_barriers, &savedLegacyBuffer, sizeof(buffer)) &&
+               !std::memcmp(view.buffer_memory_barriers, &expectedLegacyBuffer, sizeof(buffer)) &&
                !std::memcmp(view.image_memory_barriers, &savedLegacyImage, sizeof(image)),
-           "legacy structures copied exactly because no legacy micromap access exists");
+           "legacy structures preserve ranges and borrowed chains while serialized transfer writes gain shader scope");
     expect(!std::memcmp(&memory, &savedLegacyMemory, sizeof(memory)) && !std::memcmp(&buffer, &savedLegacyBuffer, sizeof(buffer)) &&
                !std::memcmp(&image, &savedLegacyImage, sizeof(image)),
            "original legacy arrays immutable");
@@ -465,12 +468,79 @@ void nativeSidecarScopes() {
                legacy.view().memory_barriers[0].dstAccessMask == VK_ACCESS_SHADER_READ_BIT,
            "legacy acquire keeps ignored source empty without expanding event execution scopes");
 }
+void serializedBufferScopes() {
+    VkMemoryBarrier2 memory = init<VkMemoryBarrier2>(VK_STRUCTURE_TYPE_MEMORY_BARRIER_2);
+    memory.srcStageMask = memory.dstStageMask = VK_PIPELINE_STAGE_2_MICROMAP_BUILD_BIT_EXT;
+    memory.srcAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT;
+    memory.dstAccessMask = VK_ACCESS_2_TRANSFER_READ_BIT;
+    VkBufferMemoryBarrier2 buffer = init<VkBufferMemoryBarrier2>(VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER_2);
+    buffer.srcStageMask = memory.srcStageMask;
+    buffer.dstStageMask = memory.dstStageMask;
+    buffer.srcAccessMask = memory.srcAccessMask;
+    buffer.dstAccessMask = memory.dstAccessMask;
+    buffer.srcQueueFamilyIndex = buffer.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    buffer.buffer = handle<VkBuffer>(0x1234);
+    buffer.offset = 256;
+    buffer.size = 144;
+    auto dependency = init<VkDependencyInfo>(VK_STRUCTURE_TYPE_DEPENDENCY_INFO);
+    dependency.memoryBarrierCount = dependency.bufferMemoryBarrierCount = 1;
+    dependency.pMemoryBarriers = &memory;
+    dependency.pBufferMemoryBarriers = &buffer;
+    TranslatedDependency translated;
+    expect(translated.assign(dependency) == VK_SUCCESS, "serialized buffer dependency translates");
+    auto view = translated.view();
+    const auto stages = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_2_ALL_TRANSFER_BIT;
+    expect(view.pMemoryBarriers[0].srcStageMask == stages && view.pMemoryBarriers[0].dstStageMask == stages &&
+               view.pMemoryBarriers[0].srcAccessMask == (VK_ACCESS_2_TRANSFER_WRITE_BIT | VK_ACCESS_2_SHADER_WRITE_BIT) &&
+               view.pMemoryBarriers[0].dstAccessMask == (VK_ACCESS_2_TRANSFER_READ_BIT | VK_ACCESS_2_SHADER_READ_BIT),
+           "MM-stage serialized transfer accesses include actual compute writers and readers");
+    expect(view.pBufferMemoryBarriers[0].srcStageMask == stages &&
+               view.pBufferMemoryBarriers[0].srcAccessMask == view.pMemoryBarriers[0].srcAccessMask &&
+               view.pBufferMemoryBarriers[0].dstAccessMask == view.pMemoryBarriers[0].dstAccessMask &&
+               view.pBufferMemoryBarriers[0].buffer == buffer.buffer && view.pBufferMemoryBarriers[0].offset == 256 &&
+               view.pBufferMemoryBarriers[0].size == 144 && view.memoryBarrierCount == 1,
+           "serialization buffer range is retained without an unrelated sidecar barrier");
+    TranslatedDependency twice;
+    expect(twice.assign(view) == VK_SUCCESS && twice.view().pMemoryBarriers[0].srcStageMask == stages &&
+               twice.view().pMemoryBarriers[0].dstAccessMask == view.pMemoryBarriers[0].dstAccessMask,
+           "serialized scope translation is idempotent");
+    memory.srcStageMask = memory.dstStageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
+    expect(
+        translated.assign(dependency, true) == VK_SUCCESS &&
+            translated.view().pMemoryBarriers[0].srcStageMask == VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT &&
+            translated.view().pMemoryBarriers[0].srcAccessMask == (VK_ACCESS_2_TRANSFER_WRITE_BIT | VK_ACCESS_2_SHADER_WRITE_BIT),
+        "ALL_COMMANDS includes shader serialization on a compute queue");
+    expect(translated.assign(dependency, false) == VK_SUCCESS &&
+               translated.view().pMemoryBarriers[0].srcAccessMask == VK_ACCESS_2_TRANSFER_WRITE_BIT &&
+               translated.view().pMemoryBarriers[0].dstAccessMask == VK_ACCESS_2_TRANSFER_READ_BIT,
+           "ALL_COMMANDS on a non-compute queue does not invent unsupported shader accesses");
+    memory.srcStageMask = memory.dstStageMask = VK_PIPELINE_STAGE_2_ALL_TRANSFER_BIT;
+    expect(translated.assign(dependency, true) == VK_SUCCESS &&
+               translated.view().pMemoryBarriers[0].srcStageMask == VK_PIPELINE_STAGE_2_ALL_TRANSFER_BIT &&
+               translated.view().pMemoryBarriers[0].srcAccessMask == VK_ACCESS_2_TRANSFER_WRITE_BIT,
+           "ordinary transfer scope remains ordinary transfer");
+    VkMemoryBarrier legacy = init<VkMemoryBarrier>(VK_STRUCTURE_TYPE_MEMORY_BARRIER);
+    legacy.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+    legacy.dstAccessMask = VK_ACCESS_HOST_READ_BIT;
+    TranslatedLegacyBarriers old;
+    expect(old.assign(VkPipelineStageFlags(VK_PIPELINE_STAGE_2_MICROMAP_BUILD_BIT_EXT), VK_PIPELINE_STAGE_HOST_BIT, 0, 1, &legacy,
+                      0, nullptr, 0, nullptr) == VK_SUCCESS &&
+               old.view().src_stage_mask == (VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_TRANSFER_BIT) &&
+               old.view().memory_barriers[0].srcAccessMask == (VK_ACCESS_TRANSFER_WRITE_BIT | VK_ACCESS_SHADER_WRITE_BIT) &&
+               old.view().memory_barriers[0].dstAccessMask == VK_ACCESS_HOST_READ_BIT,
+           "legacy serialized release covers actual shader writes and preserves host acquire");
+    expect(old.assign(VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, VK_PIPELINE_STAGE_HOST_BIT, 0, 1, &legacy, 0, nullptr, 0, nullptr,
+                      false) == VK_SUCCESS &&
+               old.view().memory_barriers[0].srcAccessMask == VK_ACCESS_TRANSFER_WRITE_BIT,
+           "legacy ALL_COMMANDS does not add compute accesses on a non-compute queue");
+}
 }  // namespace
 int main() {
     masks();
     dependencyCopies();
     failuresAndLegacy();
     nativeSidecarScopes();
+    serializedBufferScopes();
     std::printf("OMM synchronization translation: %u checks, %u failures\n", checks, failures);
     return failures ? 1 : 0;
 }

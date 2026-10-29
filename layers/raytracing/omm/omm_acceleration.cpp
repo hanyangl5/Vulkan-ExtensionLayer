@@ -51,6 +51,8 @@ struct Body {
 struct Object {
     VkAccelerationStructureKHR handle{};
     VkAccelerationStructureTypeKHR type{};
+    VkBuffer storage{};
+    VkDeviceSize offset{}, size{};
     VkDeviceAddress native{};
     BufferRef root;
     std::shared_ptr<Body> active_body;
@@ -65,9 +67,10 @@ struct InstancesPush {
 };
 struct PublishPush {
     uint64_t root, body, capacity, status;
+    uint64_t native_address;
     uint32_t kind, reserved;
 };
-static_assert(sizeof(InstancesPush) == 72 && sizeof(PublishPush) == 40);
+static_assert(sizeof(InstancesPush) == 72 && sizeof(PublishPush) == 48);
 struct NativeInfo {
     VkAccelerationStructureBuildGeometryInfoKHR info{};
     std::vector<VkAccelerationStructureGeometryKHR> geometries;
@@ -314,6 +317,16 @@ VkResult prepare_blas(AccelerationBackend* b, Job* job, const VkAccelerationStru
                      0};
     return VK_SUCCESS;
 }
+VkResult resolve_native(AccelerationBackend* b, Object& object) {
+    if (device_buffer_as_address_span(b->micromaps, object.storage, object.offset, object.size) != VK_SUCCESS)
+        return VK_ERROR_VALIDATION_FAILED_EXT;
+    if (!object.native) {
+        VkAccelerationStructureDeviceAddressInfoKHR address{VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_DEVICE_ADDRESS_INFO_KHR};
+        address.accelerationStructure = object.handle;
+        object.native = b->address_as(b->d->device, &address);
+    }
+    return object.native ? VK_SUCCESS : VK_ERROR_VALIDATION_FAILED_EXT;
+}
 VkResult prepare_tlas(AccelerationBackend* b, Job* job, const VkAccelerationStructureBuildGeometryInfoKHR& original) {
     if (job->native.info.geometryCount != 1) return VK_ERROR_VALIDATION_FAILED_EXT;
     auto& geometry = job->native.geometries[0].geometry.instances;
@@ -334,6 +347,9 @@ VkResult prepare_tlas(AccelerationBackend* b, Job* job, const VkAccelerationStru
     std::vector<RegistryEntry> entries;
     for (const auto& pair : b->objects) {
         if (pair.second->type != VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR) continue;
+        // Unrelated, unbound ASes may legally exist. A registry snapshot must
+        // never cause a native address query for them.
+        if (resolve_native(b, *pair.second) != VK_SUCCESS) continue;
         entries.push_back({pair.second->native, pair.second->root->address});
         job->body->dependencies.push_back(pair.second);
     }
@@ -473,10 +489,10 @@ VkResult acceleration_track(AccelerationBackend* b, VkAccelerationStructureKHR h
         auto object = std::make_shared<Object>();
         object->handle = handle;
         object->type = info->type;
-        VkAccelerationStructureDeviceAddressInfoKHR address{VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_DEVICE_ADDRESS_INFO_KHR};
-        address.accelerationStructure = handle;
-        object->native = b->address_as(b->d->device, &address);
-        auto result = buffer(b, sizeof(MetadataRootCell), true, 0, &object->root);
+        object->storage = info->buffer;
+        object->offset = info->offset;
+        object->size = info->size;
+        auto result = buffer(b, sizeof(MetadataRootCell) + sizeof(AccelerationIdentityCell), true, 0, &object->root);
         if (result != VK_SUCCESS) return result;
         b->objects.emplace(handle, std::move(object));
         return VK_SUCCESS;
@@ -489,12 +505,25 @@ void acceleration_untrack(AccelerationBackend* b, VkAccelerationStructureKHR han
     std::lock_guard<std::mutex> lock(b->mutex);
     b->objects.erase(handle);
 }
+VkResult acceleration_reference(AccelerationBackend* b, VkAccelerationStructureKHR handle, VkDeviceAddress* identity_address,
+                                VkDeviceAddress* root_address, std::shared_ptr<void>* lifetime) {
+    if (!b || !identity_address || !root_address) return VK_ERROR_VALIDATION_FAILED_EXT;
+    std::lock_guard<std::mutex> lock(b->mutex);
+    const auto found = b->objects.find(handle);
+    if (found == b->objects.end()) return VK_ERROR_VALIDATION_FAILED_EXT;
+    *root_address = found->second->root->address;
+    *identity_address = *root_address + sizeof(MetadataRootCell);
+    if (lifetime) *lifetime = found->second;
+    return VK_SUCCESS;
+}
 VkResult acceleration_identity(AccelerationBackend* b, VkAccelerationStructureKHR handle, VkDeviceAddress* native_address,
                                VkDeviceAddress* root_address, std::shared_ptr<void>* lifetime) {
     if (!b || !native_address || !root_address) return VK_ERROR_VALIDATION_FAILED_EXT;
     std::lock_guard<std::mutex> lock(b->mutex);
     auto found = b->objects.find(handle);
     if (found == b->objects.end()) return VK_ERROR_VALIDATION_FAILED_EXT;
+    const auto resolved = resolve_native(b, *found->second);
+    if (resolved != VK_SUCCESS) return resolved;
     *native_address = found->second->native;
     *root_address = found->second->root->address;
     if (lifetime) *lifetime = found->second;
@@ -543,6 +572,8 @@ VkResult acceleration_cmd_build(AccelerationBackend* b, VkCommandBuffer cb, uint
             auto found = b->objects.find(infos[i].dstAccelerationStructure);
             if (found == b->objects.end() || found->second->type != infos[i].type) return VK_ERROR_VALIDATION_FAILED_EXT;
             job.object = found->second;
+            result = resolve_native(b, *job.object);
+            if (result != VK_SUCCESS) return result;
             job.body = std::make_shared<Body>();
             if (infos[i].geometryCount) job.native.ranges.assign(ranges[i], ranges[i] + infos[i].geometryCount);
             result = buffer(b, 16, false, 0, &job.status);
@@ -596,6 +627,7 @@ VkResult acceleration_cmd_build(AccelerationBackend* b, VkCommandBuffer cb, uint
                                     job.body->buffer->address,
                                     job.body->buffer->size,
                                     job.status->address,
+                                    job.object->native,
                                     blas ? kMetadataBlas : kMetadataTlas,
                                     0};
             dispatch(b, cb, 2, &publication, sizeof(publication));

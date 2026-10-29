@@ -3,6 +3,7 @@
 #include "native_fixture.h"
 #include "../omm_consumers.h"
 #include "../omm_metadata.h"
+#include "../omm_acceleration.h"
 #include <atomic>
 #include <cstdlib>
 #include <new>
@@ -308,7 +309,9 @@ int main(int argc, char** argv) {
         MetadataInstance logical{blas_root.address, blas.address, uint32_t(instance.flags), kMetadataInstanceActive, 0};
         require(metadata_pack_tlas(&logical, 1, 0, 1, &packed) == MetadataResult::Success, "TLAS metadata");
         auto scene_root = root_for(fixture, packed, kMetadataTlas);
-        identities.values.push_back({scenes[i].handle, {scenes[i].address, scene_root.address, {}}});
+        const AccelerationIdentityCell payload{kAccelerationIdentityMagic, 1, 1, 0, scenes[i].address, scene_root.address};
+        const auto cell = upload(fixture, &payload, sizeof(payload));
+        identities.values.push_back({scenes[i].handle, {scenes[i].address, scene_root.address, {}, cell.address}});
     }
     auto build_command = fixture.begin();
     const auto* blas_range = &blas.range;

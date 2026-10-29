@@ -5,7 +5,7 @@ SPDX-License-Identifier: Apache-2.0
 
 # Software opacity micromap implementation status
 
-Updated 2026-10-28. The active goal is the complete native-RT EXT implementation
+Updated 2026-10-29. The active goal is the complete native-RT EXT implementation
 in [the specification](opacity_micromap_layer.md), following
 [the implementation plan](opacity_micromap_plan.md). No full milestone is complete.
 The experimental loader now connects public micromap build/copy/query operations,
@@ -37,18 +37,18 @@ there is no `vkrt_layer` hierarchy or fallback build dependency.
 | Automatic RQ consumer | Typed parallel state, inline Proceed filtering and flags/AABB getter restoration; production descriptor provenance and bound-set pipeline variants now connect compute RQ |
 | Native metadata component | Checked BVH-independent RootCell/TLAS/BLAS layout, normalized 64-bit association, GPU-owned OMM snapshots, native AS interception and GPU root publication |
 | Packed classifier composition | Resource-free classifier closure linked into ordinary application SPIR-V; actual GPU packed-data/native-RQ chain passes 4,506 traces with explicit scene RootCell |
-| Experimental public API | Public create/destroy/sizes/build/clone/compact and compacted/serialization-size queries, buffer translation, state restoration and sync translation; serialization execution remains open |
+| Experimental public API | Public create/destroy/sizes/build/clone/compact, size queries, GPU serialization/deserialization and compatibility, buffer/state/synchronization translation |
 | AS provenance compiler | Descriptor arrays, scalar AS phi/copy, integer conversions and helper argument/return propagation; compiler provider ABI passes 230 checks, integer runtime provider remains open |
-| Descriptor contexts | Native identity plus RootCell in coherent shadow records, ordinary writes/copies, variable counts, immutable per-binding contexts; no extra application set or push range |
-| Native AS lifecycle | Device BUILD for BLAS/TLAS, GPU instance capture/sanitization, replay tokens and fence-driven per-AS retirement; update/copy/serialization remain open |
+| Descriptor contexts | Stable GPU-published identity cells, shadow ABI v2 null/unwritten/ready states, descriptor update-before-bind, ordinary writes/copies and immutable per-binding contexts; no extra application set or push range |
+| Native AS lifecycle | Device BUILD for BLAS/TLAS, create-before-bind, GPU instance capture/sanitization, replay tokens and private-timeline per-AS retirement; update/copy/serialization remain open |
 
 The CPU evaluator reports 396,693 checks and the storage suite reports 786 checks.
 Storage tests include truncated and corrupted blobs, size overflow, source-input
 mutation/release, canonical padding and round trips. Planner arithmetic limits
 are not advertised device limits. The internal storage blob is not the Vulkan
 public serialization envelope. The experimental device adapter now tracks
-objects and connects public build/copy/query commands; mandatory serialization
-execution and compatibility operations remain required.
+objects and connects public build/copy/query commands; GPU serialization, deserialization and compatibility are now connected. Complete
+public lifecycle and feature-interaction qualification remains required.
 
 Device build now runs two GPU phases: validate and plan records, then encode
 payload words in parallel with an intervening compute dependency. Twenty-five
@@ -139,9 +139,12 @@ compiler preparation without accepting that invalid frontend output.
 
 ## Verification and external CTS
 
-Standalone CMake build with LLVM 20.1.3 and Vulkan SDK 1.4.357.0 passes 26
-component CTests (12 offline, 14 GPU). The public loader test separately passes 54 checks with
-validation above and below the layer. Parent VEL configuration builds the new
+Standalone CMake build with LLVM 20.1.3 and Vulkan SDK 1.4.357.0 has passing
+coverage for 27 non-loader component CTests (12 offline, 15 GPU). The first bounded
+frozen attempt produced 25 Pass and two native-proof Timeouts; both passed a
+targeted retry with unchanged executables. Original failures are retained. The
+public loader test separately passes 93 checks in each layer order with both SDK
+VVL 1.4.357 and the compatible VVL 1.4.366 nightly. Parent VEL configuration builds the new
 OMM targets and passes 12 offline targets; the host-only configuration passes three without
 Vulkan dependencies. The native GPU proofs pass with `VK_LAYER_KHRONOS_validation` and
 `VK_LAYER_VALIDATE_SYNC=1`, with no validation or synchronization diagnostics.
@@ -166,13 +169,14 @@ results, not software OMM qualification. Exact cases, executable hashes, raw
 evidence location and reproduction are in
 [the CTS inventory](omm_cts_inventory_2026-10-26.md).
 
-The current RTX 3080 driver exposes native OMM with subdivision limits 12 for both
-formats. `VK_VEL_OMM_EXPERIMENTAL_SOFTWARE=1` explicitly selects the incomplete
+The RTX 3080 driver is now 621.01/API 1.4.357, replacing the prior
+596.49/API 1.4.329 runtime. It exposes native OMM; the software CTS matrix includes
+level 12 in both formats. `VK_VEL_OMM_EXPERIMENTAL_SOFTWARE=1` explicitly selects the incomplete
 development backend when the EXT extension is enabled. The mode is captured at
 instance creation. Its software API fixture checks canonical storage magic to
-confirm emulation. Newly run native-through-layer CTS retains the 8 Pass/2 Fail
-baseline. The final reviewed software matrix passes 36/36 exact cases in each
-validation-layer order: 34 compute RQ cases and two micromap size queries. In an
+confirm emulation. The earlier 596.49 native-through-layer CTS retained the 8 Pass/2 Fail
+baseline. Current 621.01 software reruns pass 36/36 exact cases in each
+validation-layer order with VVL 1.4.366: 34 compute RQ cases and two micromap size queries. In an
 earlier below-order run, 34 passed and the final two level-12 processes could not
 initialize during Windows logoff
 (`0xC000026B`, empty stdout and no QPA), and both passed in a fresh retry. Keep
@@ -183,6 +187,16 @@ and 2 Fail: both actual RTP rendering cases still return
 exercise no RTP shader. The pinned CTS `copy.compact` case actually records
 CLONE; it is not external COMPACT coverage. These results establish the tested
 compute RQ path, not complete EXT conformance.
+
+The first current CTS attempt with older SDK VVL 1.4.357 returned 36 InternalError
+results because it does not recognize the newly advertised
+VK_EXT_cooperative_matrix_maintenance1 feature structure. A native-only ordinary
+triangle CTS control reproduced that error. A pre-existing official VVL 1.4.366
+nightly was copied into this worktree for the passing reruns; the CTS source,
+cases, validation categories and driver capabilities were not filtered or changed.
+The same frozen OMM DLL is used in both failed and passing attempts.
+See the [lifecycle/serialization report](omm_lifecycle_serialization_2026-10-29.md)
+and its hash manifest for current results, runtime provenance and exact evidence.
 
 ## Open milestone gates
 
@@ -200,16 +214,20 @@ compute RQ path, not complete EXT conformance.
 
 Next, implement integer-derived AS runtime lookup and graphics RQ, then extend
 native RTP context transport to general SBT, nested/callable/indirect execution.
-Complete public micromap serialization, AS update/copy/relocation and the full
+Complete AS update/copy/serialization/relocation and the full
 synchronization/lifetime matrix. The current AS registry snapshot also needs a
-solution for BLAS objects created after a TLAS command was recorded. Query
+solution for BLAS objects created or bound after a TLAS command was recorded. Query
 execution currently requires compute and timestamps on its command queue; the
 fallback for other legal queues remains required. Keep the shared core independent
 of native BVH internals and the separate software RT backend.
 
-Review also identified AS creation before buffer binding and external-fence
-payload changes as concrete remaining lifecycle defects; the passing matrix
-does not cover them. See the current consumer report for details. Abandoned
+AS creation before ordinary buffer binding and descriptor update-before-bind are
+now covered by real native AS/GPU regressions. External-fence payload generations
+use private queue timelines when supported; fallback FD/Win32 transactions have
+528 checks, while the complete no-timeline and real Linux external-handle matrix
+remains unqualified. Sparse AS address eligibility has tracker coverage, not a
+real QueueBindSparse/GPU proof. The new codec passes 81 checks at levels 6 and 12,
+including actual equal-BDA aliases. See the lifecycle report for details. Abandoned
 record/reset-only AS bodies, consumer bind OOM transactions, derivative batch
 failure handling and GIPA software-entry availability are now fixed with
 independent regressions.

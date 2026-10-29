@@ -35,18 +35,33 @@ VkAccessFlags2 sidecar_access(VkPipelineStageFlags2 stages, VkAccessFlags2 acces
 }
 // A micromap read can originally target AS_BUILD. The translated ShaderRead
 // needs compute in its stage scope as well; keep native AS/unrelated stages.
+VkAccessFlags2 barrier_access(VkPipelineStageFlags2 stages, VkAccessFlags2 accesses, bool compute_queue) noexcept {
+    auto result = map_access2(accesses);
+    if ((stages & VK_PIPELINE_STAGE_2_MICROMAP_BUILD_BIT_EXT) ||
+        (compute_queue && (stages & VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT))) {
+        if (accesses & VK_ACCESS_2_TRANSFER_READ_BIT) result |= VK_ACCESS_2_SHADER_READ_BIT;
+        if (accesses & VK_ACCESS_2_TRANSFER_WRITE_BIT) result |= VK_ACCESS_2_SHADER_WRITE_BIT;
+    }
+    return result;
+}
 VkPipelineStageFlags2 barrier_stage(VkPipelineStageFlags2 stages, VkAccessFlags2 accesses) noexcept {
     auto result = map_stage2(stages);
     if ((accesses & micromap_access) && !(result & VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT))
         result |= VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT;
+    if ((stages & VK_PIPELINE_STAGE_2_MICROMAP_BUILD_BIT_EXT) &&
+        (accesses & (VK_ACCESS_2_TRANSFER_READ_BIT | VK_ACCESS_2_TRANSFER_WRITE_BIT)) &&
+        !(result & VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT))
+        result |= VK_PIPELINE_STAGE_2_ALL_TRANSFER_BIT;
     return result;
 }
 template <typename Barrier>
-void translate(Barrier& barrier) noexcept {
+void translate(Barrier& barrier, bool compute_queue) noexcept {
+    const auto source_access = barrier_access(barrier.srcStageMask, barrier.srcAccessMask, compute_queue);
+    const auto destination_access = barrier_access(barrier.dstStageMask, barrier.dstAccessMask, compute_queue);
     barrier.srcStageMask = barrier_stage(barrier.srcStageMask, barrier.srcAccessMask);
     barrier.dstStageMask = barrier_stage(barrier.dstStageMask, barrier.dstAccessMask);
-    barrier.srcAccessMask = map_access2(barrier.srcAccessMask);
-    barrier.dstAccessMask = map_access2(barrier.dstAccessMask);
+    barrier.srcAccessMask = source_access;
+    barrier.dstAccessMask = destination_access;
 }
 template <typename T>
 bool valid_array(uint32_t count, const T* pointer) noexcept {
@@ -86,7 +101,7 @@ VkAccessFlags map_access(VkAccessFlags accesses) noexcept {
     return result;
 }
 TranslatedDependency::TranslatedDependency() noexcept { source_.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO; }
-VkResult TranslatedDependency::assign(const VkDependencyInfo& source) noexcept {
+VkResult TranslatedDependency::assign(const VkDependencyInfo& source, bool compute_queue) noexcept {
     if (!valid_array(source.memoryBarrierCount, source.pMemoryBarriers) ||
         !valid_array(source.bufferMemoryBarrierCount, source.pBufferMemoryBarriers) ||
         !valid_array(source.imageMemoryBarrierCount, source.pImageMemoryBarriers))
@@ -103,9 +118,9 @@ VkResult TranslatedDependency::assign(const VkDependencyInfo& source) noexcept {
         copy_array(next.memory_, source.memoryBarrierCount, source.pMemoryBarriers);
         copy_array(next.buffers_, source.bufferMemoryBarrierCount, source.pBufferMemoryBarriers);
         copy_array(next.images_, source.imageMemoryBarrierCount, source.pImageMemoryBarriers);
-        for (auto& barrier : next.memory_) translate(barrier);
-        for (auto& barrier : next.buffers_) translate(barrier);
-        for (auto& barrier : next.images_) translate(barrier);
+        for (auto& barrier : next.memory_) translate(barrier, compute_queue);
+        for (auto& barrier : next.buffers_) translate(barrier, compute_queue);
+        for (auto& barrier : next.images_) translate(barrier, compute_queue);
         // Keep source/destination scopes paired per barrier. Merging masks from
         // separate barriers could invent dependencies that the app did not ask
         // for, particularly across event release/acquire NONE scopes.
@@ -149,7 +164,7 @@ VkDependencyInfo TranslatedDependency::view() const noexcept {
 VkResult TranslatedLegacyBarriers::assign(VkPipelineStageFlags source_stages, VkPipelineStageFlags destination_stages,
                                           VkDependencyFlags flags, uint32_t memory_count, const VkMemoryBarrier* memory,
                                           uint32_t buffer_count, const VkBufferMemoryBarrier* buffers, uint32_t image_count,
-                                          const VkImageMemoryBarrier* images) noexcept {
+                                          const VkImageMemoryBarrier* images, bool compute_queue) noexcept {
     if (!valid_array(memory_count, memory) || !valid_array(buffer_count, buffers) || !valid_array(image_count, images))
         return VK_ERROR_INITIALIZATION_FAILED;
     try {
@@ -165,17 +180,22 @@ VkResult TranslatedLegacyBarriers::assign(VkPipelineStageFlags source_stages, Vk
         copy_array(next.memory_, memory_count, memory);
         copy_array(next.buffers_, buffer_count, buffers);
         copy_array(next.images_, image_count, images);
+        const auto translate_legacy = [&](auto& barrier) {
+            const auto source_access = barrier.srcAccessMask, destination_access = barrier.dstAccessMask;
+            next.source_stages_ |= static_cast<VkPipelineStageFlags>(barrier_stage(source_stages, source_access));
+            next.destination_stages_ |= static_cast<VkPipelineStageFlags>(barrier_stage(destination_stages, destination_access));
+            barrier.srcAccessMask = static_cast<VkAccessFlags>(barrier_access(source_stages, source_access, compute_queue));
+            barrier.dstAccessMask =
+                static_cast<VkAccessFlags>(barrier_access(destination_stages, destination_access, compute_queue));
+        };
         for (auto& barrier : next.memory_) {
-            barrier.srcAccessMask = map_access(barrier.srcAccessMask);
-            barrier.dstAccessMask = map_access(barrier.dstAccessMask);
+            translate_legacy(barrier);
         }
         for (auto& barrier : next.buffers_) {
-            barrier.srcAccessMask = map_access(barrier.srcAccessMask);
-            barrier.dstAccessMask = map_access(barrier.dstAccessMask);
+            translate_legacy(barrier);
         }
         for (auto& barrier : next.images_) {
-            barrier.srcAccessMask = map_access(barrier.srcAccessMask);
-            barrier.dstAccessMask = map_access(barrier.dstAccessMask);
+            translate_legacy(barrier);
         }
         for (uint32_t i = 0; i < buffer_count; ++i) {
             if (!((buffers[i].srcAccessMask | buffers[i].dstAccessMask) & static_cast<VkAccessFlags>(as_access))) continue;
