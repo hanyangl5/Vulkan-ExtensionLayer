@@ -1056,7 +1056,81 @@ static void native_query_scopes(void) {
     pthread_mutex_destroy(&state.lock);
 #endif
 }
+struct query_allocation_context {
+    unsigned allocations, frees, native_destroys;
+};
+static void *VKAPI_CALL query_allocate(void *user, size_t size, size_t alignment, VkSystemAllocationScope scope) {
+    struct query_allocation_context *context = user;
+    CHECK(scope == VK_SYSTEM_ALLOCATION_SCOPE_OBJECT && alignment <= _Alignof(max_align_t));
+    void *allocation = malloc(size);
+    if (allocation) ++context->allocations;
+    return allocation;
+}
+static void *VKAPI_CALL query_reallocate(void *user, void *allocation, size_t size, size_t alignment,
+                                        VkSystemAllocationScope scope) {
+    (void)user;
+    CHECK(scope == VK_SYSTEM_ALLOCATION_SCOPE_OBJECT && alignment <= _Alignof(max_align_t));
+    return realloc(allocation, size);
+}
+static void VKAPI_CALL query_free(void *user, void *allocation) {
+    struct query_allocation_context *context = user;
+    if (allocation) ++context->frees;
+    free(allocation);
+}
+static VKAPI_ATTR VkResult VKAPI_CALL allocation_create_query(VkDevice device, const VkQueryPoolCreateInfo *info,
+                                                               const VkAllocationCallbacks *allocator, VkQueryPool *pool) {
+    CHECK(device == HANDLE(VkDevice, 0x8123) && info->queryType == VK_QUERY_TYPE_OCCLUSION && allocator);
+    *pool = HANDLE(VkQueryPool, 0x8345);
+    return VK_SUCCESS;
+}
+static VKAPI_ATTR void VKAPI_CALL allocation_destroy_query(VkDevice device, VkQueryPool pool,
+                                                            const VkAllocationCallbacks *allocator) {
+    CHECK(device == HANDLE(VkDevice, 0x8123) && pool == HANDLE(VkQueryPool, 0x8345) && allocator);
+    ++((struct query_allocation_context *)allocator->pUserData)->native_destroys;
+}
+static void query_destroy_callbacks(bool virtual_pool, bool distinct_destroy) {
+    struct query_allocation_context creation = {0}, destruction = {0};
+    VkAllocationCallbacks allocator = {&creation, query_allocate, query_reallocate, query_free, NULL, NULL};
+    VkAllocationCallbacks current = allocator;
+    if (distinct_destroy) current.pUserData = &destruction;
+    struct vkrt_query_device state = {.format = HANDLE(VkPipeline, 0x8234)};
+    vkrt_mutex_init(&state.lock);
+    struct vkrt_device_data dev = {.device = HANDLE(VkDevice, 0x8123), .queries = &state};
+    dev.vtable.CreateQueryPool = allocation_create_query;
+    dev.vtable.DestroyQueryPool = allocation_destroy_query;
+    CHECK(vkrt_map_object(VKRT_HKEY(dev.device), &dev));
+    memset(&event_fixture, 0, sizeof(event_fixture));
+    event_fixture.dev = &dev;
+    marker_storage_active = true;
+    VkQueryPoolCreateInfo info = {.sType = VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO,
+                                  .queryType = virtual_pool ? VK_QUERY_TYPE_ACCELERATION_STRUCTURE_COMPACTED_SIZE_KHR
+                                                            : VK_QUERY_TYPE_OCCLUSION,
+                                  .queryCount = 1};
+    VkQueryPool pool = VK_NULL_HANDLE;
+    PFN_vkCreateQueryPool create = (PFN_vkCreateQueryPool)vkrt_query_pool_proc("vkCreateQueryPool");
+    PFN_vkDestroyQueryPool destroy = (PFN_vkDestroyQueryPool)vkrt_query_pool_proc("vkDestroyQueryPool");
+    VkResult result = create(dev.device, &info, &allocator, &pool);
+    CHECK(result == VK_SUCCESS && pool);
+    if (result == VK_SUCCESS) destroy(dev.device, pool, &current);
+    unsigned frees = virtual_pool ? 2 : 1;
+    CHECK(creation.allocations == frees && !destruction.allocations);
+    CHECK(creation.frees == (distinct_destroy ? 0 : frees) && destruction.frees == (distinct_destroy ? frees : 0));
+    CHECK(creation.native_destroys == (!virtual_pool && !distinct_destroy) &&
+          destruction.native_destroys == (!virtual_pool && distinct_destroy));
+    CHECK(!state.pools && !state.native_pools);
+    if (virtual_pool) CHECK(event_fixture.allocated == 1 && event_fixture.released_count == 1);
+    marker_storage_active = false;
+    vkrt_unmap_object(VKRT_HKEY(dev.device));
+#ifndef _WIN32
+    pthread_mutex_destroy(&state.lock);
+#endif
+}
 int main(void) {
+    /* Compatible allocators may change pUserData between API calls. Both
+     * native metadata and virtual AS slots belong to the current destructor. */
+    for (unsigned virtual_pool = 0; virtual_pool < 2; ++virtual_pool)
+        for (unsigned distinct_destroy = 0; distinct_destroy < 2; ++distinct_destroy)
+            query_destroy_callbacks(virtual_pool != 0, distinct_destroy != 0);
     native_query_scopes();
     event_backend_admission();
     event_occurrences();

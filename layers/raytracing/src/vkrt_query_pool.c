@@ -417,9 +417,9 @@ static void publish_operation(struct vkrt_cmd_buffer_data *cb, struct query_oper
     vkrt_replay_push_constants(cb);
 }
 
-static void free_native_pool(struct native_query_pool *pool) {
-    if (pool->has_allocator)
-        pool->allocator.pfnFree(pool->allocator.pUserData, pool);
+static void free_native_pool(struct native_query_pool *pool, const VkAllocationCallbacks *allocator) {
+    if (allocator)
+        allocator->pfnFree(allocator->pUserData, pool);
     else
         free(pool);
 }
@@ -439,7 +439,7 @@ static VkResult create_native_pool(struct vkrt_device_data *dev, const VkQueryPo
     }
     VkResult result = dev->vtable.CreateQueryPool(dev->device, info, allocator, &pool->handle);
     if (result != VK_SUCCESS) {
-        free_native_pool(pool);
+        free_native_pool(pool, allocator);
         return result;
     }
     vkrt_mutex_lock(&dev->queries->lock);
@@ -525,7 +525,7 @@ static VKAPI_ATTR void VKAPI_CALL DestroyQueryPool(VkDevice device, VkQueryPool 
             }
             /* Forget before native destruction permits a concurrent Create
              * to publish a new generation with the same numeric handle. */
-            if (native) free_native_pool(native);
+            if (native) free_native_pool(native, allocator);
             dev->vtable.DestroyQueryPool(device, handle, allocator);
         }
         return;
@@ -541,13 +541,12 @@ static VKAPI_ATTR void VKAPI_CALL DestroyQueryPool(VkDevice device, VkQueryPool 
     vkrt_mutex_unlock(&dev->queries->lock);
     vkrt_debug_object_forget(dev, VK_OBJECT_TYPE_QUERY_POOL, (uint64_t)(uintptr_t)pool);
     destroy_buffer(dev, &pool->storage);
-    if (pool->has_allocator)
-        pool->allocator.pfnFree(pool->allocator.pUserData, pool->slots);
+    if (allocator)
+        allocator->pfnFree(allocator->pUserData, pool->slots);
     else
         free(pool->slots);
-    VkAllocationCallbacks callbacks = pool->allocator;
-    if (pool->has_allocator)
-        callbacks.pfnFree(callbacks.pUserData, pool);
+    if (allocator)
+        allocator->pfnFree(allocator->pUserData, pool);
     else
         free(pool);
 }
@@ -875,7 +874,7 @@ void vkrt_query_device_finish(struct vkrt_device_data *dev) {
     while (q->pools) DestroyQueryPool(dev->device, (VkQueryPool)(uintptr_t)q->pools, pool_allocator(q->pools));
     while (q->native_pools) {
         struct native_query_pool *next = q->native_pools->next;
-        free_native_pool(q->native_pools);
+        free_native_pool(q->native_pools, q->native_pools->has_allocator ? &q->native_pools->allocator : NULL);
         q->native_pools = next;
     }
     while (q->queues) {
