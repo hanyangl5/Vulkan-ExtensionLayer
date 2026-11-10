@@ -80,6 +80,10 @@ struct NativeInfo {
 struct Job {
     NativeInfo native;
     std::shared_ptr<Object> object;
+    // An out-of-place UPDATE reads this native AS until the submission ends.
+    // Its metadata is not shared: the complete update description produces a
+    // fresh body, so replaying or destroying the source cannot mutate the copy.
+    std::shared_ptr<Object> source;
     std::shared_ptr<Body> body;
     BufferRef sources, status, instances, registry;
     MetadataBuildPush metadata{};
@@ -89,7 +93,9 @@ VkResult copy_info(const VkAccelerationStructureBuildGeometryInfoKHR* input, Nat
     if (!input || input->sType != VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_GEOMETRY_INFO_KHR ||
         (input->geometryCount && !input->pGeometries && !input->ppGeometries) || (input->pGeometries && input->ppGeometries))
         return VK_ERROR_VALIDATION_FAILED_EXT;
-    if (input->mode != VK_BUILD_ACCELERATION_STRUCTURE_MODE_BUILD_KHR || input->pNext ||
+    if ((input->mode != VK_BUILD_ACCELERATION_STRUCTURE_MODE_BUILD_KHR &&
+         input->mode != VK_BUILD_ACCELERATION_STRUCTURE_MODE_UPDATE_KHR) ||
+        input->pNext ||
         (input->type != VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR &&
          input->type != VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR))
         return VK_ERROR_FEATURE_NOT_PRESENT;
@@ -574,6 +580,13 @@ VkResult acceleration_cmd_build(AccelerationBackend* b, VkCommandBuffer cb, uint
             job.object = found->second;
             result = resolve_native(b, *job.object);
             if (result != VK_SUCCESS) return result;
+            if (infos[i].mode == VK_BUILD_ACCELERATION_STRUCTURE_MODE_UPDATE_KHR) {
+                const auto source = b->objects.find(infos[i].srcAccelerationStructure);
+                if (source == b->objects.end() || source->second->type != infos[i].type) return VK_ERROR_VALIDATION_FAILED_EXT;
+                job.source = source->second;
+                result = resolve_native(b, *job.source);
+                if (result != VK_SUCCESS) return result;
+            }
             job.body = std::make_shared<Body>();
             if (infos[i].geometryCount) job.native.ranges.assign(ranges[i], ranges[i] + infos[i].geometryCount);
             result = buffer(b, 16, false, 0, &job.status);

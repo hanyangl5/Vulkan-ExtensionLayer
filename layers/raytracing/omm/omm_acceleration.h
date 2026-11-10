@@ -50,7 +50,9 @@ VkResult acceleration_identity(AccelerationBackend*, VkAccelerationStructureKHR,
                                VkDeviceAddress* root_address, std::shared_ptr<void>* lifetime = nullptr);
 VkResult acceleration_root_from_address(AccelerationBackend*, VkDeviceAddress native_address, VkDeviceAddress* root_address,
                                         std::shared_ptr<void>* lifetime = nullptr);
-// Only DEVICE/BUILD is currently implemented. Unsupported operations fail closed.
+// DEVICE BUILD and UPDATE preserve the native operation and scratch sizes.
+// UPDATE supplies a complete geometry/OMM description as required by Vulkan;
+// omitting an association never means inheriting the source's old association.
 // pGeometries and ppGeometries are copied; original application inputs are untouched.
 VkResult acceleration_get_build_sizes(AccelerationBackend*, VkAccelerationStructureBuildTypeKHR,
                                       const VkAccelerationStructureBuildGeometryInfoKHR*, const uint32_t*,
@@ -75,5 +77,7 @@ void acceleration_collect_idle(AccelerationBackend*);
 void acceleration_collect_completed(AccelerationBackend*, const AccelerationRecordingRef&);
 // Allocation-free identity comparison for submission retirement. A recording
 // conservatively touches every destination AS whose root it can publish.
+// UPDATE source retention is a native read lifetime, not a metadata writer:
+// independent target bodies never dereference the source's private RootCell.
 bool acceleration_recordings_overlap(const AccelerationRecordingRef&, const AccelerationRecordingRef&) noexcept;
 }  // namespace vel::omm

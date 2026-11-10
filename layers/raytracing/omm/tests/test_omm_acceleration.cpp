@@ -9,7 +9,7 @@
 #include <unordered_map>
 using namespace vel::omm;
 namespace {
-unsigned assertions = 0, native_builds = 0, sanitized_queries = 0;
+unsigned assertions = 0, native_builds = 0, native_updates = 0, sanitized_queries = 0;
 unsigned live_private_buffers = 0;
 unsigned live_private_memory = 0;
 uint32_t physical_family_count = 0;
@@ -26,6 +26,7 @@ DeviceBackend* tracked_buffers{};
 unsigned address_queries = 0;
 bool fail_private_buffer = false;
 VkDeviceAddress original_instances{};
+const VkAccelerationStructureBuildGeometryInfoKHR* expected_update{};
 void require(bool value, const char* reason) {
     ++assertions;
     if (!value) {
@@ -50,6 +51,15 @@ VKAPI_ATTR void VKAPI_CALL spy_build(VkCommandBuffer cb, uint32_t count, const V
                                      const VkAccelerationStructureBuildRangeInfoKHR* const* ranges) {
     for (uint32_t i = 0; i < count; ++i) {
         require((infos[i].flags & 0x1c0) == 0, "native AS build strips all OMM flags");
+        if (expected_update) {
+            require(infos[i].mode == VK_BUILD_ACCELERATION_STRUCTURE_MODE_UPDATE_KHR &&
+                        infos[i].srcAccelerationStructure == expected_update->srcAccelerationStructure &&
+                        infos[i].dstAccelerationStructure == expected_update->dstAccelerationStructure &&
+                        infos[i].scratchData.deviceAddress == expected_update->scratchData.deviceAddress &&
+                        infos[i].flags == (expected_update->flags & ~VkBuildAccelerationStructureFlagsKHR(0x1c0)),
+                    "native UPDATE preserves mode, source, destination, scratch and every ordinary build flag");
+        }
+        if (infos[i].mode == VK_BUILD_ACCELERATION_STRUCTURE_MODE_UPDATE_KHR) ++native_updates;
         for (uint32_t g = 0; g < infos[i].geometryCount; ++g) {
             const auto& geometry = infos[i].pGeometries[g];
             if (geometry.geometryType == VK_GEOMETRY_TYPE_TRIANGLES_KHR)
@@ -424,6 +434,335 @@ void unbound_descriptor_query(Fixture& f, DeviceBackend* mm, AccelerationBackend
         vkDestroyDescriptorSetLayout(f.device, set_layout, nullptr);
     }
 }
+Acceleration updatable_as(Fixture& f, DeviceBackend* mm, AccelerationBackend* as, VkAccelerationStructureTypeKHR type,
+                          const VkAccelerationStructureGeometryKHR& geometry, VkBuildAccelerationStructureFlagsKHR flags) {
+    Acceleration value{};
+    value.build =
+        init<VkAccelerationStructureBuildGeometryInfoKHR>(VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_GEOMETRY_INFO_KHR);
+    value.build.type = type;
+    value.build.mode = VK_BUILD_ACCELERATION_STRUCTURE_MODE_BUILD_KHR;
+    value.build.flags = flags;
+    value.build.geometryCount = 1;
+    value.build.pGeometries = &geometry;
+    value.range.primitiveCount = 1;
+    const uint32_t maximum = 1;
+    auto sizes = init<VkAccelerationStructureBuildSizesInfoKHR>(VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_SIZES_INFO_KHR);
+    CHECK(acceleration_get_build_sizes(as, VK_ACCELERATION_STRUCTURE_BUILD_TYPE_DEVICE_KHR, &value.build, &maximum, &sizes));
+    // Query UPDATE as well. Both scratch fields must remain the actual native
+    // answers; neither a BUILD conversion nor software body size may replace it.
+    auto update = value.build;
+    update.mode = VK_BUILD_ACCELERATION_STRUCTURE_MODE_UPDATE_KHR;
+    auto update_sizes = sizes;
+    CHECK(acceleration_get_build_sizes(as, VK_ACCELERATION_STRUCTURE_BUILD_TYPE_DEVICE_KHR, &update, &maximum, &update_sizes));
+    auto native_info = update;
+    native_info.flags &= ~VkBuildAccelerationStructureFlagsKHR(0x1c0);
+    auto native_geometry = geometry;
+    if (native_geometry.geometryType == VK_GEOMETRY_TYPE_TRIANGLES_KHR) native_geometry.geometry.triangles.pNext = nullptr;
+    native_info.pGeometries = &native_geometry;
+    auto native_result = sizes;
+    native_sizes(f.device, VK_ACCELERATION_STRUCTURE_BUILD_TYPE_DEVICE_KHR, &native_info, &maximum, &native_result);
+    require(update_sizes.accelerationStructureSize == native_result.accelerationStructureSize &&
+                update_sizes.buildScratchSize == native_result.buildScratchSize &&
+                update_sizes.updateScratchSize == native_result.updateScratchSize && update_sizes.updateScratchSize != 0,
+            "UPDATE size query preserves both native scratch sizes and acceleration structure size");
+    const auto storage =
+        f.buffer(std::max(sizes.accelerationStructureSize, update_sizes.accelerationStructureSize),
+                 VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, false);
+    auto create = init<VkAccelerationStructureCreateInfoKHR>(VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_CREATE_INFO_KHR);
+    create.type = type;
+    create.buffer = storage.handle;
+    create.size = std::max(sizes.accelerationStructureSize, update_sizes.accelerationStructureSize);
+    CHECK(f.createAS(f.device, &create, nullptr, &value.handle));
+    f.structures.push_back(value.handle);
+    auto address =
+        init<VkAccelerationStructureDeviceAddressInfoKHR>(VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_DEVICE_ADDRESS_INFO_KHR);
+    address.accelerationStructure = value.handle;
+    value.address = f.addressAS(f.device, &address);
+    const auto scratch = f.buffer(std::max(sizes.buildScratchSize, update_sizes.updateScratchSize) + f.scratchAlignment - 1,
+                                  VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, false);
+    value.build.dstAccelerationStructure = value.handle;
+    value.build.scratchData.deviceAddress = (scratch.address + f.scratchAlignment - 1) & ~(f.scratchAlignment - 1);
+    track_as(mm, as, value, type);
+    return value;
+}
+void destroy_native_as(Fixture& f, DeviceBackend* mm, AccelerationBackend* as, const Acceleration& value) {
+    const auto storage = creations.at(value.handle).buffer;
+    acceleration_untrack(as, value.handle);
+    f.destroyAS(f.device, value.handle, nullptr);
+    f.structures.erase(std::remove(f.structures.begin(), f.structures.end(), value.handle), f.structures.end());
+    const auto backing = std::find_if(f.buffers.begin(), f.buffers.end(), [&](const Buffer& v) { return v.handle == storage; });
+    require(backing != f.buffers.end(), "native UPDATE source backing is owned by fixture");
+    release(f, mm, *backing);
+}
+struct UpdateMicromap {
+    VkMicromapEXT handle{};
+    Buffer triangles{}, data{}, storage{}, scratch{};
+};
+UpdateMicromap update_micromap(Fixture& f, DeviceBackend* mm, VkCommandBuffer cb, uint32_t level, uint32_t packed) {
+    UpdateMicromap result;
+    const VkBufferUsageFlags usage =
+        VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+    result.triangles = f.buffer(8, usage, false);
+    result.data = f.buffer(4, usage, false);
+    result.scratch = f.buffer(512, usage, false);
+    track(mm, result.triangles, 8, usage);
+    track(mm, result.data, 4, usage);
+    track(mm, result.scratch, 512, usage);
+    const uint32_t triangle[] = {0, 0x00020000u | level};
+    vkCmdUpdateBuffer(cb, result.triangles.handle, 0, 8, triangle);
+    vkCmdUpdateBuffer(cb, result.data.handle, 0, 4, &packed);
+    auto info = init<VkMicromapBuildInfoEXT>(VK_STRUCTURE_TYPE_MICROMAP_BUILD_INFO_EXT);
+    info.type = VK_MICROMAP_TYPE_OPACITY_MICROMAP_EXT;
+    info.mode = VK_BUILD_MICROMAP_MODE_BUILD_EXT;
+    VkMicromapUsageEXT usage_count{1, level, VK_OPACITY_MICROMAP_FORMAT_4_STATE_EXT};
+    info.usageCountsCount = 1;
+    info.pUsageCounts = &usage_count;
+    auto sizes = init<VkMicromapBuildSizesInfoEXT>(VK_STRUCTURE_TYPE_MICROMAP_BUILD_SIZES_INFO_EXT);
+    CHECK(device_get_build_sizes(mm, VK_ACCELERATION_STRUCTURE_BUILD_TYPE_DEVICE_KHR, &info, &sizes));
+    result.storage = f.buffer(sizes.micromapSize, usage, false);
+    track(mm, result.storage, sizes.micromapSize, usage | VK_BUFFER_USAGE_MICROMAP_STORAGE_BIT_EXT);
+    auto create = init<VkMicromapCreateInfoEXT>(VK_STRUCTURE_TYPE_MICROMAP_CREATE_INFO_EXT);
+    create.type = VK_MICROMAP_TYPE_OPACITY_MICROMAP_EXT;
+    create.buffer = result.storage.handle;
+    create.size = sizes.micromapSize;
+    CHECK(device_create_micromap(mm, &create, nullptr, &result.handle));
+    info.dstMicromap = result.handle;
+    info.data.deviceAddress = result.data.address;
+    info.triangleArray.deviceAddress = result.triangles.address;
+    info.triangleArrayStride = 8;
+    info.scratchData.deviceAddress = (result.scratch.address + 255) & ~uint64_t(255);
+    Fixture::barrier(cb, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_ACCESS_TRANSFER_WRITE_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                     VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT);
+    CHECK(device_cmd_build(mm, cb, 1, &info));
+    return result;
+}
+void release_micromap(Fixture& f, DeviceBackend* mm, const UpdateMicromap& value) {
+    if (!value.handle) return;
+    device_destroy_micromap(mm, value.handle, nullptr);
+    for (const auto& buffer : {value.triangles, value.data, value.storage, value.scratch}) release(f, mm, buffer);
+}
+void update_probe(Fixture& f, AccelerationBackend* as, VkPipeline pipeline, VkPipelineLayout layout, const Buffer& output,
+                  const Acceleration& tlas, bool hit, uint32_t custom, uint32_t flags, const char* reason) {
+    VkDeviceAddress native{}, root{};
+    CHECK(acceleration_identity(as, tlas.handle, &native, &root));
+    const uint64_t push[] = {native, root, output.address};
+    const auto cb = f.begin();
+    vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_COMPUTE, pipeline);
+    vkCmdPushConstants(cb, layout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(push), push);
+    vkCmdDispatch(cb, 1, 1, 1);
+    Fixture::barrier(cb, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_ACCESS_SHADER_WRITE_BIT, VK_PIPELINE_STAGE_HOST_BIT,
+                     VK_ACCESS_HOST_READ_BIT);
+    f.submit(cb);
+    const auto* result = static_cast<const uint32_t*>(output.mapped);
+    require(result[0] == uint32_t(hit) && result[1] == 0 && result[2] == uint32_t(hit) && result[3] == 1 && result[4] == custom &&
+                result[5] == flags && result[6] == 1 && result[7] == 1,
+            reason);
+}
+AccelerationRecordingRef record_update(AccelerationBackend* as, VkCommandBuffer cb,
+                                       const VkAccelerationStructureBuildGeometryInfoKHR& info,
+                                       const VkAccelerationStructureBuildRangeInfoKHR& range) {
+    AccelerationRecordingRef result;
+    const auto* ranges = &range;
+    expected_update = &info;
+    CHECK(acceleration_cmd_build(as, cb, 1, &info, &ranges, &result));
+    expected_update = nullptr;
+    return result;
+}
+void native_update_tests(Fixture& f, DeviceBackend* mm, AccelerationBackend* as, SubmissionTracker* submissions,
+                         VkPipeline pipeline, VkPipelineLayout layout, const Buffer& output) {
+    const VkBufferUsageFlags input_usage = VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR |
+                                           VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+    // Complete UPDATE descriptions cover all three association states, including
+    // unchanged MM association without either OMM update permission flag.
+    for (unsigned variant = 0; variant < 5; ++variant) {
+        const bool associated = variant != 0, special_only = variant == 4, retained_mm = variant == 1;
+        auto source_vertices = f.buffer(36, input_usage, true), update_vertices = f.buffer(36, input_usage, true);
+        const float triangle[] = {0, 0, 0, 1, 0, 0, 0, 1, 0};
+        const float moved_triangle[] = {0, 0, 0.5f, 1, 0, 0.5f, 0, 1, 0.5f};
+        std::memcpy(source_vertices.mapped, triangle, sizeof(triangle));
+        std::memcpy(update_vertices.mapped, moved_triangle, sizeof(moved_triangle));
+        auto source_geometry = init<VkAccelerationStructureGeometryKHR>(VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR);
+        source_geometry.geometryType = VK_GEOMETRY_TYPE_TRIANGLES_KHR;
+        source_geometry.flags = VK_GEOMETRY_OPAQUE_BIT_KHR;
+        source_geometry.geometry.triangles = init<VkAccelerationStructureGeometryTrianglesDataKHR>(
+            VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_TRIANGLES_DATA_KHR);
+        source_geometry.geometry.triangles.vertexFormat = VK_FORMAT_R32G32B32_SFLOAT;
+        source_geometry.geometry.triangles.vertexData.deviceAddress = source_vertices.address;
+        source_geometry.geometry.triangles.vertexStride = 12;
+        source_geometry.geometry.triangles.maxVertex = 2;
+        source_geometry.geometry.triangles.indexType = VK_INDEX_TYPE_NONE_KHR;
+        auto initial = f.begin();
+        UpdateMicromap original_mm{}, replacement_mm{};
+        if (associated && !special_only) {
+            original_mm = update_micromap(f, mm, initial, 0, retained_mm ? 1 : 0);
+            if (!retained_mm) replacement_mm = update_micromap(f, mm, initial, variant == 2 ? 1 : 0, variant == 2 ? 0x55 : 1);
+        }
+        Buffer original_indices{}, replacement_indices{};
+        auto original_association = init<VkAccelerationStructureTrianglesOpacityMicromapEXT>(
+            VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_TRIANGLES_OPACITY_MICROMAP_EXT);
+        auto replacement_association = original_association;
+        if (associated) {
+            original_indices = f.buffer(4, input_usage, true);
+            replacement_indices = f.buffer(4, input_usage, true);
+            track(mm, original_indices, 4, input_usage);
+            track(mm, replacement_indices, 4, input_usage);
+            *static_cast<uint32_t*>(original_indices.mapped) =
+                special_only ? uint32_t(VK_OPACITY_MICROMAP_SPECIAL_INDEX_FULLY_TRANSPARENT_EXT) : 0;
+            *static_cast<uint32_t*>(replacement_indices.mapped) =
+                special_only ? uint32_t(VK_OPACITY_MICROMAP_SPECIAL_INDEX_FULLY_OPAQUE_EXT) : 0;
+            original_association.indexType = replacement_association.indexType = VK_INDEX_TYPE_UINT32;
+            original_association.indexBuffer.deviceAddress = original_indices.address;
+            replacement_association.indexBuffer.deviceAddress = replacement_indices.address;
+            original_association.micromap = original_mm.handle;
+            replacement_association.micromap = retained_mm ? original_mm.handle : replacement_mm.handle;
+            source_geometry.geometry.triangles.pNext = &original_association;
+        }
+        auto replacement_geometry = source_geometry;
+        replacement_geometry.geometry.triangles.vertexData.deviceAddress = update_vertices.address;
+        replacement_geometry.geometry.triangles.pNext = associated ? &replacement_association : nullptr;
+        VkBuildAccelerationStructureFlagsKHR flags = VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_UPDATE_BIT_KHR;
+        if (variant == 2 || special_only) flags |= VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_OPACITY_MICROMAP_UPDATE_BIT_EXT;
+        if (variant == 3) flags |= VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_OPACITY_MICROMAP_DATA_UPDATE_BIT_EXT;
+        auto source_blas = updatable_as(f, mm, as, VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR, source_geometry, flags);
+        auto target_blas = updatable_as(f, mm, as, VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR, source_geometry, flags);
+        auto source_instances = f.buffer(64, input_usage, true), changed_instances = f.buffer(64, input_usage, true),
+             target_instances = f.buffer(64, input_usage, true);
+        for (const auto& buffer : {source_instances, changed_instances, target_instances}) track(mm, buffer, 64, input_usage);
+        VkAccelerationStructureInstanceKHR instance{};
+        for (unsigned axis = 0; axis < 3; ++axis) instance.transform.matrix[axis][axis] = 1;
+        instance.mask = 255;
+        instance.instanceCustomIndex = 77;
+        instance.accelerationStructureReference = source_blas.address;
+        std::memcpy(source_instances.mapped, &instance, sizeof(instance));
+        const uint32_t update_flags = associated ? 0x20u : VK_GEOMETRY_INSTANCE_TRIANGLE_FACING_CULL_DISABLE_BIT_KHR;
+        instance.flags = VkGeometryInstanceFlagsKHR(update_flags);
+        instance.instanceCustomIndex = 81;
+        std::memcpy(changed_instances.mapped, &instance, sizeof(instance));
+        instance.instanceCustomIndex = 83;
+        instance.accelerationStructureReference = target_blas.address;
+        std::memcpy(target_instances.mapped, &instance, sizeof(instance));
+        auto instance_geometry = init<VkAccelerationStructureGeometryKHR>(VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR);
+        instance_geometry.geometryType = VK_GEOMETRY_TYPE_INSTANCES_KHR;
+        instance_geometry.geometry.instances = init<VkAccelerationStructureGeometryInstancesDataKHR>(
+            VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_INSTANCES_DATA_KHR);
+        instance_geometry.geometry.instances.data.deviceAddress = source_instances.address;
+        auto source_tlas = updatable_as(f, mm, as, VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR, instance_geometry,
+                                        VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_UPDATE_BIT_KHR);
+        auto target_tlas = updatable_as(f, mm, as, VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR, instance_geometry,
+                                        VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_UPDATE_BIT_KHR);
+        const auto* range = &source_blas.range;
+        AccelerationRecordingRef initial_blas, initial_tlas;
+        CHECK(acceleration_cmd_build(as, initial, 1, &source_blas.build, &range, &initial_blas));
+        range = &source_tlas.range;
+        CHECK(acceleration_cmd_build(as, initial, 1, &source_tlas.build, &range, &initial_tlas));
+        CHECK(vkEndCommandBuffer(initial));
+        submit_finished(f, submissions, initial, {initial_blas, initial_tlas});
+        update_probe(f, as, pipeline, layout, output, source_tlas, !associated || retained_mm, 77, 0,
+                     "initial native source and canonical association match before UPDATE");
+        VkDeviceAddress ignored{}, source_root{}, target_root{};
+        CHECK(acceleration_identity(as, source_blas.handle, &ignored, &source_root));
+        CHECK(acceleration_identity(as, target_blas.handle, &ignored, &target_root));
+        require(source_root != target_root, "out-of-place UPDATE target owns a distinct stable root");
+
+        auto update_blas = target_blas.build;
+        update_blas.mode = VK_BUILD_ACCELERATION_STRUCTURE_MODE_UPDATE_KHR;
+        update_blas.srcAccelerationStructure = source_blas.handle;
+        const VkAccelerationStructureGeometryKHR* geometry_pointer = &replacement_geometry;
+        update_blas.pGeometries = nullptr;
+        update_blas.ppGeometries = &geometry_pointer;
+        auto target_geometry = instance_geometry;
+        target_geometry.geometry.instances.data.deviceAddress = target_instances.address;
+        auto update_tlas = target_tlas.build;
+        update_tlas.mode = VK_BUILD_ACCELERATION_STRUCTURE_MODE_UPDATE_KHR;
+        update_tlas.srcAccelerationStructure = source_tlas.handle;
+        update_tlas.pGeometries = &target_geometry;
+        // Record this read of the native source before the in-place UPDATE is
+        // even recorded. No host last-body guess is allowed at execution time.
+        const auto destination_cb = f.begin();
+        const auto baseline_buffers = live_private_buffers, baseline_memory = live_private_memory, builds_before = native_builds;
+        AccelerationRecordingRef rejected = initial_blas;
+        auto invalid = update_blas;
+        invalid.srcAccelerationStructure = VK_NULL_HANDLE;
+        range = &target_blas.range;
+        require(acceleration_cmd_build(as, destination_cb, 1, &invalid, &range, &rejected) == VK_ERROR_VALIDATION_FAILED_EXT &&
+                    rejected == initial_blas && native_builds == builds_before,
+                "UPDATE rejects missing source atomically before native commands");
+        invalid.srcAccelerationStructure = source_tlas.handle;
+        require(acceleration_cmd_build(as, destination_cb, 1, &invalid, &range, &rejected) == VK_ERROR_VALIDATION_FAILED_EXT &&
+                    native_builds == builds_before,
+                "UPDATE rejects a source of the wrong AS type before native commands");
+        fail_private_buffer = true;
+        const auto allocation_failed = acceleration_cmd_build(as, destination_cb, 1, &update_blas, &range, &rejected);
+        fail_private_buffer = false;
+        require(allocation_failed == VK_ERROR_OUT_OF_DEVICE_MEMORY && rejected == initial_blas && native_builds == builds_before &&
+                    live_private_buffers == baseline_buffers && live_private_memory == baseline_memory,
+                "UPDATE allocation failure preserves result token, private allocation counts and native command prefix");
+        rejected.reset();
+        auto destination_blas = record_update(as, destination_cb, update_blas, target_blas.range);
+        auto destination_tlas = record_update(as, destination_cb, update_tlas, target_tlas.range);
+        CHECK(vkEndCommandBuffer(destination_cb));
+        auto in_place_blas = update_blas;
+        in_place_blas.dstAccelerationStructure = source_blas.handle;
+        in_place_blas.scratchData = source_blas.build.scratchData;
+        auto changed_geometry = instance_geometry;
+        changed_geometry.geometry.instances.data.deviceAddress = changed_instances.address;
+        auto in_place_tlas = update_tlas;
+        in_place_tlas.dstAccelerationStructure = source_tlas.handle;
+        in_place_tlas.scratchData = source_tlas.build.scratchData;
+        in_place_tlas.pGeometries = &changed_geometry;
+        const auto in_place_cb = f.begin();
+        auto in_place_blas_token = record_update(as, in_place_cb, in_place_blas, source_blas.range);
+        auto in_place_tlas_token = record_update(as, in_place_cb, in_place_tlas, source_tlas.range);
+        require(acceleration_recordings_overlap(initial_blas, in_place_blas_token) &&
+                    !acceleration_recordings_overlap(in_place_blas_token, destination_blas),
+                "UPDATE retirement overlaps destination writers while independent target metadata does not read source root");
+        submit_build(f, submissions, in_place_cb, {in_place_blas_token, in_place_tlas_token});
+        in_place_blas_token.reset();
+        in_place_tlas_token.reset();
+        update_probe(
+            f, as, pipeline, layout, output, source_tlas, true, 81, update_flags,
+            "native in-place BLAS/TLAS UPDATE preserves identity and publishes changed canonical associations/instance flags");
+        CHECK(acceleration_identity(as, source_blas.handle, &ignored, &target_root));
+        require(target_root == source_root, "in-place BLAS UPDATE retains the original stable root address");
+        submit_finished(f, submissions, destination_cb, {destination_blas, destination_tlas});
+        update_probe(f, as, pipeline, layout, output, target_tlas, true, 83, update_flags,
+                     "native out-of-place BLAS/TLAS UPDATE consumes the latest native source and complete explicit inputs");
+        submit_finished(f, submissions, initial, {initial_blas, initial_tlas});
+        update_probe(f, as, pipeline, layout, output, source_tlas, !associated || retained_mm, 77, 0,
+                     "old source BUILD CB replay restores its original source metadata");
+        update_probe(f, as, pipeline, layout, output, target_tlas, true, 83, update_flags,
+                     "replaying source BUILD cannot mutate independent out-of-place UPDATE canonical snapshots");
+        submit_finished(f, submissions, destination_cb, {destination_blas, destination_tlas});
+        update_probe(f, as, pipeline, layout, output, target_tlas, true, 83, update_flags,
+                     "recorded native UPDATE CB replays after a different source body is published");
+        vkFreeCommandBuffers(f.device, f.pool, 1, &initial);
+        vkFreeCommandBuffers(f.device, f.pool, 1, &destination_cb);
+        initial_blas.reset();
+        initial_tlas.reset();
+        destination_blas.reset();
+        destination_tlas.reset();
+        destroy_native_as(f, mm, as, source_tlas);
+        destroy_native_as(f, mm, as, source_blas);
+        for (const auto& buffer : {source_instances, changed_instances, target_instances, source_vertices, update_vertices})
+            release(f, mm, buffer);
+        if (associated) {
+            release(f, mm, original_indices);
+            release(f, mm, replacement_indices);
+        }
+        release_micromap(f, mm, original_mm);
+        release_micromap(f, mm, replacement_mm);
+        update_probe(
+            f, as, pipeline, layout, output, target_tlas, true, 83, update_flags,
+            "updated destination traverses after actual source AS destruction and all OMM/index/instance inputs are freed");
+        destroy_native_as(f, mm, as, target_tlas);
+        destroy_native_as(f, mm, as, target_blas);
+        require(live_private_buffers == 0 && live_private_memory == 0,
+                "UPDATE/replay/source-destruction retires every source/target metadata allocation");
+        std::printf("PASS native AS UPDATE variant %u: in-place, out-of-place, source replay, UPDATE replay, source lifetime\n",
+                    variant);
+    }
+    require(native_updates == 20, "twenty genuine native UPDATE commands reached the driver without conversion to BUILD");
+}
 }  // namespace
 int main(int argc, char** argv) {
     if (argc != 2) return 1;
@@ -688,6 +1027,7 @@ int main(int argc, char** argv) {
     require(native_builds == 216 && sanitized_queries == 4,
             "all 200 discarded plus sixteen submitted builds and four sanitized size queries reached native API");
     unbound_descriptor_query(f, mm, as, submissions, pipeline, layout, output);
+    native_update_tests(f, mm, as, submissions, pipeline, layout, output);
     CHECK(vkDeviceWaitIdle(f.device));
     acceleration_collect_idle(as);
     submissions_destroy(submissions);

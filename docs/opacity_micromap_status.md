@@ -5,15 +5,25 @@ SPDX-License-Identifier: Apache-2.0
 
 # Software opacity micromap implementation status
 
-Updated 2026-10-29. The active goal is the complete native-RT EXT implementation
-in [the specification](opacity_micromap_layer.md), following
+Updated 2026-11-11. Development is paused at the user's request; the current
+implementation is preserved as an experimental checkpoint. The intended contract
+remains the complete native-RT EXT implementation in
+[the specification](opacity_micromap_layer.md), following
 [the implementation plan](opacity_micromap_plan.md). No full milestone is complete.
 The experimental loader now connects public micromap build/copy/query operations,
 native AS metadata and descriptor-sourced compute and monolithic graphics Ray
 Query consumers. Default
 operation remains native pass-through. The layer does not add
 OMM discovery to devices without native OMM while the full consumer contract is
-unfinished. The complete application-facing adapter remains in progress.
+unfinished. The complete application-facing adapter remains incomplete.
+
+The final checkpoint also enables native BLAS/TLAS UPDATE in the AS backend,
+preserving native source/destination, mode and scratch sizes while producing
+independent metadata for the target. The targeted GPU component test passes
+2,161 assertions with synchronization validation, including genuine in-place and
+out-of-place UPDATE, replay and source destruction. Public API UPDATE integration
+and its external CTS matrix remain unqualified. See
+[the pause checkpoint](omm_pause_checkpoint_2026-11-11.md) for verification limits.
 
 ## Workspace and separation
 
@@ -41,7 +51,7 @@ there is no `vkrt_layer` hierarchy or fallback build dependency.
 | Experimental public API | Public create/destroy/sizes/build/clone/compact, size queries, GPU serialization/deserialization and compatibility, buffer/state/synchronization translation |
 | AS provenance compiler | Descriptor arrays, scalar AS phi/copy, integer conversions and helper argument/return propagation; compiler provider ABI passes 230 checks, integer runtime provider remains open |
 | Descriptor contexts | Stable GPU-published identity cells, shadow ABI v2 null/unwritten/ready states, descriptor update-before-bind, ordinary writes/copies and immutable per-binding contexts; no extra application set or push range |
-| Native AS lifecycle | Device BUILD for BLAS/TLAS, create-before-bind, GPU instance capture/sanitization, replay tokens and private-timeline per-AS retirement; update/copy/serialization remain open |
+| Native AS lifecycle | Device BUILD and component-tested UPDATE for BLAS/TLAS, create-before-bind, GPU instance capture/sanitization, replay tokens and private-timeline per-AS retirement; public UPDATE qualification, copy and serialization remain open |
 
 The CPU evaluator reports 396,693 checks and the storage suite reports 786 checks.
 Storage tests include truncated and corrupted blobs, size overflow, source-input
