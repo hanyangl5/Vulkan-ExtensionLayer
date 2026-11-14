@@ -229,9 +229,9 @@ void rt_store_hit(uint64_t p, sw_hit h) {
     rt_w(p + 32ul, h.opaque ? 1u : 0u);
     rt_w(p + 36ul, h.instance_node);
 }
-sw_ray_query_state rt_load_q(uint64_t node) {
+sw_traversal_state rt_load_q(uint64_t node) {
     uint64_t p = node + 256ul;
-    sw_ray_query_state q;
+    sw_traversal_state q;
     q.as_address = rt_u64(p);
     q.ray.origin = rt_v3(p + 8ul);
     q.ray.direction = rt_v3(p + 20ul);
@@ -252,7 +252,7 @@ sw_ray_query_state rt_load_q(uint64_t node) {
     q.want_committed = rt_u(p + 168ul);
     return q;
 }
-void rt_store_q(uint64_t node, sw_ray_query_state q) {
+void rt_store_q(uint64_t node, sw_traversal_state q) {
     uint64_t p = node + 256ul;
     rt_w64(p, q.as_address);
     rt_wv3(p + 8ul, q.ray.origin);
@@ -276,7 +276,7 @@ void rt_store_q(uint64_t node, sw_ray_query_state q) {
 // q is the exact shared RQ BVH4 state, stored in the trace node across calls.
 void rt_hit_system(uint64_t shader, uint64_t trace, bool committed, uint kind, float distance) {
     uint64_t f = rt_frame(shader);
-    sw_ray_query_state q = rt_load_q(trace);
+    sw_traversal_state q = rt_load_q(trace);
     q.want_committed = committed ? 1u : 0u;
     rt_w(f + uint64_t(VEL_RT_SYS_RAY_FLAGS), q.ray_flags);
     rt_w(f + uint64_t(VEL_RT_SYS_CULL_MASK), rt_u(trace + 176ul));
@@ -301,7 +301,7 @@ void rt_hit_system(uint64_t shader, uint64_t trace, bool committed, uint kind, f
     }
 }
 bool rt_hit_record(uint64_t trace, bool committed, out uint group, out uint64_t record) {
-    sw_ray_query_state q = rt_load_q(trace);
+    sw_traversal_state q = rt_load_q(trace);
     q.want_committed = committed ? 1u : 0u;
     uint64_t index = uint64_t(sw_get_intersection_instance_sbt_offset(q)) + uint64_t(rt_u(trace + 72ul) & 15u) +
                      uint64_t(uint(sw_get_intersection_geometry_index(q))) * uint64_t(rt_u(trace + 76ul) & 15u);
@@ -323,9 +323,9 @@ void rt_complete_trace(uint64_t trace) {
 void rt_accept_report(uint64_t trace, bool accepted, bool terminateRay) {
     uint64_t intersection = rt_u64(trace + 112ul), control = rt_control(intersection);
     if (accepted) {
-        sw_ray_query_state q = rt_load_q(trace);
+        sw_traversal_state q = rt_load_q(trace);
         q.gen_thit = rt_f(trace + 104ul);
-        sw_ray_query_generate_intersection(q);
+        sw_traversal_generate_intersection(q);
         rt_store_q(trace, q);
         rt_copy(trace + 512ul + rt_attr_stride, trace + 512ul, rt_u(trace + 100ul));
         rt_w(trace + 84ul, rt_u(trace + 92ul));
@@ -333,7 +333,7 @@ void rt_accept_report(uint64_t trace, bool accepted, bool terminateRay) {
         rt_w(trace + 148ul, rt_u(trace + 100ul));
         rt_wf(rt_frame(intersection) + uint64_t(VEL_RT_SYS_TMAX), q.tclosest);
         if (terminateRay || (q.ray_flags & SW_RAY_FLAG_TERMINATE_ON_FIRST_HIT) != 0u) {
-            sw_ray_query_terminate(q);
+            sw_traversal_terminate(q);
             rt_store_q(trace, q);
             // Ray termination abandons the active intersection invocation.
             // In particular no later Report may replace the accepted first hit.
@@ -360,9 +360,9 @@ void rt_shader_done(uint64_t shader, uint disposition) {
     }
     if (action == 3u) {
         if (disposition != 4u) {
-            sw_ray_query_state q = rt_load_q(trace);
-            sw_ray_query_confirm(q);
-            if (disposition == 5u) sw_ray_query_terminate(q);
+            sw_traversal_state q = rt_load_q(trace);
+            sw_traversal_confirm(q);
+            if (disposition == 5u) sw_traversal_terminate(q);
             rt_store_q(trace, q);
         }
         return;
@@ -393,7 +393,7 @@ void rt_begin_trace(uint64_t shader) {
     rt_w(node + 132ul, rt_u(c + 84ul));
     rt_w64(node + 136ul, rt_frame(shader) + uint64_t(rt_u(c + 80ul)));
     rt_w(node + 176ul, rt_u(c + 32ul) & 255u);
-    sw_ray_query_state q = rt_load_q(node);
+    sw_traversal_state q = rt_load_q(node);
     q.as_address = vel_rt_resolve_as(rt_p64(rt_ctx + uint64_t(VEL_RT_RUN_AS_REGISTRY)), rt_u64(c + 16ul));
     q.ray_flags = rt_u(c + 28ul);
     q.cull_mask = rt_u(c + 32ul) & 255u;
@@ -401,7 +401,7 @@ void rt_begin_trace(uint64_t shader) {
     q.ray.direction = rt_v3(c + 64ul);
     q.tmin = rt_f(c + 60ul);
     q.tclosest = rt_f(c + 76ul);
-    sw_ray_query_initialize_data(q);
+    sw_traversal_initialize_data(q);
     rt_store_q(node, q);
     rt_top = node;
 }
@@ -422,7 +422,7 @@ void rt_report(uint64_t shader) {
         rt_fail(VEL_RT_STATUS_REQUEST);
         return;
     }
-    sw_ray_query_state q = rt_load_q(trace);
+    sw_traversal_state q = rt_load_q(trace);
     float distance = rt_f(c + 16ul);
     if (!(q.tmin <= distance && distance <= q.tclosest)) {
         rt_w(c + 12ul, 0u);
@@ -450,8 +450,8 @@ void rt_report(uint64_t shader) {
     if (ah != 0ul) rt_hit_system(ah, trace, false, rt_u(c + 20ul), distance);
 }
 void rt_trace_step(uint64_t trace) {
-    sw_ray_query_state q = rt_load_q(trace);
-    bool candidate = sw_ray_query_proceed(q);
+    sw_traversal_state q = rt_load_q(trace);
+    bool candidate = sw_traversal_proceed(q);
     rt_store_q(trace, q);
     if (candidate) {
         uint group;
@@ -459,7 +459,7 @@ void rt_trace_step(uint64_t trace) {
         if (!rt_hit_record(trace, false, group, record)) return;
         if (group == 0xffffffffu) {
             if (q.intersection_type == SW_CAND_TRIANGLE) {
-                sw_ray_query_confirm(q);
+                sw_traversal_confirm(q);
                 rt_store_q(trace, q);
             }
             return;
@@ -474,7 +474,7 @@ void rt_trace_step(uint64_t trace) {
         }
         uint any = rt_any[group];
         if (any == 0xffffffffu) {
-            sw_ray_query_confirm(q);
+            sw_traversal_confirm(q);
             rt_store_q(trace, q);
             return;
         }

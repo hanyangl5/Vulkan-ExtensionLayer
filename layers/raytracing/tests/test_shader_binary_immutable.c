@@ -2,9 +2,7 @@
  * SPDX-License-Identifier: Apache-2.0
  * RQ binary execution after original immutable interfaces and device die.
  */
-#define main immutable_unused_triangle_main
-#include "test_shader_object_rq.c"
-#undef main
+#include "shader_object_harness.h"
 
 static VkSampler sampler(void) {
     VkSamplerReductionModeCreateInfo reduction = {.sType = VK_STRUCTURE_TYPE_SAMPLER_REDUCTION_MODE_CREATE_INFO,

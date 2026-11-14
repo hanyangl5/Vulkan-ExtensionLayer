@@ -9,7 +9,7 @@ static VkResult budget_device(VkPhysicalDevice physical, const VkDeviceCreateInf
                               VkDevice *device);
 #define vkCreateDevice budget_device
 #define VKRT_TEST_FIXTURE_ONLY
-#include "00_single_tri/main.c"
+#include "gpu_harness.h"
 #undef vkCreateDevice
 #include "vkrt_resource_profile.h"
 

@@ -72,9 +72,6 @@ struct vkrt_device_data {
    bool queue_families_have_allocator;
    VkAllocationCallbacks queue_families_allocator;
 
-   /* Original application request, before emulated names are stripped. This
-    * is not evidence that a native RT feature was enabled downstream. */
-   bool app_requested_ray_query;
    VkPipelineLayout            build_pipeline_layout;
    VkPipeline build_pipelines[21];
    uint32_t build_ploc_subgroup_size;

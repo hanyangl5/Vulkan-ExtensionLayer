@@ -26,7 +26,7 @@ static VkResult replay_create_device(VkPhysicalDevice, const VkDeviceCreateInfo 
 #define vkCreateInstance replay_create_instance
 #define vkCreateDevice replay_create_device
 #define VKRT_TEST_FIXTURE_ONLY
-#include "00_single_tri/main.c"
+#include "gpu_harness.h"
 #undef vkCreateInstance
 #undef vkCreateDevice
 #ifdef _WIN32

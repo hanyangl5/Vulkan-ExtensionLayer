@@ -75,8 +75,11 @@ static VKAPI_ATTR void VKAPI_CALL GetPhysicalDeviceFeatures2(VkPhysicalDevice ph
         if (eligible && vkrt_virtual_object_feature_range(p->sType, &offset, &bytes)) memset((char *)p + offset, 0, bytes);
         if (p->sType == VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_FEATURES_KHR)
             ((VkPhysicalDeviceAccelerationStructureFeaturesKHR *)p)->accelerationStructure = eligible;
+        /* Ray query is outside this layer's contract. Its feature stays false
+         * even when the backend is eligible, so a module using OpRayQuery* is
+         * never advertised as supported. */
         if (p->sType == VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_QUERY_FEATURES_KHR)
-            ((VkPhysicalDeviceRayQueryFeaturesKHR *)p)->rayQuery = eligible;
+            ((VkPhysicalDeviceRayQueryFeaturesKHR *)p)->rayQuery = VK_FALSE;
         if (p->sType == VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_FEATURES_KHR)
             ((VkPhysicalDeviceRayTracingPipelineFeaturesKHR *)p)->rayTracingPipeline = eligible;
         /* A flat compute module cannot preserve independent per-stage binding
@@ -89,7 +92,6 @@ static VKAPI_ATTR void VKAPI_CALL GetPhysicalDeviceFeatures2(VkPhysicalDevice ph
 
 static const VkExtensionProperties software_extensions[] = {
     {VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME, VK_KHR_ACCELERATION_STRUCTURE_SPEC_VERSION},
-    {VK_KHR_RAY_QUERY_EXTENSION_NAME, VK_KHR_RAY_QUERY_SPEC_VERSION},
     {VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME, VK_KHR_RAY_TRACING_PIPELINE_SPEC_VERSION},
     {VK_KHR_PIPELINE_LIBRARY_EXTENSION_NAME, VK_KHR_PIPELINE_LIBRARY_SPEC_VERSION},
     {VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME, VK_KHR_DEFERRED_HOST_OPERATIONS_SPEC_VERSION},
@@ -105,7 +107,9 @@ static VKAPI_ATTR VkResult VKAPI_CALL EnumerateDeviceExtensionProperties(VkPhysi
     struct vkrt_instance_data *inst = VKRT_FIND(struct vkrt_instance_data, physical);
     struct vkrt_software_rt_profile profile;
     bool eligible = inst && vkrt_virtual_rt_profile(inst, physical, &profile);
-    const uint32_t first = eligible ? 0 : 4;
+    /* The first three names need the software backend; the trailing deferred
+     * host operations dependency is advertised on every device. */
+    const uint32_t first = eligible ? 0 : 3;
     const uint32_t software_count = (uint32_t)VKRT_ARRAY_SIZE(software_extensions) - first;
     if (layer && !strcmp(layer, "VK_LAYER_VKRT_SOFTWARE_RAY_QUERY")) {
         const uint32_t written = properties && *count < software_count ? *count : software_count;

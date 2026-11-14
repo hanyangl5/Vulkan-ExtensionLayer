@@ -125,25 +125,20 @@ VKAPI_ATTR void VKAPI_CALL Properties(VkPhysicalDevice, VkPhysicalDeviceProperti
     out->limits.maxPushConstantsSize = 256;
     out->limits.maxComputeWorkGroupCount[0] = 65535;
 }
-Words Source(bool raygen, bool query = false, bool mixed = false) {
+Words Source(bool raygen, bool mixed = false) {
     std::string source = "OpCapability Shader\n";
     if (raygen || mixed) source += "OpCapability RayTracingKHR\n";
-    if (query) source += "OpCapability RayQueryKHR\n";
     if (raygen || mixed) source += "OpExtension \"SPV_KHR_ray_tracing\"\n";
-    if (query) source += "OpExtension \"SPV_KHR_ray_query\"\n";
     source += "OpMemoryModel Logical GLSL450\n";
     source += raygen ? "OpEntryPoint RayGenerationKHR %main \"raygen\"\n"
                      : "OpEntryPoint GLCompute %main \"native_main\"\nOpEntryPoint Vertex %vertex \"native_main\"\n";
     if (mixed) source += "OpEntryPoint RayGenerationKHR %raygen \"raygen\"\n";
     if (!raygen) source += "OpExecutionMode %main LocalSize 1 1 1\n";
     source += "%void = OpTypeVoid\n%fn = OpTypeFunction %void\n";
-    if (query) source += "%query = OpTypeRayQueryKHR\n%pointer = OpTypePointer Function %query\n";
     source += "%main = OpFunction %void None %fn\n%entry = OpLabel\n";
-    if (query) source += "%q = OpVariable %pointer Function\n";
     source += "OpReturn\nOpFunctionEnd\n";
     if (!raygen) {
         source += "%vertex = OpFunction %void None %fn\n%v = OpLabel\n";
-        if (query) source += "%vq = OpVariable %pointer Function\n";
         source += "OpReturn\nOpFunctionEnd\n";
     }
     if (mixed) source += "%raygen = OpFunction %void None %fn\n%r = OpLabel\nOpReturn\nOpFunctionEnd\n";
@@ -448,8 +443,8 @@ void NativePassThrough() {
 }
 void InlineAdmission() {
     Device device(0x507);
-    for (unsigned kind = 0; kind < 3; ++kind) {
-        const auto words = Source(false, kind == 1, kind == 2), saved_words = words;
+    for (unsigned kind = 0; kind < 2; ++kind) {
+        const auto words = Source(false, kind == 1), saved_words = words;
         VkPipelineShaderStageRequiredSubgroupSizeCreateInfo tail{
             VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_REQUIRED_SUBGROUP_SIZE_CREATE_INFO};
         tail.requiredSubgroupSize = 32;

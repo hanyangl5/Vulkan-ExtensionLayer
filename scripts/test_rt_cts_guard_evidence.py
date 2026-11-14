@@ -16,7 +16,7 @@ from run_rt_cts import classify, guard_evidence, main, qpa_result, run_environme
 
 
 class RunnerTimeoutTests(unittest.TestCase):
-    case = "dEQP-VK.ray_query.example"
+    case = "dEQP-VK.ray_tracing_pipeline.example"
 
     def test_terminated_qpa_timeout_matches_selected_case(self):
         with tempfile.TemporaryDirectory() as directory:

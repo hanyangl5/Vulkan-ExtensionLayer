@@ -2,9 +2,7 @@
  * Public GPU construction/serialization/deserialization. Only the serialized
  * artifact is mapped; AS output and scratch storage remain device-local.
  */
-#define main vkrt_unused_serialization_gpu_build_main
-#include "test_gpu_build.c"
-#undef main
+#include "as_harness.h"
 #include "vkrt_as_serialization.h"
 
 struct serial_buffer {
@@ -140,16 +138,6 @@ static void restore_commands(VkCommandBuffer command) {
     deserialize(command, restored_blas.handle, &blas_serial);
 }
 static void repeat_commands(VkCommandBuffer command) { serialize(command, restored_tlas.handle, &repeated_serial); }
-static void hit(VkAccelerationStructureKHR tlas, unsigned instance) {
-    const float origin[] = {3 + instance * 10.0f, 0, 2}, direction[] = {0, 0, -1};
-    struct out_block result;
-    run_ray(tlas, origin, direction, 0, 100, 0, 255, &result);
-    expect_u("serialized hit", result.hit_type, 1);
-    expect_u("serialized primitive", result.primitive_index, 0);
-    expect_u("serialized instance", result.instance_custom_index, 77 + instance);
-    expect_u("serialized getters", result.getter_errors, 0);
-    expect_f("serialized transformed distance", result.t, 3, 1e-5f);
-}
 static void prefix(const struct serial_buffer *serial, uint32_t count, VkDeviceAddress expected_handle) {
     const uint64_t physical = u64(serial, 40), total = u64(serial, 32);
     if (total > serial->capacity || total != vkrt_as_serialization_size(physical, count) || u64(serial, 48) != count) {
@@ -213,7 +201,7 @@ int main(void) {
     serial_storage(&tlas_serial, vkrt_as_serialization_size(top_bound, 3));
     serial_storage(&repeated_serial, vkrt_as_serialization_size(top_bound, 3));
     g_before_dispatch = first_commands;
-    hit(source_tlas.handle, 0);
+    run_recorded_hook();
     g_before_dispatch = NULL;
     prefix(&blas_serial, 0, 0);
     prefix(&tlas_serial, 3, original_public);
@@ -260,12 +248,12 @@ int main(void) {
     for (unsigned i = 0; i < 3; ++i) memcpy(tlas_serial.bytes + 56 + i * 8, &replacement, 8);
     /* The destination TLAS has never been queried for an AS address. */
     g_before_dispatch = restore_commands;
-    hit(restored_tlas.handle, 0);
+    run_recorded_hook();
     g_before_dispatch = NULL;
-    hit(restored_tlas.handle, 1);
-    hit(restored_tlas.handle, 2);
+    run_recorded_hook();
+    run_recorded_hook();
     g_before_dispatch = repeat_commands;
-    hit(restored_tlas.handle, 2);
+    run_recorded_hook();
     g_before_dispatch = NULL;
     prefix(&repeated_serial, 3, replacement);
     destroy_as(&restored_tlas);

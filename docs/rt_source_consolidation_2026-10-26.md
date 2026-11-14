@@ -56,7 +56,7 @@ three actual external CTS smoke cases. The Windows script harness confirms that
 and CTest failures propagate to the caller.
 
 The expanded external RT matrix and shader-binary interface outcomes are recorded
-in the [query/control-flow evidence](rt_query_controlflow_2026-10-26.md) and
+in the query/control-flow evidence (removed with the Ray Query pivot) and
 [binary interface report](rt_shader_objects_2026-10-26.md). All cases use the
 unmodified external `D:/Codes/VK-GL-CTS` executable and resource archive with
 Khronos validation; skips and failures remain separate from passes.

@@ -344,18 +344,7 @@ vkrt_CreateDevice(VkPhysicalDevice physicalDevice,
       return result;
    }
 
-   data->app_requested_ray_query = false;
-   if (pCreateInfo->ppEnabledExtensionNames) {
-      for (uint32_t i = 0; i < pCreateInfo->enabledExtensionCount; i++) {
-         if (strcmp(pCreateInfo->ppEnabledExtensionNames[i],
-                    VK_KHR_RAY_QUERY_EXTENSION_NAME) == 0) {
-             data->app_requested_ray_query = true;
-             break;
-         }
-      }
-   }
-
-   VKRT_LOG_DBG("CreateDevice ok (%p) app_requested_ray_query=%d", (void *)*pDevice, (int)data->app_requested_ray_query);
+   VKRT_LOG_DBG("CreateDevice ok (%p) software ray tracing pipeline backend", (void *)*pDevice);
    return VK_SUCCESS;
 }
 

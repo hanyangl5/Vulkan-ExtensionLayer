@@ -1,10 +1,11 @@
 # Software ray tracing layer
 
-`VK_LAYER_VKRT_SOFTWARE_RAY_QUERY` is the canonical implementation of the active
-[software AS/Ray Query/RT Pipeline goal](../../docs/ray_tracing_fallback_goal.md).
-Its existing layer name is retained for application and test compatibility. AS,
-Ray Query, and RT Pipeline share the layer's object model, GPU builder, portable
-BVH4 representation, AS address resolver, and resumable traversal core.
+`VK_LAYER_VKRT_SOFTWARE_RAY_QUERY` is the canonical implementation of the
+[software AS + RT Pipeline goal](../../docs/ray_tracing_fallback_goal.md).
+Its layer name is retained for application, script and test compatibility even
+though Ray Query is no longer part of the delivered contract. AS and RT Pipeline
+share the layer's object model, GPU builder, portable BVH4 representation, AS
+address resolver, and resumable traversal core.
 
 The complete mandatory Vulkan RT contract remains unfinished. Public API tests
 and selected external Khronos CTS cases have native controls and validation
@@ -124,64 +125,54 @@ different purposes; neither completes the full goal by itself.
 
 ## Current implementation and evidence
 
+This layer delivers `VK_KHR_acceleration_structure` and
+`VK_KHR_ray_tracing_pipeline` only. `VK_KHR_ray_query` is not advertised, not
+lowered, and rejected at shader-module creation; Ray Query only fixtures and CTS
+selections were removed with the scope pivot.
+
 The GPU path builds triangle/AABB BLAS and instance TLAS through Mesa construction
 IR and encodes the shared BVH4 runtime. UPDATE refreshes leaf records and refits
 bounds while retaining the runtime topology. It also supports GPU CLONE/COMPACT,
 serialization and relocation, and bounded public AS property-query publication.
-COMPACT retains the same representation and
-size. Non-null zero-mask and empty-BLAS instances retain recoverable leaves. The
+Non-null zero-mask and empty-BLAS instances retain recoverable leaves. The
 [AS address contract](docs/AS_ADDRESS_ABI.md) distinguishes public values,
 physical roots, and publication lifetime.
 
-Ray Query lowers supported typed SPIR-V operations to traversal in the consuming
-shader stage. Canonical RTP links all six RT stages into a compute scheduler with
-GPU SBT selection, nested traces and callables, invocation-private continuation
+Ray tracing pipelines link all six RT stages into a compute scheduler with GPU
+SBT selection, nested traces and callables, invocation-private continuation
 storage in execution-owned BDA arenas, descriptor-backed opaque provenance, and
-one cached native variant per pipeline with execution-time stack budgets.
-The adapter restores application compute pipeline, descriptor, push, and
-shader-object state after internal work. Shader-object binaries retain source,
-specialization and complete linked-group state. Ordinary groups transport their
-native binary; RQ groups reconstruct owned descriptor/sampler/push interfaces
-against the destination resolver, then use native BINARY creation. Selected
-null/different-layout, partial-batch and cross-device imports have external CTS
-and actual GPU evidence; complete optional-feature compatibility remains open.
+one cached native variant per pipeline with execution-time stack budgets. The
+software traversal is embedded as GLSL (`shaders/sw_traversal.glsl`) and
+compiled into each generated stage. The adapter restores application compute
+pipeline, descriptor, push and shader-object state after internal work.
 
-Evidence records retain the tested revision, device, commands, failures, and
-scope:
+Evidence records (all pre-pivot numbers must be re-qualified on this branch):
 
 - [AS query publication without native timestamps](../../docs/rt_query_events_2026-10-28.md).
-- [Mesa pipeline comparison, source BDA pointers, allocation counts and native query scopes](../../docs/rt_mesa_pipeline_2026-10-29.md).
+- [Mesa pipeline comparison, source BDA pointers, allocation counts](../../docs/rt_mesa_pipeline_2026-10-29.md).
 - [Software discovery, SPIR-V 1.4 and compatibility gates](../../docs/rt_software_discovery_2026-10-28.md).
 - [Execution-owned RTP arenas](../../docs/rtp_execution_arenas_2026-10-28.md).
-- [Shared typed runtime and initial external CTS](../../docs/rt_cts_typed_runtime_2026-10-26.md).
 - [Opaque resource provenance across suspension](../../docs/rt_opaque_provenance_2026-10-26.md).
-- [External control flow, private state, nonuniform arguments, and barriers](../../docs/rt_cts_controlflow_2026-10-26.md).
-- [Public AS query publication](../../docs/rt_query_publication_2026-10-26.md) and
-  [external query/control-flow results](../../docs/rt_query_controlflow_2026-10-26.md).
 - [Pipeline creation hints and derivatives](../../docs/rt_pipeline_creation_2026-10-26.md).
 - [Resource profile and boundary checks](../../docs/rt_resource_profile_2026-10-26.md).
 - [Shader-object source and binary interoperability](../../docs/rt_shader_objects_2026-10-26.md).
+- [DescriptorSetLayout ownership](../../docs/rt_descriptor_layout_ownership_2026-10-29.md).
 
 Logical StorageBuffer pointer Phi/Select and inlined helper values use typed
 route/selector snapshots across suspension. RT pipeline libraries retain typed
-definitions and link through the same compute-backed runtime. The
-[refit/compiler/library checkpoint](../../docs/rt_refit_pointer_libraries_2026-10-28.md)
-records their scope and validation. Full pointer provenance, complete shader/API/
-resource and synchronization coverage, advertised-limit qualification, larger builder variants, and physical
-no-RT qualification remain work under the active goal. Unsupported optional
-features retain explicit boundaries. Evidence records distinguish failures,
-unsupported cases, and startup crashes from passes; an isolated successful
-recheck does not replace the original run's result.
-
+definitions and link through the same compute-backed runtime. Full pointer
+provenance, complete shader/API/resource and synchronization coverage,
+advertised-limit qualification, larger builder variants, pipeline compile cost
+and physical no-RT qualification remain work under the active goal. Unsupported
+optional features retain explicit boundaries.
 ## Source provenance
 
 Source files retain their original copyright, license, and provenance notices.
 The Mesa-derived builder files carry their own notices; the original reference
 revision and construction interface are recorded in
-[`docs/IR_CONTRACT_V2.md`](docs/IR_CONTRACT_V2.md). Imported milestones and test
-results remain in the [historical status](docs/imported_ray_query_status.md) and
-[original design](docs/rayquery_software_rt_layer_design.md); they describe their
-original revisions.
+[`docs/IR_CONTRACT_V2.md`](docs/IR_CONTRACT_V2.md). Imported Ray Query
+milestones are retained in git history only; they describe a superseded revision
+and are not part of this contract.
 
 The traversal source also records its stated Arm Avalon DDK origin, including
 passages described as retained verbatim. Those source notices are preserved by

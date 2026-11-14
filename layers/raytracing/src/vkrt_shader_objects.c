@@ -4,7 +4,7 @@
 #include "vkrt_layer.h"
 #include "vkrt_rt_capabilities.h"
 #include "vkrt_as_registry.h"
-#include "vkrt_spirv_lower.h"
+#include "vkrt_spirv_support.h"
 #include "vkrt_shader_interface.h"
 #include "vkrt_rtp.h"
 
@@ -1129,7 +1129,7 @@ cleanup:
         }
         if (ranges) free(ranges[i]);
         if (layouts) free(layouts[i]);
-        if (selected) vkrt_spirv_lower_free(selected[i]);
+        if (selected) vkrt_spirv_free(selected[i]);
         if (records) free_record(records[i]);
         if (stages) free_record(stages[i]);
     }

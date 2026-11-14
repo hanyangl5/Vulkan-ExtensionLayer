@@ -60,7 +60,7 @@ static VkResult create_instance(const VkInstanceCreateInfo *info, const VkAlloca
 #define vkCreateDevice create_device
 #define vkCreateInstance create_instance
 #define VKRT_TEST_FIXTURE_ONLY
-#include "00_single_tri/main.c"
+#include "gpu_harness.h"
 #undef vkCreateDevice
 #undef vkCreateInstance
 

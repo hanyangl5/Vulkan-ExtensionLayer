@@ -124,8 +124,8 @@ static bool timestamp_fallback_substrate(struct vkrt_instance_data *inst, VkPhys
 static size_t device_chain_size(VkStructureType type) {
     return type == VKRT_PORTABILITY_FEATURES ? sizeof(VkPhysicalDevicePortabilitySubsetFeaturesKHR) : vkrt_chain_size(type);
 }
-/* Base AS/RQ/RTP objects and shaders use the shared layer backend. Consume
- * their requests instead of enabling native RT on the downstream device. */
+/* Base AS/RTP objects and shaders use the shared layer backend. Consume their
+ * requests instead of enabling native RT on the downstream device. */
 static VkResult virtual_feature(const VkBaseInStructure *p, bool *remove, bool *uses_virtual_rt) {
     size_t offset, bytes;
     if (*uses_virtual_rt && vkrt_virtual_object_feature_range(p->sType, &offset, &bytes)) {
@@ -146,6 +146,9 @@ static VkResult virtual_feature(const VkBaseInStructure *p, bool *remove, bool *
     if (p->sType == VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_FEATURES_KHR)
         *uses_virtual_rt |= ((const VkPhysicalDeviceAccelerationStructureFeaturesKHR *)p)->accelerationStructure != VK_FALSE;
     if (p->sType == VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_QUERY_FEATURES_KHR) {
+        /* Enabling the ray query feature selects the software backend device,
+         * but the feature itself is stripped and never claimed. Modules that
+         * still use it are rejected when the shader module is created. */
         *uses_virtual_rt |= ((const VkPhysicalDeviceRayQueryFeaturesKHR *)p)->rayQuery != VK_FALSE;
         *remove = true;
     }
@@ -187,6 +190,9 @@ bool vkrt_device_uses_virtual_rt(const VkDeviceCreateInfo *info) {
         if (p->sType == VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_FEATURES_KHR &&
             ((const VkPhysicalDeviceAccelerationStructureFeaturesKHR *)p)->accelerationStructure)
             return true;
+        /* A minimal ray-query request still selects the software backend: the
+         * feature node is consumed before the driver sees it, and modules that
+         * use ray query are rejected at shader-module creation time. */
         if (p->sType == VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_QUERY_FEATURES_KHR &&
             ((const VkPhysicalDeviceRayQueryFeaturesKHR *)p)->rayQuery)
             return true;
@@ -304,7 +310,7 @@ static bool native_backend_capabilities(struct vkrt_instance_data *inst, VkPhysi
      * storage-buffer pointers after that change of storage class. */
     if (!supported.features.shaderStorageBufferArrayDynamicIndexing || !descriptor.shaderStorageBufferArrayNonUniformIndexing ||
         !pointers.variablePointersStorageBuffer) {
-        VKRT_LOG_ERR("AS value lowering requires storage-buffer dynamic/nonuniform indexing and variable pointers");
+        VKRT_LOG_ERR("software RT backend requires storage-buffer dynamic/nonuniform indexing and variable pointers");
         return false;
     }
 

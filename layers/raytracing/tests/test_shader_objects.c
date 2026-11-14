@@ -4,7 +4,7 @@
 #include "vkrt_shader_objects.h"
 #include "vkrt_shader_interface.h"
 #include "vkrt_as_registry.h"
-#include "vkrt_spirv_lower.h"
+#include "vkrt_spirv_support.h"
 #include "vkrt_rt_capabilities.h"
 #include "vkrt_rtp.h"
 #include <stdatomic.h>
@@ -196,7 +196,7 @@ VkResult vkrt_spirv_select_native_entry(const uint32_t *words, size_t count, con
     *out_count = count;
     return VK_SUCCESS;
 }
-void vkrt_spirv_lower_free(uint32_t *words) {
+void vkrt_spirv_free(uint32_t *words) {
     if (words) {
         CHECK(selected_buffers != 0);
         --selected_buffers;

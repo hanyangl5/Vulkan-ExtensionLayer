@@ -11,7 +11,7 @@ same case list for a native control and its corresponding fallback comparison.
 Example (PowerShell):
   python scripts/run_rt_cts.py --cts D:/Codes/VK-GL-CTS/build/external/vulkancts/modules/vulkan/Release/deqp-vk.exe `
     --archive-dir D:/Codes/VK-GL-CTS/external/vulkancts/data --cases cases.txt `
-    --mode ray-query --layer-dir build-rq-goal/layers --output-dir build-rt-cts-evidence/rq-run
+    --mode software-rt --layer-dir build-rq-goal/layers --output-dir build-rt-cts-evidence/rq-run
 
 NotSupported, crashes, timeouts and missing results never count as passes. This
 runner records evidence; a small passing slice is not Vulkan conformance.
@@ -36,7 +36,6 @@ import xml.etree.ElementTree as ET
 
 
 LAYERS = {
-    "ray-query": "VK_LAYER_VKRT_SOFTWARE_RAY_QUERY",
     "software-rt": "VK_LAYER_VKRT_SOFTWARE_RAY_QUERY",
 }
 STATUSES = ("pass", "fail", "notSupported", "crash", "timeout", "noresult")
@@ -157,7 +156,7 @@ def run_environment(mode, snapshot, validation_dir=None, guard_dir=None, mask_na
         overrides.update(VK_INSTANCE_LAYERS=LAYERS[mode], VK_LAYER_PATH=str(snapshot))
         if guard_dir:
             overrides["VK_INSTANCE_LAYERS"] += os.pathsep + "VK_LAYER_VKRT_NO_NATIVE_RT_GUARD"
-        if mode in ("ray-query", "software-rt"):
+        if mode == "software-rt":
             overrides["ENABLE_VKRT_SOFTWARE_RAY_QUERY"] = "1"
     if validation_dir or guard_dir:
         overrides["VK_LAYER_PATH"] = os.pathsep.join(
@@ -398,7 +397,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--cts", required=True, type=Path)
     parser.add_argument("--cases", required=True, type=Path, help="one exact CTS case per line; # comments allowed")
-    parser.add_argument("--mode", required=True, choices=("native", "ray-query", "software-rt"))
+    parser.add_argument("--mode", required=True, choices=("native", "software-rt"))
     parser.add_argument("--layer-dir", type=Path, help="directory containing the chosen fallback manifest")
     parser.add_argument("--output-dir", required=True, type=Path, help="new or empty evidence directory")
     parser.add_argument("--archive-dir", required=True, type=Path, help="CTS test-resource directory")

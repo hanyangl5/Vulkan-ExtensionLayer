@@ -13,7 +13,7 @@ static VkResult component_create_device(VkPhysicalDevice physical, const VkDevic
                                         const VkAllocationCallbacks *allocator, VkDevice *device);
 #define vkCreateDevice component_create_device
 #define VKRT_TEST_FIXTURE_ONLY
-#include "00_single_tri/main.c"
+#include "gpu_harness.h"
 #undef vkCreateDevice
 
 static VkResult component_create_device(VkPhysicalDevice physical, const VkDeviceCreateInfo *info,

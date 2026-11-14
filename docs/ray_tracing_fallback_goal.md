@@ -1,319 +1,160 @@
 <!-- Copyright 2026 The Khronos Group Inc. -->
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 
-# Software Ray Tracing Fallback: Implementation Goal
+# Software Ray Tracing Pipeline Fallback: Implementation Goal
 
 **Project status:** active development; the complete fallback is not implemented.
-This is the current implementation contract, reviewed on 2026-10-25 against
-baseline `f18c40d316688066834d1334b2c666d1d60b9351`.
-Track component results and remaining work in the [implementation status](ray_tracing_fallback_status.md).
+This contract was rewritten on 2026-10-30 for branch
+`codex/ray-tracing-pipeline-only`. It supersedes the earlier AS/RQ/RTP goal:
+**Ray Query (`VK_KHR_ray_query`) is out of scope and is no longer advertised,
+lowered, or tested.**
 
 ## Outcome
 
 Implement a Vulkan layer that provides the complete mandatory functionality of
-`VK_KHR_acceleration_structure`, `VK_KHR_ray_query`, and
-`VK_KHR_ray_tracing_pipeline` on qualifying Vulkan devices without native RT.
-Unmodified applications use their ordinary AS objects, descriptors, SPIR-V shaders,
-SBTs, and trace/query commands. GPU compute builds AS. Software traversal and
-intersection run in the consuming shader stage for Ray Query and in compute for
-RT pipelines; no native RT extension, shader instruction, or driver-private BVH
-interface is required downstream.
+`VK_KHR_acceleration_structure` and `VK_KHR_ray_tracing_pipeline` on
+qualifying Vulkan devices without native RT. Unmodified applications use their
+ordinary AS objects, descriptors, SPIR-V shaders, SBTs, and `vkCmdTraceRays*`
+commands. GPU compute builds AS. Ray traversal and intersection run in a
+layer-generated compute program that schedules the six RT stages; no native RT
+extension, shader instruction, or driver-private BVH interface is required
+downstream.
 
-Ray Query and RT pipelines must share one versioned AS representation, object
-model, builder, and resumable traversal core. An AS built once must be usable by
-both consumers. A triangle demo, imported reference source, isolated continuation
-test, or one working shader pattern does not complete this goal.
+`VK_KHR_ray_query` is deliberately excluded:
 
-Develop on `codex/ray-tracing-fallback`. Keep implementation, evidence, failures,
-and the next actionable work item in this repository. Complete milestones only
-after their exit criteria are demonstrated; do not mark the full goal complete
-because an intermediate subset runs.
+- The extension is not advertised by the layer.
+- `VkPhysicalDeviceRayQueryFeaturesKHR` is consumed and stripped; a shader
+  module containing `OpTypeRayQueryKHR`/`OpRayQuery*KHR` is rejected with
+  `VK_ERROR_FEATURE_NOT_PRESENT` instead of being lowered.
+- Ray Query only test fixtures, CTS selections and evidence records were
+  removed. Reintroducing Ray Query requires a new goal and a new lowering path.
 
-Keep fallback source, shaders, shared BVH4 components and tests together under
-`layers/raytracing`, with one canonical AS/RQ/RTP build entry. Remove superseded
-runtime implementations after extracting any shared dependencies still in use.
-Keep pinned upstream source and historical validation records as provenance.
-
-### Compatibility and test scope
-
-The user clarified on 2026-10-28 that incompatibility with some newer optional
-extensions is acceptable, and that every test need not pass. The required
-delivery remains the mandatory AS/RQ/RTP baseline on qualifying devices.
-Ordinary descriptor-based applications, reported mandatory limits, shared AS
-semantics and their required synchronization/lifetimes remain in scope.
-
-Newer optional mechanisms may be excluded individually through documented
-capability masks or explicit device/operation admission checks. Do not advertise
-an unsupported optional feature or forward virtual objects into an incompatible
-native entry point. Record the excluded extension or combination and its reason;
-additional interoperability is follow-up work rather than a requirement to
-implement every native extension visible on the development GPU.
-
-Use representative external CTS and targeted regressions to establish the
-supported behavior. Retain passed, failed, unsupported, skipped and unrun cases
-with reasons. Separate mandatory implementation defects from declared optional
-incompatibilities, fixture errors and driver/environment qualification. Complete
-test-suite or CTS all-pass is not a delivery criterion; evidence must still match
-the mandatory behavior claimed as implemented. No formal conformance claim follows
-from a passing slice.
+The AS representation, AS object model and software traversal remain shared
+infrastructure for the RT pipeline runtime; "pipeline only" does not mean the
+AS backend is optional.
 
 ## Architecture decisions
 
 | Module | Selected route |
 | --- | --- |
-| API and objects | One layer-owned AS/device/descriptor model for RQ and RTP |
-| GPU AS build | Reuse Mesa leaf, Morton sort, LBVH, PLOC, and HPLOC algorithms with a public-Vulkan host adapter |
+| API and objects | One layer-owned AS/device/descriptor model for RT pipelines |
+| GPU AS build | Mesa leaf, Morton sort, LBVH, PLOC and HPLOC algorithms through a public-Vulkan host adapter |
 | Build intermediate | Original Mesa build IR; internal construction interface only |
-| Traversal representation | Portable BVH4 with FP32 child bounds, inspired by RADV BOX32 |
-| Traversal | Layer-owned software implementation of the applicable RADV algorithms/state machine |
-| Ray Query | Typed SPIR-V lowering to resumable traversal operations in the original shader stage |
-| RT Pipeline | Typed SPIR-V continuation/state-machine lowering into a compute program |
-| Continuation/runtime reference | D3D12RaytracingFallback and its DXC passes; Mesa NIR as a secondary reference |
-| OMM | Independent native-RT workstream; shared evaluator can be integrated later |
-
-```mermaid
-flowchart TD
-    A["Geometry and instances"] --> B["Mesa build algorithms"]
-    B --> C["Mesa build IR"]
-    C --> D["Portable BVH4 encoder"]
-    D --> E["Shared software traversal"]
-    E --> F["Ray Query lowering"]
-    E --> G["RTP continuation scheduler"]
-```
-
-The runtime ABI is layer-owned, not a copy of AMD's GPU address encoding or binary
-AS format. Use 64-bit checked byte-size/address arithmetic. Tagged node indices may
-remain 32-bit if their capacity covers the advertised requirements and indexing
-uses 64-bit multiplication. Bounds, original IDs, geometry flags, instance data,
-parent links, and update metadata have explicit versioned layouts.
-
-Mesa IR is not the final traversal format. The final implementation must not keep
-both the old D3D working tree and Mesa IR as permanent redundant traversal data.
-Retain only data required for the runtime and supported updates after construction.
-
-### Change from the earlier port contract
-
-The earlier exact D3D12 builder reproduction requirement is superseded by the
-explicit Mesa-build/BVH4 decision. Microsoft remains the architectural and
-behavioral reference for continuation lowering, the runtime, and relevant tests.
-Preserve source provenance and document adaptations. This does not reduce shader
-or Vulkan API coverage, and does not import upstream limitations such as missing
-callables or ignored dispatch depth as acceptable Vulkan behavior.
-
-The unpushed raw-Mesa-IR traversal experiment predating this goal is not the chosen
-runtime or a prerequisite to merge. Migrate intentionally from the committed
-baseline; do not accidentally publish that paused working tree.
+| Traversal representation | Portable BVH4 with FP32 child bounds |
+| Traversal | Layer-owned software implementation inspired by the RADV state machine |
+| RT Pipeline | Typed SPIR-V continuation/state-machine lowering into a compute program; the traversal GLSL is compiled into each stage |
+| OMM | Separate optional workstream; not part of this goal |
 
 ## Device and compatibility contract
 
-The initial implementation route targets 64-bit Vulkan devices with compute,
-buffer device address, shader integer capabilities, required storage access,
-layout, and memory-model features used by the selected shader variants. Pin the
-exact Vulkan/SPIR-V/Mesa revisions and determine this capability predicate from
-compiled SPIR-V and actual device queries before enabling support.
+Target 64-bit Vulkan 1.2+ devices with compute, buffer device address, scalar
+block layout, int8/16/64, storage8/16, Vulkan device-scope memory model,
+storage-buffer dynamic/NonUniform array indexing, variable storage-buffer
+pointers, compute subgroup basic/ballot and Vulkan 1.2 timestamps or core
+events. Feature/profile truth for AS/RTP and its mandatory limits is supplied
+by one software profile; unsupported optional RT features stay false and are
+rejected when requested.
 
-These are underlying-device prerequisites, not permission to reduce mandatory
-RT functionality below Vulkan's required limits. PLOC's original 1024-invocation
-workgroup or HPLOC's subgroup constraints must select eligible implementations;
-they must not silently become universal requirements if another correct builder
-can serve the device. Unsupported optional feature bits stay false until tested.
-
-The final layer must support legal applications at the limits it reports,
-including the applicable mandatory minimums. Current prototype limits are not a
-valid final contract. At minimum, audit geometry/instance/primitive counts,
-dispatch invocation count, AS descriptor counts, hit-attribute size, alignments,
-and recursion/stack behavior against the pinned specification.
-
-No spare descriptor set, storage-buffer slot, or push-constant space may be assumed
-for a general transparent path. Account for physical descriptor budgets when
-virtualizing AS bindings. Do not lower device limits below Vulkan guarantees to
-make room. Prove a resource-delivery strategy for fully occupied application
-layouts, with BDA context snapshots/layout virtualization or a documented semantic
-fallback. The concrete mechanism is an M0 proof obligation.
+Newer optional RT mechanisms may be excluded individually through documented
+capability masks; the layer must not advertise what it does not implement, and
+must not forward virtual AS/pipeline objects into native RT entry points.
 
 ## Required behavior
 
 ### Layer and API translation
 
-- Virtualize extension enumeration, feature/property/format queries, device
-  creation, dispatch lookup, and required dependency behavior consistently.
-- Strip emulated RT extension names, feature structures, buffer usages, stages,
-  access masks, and capabilities before calling a driver that lacks them.
-- Preserve compatible unrelated enabled features and `pNext` chains, application
-  allocator behavior, command state, threading and object lifetimes. Named newer
-  optional-extension incompatibilities follow the scope above.
-- Never forward virtual AS/pipeline tokens to native RT entry points. An unsupported
-  experimental path must fail explicitly rather than execute a logging-only stub.
-- Provide mandatory deferred-host-operation behavior for synchronous completion
-  where permitted; optional acceleration-structure host commands remain gated by
-  their actual feature support.
+- Virtualize extension enumeration, feature/property queries, device creation,
+  dispatch lookup, and required dependency behavior consistently.
+- Strip emulated AS/RTP extension names, feature structures, buffer usages,
+  stages, access masks and capabilities before calling a driver that lacks
+  them. Strip `VK_KHR_ray_query` as well; it is not implemented.
+- Preserve unrelated features, `pNext` chains, allocators, command state,
+  threading and object lifetimes.
+- Provide mandatory deferred-host-operation behavior where permitted; optional
+  host AS commands stay gated by their real support.
 
 ### Acceleration structures
 
 - Implement all mandatory device-side AS operations: size/address queries,
   BUILD/UPDATE, clone/compact, property queries, serialization/deserialization,
   compatibility, and their required lifecycle/synchronization behavior.
-- Support required input formats, indexed/nonindexed triangles, AABBs,
-  multi-geometry BLASes, instance arrays/pointer arrays, transforms, inactive
-  primitives/instances, masks, flags, original IDs, and BLAS reuse.
-- Use Mesa's common shader/argument contracts where practical. Replace private
-  `vk_device`, `vk_meta`, address-fill, and unaligned-dispatch helpers with ordinary
-  Vulkan operations and real bounds checks.
-- Implement size/scratch planning, initialization, pass synchronization, and
-  subgroup/workgroup capability selection for LBVH/PLOC/HPLOC and supported
-  32/64-bit Morton variants. Current Mesa sorting is bitonic plus hierarchical
-  merging; do not introduce a historical radix-sort dependency without need.
-- Preserve the PLOC task/phase sentinel initialization and HPLOC range-buffer
-  initialization. Porting the kernels without their host contracts is incomplete.
-- Implement UPDATE/refit separately for the selected runtime layout; invoking a
-  construction algorithm again does not by itself prove update semantics.
-- Use large-AS arithmetic and chunked dispatch without imposing an accidental
-  4 GiB byte-offset ceiling. Real allocation failure may return OOM; small
-  fabricated size bounds or truncated addresses are unacceptable.
+- Support indexed/nonindexed triangles, AABBs, multi-geometry BLASes, instance
+  arrays/pointer arrays, transforms, inactive primitives/instances, masks,
+  flags, original IDs, and BLAS reuse.
+- GPU CONVERT/CLONE/COMPACT, semantic UPDATE (topology-preserving refit),
+  serialization with public-BLAS relocation, and bounded property-query
+  publication are implemented on the shared BVH4 runtime.
+- Large-AS arithmetic and chunked dispatch must avoid an accidental 4 GiB
+  byte-offset ceiling.
 
-### Shared traversal and Ray Query
+### RT pipeline compiler and runtime
 
-- Implement conservative box tests and Vulkan-compatible triangle intersection,
-  including floating-point/edge invariants. Preserve procedural candidate behavior,
-  opacity precedence, face/primitive culling, and candidate/committed separation.
-- Adapt software algorithms rather than depending on AMD intersection instructions,
-  private address packing, hardware stacks, or undocumented descriptors.
-- Provide a bounded fast traversal stack plus a proven overflow strategy, such as
-  parent-based restart or spill. Silently dropping children on overflow is invalid.
-  Separate traversal state from the RTP continuation/call stack.
-- Lower every base Ray Query instruction and getter. Preserve the actual AS operand
-  for each query, including multiple bindings, descriptor arrays/dynamic indexing,
-  legal control-flow/function passage, and integer-to-AS conversion.
-- Preserve multiple simultaneously live queries, arrays, reinitialization,
-  Confirm/Generate/Terminate, all getters, and required shader stages.
-- Access large AS storage through BDA or equivalent scalable addressing; requiring
-  the entire AS to fit a storage-buffer descriptor range is not the final design.
-
-### RT shader compiler and runtime
-
-- Replace the SPIRV-Cross/GLSL regex path with a typed transformation over validated
-  SPIR-V. Preserve entry points, specialization constants, types, resources, and
-  legal shader instructions supported by the exposed capability contract.
-- Generate resumable states for `TraceRay`, `ReportIntersection`, `ExecuteCallable`,
-  and transitive suspending helper calls. Implement Phi-edge liveness, typed frame
-  layouts, spills/rematerialization, return values, and control-flow restoration.
-- Preserve mutable function-local storage and alias lifetimes across suspension.
-  Opaque images/samplers/AS values require provenance and rematerialization, not
-  arbitrary byte spills or invalid pointer casts.
-- Implement all six base RT shader stages, arbitrary legal payload/attribute/callable
-  layouts, hit kinds/builtins, nested traces, callable dispatch, and 3D launch IDs.
-- Implement Any-Hit/Intersection suspension and return behavior, including
-  IgnoreIntersection, TerminateRay, and ReportIntersection's returned acceptance.
-- Preserve SBT indexing, group handles, original shader-record data, multiple raygen
-  groups, pipeline library interactions, stack queries/control, and pipeline caches.
-- Do not implement recursion by unrolling shader calls to a selected fixed depth.
-  Advertised recursion and stack behavior must follow the implemented runtime.
-- Do not assume SPIR-V to NIR to SPIR-V is a ready-made backend: adopting it would
-  require an executable resource/RT-ABI round-trip proof and an explicit decision.
+- Preserve entry points, specialization constants, types, resources and legal
+  shader instructions through a typed transformation of validated SPIR-V.
+- Generate resumable states for `TraceRay`, `ReportIntersection`,
+  `ExecuteCallable`, and transitive suspending helper calls; implement Phi-edge
+  liveness, typed frames, spills/rematerialization, return values and CFG
+  restoration.
+- Implement all six base RT stages, legal payload/attribute/callable layouts,
+  hit kinds/builtins, nested traces, callable dispatch and 3D launch IDs.
+- Preserve SBT indexing, group handles, record data, pipeline libraries,
+  stack queries and pipeline caches.
+- Do not unroll recursion to a fixed depth.
 
 ### Synchronization and execution
 
-Translate RT/AS dependencies to the actual compute/transfer/instrumented-shader
-accesses, including barriers, events, semaphores, ownership, query availability,
-and valid cross-queue use. Preserve application graphics/compute state around
-internal work and valid command-buffer reuse, secondary buffers, concurrent
-recording/submission, and GPU-generated inputs. Avoid CPU readback or queue-idle
-waits as an architectural requirement.
-
-Optional capture/replay, indirect commands, descriptor-buffer and shader-object
-interactions, position fetch, and additional RT extensions require explicit
-capability entries and tests where exposed. They may be declared unsupported
-within this delivery. Do not silently forward an incompatible path merely because
-the base driver supports an unrelated extension.
+Translate RT/AS dependencies to the actual compute/transfer/shader accesses,
+including barriers, events, semaphores, ownership, query availability and
+cross-queue use. Preserve application state around internal work, command
+buffer reuse, secondary buffers and concurrent recording.
 
 ## Milestones and exit criteria
 
 | Milestone | Deliverable and exit criterion |
 | --- | --- |
-| M0: prove the architecture | Mandatory-limit/capability audit; full-layout resource transport; no-native-RT device creation/dispatch; typed continuation stress proof; versioned BVH4/addressing contract |
-| M1: shared AS backend | Mesa build variants to BVH4, GPU encode/refit, structural and numerical reference checks, original-ID/lifetime correctness |
-| M2: complete Ray Query | All base opcodes and AS-value paths; query state/opacity/procedural/overflow tests; shared AS consumed in real shaders |
-| M3: complete RT Pipeline | Typed continuation compiler and integrated scheduler; all six stages, callable/procedural/recursive shaders, payloads/SBT/stack coverage |
-| M4: API and integration | Mandatory AS copy/query/serialization, device/descriptor/pipeline translation, synchronization and lifecycle matrix |
-| M5: qualification | Applicable CTS and regression matrix, physical no-RT GPU runs, supported platforms, independent expected results, truthful capability reporting |
+| M0: prove the architecture | Capability/limit audit; full-layout resource transport; no-native-RT device creation/dispatch; typed continuation stress proof; versioned BVH4/addressing contract |
+| M1: shared AS backend | Mesa build variants to BVH4, GPU encode/refit, structural and numerical checks, original-ID/lifetime correctness |
+| M2: complete RT pipeline | Typed continuation compiler and integrated scheduler; all six stages, callable/procedural/recursive shaders, payloads/SBT/stack coverage |
+| M3: API and integration | Mandatory AS copy/query/serialization, device/descriptor/pipeline translation, synchronization and lifecycle matrix |
+| M4: qualification | Applicable AS/RTP CTS and regression matrix, physical no-RT GPU runs, supported platforms, truthful capability reporting |
 
-M0 mechanisms may be developed in parallel with M1/M2 component work, but M0 is
-not complete until its full proof set passes. A CPU encoder is a reference and
-layout-validation tool; it does not satisfy the GPU encoding or shared integration
-milestones.
-
-The initial [BVH4 reference foundation](../layers/raytracing/docs/BVH4.md)
-provides the experimental C-compatible ABI, checked size planner, CPU encoder,
-and structural tests. It is intentionally labelled as component work until the
-GPU producers and both consumers adopt it.
+Milestones are complete only after their exit criteria are demonstrated. A CPU
+encoder, one working shader pattern, or a passing CTS slice does not complete a
+milestone.
 
 ## Verification surface
 
-### External CTS delivery evidence
-
-Delivery must include attempts to run the applicable Vulkan ray-tracing CTS from
-the user's `D:\Codes\VK-GL-CTS` checkout, rather than relying only on tests
-authored in this repository. Run feasible AS, Ray Query and RT Pipeline subsets
-through the actual layer, and expand coverage as implementation progresses.
-Running the entire CTS or obtaining an all-pass result is not a prerequisite for
-reporting delivery progress. Record the CTS source
-revision, executable/build configuration, selected case lists, device/driver,
-layer/ICD configuration, exact commands and raw logs, with passed/failed/skipped/
-crashed/not-run counts and reasons. Native-driver control results must remain
-distinct from fallback results; an unsupported skip is not a fallback pass.
-Use failures to choose implementation work and retain reproducible evidence.
-This supplements, and does not relax, the complete mandatory functionality goal
-or the final M5 qualification requirements.
-
-- **No-native-RT execution:** test on an ICD/capture boundary that rejects native
-  AS/RQ/RTP features and operations, even when a developer GPU has hardware RT.
-  Inspect every downstream call and generated SPIR-V. Also qualify a physical
-  device without RT. Lavapipe alone is not cross-vendor qualification.
-- **Builder/runtime:** independently check graph structure, leaf coverage, bounds,
-  original IDs and transforms for empty/singleton/duplicate/inactive inputs,
-  unbalanced trees, multiple geometries, >4 GiB layout arithmetic, update and copy.
-  Force each supported build/key/subgroup variant and the traversal-overflow path.
-- **RQ:** test all base instructions; two different TLASes selected in one shader,
-  indexed descriptors, helper/control-flow AS passage, multiple live queries,
-  AABB opacity, candidate/committed state, and each supported native shader stage.
-- **Compiler/RTP:** stripped debug names; nested structs/matrices/arrays and multiple
-  payload locations; Phi loops; local pointer aliases; opaque values across
-  suspension; helper TraceRay/ReportIntersection; callable and nested traces;
-  hit side effects; null groups; GPU-generated SBT data where enabled.
-- **API/resources:** every mandatory entry point, query result modes,
-  serialization relocation, allocation failure, allocator callbacks,
-  command-state restoration, synchronization and resource-limit cases.
-- **Evidence:** keep reproducible build/test commands and per-revision results.
-  Compare unambiguous scenes exactly and specification-allowed result sets where
-  candidate ordering or numerical boundaries permit variation. Native differential
-  results supplement independent oracles; they are not the only correctness test.
-
-Use sanitizers and SPIR-V validation for compiler/layout code, downstream Vulkan
-validation for translated commands, and applicable CTS plus dedicated regressions.
-Local test success alone is not a formal Vulkan conformance claim.
+- External CTS from the user's `D:\Codes\VK-GL-CTS` checkout: run applicable
+  `dEQP-VK.ray_tracing_pipeline` and `dEQP-VK.acceleration_structure` subsets.
+  `dEQP-VK.ray_query.*` cases are out of scope.
+- No-native-RT execution: a boundary that rejects native AS/RTP features and
+  operations, plus a physical device without RT. Lavapipe alone is not
+  cross-vendor qualification.
+- Builder/runtime: graph structure, leaf coverage, bounds, original IDs,
+  transforms for empty/singleton/duplicate/inactive inputs, unbalanced trees,
+  multiple geometries, >4 GiB arithmetic, update and copy.
+- Compiler/RTP: stripped debug names, aggregates, Phi loops, pointer aliases,
+  opaque values across suspension, helper TraceRay/ReportIntersection,
+  callable and nested traces, hit side effects, null groups, GPU-generated SBT.
+- API/resources: every mandatory entry point, query modes, serialization
+  relocation, allocation failure, allocator callbacks, command-state
+  restoration, synchronization and resource limits.
+- Keep reproducible commands and per-revision results; retain failures, skips
+  and unrun cases with reasons. A skipped case is not a pass.
 
 ## Iteration and stop policy
 
-Choose the next work item from demonstrated gaps and failed proof gates. Preserve
-passing behavior, update the status/evidence record, and continue toward the full
-goal. Keep unrelated layers and the independent native-RT OMM branch out of scope.
-Do not merge the development branch or change published support claims solely to
-close a milestone.
-
-If a proof fails, investigate alternatives within the public-Vulkan contract.
-If no defensible path remains, report the exact blocker, attempted alternatives,
-evidence, and the input/capability required to proceed. A blocked or budget-limited
-iteration is not goal completion.
+Choose the next work item from demonstrated gaps and failed proof gates.
+Record the result, update the status page, and continue toward the full goal.
+Do not merge the development branch or change support claims to close a
+milestone. If a proof fails, investigate alternatives within the public-Vulkan
+contract; if none remains, report the blocker with its evidence.
 
 ## References
 
-- [Baseline audit and feasibility review](ray_tracing_fallback_review.md)
-- [D3D12 source provenance and historical port record](ray_tracing_fallback_port.md)
-- [Current RTP executable limitations](ray_tracing_fallback_layer.md)
-- [Current RQ executable limitations](../layers/raytracing/README.md)
-- [Vulkan required limits](https://docs.vulkan.org/refpages/latest/refpages/source/Required_Limits.html)
-- [Ray traversal specification](https://docs.vulkan.org/spec/latest/chapters/raytraversal.html)
-- [SPV_KHR_ray_query](https://github.khronos.org/SPIRV-Registry/extensions/KHR/SPV_KHR_ray_query.html)
+- [Current status](ray_tracing_fallback_status.md)
+- [Baseline review](ray_tracing_fallback_review.md)
+- [D3D12 source provenance](ray_tracing_fallback_port.md)
+- [Vulkan ray traversal specification](https://docs.vulkan.org/spec/latest/chapters/raytraversal.html)
 - [SPV_KHR_ray_tracing](https://github.khronos.org/SPIRV-Registry/extensions/KHR/SPV_KHR_ray_tracing.html)
-- [Pinned Mesa common builder](https://github.com/chaotic-cx/mesa-mirror/blob/837ab0e30740abb9ebb60bcd40a5114c68c673d9/src/vulkan/runtime/vk_acceleration_structure.c)
-- [Pinned RADV software traversal reference](https://github.com/chaotic-cx/mesa-mirror/blob/837ab0e30740abb9ebb60bcd40a5114c68c673d9/src/amd/vulkan/nir/radv_nir_rt_common.c)
+- [Pinned Mesa builder](https://github.com/chaotic-cx/mesa-mirror/blob/837ab0e30740abb9ebb60bcd40a5114c68c673d9/src/vulkan/runtime/vk_acceleration_structure.c)

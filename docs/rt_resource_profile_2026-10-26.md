@@ -245,4 +245,5 @@ Evidence:
 - `build-resource-profile/dsl-lifetime-retained-compute.log` (retained native compute control)
 
 These are resource-boundary proofs, not substitutes for Vulkan CTS. CTS progress
-and the remaining RT goal are tracked in `rt_cts_typed_runtime_2026-10-26.md`.
+and the remaining RT goal are tracked in the current status page; the former
+typed-runtime checkpoint was removed with the Ray Query pivot.

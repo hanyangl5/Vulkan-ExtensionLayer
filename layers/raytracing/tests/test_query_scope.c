@@ -14,7 +14,7 @@ static VkResult scope_create_device(VkPhysicalDevice, const VkDeviceCreateInfo *
 #define vkCreateInstance scope_create_instance
 #define vkCreateDevice scope_create_device
 #define VKRT_TEST_FIXTURE_ONLY
-#include "00_single_tri/main.c"
+#include "gpu_harness.h"
 #undef vkCreateInstance
 #undef vkCreateDevice
 

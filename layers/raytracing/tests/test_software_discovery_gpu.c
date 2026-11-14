@@ -28,9 +28,8 @@ static VKAPI_ATTR VkBool32 VKAPI_CALL validation(VkDebugUtilsMessageSeverityFlag
     }
     return VK_FALSE;
 }
-static const char *extensions[] = {VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME, VK_KHR_RAY_QUERY_EXTENSION_NAME,
-                                   VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME, VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME,
-                                   VK_KHR_PIPELINE_LIBRARY_EXTENSION_NAME};
+static const char *extensions[] = {VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME, VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME,
+                                   VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME, VK_KHR_PIPELINE_LIBRARY_EXTENSION_NAME};
 static const char *commands[] = {"vkCreateAccelerationStructureKHR",
                                  "vkDestroyAccelerationStructureKHR",
                                  "vkCmdBuildAccelerationStructuresKHR",
@@ -132,12 +131,11 @@ int main(int argc, char **argv) {
         if (!extension_support(devices[i], requested_count, requested)) continue;
         VkPhysicalDeviceRayTracingPipelineFeaturesKHR rtp = {
             .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_FEATURES_KHR};
-        VkPhysicalDeviceRayQueryFeaturesKHR rq = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_QUERY_FEATURES_KHR, .pNext = &rtp};
         VkPhysicalDeviceAccelerationStructureFeaturesKHR as = {
-            .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_FEATURES_KHR, .pNext = &rq};
+            .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_FEATURES_KHR, .pNext = &rtp};
         VkPhysicalDeviceFeatures2 features = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2, .pNext = &as};
         vkGetPhysicalDeviceFeatures2(devices[i], &features);
-        if (!as.accelerationStructure || (!as_only && (!rq.rayQuery || !rtp.rayTracingPipeline))) continue;
+        if (!as.accelerationStructure || (!as_only && !rtp.rayTracingPipeline)) continue;
         VkFormatProperties format;
         vkGetPhysicalDeviceFormatProperties(devices[i], VK_FORMAT_R32G32B32_SFLOAT, &format);
         if (!(format.bufferFeatures & VK_FORMAT_FEATURE_ACCELERATION_STRUCTURE_VERTEX_BUFFER_BIT_KHR)) continue;
@@ -181,11 +179,9 @@ int main(int argc, char **argv) {
                 rt.shaderGroupHandleAlignment == 32 && !rt.shaderGroupHandleCaptureReplaySize && rt.maxRayHitAttributeSize == 32);
     VkPhysicalDeviceRayTracingPipelineFeaturesKHR enable_rt = {
         .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_FEATURES_KHR, .rayTracingPipeline = VK_TRUE};
-    VkPhysicalDeviceRayQueryFeaturesKHR enable_rq = {
-        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_QUERY_FEATURES_KHR, .pNext = &enable_rt, .rayQuery = VK_TRUE};
     VkPhysicalDeviceAccelerationStructureFeaturesKHR enable_as = {
         .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_FEATURES_KHR,
-        .pNext = as_only ? NULL : &enable_rq,
+        .pNext = as_only ? NULL : &enable_rt,
         .accelerationStructure = VK_TRUE};
     float priority = 1;
     VkDeviceQueueCreateInfo queue = {.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO,

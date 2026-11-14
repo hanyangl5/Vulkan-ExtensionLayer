@@ -8,7 +8,7 @@ removed during source consolidation. The commands and source descriptions below
 refer to their original revisions, available in Git history. Use the current
 [unified implementation](../layers/raytracing/README.md) for builds and execution.
 
-The active target is [complete mandatory Vulkan AS/RQ/RTP fallback](ray_tracing_fallback_goal.md), using Mesa construction, a shared portable BVH4 runtime, and typed SPIR-V continuation lowering. See the [baseline feasibility review](ray_tracing_fallback_review.md). The complete fallback is not finished.
+The active target is [complete mandatory Vulkan AS + RT Pipeline fallback](ray_tracing_fallback_goal.md), using Mesa construction, a shared portable BVH4 runtime, and typed SPIR-V continuation lowering. Ray Query is outside that contract on the `codex/ray-tracing-pipeline-only` branch. See the [baseline feasibility review](ray_tracing_fallback_review.md). The complete fallback is not finished.
 
 This page records the executable RTP prototype and its limitations at baseline `f18c40d3`. Its D3D-derived builder and direct-call shader path are migration sources, not the final selected architecture. The [D3D12 port record](ray_tracing_fallback_port.md) preserves historical source and component-test evidence.
 

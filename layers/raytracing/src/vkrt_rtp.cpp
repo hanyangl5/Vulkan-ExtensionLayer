@@ -722,7 +722,6 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateRayTracingPipelinesKHR(VkDevice device, VkD
                 for (auto g : p->groups) Need(!g.pNext && !g.pShaderGroupCaptureReplayHandle);
                 TypedContinuationCompileOptions compile_options;
                 compile_options.transport = TypedFrameTransport::PhysicalAddress;
-                compile_options.ray_query_as_context = vkrt_as_registry_address(d);
                 for (uint32_t s = 0; s < ci.stageCount; ++s) {
                     const auto &stage = ci.pStages[s];
                     Need(!stage.pNext && !stage.flags && stage.pName);

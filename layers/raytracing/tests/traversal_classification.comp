@@ -4,7 +4,7 @@
  * No native ray-query or acceleration-structure capability is required.
  */
 #version 460
-#include "sw_ray_query.glsl"
+#include "sw_traversal.glsl"
 
 layout(local_size_x = 1) in;
 layout(set = 0, binding = 1, std430) buffer Results { uvec4 values[]; } result;
@@ -31,21 +31,21 @@ void main()
       return;
    }
    if (index >= 30u) {
-      sw_ray_query_state q;
+      sw_traversal_state q;
       q.as_address = index == 30u ? pc.deep_tlas : pc.resume_tlas;
       q.ray = sw_setup_ray(vec3(0,0,10), vec3(0,0,-1));
       q.ray_flags = 0u;
       q.cull_mask = 255u;
       q.tmin = 0.0;
       q.tclosest = 100.0;
-      sw_ray_query_initialize_data(q);
+      sw_traversal_initialize_data(q);
       uint candidates = 0u, observed = 0u;
-      while (sw_ray_query_proceed(q) && candidates < 10u) {
+      while (sw_traversal_proceed(q) && candidates < 10u) {
          uint primitive = q.candidate.primitive_index;
          observed = index == 30u ? primitive : observed | (1u << primitive);
          /* Reject the first candidate; then Confirm changes the interval
           * after Proceed already saved its next sibling cursor. */
-         if (index == 31u && candidates != 0u) sw_ray_query_confirm(q);
+         if (index == 31u && candidates != 0u) sw_traversal_confirm(q);
          ++candidates;
       }
       result.values[index] = index == 30u ? uvec4(candidates, observed, 0u, 0u) :
@@ -53,7 +53,7 @@ void main()
       return;
    }
    uvec4 test_case = input_cases.values[index];
-   sw_ray_query_state q;
+   sw_traversal_state q;
    q.as_address = pc.tlas;
    q.ray_flags = test_case.y;
    q.current_instance = (3u << 30u);

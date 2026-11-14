@@ -15,7 +15,7 @@ static VkResult arena_device(VkPhysicalDevice, const VkDeviceCreateInfo *, const
 #define vkCreateInstance arena_instance
 #define vkCreateDevice arena_device
 #define VKRT_TEST_FIXTURE_ONLY
-#include "00_single_tri/main.c"
+#include "gpu_harness.h"
 #undef vkCreateInstance
 #undef vkCreateDevice
 

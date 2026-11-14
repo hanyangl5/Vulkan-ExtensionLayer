@@ -1,8 +1,7 @@
 // Copyright 2026 The Khronos Group Inc.
 // SPDX-License-Identifier: Apache-2.0
 #include "typed_pipeline.h"
-#include "vkrt_spirv_lower.h"
-#include "sw_ray_query.spv.h"
+#include "vkrt_spirv_support.h"
 #include "spirv_environment.h"
 #include "spirv_memory_model.h"
 #include <spirv-tools/libspirv.hpp>
@@ -435,40 +434,6 @@ Words SelectShaderEntry(const Words &source, const std::string &entry, VkShaderS
     return cleaned;
 }
 
-struct DescriptorSource {
-    uint32_t variable, descriptor_set, binding;
-    bool acceleration_structure;
-};
-std::vector<DescriptorSource> DescriptorSources(const Words &source) {
-    std::set<uint32_t> as_types;
-    std::map<uint32_t, uint32_t> variables, sets, bindings;
-    for (size_t p = 5; p < source.size(); p += source[p] >> 16) {
-        const auto op = source[p] & 65535;
-        if (op == spv::OpTypeAccelerationStructureKHR ||
-            ((op == spv::OpTypeArray || op == spv::OpTypeRuntimeArray) && as_types.count(source[p + 2])) ||
-            (op == spv::OpTypePointer && as_types.count(source[p + 3])))
-            as_types.insert(source[p + 1]);
-        if (op == spv::OpVariable) variables.emplace(source[p + 2], source[p + 1]);
-        if (op == spv::OpDecorate && source[p + 2] == spv::DecorationDescriptorSet) sets[source[p + 1]] = source[p + 3];
-        if (op == spv::OpDecorate && source[p + 2] == spv::DecorationBinding) bindings[source[p + 1]] = source[p + 3];
-    }
-    std::vector<DescriptorSource> result;
-    for (const auto &[variable, type] : variables)
-        if (sets.count(variable) && bindings.count(variable))
-            result.push_back({variable, sets.at(variable), bindings.at(variable), as_types.count(type) != 0});
-    return result;
-}
-Words LowerStageQueries(const Words &source, uint64_t context) {
-    uint32_t *output = nullptr;
-    size_t count = 0;
-    char error[512]{};
-    const auto result = vkrt_spirv_lower_rt_with_context(source.data(), source.size(), vkrt_spv_traversal,
-                                                         sizeof(vkrt_spv_traversal) / sizeof(uint32_t), context, &output, &count,
-                                                         error, sizeof(error));
-    std::unique_ptr<uint32_t, decltype(&vkrt_spirv_lower_free)> owner(output, vkrt_spirv_lower_free);
-    Require(result == 0, std::string("stage Ray Query lowering failed: ") + error);
-    return {output, output + count};
-}
 }  // namespace
 
 Words SelectNativeShaderEntry(const Words &source, const std::string &entry, VkShaderStageFlagBits stage) {
@@ -502,31 +467,12 @@ TypedContinuationProgram CompileTypedPipelineStage(const Words &source, const st
     options.emit_compute_entry = false;
     options.step_export_name = export_name;
     auto selected = Specialize(source, specialization);
-    auto has_queries = [](const Words &words) {
-        for (size_t p = 5; p < words.size(); p += words[p] >> 16)
-            if ((words[p] & 65535) == spv::OpTypeRayQueryKHR) return true;
-        return false;
-    };
-    if (has_queries(selected)) selected = SelectShaderEntry(selected, entry, stage);
-    if (!has_queries(selected)) return CompileTypedContinuationSteps(selected, entry, Model(stage), options);
-
-    // The query object becomes the shared traversal's ordinary typed state
-    // before continuation planning, so every live query survives suspension.
-    // Descriptor values are lowered once; TraceRay retains its typed AS bridge.
-    const auto original_descriptors = DescriptorSources(selected);
-    selected = LowerStageQueries(selected, options.ray_query_as_context);
-    auto program = CompileTypedContinuationSteps(selected, entry, Model(stage), options);
-    // RQ already translated AS descriptors to address-cell SSBOs. Preserve
-    // their semantic classification with the final source IDs, not stale IDs
-    // from the pre-link source or traversal library.
-    for (const auto &descriptor : DescriptorSources(program.source))
-        if (std::any_of(original_descriptors.begin(), original_descriptors.end(), [&](const auto &original) {
-                return original.acceleration_structure && original.descriptor_set == descriptor.descriptor_set &&
-                       original.binding == descriptor.binding;
-            }))
-            program.acceleration_structure_descriptors.push_back(
-                {descriptor.variable, descriptor.descriptor_set, descriptor.binding});
-    return program;
+    // Ray query is outside the delivered contract: the layer advertises neither
+    // VK_KHR_ray_query nor a consuming-stage lowering path, so an RT stage that
+    // still declares a query type is rejected instead of being half-compiled.
+    for (size_t p = 5; p < selected.size(); p += selected[p] >> 16)
+        Require((selected[p] & 65535) != spv::OpTypeRayQueryKHR, "ray query is not supported by this layer");
+    return CompileTypedContinuationSteps(selected, entry, Model(stage), options);
 }
 
 TypedContinuationProgram RenameTypedPipelineStage(const TypedContinuationProgram &stage, const std::string &export_name) {

@@ -2,9 +2,7 @@
  * SPDX-License-Identifier: MIT
  * Two logical devices with different public RT profiles share binary identity.
  */
-#define main shader_object_triangle_fixture_main
-#include "test_shader_object_rq.c"
-#undef main
+#include "shader_object_harness.h"
 struct context {
     VkDevice device;
     VkQueue queue;

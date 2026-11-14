@@ -25,7 +25,7 @@ manifest, retaining commands, stdout, session identity and QPA results.
 | Initial execution selection | 32 | 14 | 46 | 2 matching NotSupported |
 | Final complete execution rerun | 46 | 0 | 46 | 2 matching NotSupported |
 
-The exact [52-case selection](rt_cts_state_spill_cases.txt) includes the previous
+The exact 52-case selection (case list removed with the Ray Query pivot) includes the previous
 20 cases plus 16/64-bit aggregates, null/undefined values, pipeline interfaces
 and opaque resource values across TraceRay, ExecuteCallable and
 ReportIntersection. All 13 initial failures reject opaque image/sampler/combined
@@ -34,7 +34,7 @@ implementation failures, not skips or native-driver failures. The original
 results remain in `build-rt-cts-evidence/rtp-state-spill-initial/summary.json`;
 the matching native control is `rtp-state-spill-native/summary.json`.
 
-The independent [48-case execution selection](rt_cts_execution_cases.txt) covers
+The independent 48-case execution selection (case list removed with the Ray Query pivot) covers
 traversal dispositions, specialization, nested callables, memory guarantees,
 shader records, recursion and SBT alignment. Both complete final runs use the
 same layer snapshot, SHA-256

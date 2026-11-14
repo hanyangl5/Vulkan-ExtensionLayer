@@ -79,9 +79,6 @@ struct TypedContinuationCompileOptions {
     // Standalone BDA wrapper only: specialization values supply the low/high
     // uint32 words of an immutable per-dispatch context address.
     uint32_t context_root_low_spec_id = 0, context_root_high_spec_id = 1;
-    // Pipeline frontend: device-owned shared AS resolver for Ray Query used
-    // inside RT stages. Zero remains useful for offline compilation only.
-    uint64_t ray_query_as_context = 0;
 };
 struct TypedBuiltinVariable {
     uint32_t variable, type, builtin, byte_offset, byte_size;

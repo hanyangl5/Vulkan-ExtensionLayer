@@ -4,8 +4,8 @@
  * rules retain their Avalon provenance. No Mesa private runtime layout is used.
  */
 
-#ifndef SW_RAY_QUERY_GLSL
-#define SW_RAY_QUERY_GLSL
+#ifndef SW_TRAVERSAL_GLSL
+#define SW_TRAVERSAL_GLSL
 
 #extension GL_EXT_buffer_reference : require
 #extension GL_EXT_buffer_reference2 : require
@@ -97,7 +97,7 @@ struct sw_hit {
    uint  instance_node;
 };
 
-struct sw_ray_query_state {
+struct sw_traversal_state {
    uint64_t as_address; /* Actual AS value, independent for every query. */
    sw_ray  ray;
    float   tmin;
@@ -125,7 +125,7 @@ struct sw_ray_query_state {
     * pointer, including scalars. A call site this layer synthesises from
     * an OpRayQuery* instruction only has values, and a Function-class
     * temporary cannot be created at a global scope. So every sw_*
-    * entry point takes a single `inout sw_ray_query_state` and reads any
+    * entry point takes a single `inout sw_traversal_state` and reads any
     * further argument from here, which the SPIR-V rewrite stores first.
     */
    float   gen_thit;        /* GenerateIntersection(thit)          */
@@ -496,7 +496,7 @@ sw_ray_tri_test(vec3 v0, vec3 v1, vec3 v2,
 /* ------------------------------------------------------------------ */
 
 bool
-sw_test_triangle_leaf(inout sw_ray_query_state q,
+sw_test_triangle_leaf(inout sw_traversal_state q,
                       uint leaf_handle,
                       uint flags,
                       uint instance_id,
@@ -561,7 +561,7 @@ sw_test_triangle_leaf(inout sw_ray_query_state q,
 }
 
 bool
-sw_test_aabb_leaf(inout sw_ray_query_state q,
+sw_test_aabb_leaf(inout sw_traversal_state q,
                   uint leaf_handle,
                   uint flags,
                   uint instance_id,
@@ -607,7 +607,7 @@ bool sw_make_object_ray(uint64_t base, uint instance, sw_ray world, out sw_ray o
    return true;
 }
 
-bool sw_bottom_traversal(inout sw_ray_query_state q) {
+bool sw_bottom_traversal(inout sw_traversal_state q) {
    uint64_t instance = vel_rt_bvh4_leaf(q.as_address, q.current_instance);
    uint custom_and_mask = blas_u32(instance, 2u);
    if (((custom_and_mask >> 24) & q.cull_mask) == 0u) return false;
@@ -643,7 +643,7 @@ bool sw_bottom_traversal(inout sw_ray_query_state q) {
    return false;
 }
 
-bool sw_ray_query_proceed(inout sw_ray_query_state q) {
+bool sw_traversal_proceed(inout sw_traversal_state q) {
    if (q.cull_mask == 0u) return false;
    q.intersection_type = SW_CAND_NONE;
    for (;;) {
@@ -680,10 +680,10 @@ bool sw_ray_query_proceed(inout sw_ray_query_state q) {
 
 /* Every argument arrives through q: the SPIR-V rewrite has already
  * stored them into q.as, q.ray_flags, q.cull_mask, q.ray.origin,
- * q.ray.direction, q.tmin and q.tclosest. See sw_ray_query_state for
+ * q.ray.direction, q.tmin and q.tclosest. See sw_traversal_state for
  * why the signature is a single `inout q`. */
 void
-sw_ray_query_initialize_data(inout sw_ray_query_state q)
+sw_traversal_initialize_data(inout sw_traversal_state q)
 {
    q.ray.inv_direction = 1.0 / q.ray.direction;
 
@@ -698,13 +698,13 @@ sw_ray_query_initialize_data(inout sw_ray_query_state q)
 
 /* Public AS operands are opaque aligned values, not physical buffer BDAs.
  * Only this boundary resolves them; the traversal core consumes BVH4 data. */
-void sw_ray_query_initialize(inout sw_ray_query_state q) {
+void sw_traversal_initialize(inout sw_traversal_state q) {
    q.as_address = vel_rt_resolve_as(vkrt_as_registry_context, q.as_address);
-   sw_ray_query_initialize_data(q);
+   sw_traversal_initialize_data(q);
 }
 
 void
-sw_ray_query_confirm(inout sw_ray_query_state q)
+sw_traversal_confirm(inout sw_traversal_state q)
 {
    if (q.intersection_type == SW_CAND_TRIANGLE &&
        q.candidate.distance <= q.tclosest) {
@@ -720,7 +720,7 @@ sw_ray_query_confirm(inout sw_ray_query_state q)
 }
 
 void
-sw_ray_query_generate_intersection(inout sw_ray_query_state q)
+sw_traversal_generate_intersection(inout sw_traversal_state q)
 {
    float thit = q.gen_thit;
    if (q.intersection_type == SW_CAND_AABB &&
@@ -735,13 +735,13 @@ sw_ray_query_generate_intersection(inout sw_ray_query_state q)
 }
 
 void
-sw_ray_query_terminate(inout sw_ray_query_state q)
+sw_traversal_terminate(inout sw_traversal_state q)
 {
    q.cull_mask = 0u;
 }
 
 uint
-sw_get_intersection_type(inout sw_ray_query_state q)
+sw_get_intersection_type(inout sw_traversal_state q)
 {
    if (q.want_committed != 0u)
       return q.committed_intersection_type;   /* 0 none, 1 tri, 2 generated */
@@ -752,65 +752,65 @@ sw_get_intersection_type(inout sw_ray_query_state q)
 }
 
 float
-sw_get_intersection_t(inout sw_ray_query_state q)
+sw_get_intersection_t(inout sw_traversal_state q)
 {
    return (q.want_committed != 0u) ? q.committed.distance : q.candidate.distance;
 }
 
 vec2
-sw_get_intersection_barycentrics(inout sw_ray_query_state q)
+sw_get_intersection_barycentrics(inout sw_traversal_state q)
 {
    return (q.want_committed != 0u) ? q.committed.barycentrics : q.candidate.barycentrics;
 }
 
 int
-sw_get_intersection_primitive_index(inout sw_ray_query_state q)
+sw_get_intersection_primitive_index(inout sw_traversal_state q)
 {
    return int((q.want_committed != 0u) ? q.committed.primitive_index
                              : q.candidate.primitive_index);
 }
 
 int
-sw_get_intersection_geometry_index(inout sw_ray_query_state q)
+sw_get_intersection_geometry_index(inout sw_traversal_state q)
 {
    return int((q.want_committed != 0u) ? q.committed.geometry_index
                              : q.candidate.geometry_index);
 }
 
 int
-sw_get_intersection_instance_id(inout sw_ray_query_state q)
+sw_get_intersection_instance_id(inout sw_traversal_state q)
 {
    return int((q.want_committed != 0u) ? q.committed.instance_id : q.candidate.instance_id);
 }
 
 int
-sw_get_intersection_instance_custom_index(inout sw_ray_query_state q)
+sw_get_intersection_instance_custom_index(inout sw_traversal_state q)
 {
    return int((q.want_committed != 0u) ? q.committed.instance_custom_index
                              : q.candidate.instance_custom_index);
 }
 
 uint
-sw_get_intersection_instance_sbt_offset(inout sw_ray_query_state q)
+sw_get_intersection_instance_sbt_offset(inout sw_traversal_state q)
 {
    uint node = q.want_committed != 0u ? q.committed.instance_node : q.candidate.instance_node;
    return blas_u32(vel_rt_bvh4_leaf(q.as_address, node), 3u) & 0x00ffffffu;
 }
 
 bool
-sw_get_intersection_front_face(inout sw_ray_query_state q)
+sw_get_intersection_front_face(inout sw_traversal_state q)
 {
    return (q.want_committed != 0u) ? q.committed.front_face : q.candidate.front_face;
 }
 
 bool
-sw_get_intersection_candidate_aabb_opaque(inout sw_ray_query_state q)
+sw_get_intersection_candidate_aabb_opaque(inout sw_traversal_state q)
 {
    return q.candidate.opaque;
 }
 
 uint
-sw_get_intersection_hit_kind(inout sw_ray_query_state q)
+sw_get_intersection_hit_kind(inout sw_traversal_state q)
 {
    bool committed = (q.want_committed != 0u);
    /* Avalon has no hit-kind; synthesise it from front-face (see the
@@ -826,15 +826,15 @@ sw_get_intersection_hit_kind(inout sw_ray_query_state q)
 }
 
 vec3
-sw_get_world_ray_origin(inout sw_ray_query_state q)    { return q.ray.origin; }
-vec3 sw_get_object_ray_origin(inout sw_ray_query_state q)
+sw_get_world_ray_origin(inout sw_traversal_state q)    { return q.ray.origin; }
+vec3 sw_get_object_ray_origin(inout sw_traversal_state q)
 {
    uint node = q.want_committed != 0u ? q.committed.instance_node : q.candidate.instance_node;
    sw_ray obj;
    sw_make_object_ray(q.as_address, node, q.ray, obj);
    return obj.origin;
 }
-vec3 sw_get_object_ray_direction(inout sw_ray_query_state q)
+vec3 sw_get_object_ray_direction(inout sw_traversal_state q)
 {
    uint node = q.want_committed != 0u ? q.committed.instance_node : q.candidate.instance_node;
    sw_ray obj;
@@ -849,19 +849,19 @@ mat4x3 sw_instance_matrix(uint64_t base, uint instance, uint byte_offset) {
       vec3(blas_f32(record, w + 2u), blas_f32(record, w + 6u), blas_f32(record, w + 10u)),
       vec3(blas_f32(record, w + 3u), blas_f32(record, w + 7u), blas_f32(record, w + 11u)));
 }
-mat4x3 sw_get_object_to_world(inout sw_ray_query_state q) {
+mat4x3 sw_get_object_to_world(inout sw_traversal_state q) {
    uint instance = q.want_committed != 0u ? q.committed.instance_node : q.candidate.instance_node;
    return sw_instance_matrix(q.as_address, instance, VEL_RT_BVH4_INSTANCE_OTW);
 }
-mat4x3 sw_get_world_to_object(inout sw_ray_query_state q) {
+mat4x3 sw_get_world_to_object(inout sw_traversal_state q) {
    uint instance = q.want_committed != 0u ? q.committed.instance_node : q.candidate.instance_node;
    return sw_instance_matrix(q.as_address, instance, VEL_RT_BVH4_INSTANCE_WTO);
 }
 vec3
-sw_get_world_ray_direction(inout sw_ray_query_state q) { return q.ray.direction; }
+sw_get_world_ray_direction(inout sw_traversal_state q) { return q.ray.direction; }
 float
-sw_get_ray_tmin(inout sw_ray_query_state q)            { return q.tmin; }
+sw_get_ray_tmin(inout sw_traversal_state q)            { return q.tmin; }
 uint
-sw_get_ray_flags(inout sw_ray_query_state q)           { return q.ray_flags; }
+sw_get_ray_flags(inout sw_traversal_state q)           { return q.ray_flags; }
 
-#endif /* SW_RAY_QUERY_GLSL */
+#endif /* SW_TRAVERSAL_GLSL */

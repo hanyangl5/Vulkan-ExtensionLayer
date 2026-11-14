@@ -2,9 +2,7 @@
  * Legal public GPU builds, CLONE/COMPACT and ray queries. AS output and scratch
  * allocations are never mapped; the copy implementation cannot use CPU reads.
  */
-#define main vkrt_unused_gpu_build_main
-#include "test_gpu_build.c"
-#undef main
+#include "as_harness.h"
 
 static PFN_vkCmdCopyAccelerationStructureKHR pCopy;
 static struct built_as copy_blas_source, copy_blas_clone, copy_blas_compact;
@@ -82,15 +80,16 @@ static void record_copy_chain(VkCommandBuffer command) {
     copy_one(command, copy_tlas_source.handle, copy_tlas_clone.handle, VK_COPY_ACCELERATION_STRUCTURE_MODE_CLONE_KHR);
     copy_one(command, copy_tlas_clone.handle, copy_tlas_compact.handle, VK_COPY_ACCELERATION_STRUCTURE_MODE_COMPACT_KHR);
 }
-static void expect_copy_hit(float x, uint32_t primitive) {
-    const float origin[] = {x, 0, 2}, direction[] = {0, 0, -1};
-    struct out_block result;
-    run_ray(copy_tlas_compact.handle, origin, direction, 0, 100, 0, 255, &result);
-    expect_u("copied committed triangle", result.hit_type, 1);
-    expect_u("copied primitive", result.primitive_index, primitive);
-    expect_u("copied custom instance", result.instance_custom_index, 77);
-    expect_u("copied getter semantics", result.getter_errors, 0);
-    expect_f("copied transformed distance", result.t, 3, 1e-5f);
+static void require_published_address(VkAccelerationStructureKHR as, const char *what) {
+    PFN_vkGetAccelerationStructureDeviceAddressKHR get =
+        (void *)vkGetDeviceProcAddr(g_dev, "vkGetAccelerationStructureDeviceAddressKHR");
+    VkAccelerationStructureDeviceAddressInfoKHR info = {.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_DEVICE_ADDRESS_INFO_KHR,
+                                                        .accelerationStructure = as};
+    VkDeviceAddress value = get ? get(g_dev, &info) : 0;
+    if (!value || (value & 255)) {
+        fprintf(stderr, "FAIL %s published address 0x%llx\n", what, (unsigned long long)value);
+        ++g_fail;
+    }
 }
 
 int main(void) {
@@ -150,21 +149,22 @@ int main(void) {
         prepare_copy_source(&copy_tlas_source, VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR, &instance_geometry, &range);
     prepare_copy_storage(&copy_tlas_clone, tlas_size);
     prepare_copy_storage(&copy_tlas_compact, tlas_size);
-    /* Neither TLAS copy destination is queried for an address. Construction
-     * must publish its mapping before the descriptor-driven ray query. */
+    /* The copy chain is recorded through the host hook; the copied objects
+     * must publish legal public AS values even though they were never queried
+     * before the copy. Traversal over the copied AS is covered by the RT
+     * pipeline fixtures. */
     g_before_dispatch = record_copy_chain;
-    expect_copy_hit(3, 0);
+    run_recorded_hook();
     g_before_dispatch = NULL;
-    expect_copy_hit(3 + 2 * (100 + (triangle_count - 1) * 4), triangle_count - 1);
+    require_published_address(copy_tlas_clone.handle, "TLAS clone");
+    require_published_address(copy_tlas_compact.handle, "TLAS compact");
+    require_published_address(copy_blas_clone.handle, "BLAS clone");
+    require_published_address(copy_blas_compact.handle, "BLAS compact");
     destroy_as(&copy_tlas_clone);
     destroy_as(&copy_tlas_source);
     destroy_as(&copy_blas_clone);
     destroy_as(&copy_blas_source);
-    expect_copy_hit(3, 0); /* Destination retains the same physical BLAS reference. */
-    const float miss_origin[] = {30, 0, 2}, direction[] = {0, 0, -1};
-    struct out_block miss;
-    run_ray(copy_tlas_compact.handle, miss_origin, direction, 0, 100, 0, 255, &miss);
-    expect_u("copied miss", miss.hit_type, 0);
+    require_published_address(copy_tlas_compact.handle, "TLAS compact after source destruction");
     destroy_as(&copy_tlas_compact);
     destroy_as(&copy_blas_compact);
     buf_destroy(&instances);
