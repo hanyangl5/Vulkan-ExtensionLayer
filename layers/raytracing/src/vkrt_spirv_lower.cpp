@@ -9,6 +9,8 @@
  *   out: ordinary SPIR-V with no KHR AS/RayQuery types or instructions,
  *        containing the layer-injected traversal functions and
  *        custom-BVH buffer accesses.
+ *   RT-stage intermediate mode keeps RT entry points and TraceRay for the
+ *        typed continuation compiler, while removing every Ray Query op.
  *
  * Two stages:
  *   1. spvtools::Link merges sw_ray_query.spv into the user
@@ -1205,9 +1207,9 @@ get_const_u32(std::vector<uint32_t> *w, TypeIndex *ti, IdGen *ids,
 /* C entry point                                                       */
 /* ================================================================== */
 
-int vkrt_spirv_lower_with_context(const uint32_t *user_words, size_t user_word_count, const uint32_t *lib_words,
-                                  size_t lib_word_count, uint64_t as_context, uint32_t **out_words, size_t *out_word_count,
-                                  char *errbuf, size_t errbuf_len) {
+static int lower_query(const uint32_t *user_words, size_t user_word_count, const uint32_t *lib_words, size_t lib_word_count,
+                       uint64_t as_context, bool retain_rt, uint32_t **out_words, size_t *out_word_count, char *errbuf,
+                       size_t errbuf_len) {
     auto fail = [&](const char *msg) -> int {
         if (errbuf && errbuf_len) std::snprintf(errbuf, errbuf_len, "%s", msg);
         std::fprintf(stderr, "VKRT SPIR-V lower: %s\n", msg);
@@ -1288,6 +1290,32 @@ int vkrt_spirv_lower_with_context(const uint32_t *user_words, size_t user_word_c
     const spv_target_env environment = version <= 0x00010400u   ? SPV_ENV_VULKAN_1_1_SPIRV_1_4
                                        : version <= 0x00010500u ? SPV_ENV_VULKAN_1_2
                                                                 : SPV_ENV_VULKAN_1_3;
+    bool vulkan_memory_model = false;
+    for_each(user, [&](size_t i, uint32_t op, uint32_t len) {
+        if (op == SpvOpMemoryModel && len == 3) vulkan_memory_model = user[i + 2] == spv::MemoryModelVulkan;
+    });
+    if (vulkan_memory_model) {
+        // A link has one memory model. Upgrade only the injected traversal;
+        // never reinterpret source Vulkan memory operands or RT payloads.
+        // The SDK pass runs on Logical addressing, so use an internal shell
+        // and restore the traversal's physical pointers before linking.
+        auto shell = lib;
+        uint32_t addressing = spv::AddressingModelPhysicalStorageBuffer64;
+        for_each(shell, [&](size_t i, uint32_t op, uint32_t len) {
+            if (op == SpvOpMemoryModel && len == 3) {
+                addressing = shell[i + 1];
+                shell[i + 1] = spv::AddressingModelLogical;
+            }
+        });
+        spvtools::Optimizer upgrade(environment);
+        upgrade.RegisterPass(spvtools::CreateUpgradeMemoryModelPass());
+        spvtools::OptimizerOptions options;
+        options.set_run_validator(false);
+        if (!upgrade.Run(shell.data(), shell.size(), &lib, options)) return fail("traversal memory model upgrade failed");
+        for_each(lib, [&](size_t i, uint32_t op, uint32_t len) {
+            if (op == SpvOpMemoryModel && len == 3) lib[i + 1] = addressing;
+        });
+    }
     spvtools::Context ctx(environment);
     std::string link_diag;
     ctx.SetMessageConsumer([&](spv_message_level_t, const char *, const spv_position_t &, const char *message) {
@@ -1664,13 +1692,13 @@ int vkrt_spirv_lower_with_context(const uint32_t *user_words, size_t user_word_c
              * vkCreateShaderModule, even after every RT instruction is gone. */
             if (op == 10 /* OpExtension */ &&
                 ((len == 1 + rq_extension.size() && std::equal(rq_extension.begin(), rq_extension.end(), merged.begin() + i + 1)) ||
-                 (len == 1 + rt_extension.size() &&
+                 (!retain_rt && len == 1 + rt_extension.size() &&
                   std::equal(rt_extension.begin(), rt_extension.end(), merged.begin() + i + 1)))) {
                 i += len;
                 continue;
             }
             if (op == SpvOpCapability && len == 2 &&
-                (merged[i + 1] == SpvCapabilityRayQueryKHR || merged[i + 1] == SpvCapabilityRayTracingKHR)) {
+                (merged[i + 1] == SpvCapabilityRayQueryKHR || (!retain_rt && merged[i + 1] == SpvCapabilityRayTracingKHR))) {
                 i += len;
                 continue;
             }
@@ -1686,6 +1714,17 @@ int vkrt_spirv_lower_with_context(const uint32_t *user_words, size_t user_word_c
     out.push_back(merged[2]);
     out.push_back(merged[3]);
     out.push_back(merged[4]);
+
+    // All original AS values become addresses. Only TraceRay needs a temporary
+    // opaque value, reconstructed at its use so the typed compiler retains the
+    // original trace root without carrying opaque query-state fields.
+    uint32_t trace_as_type = 0;
+    if (retain_rt) {
+        for_each(merged, [&](size_t, uint32_t op, uint32_t) {
+            if (op == spv::OpTraceRayKHR && !trace_as_type) trace_as_type = ids.fresh();
+        });
+        if (trace_as_type) out.insert(out.end(), {SPV_WORD0(SpvOpTypeAccelerationStructureKHR, 2), trace_as_type});
+    }
 
     /* Pending function bodies' "insert after this point" is just linear
      * append; SPIR-V allows the type/const sections to grow. */
@@ -1759,6 +1798,14 @@ int vkrt_spirv_lower_with_context(const uint32_t *user_words, size_t user_word_c
         }
         if (op == SpvOpConvertUToAccelerationStructureKHR && len == 4) {
             out.insert(out.end(), {SPV_WORD0(SpvOpBitcast, 4), merged[i + 1], merged[i + 2], merged[i + 3]});
+            i += len;
+            continue;
+        }
+        if (retain_rt && op == spv::OpTraceRayKHR && len == 12) {
+            const uint32_t scene = ids.fresh();
+            out.insert(out.end(), {SPV_WORD0(SpvOpConvertUToAccelerationStructureKHR, 4), trace_as_type, scene, merged[i + 1]});
+            out.insert(out.end(), merged.begin() + i, merged.begin() + i + len);
+            out[out.size() - len + 1] = scene;
             i += len;
             continue;
         }
@@ -1967,6 +2014,20 @@ int vkrt_spirv_lower_with_context(const uint32_t *user_words, size_t user_word_c
     *out_words = buf;
     *out_word_count = n;
     return 0;
+}
+
+int vkrt_spirv_lower_with_context(const uint32_t *user_words, size_t user_word_count, const uint32_t *lib_words,
+                                  size_t lib_word_count, uint64_t as_context, uint32_t **out_words, size_t *out_word_count,
+                                  char *errbuf, size_t errbuf_len) {
+    return lower_query(user_words, user_word_count, lib_words, lib_word_count, as_context, false, out_words, out_word_count, errbuf,
+                       errbuf_len);
+}
+
+int vkrt_spirv_lower_rt_with_context(const uint32_t *user_words, size_t user_word_count, const uint32_t *lib_words,
+                                     size_t lib_word_count, uint64_t as_context, uint32_t **out_words, size_t *out_word_count,
+                                     char *errbuf, size_t errbuf_len) {
+    return lower_query(user_words, user_word_count, lib_words, lib_word_count, as_context, true, out_words, out_word_count, errbuf,
+                       errbuf_len);
 }
 
 void

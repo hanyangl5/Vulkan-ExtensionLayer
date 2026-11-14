@@ -1067,7 +1067,7 @@ static void *VKAPI_CALL query_allocate(void *user, size_t size, size_t alignment
     return allocation;
 }
 static void *VKAPI_CALL query_reallocate(void *user, void *allocation, size_t size, size_t alignment,
-                                        VkSystemAllocationScope scope) {
+                                         VkSystemAllocationScope scope) {
     (void)user;
     CHECK(scope == VK_SYSTEM_ALLOCATION_SCOPE_OBJECT && alignment <= _Alignof(max_align_t));
     return realloc(allocation, size);
@@ -1078,13 +1078,13 @@ static void VKAPI_CALL query_free(void *user, void *allocation) {
     free(allocation);
 }
 static VKAPI_ATTR VkResult VKAPI_CALL allocation_create_query(VkDevice device, const VkQueryPoolCreateInfo *info,
-                                                               const VkAllocationCallbacks *allocator, VkQueryPool *pool) {
+                                                              const VkAllocationCallbacks *allocator, VkQueryPool *pool) {
     CHECK(device == HANDLE(VkDevice, 0x8123) && info->queryType == VK_QUERY_TYPE_OCCLUSION && allocator);
     *pool = HANDLE(VkQueryPool, 0x8345);
     return VK_SUCCESS;
 }
 static VKAPI_ATTR void VKAPI_CALL allocation_destroy_query(VkDevice device, VkQueryPool pool,
-                                                            const VkAllocationCallbacks *allocator) {
+                                                           const VkAllocationCallbacks *allocator) {
     CHECK(device == HANDLE(VkDevice, 0x8123) && pool == HANDLE(VkQueryPool, 0x8345) && allocator);
     ++((struct query_allocation_context *)allocator->pUserData)->native_destroys;
 }
@@ -1102,10 +1102,10 @@ static void query_destroy_callbacks(bool virtual_pool, bool distinct_destroy) {
     memset(&event_fixture, 0, sizeof(event_fixture));
     event_fixture.dev = &dev;
     marker_storage_active = true;
-    VkQueryPoolCreateInfo info = {.sType = VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO,
-                                  .queryType = virtual_pool ? VK_QUERY_TYPE_ACCELERATION_STRUCTURE_COMPACTED_SIZE_KHR
-                                                            : VK_QUERY_TYPE_OCCLUSION,
-                                  .queryCount = 1};
+    VkQueryPoolCreateInfo info = {
+        .sType = VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO,
+        .queryType = virtual_pool ? VK_QUERY_TYPE_ACCELERATION_STRUCTURE_COMPACTED_SIZE_KHR : VK_QUERY_TYPE_OCCLUSION,
+        .queryCount = 1};
     VkQueryPool pool = VK_NULL_HANDLE;
     PFN_vkCreateQueryPool create = (PFN_vkCreateQueryPool)vkrt_query_pool_proc("vkCreateQueryPool");
     PFN_vkDestroyQueryPool destroy = (PFN_vkDestroyQueryPool)vkrt_query_pool_proc("vkDestroyQueryPool");

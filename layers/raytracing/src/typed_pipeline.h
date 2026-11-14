@@ -11,6 +11,10 @@ namespace vel::rt {
 std::vector<uint32_t> SelectNativeShaderEntry(const std::vector<uint32_t> &source, const std::string &entry,
                                               VkShaderStageFlagBits stage);
 // Specialization is applied before typed analysis, including default values.
+// Selected RT entries lower Ray Query through the shared traversal first;
+// query state then has the same persistent typed storage as source values.
+// The returned source is already specialized/query-lowered and can be
+// recompiled for a runtime variant without lowering descriptor values twice.
 // Every stage exports void step(uint64 frameBDA); the scheduler supplies the
 // immutable system prefix, continuation state and typed invocation backing.
 TypedContinuationProgram CompileTypedPipelineStage(const std::vector<uint32_t> &source, const std::string &entry,
@@ -20,6 +24,10 @@ TypedContinuationProgram CompileTypedPipelineStage(const std::vector<uint32_t> &
                                                    VkShaderStageFlagBits stage, const VkSpecializationInfo *specialization,
                                                    const std::string &export_name,
                                                    const TypedContinuationCompileOptions &configuration);
+// Pipeline libraries append stages in application order. Rename only their
+// exported symbol for the final stage index, retaining the compiled program,
+// source IDs, frame plan and embedded device resolver without recompilation.
+TypedContinuationProgram RenameTypedPipelineStage(const TypedContinuationProgram &stage, const std::string &export_name);
 
 // Link a compute scheduler with its typed stage libraries. Scheduler prototypes
 // are compiled as empty void functions with one uint64 argument and matching

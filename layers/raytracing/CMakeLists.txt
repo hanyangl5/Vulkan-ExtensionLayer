@@ -62,8 +62,6 @@ add_library(${VKRT_LAYER_NAME} SHARED
    src/vkrt_layer.c
    src/vkrt_shader.c
    src/vkrt_spirv.c
-   src/vkrt_spirv_lower.cpp
-   src/vkrt_spirv_ids.cpp
    src/vkrt_virtual_as.c
    src/vkrt_as_registry.c
    src/vkrt_private_pool.c
@@ -115,7 +113,12 @@ else()
    target_link_libraries(vkrt_typed_compiler PUBLIC glslang::SPIRV glslang::glslang glslang::glslang-default-resource-limits)
 endif()
 target_include_directories(vkrt_typed_compiler PUBLIC ${VKRT_TYPED_SOURCE}/src ${Vulkan_INCLUDE_DIRS} ${VKRT_SPIRV_HEADERS_INCLUDE_DIR})
-target_link_libraries(vkrt_typed_compiler PUBLIC ${VKRT_SPIRV_LIBRARIES})
+add_library(vkrt_spirv_lower STATIC src/vkrt_spirv_lower.cpp src/vkrt_spirv_ids.cpp)
+target_include_directories(vkrt_spirv_lower PUBLIC src ${Vulkan_INCLUDE_DIRS} ${VKRT_SPIRV_HEADERS_INCLUDE_DIR})
+target_link_libraries(vkrt_spirv_lower PUBLIC ${VKRT_SPIRV_LIBRARIES})
+target_compile_features(vkrt_spirv_lower PUBLIC cxx_std_17)
+set_target_properties(vkrt_spirv_lower PROPERTIES POSITION_INDEPENDENT_CODE ON)
+target_link_libraries(vkrt_typed_compiler PUBLIC ${VKRT_SPIRV_LIBRARIES} vkrt_spirv_lower)
 target_compile_features(vkrt_typed_compiler PUBLIC cxx_std_17)
 set_target_properties(vkrt_typed_compiler PROPERTIES POSITION_INDEPENDENT_CODE ON)
 target_link_libraries(${VKRT_LAYER_NAME} PRIVATE vkrt_typed_compiler vkrt_command_replay)
@@ -160,6 +163,7 @@ add_custom_command(
 # LinkageAttributes or signature matching.
 add_custom_target(vkrt_traversal_spv ALL DEPENDS ${VKRT_TRAVERSAL_SPV} ${VKRT_TRAVERSAL_SPV}.h)
 add_dependencies(${VKRT_LAYER_NAME} vkrt_traversal_spv)
+add_dependencies(vkrt_typed_compiler vkrt_traversal_spv)
 
 # Production GPU build/copy/query shaders are embedded by the canonical layer.
 # The plain leaf reference is built separately by the BVH4 component tests.
@@ -355,8 +359,6 @@ set_target_properties(vkrt_cpu_bvh PROPERTIES C_STANDARD 11 POSITION_INDEPENDENT
 # ------------------------------------------------------------------
 add_executable(test_spirv_lower
    ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_spirv_lower.cpp
-   src/vkrt_spirv_lower.cpp
-   src/vkrt_spirv_ids.cpp
 )
 target_include_directories(test_spirv_lower PRIVATE
    ${CMAKE_CURRENT_SOURCE_DIR}/src
@@ -365,7 +367,7 @@ target_include_directories(test_spirv_lower PRIVATE
    ${VKRT_SPIRV_HEADERS_INCLUDE_DIR}
 )
 target_link_libraries(test_spirv_lower PRIVATE
-   ${VKRT_SPIRV_LIBRARIES}
+   vkrt_spirv_lower
 )
 set_target_properties(test_spirv_lower PROPERTIES CXX_STANDARD 17)
 
@@ -490,6 +492,11 @@ add_dependencies(test_spirv_lower vkrt_traversal_spv vkrt_test_rq_spv vkrt_test_
 
 include(CTest)
 if(BUILD_TESTING)
+   add_executable(test_typed_query_pipeline tests/typed_query_pipeline_tests.cpp)
+   target_link_libraries(test_typed_query_pipeline PRIVATE vkrt_typed_compiler)
+   add_test(NAME vkrt.typed_query_pipeline COMMAND test_typed_query_pipeline
+      ${CMAKE_CURRENT_SOURCE_DIR}/tests/rtp_query_suspend.rgen)
+   set_tests_properties(vkrt.typed_query_pipeline PROPERTIES LABELS "offline;no_native_rt;compiler" TIMEOUT 600)
    # Explicitly enabled test boundary, staged separately from application layers.
    add_library(vkrt_no_native_rt_guard SHARED tests/no_native_rt_guard_layer.c)
    target_include_directories(vkrt_no_native_rt_guard PRIVATE ${Vulkan_INCLUDE_DIRS})
@@ -638,6 +645,34 @@ if(BUILD_TESTING)
    set_target_properties(test_rtp_api PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED ON)
    add_dependencies(test_rtp_api vkrt_rtp_api_spv vkrt_rtp_api11_spv vkrt_rtp_nested_spv vkrt_rtp_physical_spv)
    add_dependencies(test_rtp_api vkrt_rtp_physical_interfaces_spv)
+   foreach(variant query_suspend query_memory_model)
+      set(output ${CMAKE_CURRENT_BINARY_DIR}/rtp_${variant}.rgen.spv)
+      set(_query_defines)
+      set(_query_args)
+      if(variant STREQUAL "query_memory_model")
+         set(_query_defines -DVKRT_SOURCE_MEMORY_MODEL)
+         set(_query_args --query-memory-model)
+      endif()
+      add_custom_command(OUTPUT ${output}
+         COMMAND ${VKRT_GLSLC} --target-env=vulkan1.1 --target-spv=spv1.4 ${_query_defines}
+            ${CMAKE_CURRENT_SOURCE_DIR}/tests/rtp_query_suspend.rgen -o ${output}
+         COMMAND ${VKRT_SPIRV_VAL} --target-env vulkan1.1spv1.4 ${output}
+         DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/tests/rtp_query_suspend.rgen VERBATIM)
+      add_custom_target(vkrt_rtp_${variant}_spv DEPENDS ${output})
+      add_dependencies(test_rtp_api vkrt_rtp_${variant}_spv)
+      foreach(mode software native)
+         add_test(NAME vkrt.rtp_api.${variant}.${mode} COMMAND test_rtp_api ${output}
+            ${CMAKE_CURRENT_BINARY_DIR}/rtp_api11.rmiss.spv ${CMAKE_CURRENT_BINARY_DIR}/rtp_api11.rchit.spv
+            ${CMAKE_CURRENT_BINARY_DIR}/rtp_api11.comp.spv ${_query_args})
+         set_tests_properties(vkrt.rtp_api.${variant}.${mode} PROPERTIES LABELS "gpu" SKIP_RETURN_CODE 77 TIMEOUT 180)
+      endforeach()
+      set_tests_properties(vkrt.rtp_api.${variant}.software PROPERTIES
+         ENVIRONMENT "VK_LAYER_PATH=${CMAKE_BINARY_DIR}/layers;VK_INSTANCE_LAYERS=VK_LAYER_VKRT_SOFTWARE_RAY_QUERY;ENABLE_VKRT_SOFTWARE_RAY_QUERY=1;VK_LOADER_LAYERS_DISABLE=~implicit~")
+      set_tests_properties(vkrt.rtp_api.${variant}.native PROPERTIES
+         ENVIRONMENT "VK_INSTANCE_LAYERS=;VK_LOADER_LAYERS_DISABLE=~implicit~")
+      set_property(TEST vkrt.rtp_api.${variant}.software APPEND PROPERTY LABELS no_native_rt)
+      set_property(TEST vkrt.rtp_api.${variant}.native APPEND PROPERTY LABELS native_rt)
+   endforeach()
    set(VKRT_RTP_VMM_SOURCE_SPV)
    set(VKRT_RTP_VMM_INTERFACES_SPV)
    foreach(fixture source interfaces)
@@ -936,7 +971,7 @@ if(BUILD_TESTING)
    set_target_properties(test_shader_objects PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED ON)
    add_test(NAME vkrt.shader_objects COMMAND test_shader_objects)
    add_executable(test_shader_objects_mixed tests/test_shader_objects_mixed.cpp tests/shader_object_mixed_source_host.c
-      src/vkrt_shader_objects.c src/vkrt_shader_interface.c src/vkrt_spirv.c src/vkrt_spirv_lower.cpp src/vkrt_spirv_ids.cpp)
+      src/vkrt_shader_objects.c src/vkrt_shader_interface.c src/vkrt_spirv.c)
    target_include_directories(test_shader_objects_mixed PRIVATE src ${CMAKE_CURRENT_BINARY_DIR} ${Vulkan_INCLUDE_DIRS}
       ${VKRT_SPIRV_HEADERS_INCLUDE_DIR})
    target_link_libraries(test_shader_objects_mixed PRIVATE vkrt_typed_compiler ${VKRT_SPIRV_LIBRARIES} Threads::Threads)

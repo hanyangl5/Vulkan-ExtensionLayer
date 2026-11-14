@@ -1017,6 +1017,129 @@ static bool check_specialized_source() {
     return failures == 0;
 }
 
+static bool check_rt_stage_query(const std::vector<uint32_t> &lib) {
+    const char *models[] = {"RayGenerationKHR", "IntersectionKHR", "AnyHitKHR", "ClosestHitKHR",
+                            "MissKHR",          "CallableKHR",     "GLCompute"};
+    for (unsigned variant = 0; variant < 14; ++variant) {
+        const char *model = models[variant % 7];
+        const bool compute = variant % 7 == 6;
+        const bool vulkan_memory_model = variant >= 7;
+        const bool trace = !std::strcmp(model, "RayGenerationKHR");
+        std::string source = "OpCapability Shader\nOpCapability RayTracingKHR\nOpCapability RayQueryKHR\n" +
+                             std::string(vulkan_memory_model ? "OpCapability VulkanMemoryModel\n" : "") +
+                             "OpExtension \"SPV_KHR_ray_tracing\"\nOpExtension \"SPV_KHR_ray_query\"\n" +
+                             std::string(vulkan_memory_model ? "OpExtension \"SPV_KHR_vulkan_memory_model\"\n" : "") +
+                             "OpMemoryModel Logical " + (vulkan_memory_model ? "VulkanKHR\n" : "GLSL450\n") + "OpEntryPoint " +
+                             std::string(model) + " %main \"main\" %scenes" + (trace ? " %payload\n" : "\n") +
+                             (compute ? "OpExecutionMode %main LocalSize 1 1 1\n" : "") + "OpName %query_scene \"query_scene\"\n" +
+                             (trace ? "OpName %trace_scene \"trace_scene\"\n" : "") +
+                             "OpDecorate %scenes DescriptorSet 0\nOpDecorate %scenes Binding 0\n";
+        if (trace) source += "OpDecorate %payload Location 0\n";
+        source += R"spv(
+%void = OpTypeVoid
+%bool = OpTypeBool
+%uint = OpTypeInt 32 0
+%float = OpTypeFloat 32
+%vec3 = OpTypeVector %float 3
+%zero = OpConstant %uint 0
+%one = OpConstant %uint 1
+%two = OpConstant %uint 2
+%mask = OpConstant %uint 255
+%semantics = OpConstant %uint 72
+%fzero = OpConstant %float 0
+%fone = OpConstant %float 1
+%far = OpConstant %float 100
+%origin = OpConstantComposite %vec3 %fzero %fzero %fzero
+%direction = OpConstantComposite %vec3 %fzero %fzero %fone
+%as = OpTypeAccelerationStructureKHR
+%as_array = OpTypeArray %as %two
+%array_ptr = OpTypePointer UniformConstant %as_array
+%as_ptr = OpTypePointer UniformConstant %as
+%scenes = OpVariable %array_ptr UniformConstant
+%query = OpTypeRayQueryKHR
+%query_ptr = OpTypePointer Function %query
+%fn = OpTypeFunction %void
+)spv";
+        source += std::string("%scope = OpConstant %uint ") + (compute ? "5\n" : "6\n");
+        if (trace) source += "%payload_ptr = OpTypePointer RayPayloadKHR %uint\n%payload = OpVariable %payload_ptr RayPayloadKHR\n";
+        source += R"spv(
+%main = OpFunction %void None %fn
+%entry = OpLabel
+%q = OpVariable %query_ptr Function
+%query_descriptor = OpAccessChain %as_ptr %scenes %zero
+%query_scene = OpLoad %as %query_descriptor
+OpRayQueryInitializeKHR %q %query_scene %zero %mask %origin %fzero %direction %far
+)spv";
+        if (vulkan_memory_model) source += "OpMemoryBarrier %scope %semantics\n";
+        if (trace)
+            source +=
+                "%trace_descriptor = OpAccessChain %as_ptr %scenes %one\n%trace_scene = OpLoad %as %trace_descriptor\n"
+                "OpTraceRayKHR %trace_scene %zero %mask %zero %one %zero %origin %fzero %direction %far %payload\n";
+        source += "%candidate = OpRayQueryProceedKHR %bool %q\nOpRayQueryTerminateKHR %q\nOpReturn\nOpFunctionEnd\n";
+        spvtools::SpirvTools validator(SPV_ENV_VULKAN_1_1_SPIRV_1_4);
+        validator.SetMessageConsumer([](spv_message_level_t, const char *, const spv_position_t &, const char *message) {
+            std::fprintf(stderr, "RT-stage query fixture: %s\n", message);
+        });
+        std::vector<uint32_t> words;
+        if (!validator.Assemble(source, &words) || !validator.Validate(words)) return false;
+        uint32_t *output = nullptr;
+        size_t count = 0;
+        char error[2048];
+        const auto lower = compute ? vkrt_spirv_lower_with_context : vkrt_spirv_lower_rt_with_context;
+        if (lower(words.data(), words.size(), lib.data(), lib.size(), UINT64_C(0x123456780000), &output, &count, error,
+                  sizeof(error))) {
+            std::fprintf(stderr, "FAIL: %s query lowering: %s\n", model, error);
+            return false;
+        }
+        const std::vector<uint32_t> lowered(output, output + count);
+        vkrt_spirv_lower_free(output);
+        spvtools::ValidatorOptions options;
+        options.SetScalarBlockLayout(true);
+        const Counts after = classify(lowered);
+        if (!validator.Validate(lowered.data(), lowered.size(), options) || after.op_ray_query || after.type_ray_query ||
+            after.op_trace_ray != int(trace) || after.type_as != int(trace) || after.rt_requirements != (compute ? 0 : 2) ||
+            !calls_function_named(lowered, "sw_ray_query_initialize") || !calls_function_named(lowered, "sw_ray_query_proceed"))
+            return false;
+        if (vulkan_memory_model) {
+            std::unordered_map<uint32_t, uint32_t> constants;
+            uint32_t barriers = 0;
+            bool model_preserved = false;
+            for (size_t i = 5; i < lowered.size(); i += SPV_LEN(lowered[i])) {
+                if (SPV_OP(lowered[i]) == 43 && SPV_LEN(lowered[i]) == 4) constants[lowered[i + 2]] = lowered[i + 3];
+                if (SPV_OP(lowered[i]) == 14) model_preserved = lowered[i + 2] == 3;
+                if (SPV_OP(lowered[i]) == 225) {
+                    if (constants[lowered[i + 1]] != (compute ? 5u : 6u) || constants[lowered[i + 2]] != 72) return false;
+                    ++barriers;
+                }
+            }
+            if (!model_preserved || barriers != 1) return false;
+        }
+        // The trace keeps its own second descriptor value through an explicit
+        // integer-to-AS bridge, while the live query keeps ordinary state.
+        if (trace) {
+            std::unordered_map<uint32_t, uint32_t> conversions;
+            uint32_t trace_value = 0, query_scene = 0, trace_scene = 0;
+            std::unordered_set<uint32_t> stored_values;
+            for (size_t i = 5; i < lowered.size(); i += SPV_LEN(lowered[i])) {
+                if (SPV_OP(lowered[i]) == 4447) conversions.emplace(lowered[i + 2], lowered[i + 3]);
+                if (SPV_OP(lowered[i]) == 4445) trace_value = lowered[i + 1];
+                if (SPV_OP(lowered[i]) == 62) stored_values.insert(lowered[i + 2]);
+                if (SPV_OP(lowered[i]) == 5) {
+                    const char *name = reinterpret_cast<const char *>(&lowered[i + 2]);
+                    if (!std::strcmp(name, "query_scene")) query_scene = lowered[i + 1];
+                    if (!std::strcmp(name, "trace_scene")) trace_scene = lowered[i + 1];
+                }
+            }
+            if (!trace_value || !query_scene || !trace_scene || query_scene == trace_scene || !stored_values.count(query_scene) ||
+                conversions.size() != 1 || !conversions.count(trace_value) || conversions.at(trace_value) != trace_scene)
+                return false;
+        }
+        std::printf("RT-stage %s %s query lowering preserves entry/trace and removes query operations PASS\n", model,
+                    vulkan_memory_model ? "Vulkan" : "GLSL450");
+    }
+    return true;
+}
+
 int
 main(int argc, char **argv)
 {
@@ -1045,6 +1168,7 @@ main(int argc, char **argv)
 
    int failures = 0;
    if (!check_specialized_source()) failures++;
+   if (!check_rt_stage_query(lib)) failures++;
    if (!check_function_query_image(lib)) failures++;
    if (!check_as_operand_values(lib)) failures++;
    if (!check_as_runtime_nonuniform(lib)) failures++;

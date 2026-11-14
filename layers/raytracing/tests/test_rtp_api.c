@@ -17,6 +17,7 @@ static bool separate_compute, descriptor_core;
 static bool debug_names_mode, vulkan11_mode, physical_source_mode;
 static bool source_memory_model_mode;
 static bool mixed_entry_mode;
+static bool disable_optimization;
 static bool private_data_mode, private_core, private_extension;
 #include <vulkan/vulkan.h>
 #if VK_USE_64_BIT_PTR_DEFINES
@@ -541,6 +542,8 @@ int main(int argc, char **argv) {
     shader_object_mode = argc == 6 && !strcmp(argv[5], "--shader-object");
     vulkan11_mode = argc == 6 && !strcmp(argv[5], "--vulkan11");
     mixed_entry_mode = argc == 6 && !strcmp(argv[5], "--mixed-entry");
+    source_memory_model_mode = argc == 6 && !strcmp(argv[5], "--query-memory-model");
+    disable_optimization = argc == 6 && !strcmp(argv[5], "--disable-optimization");
     vulkan11_mode |= mixed_entry_mode;
     debug_names_mode = argc == 6 && !strcmp(argv[5], "--push-template-debug");
     private_data_mode = argc == 6 && !strcmp(argv[5], "--push-template-private-data");
@@ -555,13 +558,13 @@ int main(int argc, char **argv) {
     }
     separate_compute = shader_object_mode || descriptor_mode;
     if (argc != 5 && !capability_harness && !maintenance6_mode && !shader_object_mode && !derivatives_mode && !library_mode &&
-        !descriptor_mode && !vulkan11_mode) {
+        !descriptor_mode && !vulkan11_mode && !source_memory_model_mode && !disable_optimization) {
         fprintf(
             stderr,
             "usage: %s rgen.spv miss.spv chit.spv compute.spv "
             "[--capability-harness|--maintenance6|--shader-object|--derivatives|--libraries|--library-stages|"
             "--push-descriptors[-maintenance6]|--push-template[-maintenance6]|--push-template-debug|--push-template-private-data|"
-            "--descriptor-buffer[-maintenance6]|--vulkan11|--mixed-entry]\n",
+            "--descriptor-buffer[-maintenance6]|--vulkan11|--mixed-entry|--query-memory-model|--disable-optimization]\n",
             argv[0]);
         return 1;
     }
@@ -863,6 +866,7 @@ int main(int argc, char **argv) {
                                               .maxPipelineRayRecursionDepth = 1,
                                               .pDynamicState = &dynamic_info,
                                               .layout = layout};
+    if (disable_optimization) rtci.flags |= VK_PIPELINE_CREATE_DISABLE_OPTIMIZATION_BIT;
     VkPipeline rt;
     VkPipeline derivative_indexed = VK_NULL_HANDLE, derivative_handle = VK_NULL_HANDLE;
     VkPipeline retained_libraries[3] = {VK_NULL_HANDLE, VK_NULL_HANDLE, VK_NULL_HANDLE};

@@ -1,6 +1,7 @@
 // Copyright 2026 The Khronos Group Inc.
 // SPDX-License-Identifier: Apache-2.0
 #include "state_compiler.h"
+#include "spirv_environment.h"
 #include <spirv-tools/libspirv.hpp>
 #include <spirv/unified1/spirv.hpp>
 #include <vulkan/vulkan.h>
@@ -219,8 +220,9 @@ bool Execute() {
     options.emit_compute_entry = false;
     options.step_export_name = "vel_rt_bda_probe";
     auto library = CompileTypedContinuationSteps(source, "main", spv::ExecutionModelClosestHitKHR, options);
-    Require(library.spirv.at(1) == 0x00010500u, "Stage library is not SPIR-V1.5");
-    spvtools::SpirvTools inspect(SPV_ENV_UNIVERSAL_1_5);
+    Require(library.spirv.at(1) == source.at(1), "Stage library changed the supported source SPIR-V version");
+    spvtools::SpirvTools inspect(UniversalEnvironmentForSPIRV(library.spirv.at(1)));
+    Require(inspect.Validate(library.spirv), "BDA stage library failed validation");
     std::string text;
     Require(inspect.Disassemble(library.spirv, &text), "Stage library disassembly failed");
     Require(text.find("LinkageAttributes \"vel_rt_bda_probe\" Export") != std::string::npos &&

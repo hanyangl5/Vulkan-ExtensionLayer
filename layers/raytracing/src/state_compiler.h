@@ -79,6 +79,9 @@ struct TypedContinuationCompileOptions {
     // Standalone BDA wrapper only: specialization values supply the low/high
     // uint32 words of an immutable per-dispatch context address.
     uint32_t context_root_low_spec_id = 0, context_root_high_spec_id = 1;
+    // Pipeline frontend: device-owned shared AS resolver for Ray Query used
+    // inside RT stages. Zero remains useful for offline compilation only.
+    uint64_t ray_query_as_context = 0;
 };
 struct TypedBuiltinVariable {
     uint32_t variable, type, builtin, byte_offset, byte_size;
@@ -132,7 +135,10 @@ struct TypedContinuationProgram {
 // edges in a dynamic structured dispatcher, and runs until suspension/return.
 // Source Function and module-Private storage are persistent in each logical
 // stage invocation; Private initializers execute once at the source entry.
-// Only suspension-live numeric SSA is spilled.
+// Numeric values crossing source blocks live in typed frame slots, including
+// parallel Phi destinations. Suspension-live values reuse their existing slots;
+// values confined to one state use native temporaries. This keeps the dispatcher
+// from turning thousands of source values into global mutable native registers.
 // Helpers are inlined before analysis. Logical local access-chain/copy aliases,
 // numeric/composite ALU, push constants, ordinary buffer resources, and launch
 // ID/size inputs are supported. Native image/sampler values and image texel

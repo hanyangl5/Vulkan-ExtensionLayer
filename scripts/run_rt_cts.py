@@ -185,6 +185,13 @@ def qpa_result(path, case):
     session = {}
     for key, value in re.findall(r"(?m)^#sessionInfo\s+(\S+)\s+([^\r\n]*)", text):
         session[key] = value
+    # Watchdog termination interrupts the XML record before its normal end.
+    # Accept only an exact selected-case begin/timeout pair, not a stray marker.
+    markers = [(kind, value.strip()) for kind, value in re.findall(
+        r"(?m)^#(beginTestCaseResult|endTestCaseResult|terminateTestCaseResult)(?:[ \t]+([^\r\n]*))?\r?$", text)]
+    if (len(markers) == 2 and markers[0] == ("beginTestCaseResult", case)
+            and markers[1][0] == "terminateTestCaseResult" and markers[1][1] in ("Timeout", "WatchdogTimeout")):
+        return markers[1][1], f"QPA terminated selected test case: {markers[1][1]}", session
     records = re.findall(
         r"(?ms)^#beginTestCaseResult\s+([^\r\n]+)\r?\n(.*?)^#endTestCaseResult\s*$", text
     )
@@ -295,6 +302,8 @@ def execute(args):
         device_info = {"source": str(device_source), "snapshot": str(device_target), "sha256": sha256(device_target),
                        "note": "User-supplied device report, not independently validated by this runner."}
     binary_stat = (cts.stat().st_size, cts.stat().st_mtime_ns)
+    watchdog = max(1, math.ceil(args.timeout))
+    watchdog_interval = min(30, watchdog) if args.watchdog_interval is None else math.ceil(args.watchdog_interval)
     summary = {
         "schema_version": 1,
         "runner_sha256": sha256(Path(__file__)),
@@ -318,6 +327,9 @@ def execute(args):
         "device_info": device_info,
         "environment": env_record,
         "timeout_seconds": args.timeout,
+        "watchdog_total_seconds": watchdog,
+        "watchdog_interval_seconds": watchdog_interval,
+        "watchdog_interval_requested_seconds": args.watchdog_interval,
         "cases": [],
         "note": "Each case is isolated. NotSupported/noresult/crash/timeout are not passes; this slice is not conformance.",
     }
@@ -331,11 +343,10 @@ def execute(args):
         guard_log = output / (stem + ".guard.jsonl")
         if guard_dir:
             env["VKRT_NO_RT_GUARD_LOG"] = str(guard_log)
-        watchdog = max(1, math.ceil(args.timeout))
         command = [str(cts), f"--deqp-case={case}", "--deqp-visibility=hidden", f"--deqp-archive-dir={archive}",
                    "--deqp-shadercache=disable", "--deqp-watchdog=enable", "--deqp-crashhandler=enable",
                    f"--deqp-watchdog-total-time-limit={watchdog}",
-                   f"--deqp-watchdog-interval-time-limit={min(30, watchdog)}", f"--deqp-log-filename={qpa}"]
+                   f"--deqp-watchdog-interval-time-limit={watchdog_interval}", f"--deqp-log-filename={qpa}"]
         if validation_dir:
             command += ["--deqp-vk-validation=enable", "--deqp-vk-print-validation-errors"]
         print(f"[{ordinal}/{len(cases)}] {args.mode}: {case}", flush=True)
@@ -392,6 +403,8 @@ def main():
     parser.add_argument("--output-dir", required=True, type=Path, help="new or empty evidence directory")
     parser.add_argument("--archive-dir", required=True, type=Path, help="CTS test-resource directory")
     parser.add_argument("--timeout", type=float, default=90, help="outer timeout per exact case, seconds")
+    parser.add_argument("--watchdog-interval", type=float,
+                        help="CTS watchdog touch interval in seconds, rounded up; default min(30, total watchdog limit)")
     parser.add_argument("--cts-revision", help="declared CTS source revision; binary SHA and QPA release are recorded separately")
     parser.add_argument("--layer-revision", help="unvalidated revision/build label for the snapshotted fallback library")
     parser.add_argument("--device-info-file", type=Path, help="snapshot a user-supplied device report beside the logs")
@@ -406,6 +419,8 @@ def main():
     args = parser.parse_args()
     if not math.isfinite(args.timeout) or args.timeout <= 0:
         parser.error("--timeout must be positive and finite")
+    if args.watchdog_interval is not None and (not math.isfinite(args.watchdog_interval) or args.watchdog_interval <= 0):
+        parser.error("--watchdog-interval must be positive and finite")
     if args.mode != "native" and args.layer_dir is None:
         parser.error("fallback modes require --layer-dir")
     if args.mode == "native" and args.layer_dir is not None:

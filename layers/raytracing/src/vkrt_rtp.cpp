@@ -175,7 +175,6 @@ struct Pipeline {
     std::shared_ptr<Layout> layout;
     std::vector<TypedContinuationProgram> metadata;
     std::vector<VkShaderStageFlagBits> kinds;
-    std::vector<std::string> entries;
     std::vector<VkRayTracingShaderGroupCreateInfoKHR> groups;
     uint32_t depth = 0;
     bool has_interface = false;
@@ -354,12 +353,9 @@ bool PushCompatible(const Layout &a, const Layout &b) {
 std::shared_ptr<Variant> Build(Pipeline &p, VkPipelineCache cache = VK_NULL_HANDLE) {
     std::lock_guard<std::mutex> lock(p.lock);
     if (p.initial) return p.initial;
-    TypedContinuationCompileOptions config;
-    config.transport = TypedFrameTransport::PhysicalAddress;
     std::vector<TypedContinuationProgram> stages;
     for (size_t n = 0; n < p.metadata.size(); ++n)
-        stages.push_back(CompileTypedPipelineStage(p.metadata[n].source, p.entries[n], p.kinds[n], nullptr,
-                                                   "vel_rt_stage_" + std::to_string(n), config));
+        stages.push_back(RenameTypedPipelineStage(p.metadata[n], "vel_rt_stage_" + std::to_string(n)));
     auto v = std::make_shared<Variant>();
     v->dev = p.dev;
     const bool optimize = (p.flags & VK_PIPELINE_CREATE_DISABLE_OPTIMIZATION_BIT) == 0;
@@ -724,14 +720,16 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateRayTracingPipelinesKHR(VkDevice device, VkD
                 }
                 if (ci.groupCount) p->groups.assign(ci.pGroups, ci.pGroups + ci.groupCount);
                 for (auto g : p->groups) Need(!g.pNext && !g.pShaderGroupCaptureReplayHandle);
+                TypedContinuationCompileOptions compile_options;
+                compile_options.transport = TypedFrameTransport::PhysicalAddress;
+                compile_options.ray_query_as_context = vkrt_as_registry_address(d);
                 for (uint32_t s = 0; s < ci.stageCount; ++s) {
                     const auto &stage = ci.pStages[s];
                     Need(!stage.pNext && !stage.flags && stage.pName);
                     auto source = ShaderWords(d, stage.module);
                     p->kinds.push_back(stage.stage);
-                    p->entries.emplace_back(stage.pName);
                     p->metadata.push_back(CompileTypedPipelineStage(source, stage.pName, stage.stage, stage.pSpecializationInfo,
-                                                                    "vel_rt_stage_" + std::to_string(s)));
+                                                                    "vel_rt_stage_" + std::to_string(s), compile_options));
                 }
                 // Vulkan implicitly appends each library's complete stage and
                 // group lists in pLibraries order. A library already owns its
@@ -754,7 +752,6 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateRayTracingPipelinesKHR(VkDevice device, VkD
                         const uint32_t base = uint32_t(p->metadata.size());
                         p->metadata.insert(p->metadata.end(), library->metadata.begin(), library->metadata.end());
                         p->kinds.insert(p->kinds.end(), library->kinds.begin(), library->kinds.end());
-                        p->entries.insert(p->entries.end(), library->entries.begin(), library->entries.end());
                         for (auto group : library->groups) {
                             for (uint32_t *stage :
                                  {&group.generalShader, &group.closestHitShader, &group.anyHitShader, &group.intersectionShader})

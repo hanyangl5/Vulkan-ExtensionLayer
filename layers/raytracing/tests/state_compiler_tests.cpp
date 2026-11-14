@@ -395,6 +395,90 @@ void Replace(std::string &source, const std::string &before, const std::string &
     Require(offset != std::string::npos, "Regression source fragment missing");
     source.replace(offset, before.size(), after);
 }
+bool DelayedSelectorOrdinaryEdge(bool execute) {
+    // The selector's only use is the entry-block access chain. A later block
+    // consumes its copied Function pointer after overwriting the selector's
+    // source buffer. Volatile keeps the source local-array access observable.
+    const auto source = Source(R"spv(
+OpCapability Shader
+OpCapability RayTracingKHR
+OpExtension "SPV_KHR_ray_tracing"
+OpMemoryModel Logical GLSL450
+OpEntryPoint RayGenerationKHR %main "main" %launch %output
+OpDecorate %launch BuiltIn LaunchIdKHR
+OpDecorate %words ArrayStride 4
+OpDecorate %block Block
+OpMemberDecorate %block 0 Offset 0
+OpDecorate %output DescriptorSet 0
+OpDecorate %output Binding 1
+%void = OpTypeVoid
+%uint = OpTypeInt 32 0
+%v3uint = OpTypeVector %uint 3
+%input_ptr = OpTypePointer Input %v3uint
+%words = OpTypeRuntimeArray %uint
+%block = OpTypeStruct %words
+%buffer_ptr = OpTypePointer StorageBuffer %block
+%buffer_word = OpTypePointer StorageBuffer %uint
+%zero = OpConstant %uint 0
+%three = OpConstant %uint 3
+%eleven = OpConstant %uint 11
+%twenty_three = OpConstant %uint 23
+%forty_seven = OpConstant %uint 47
+%poison = OpConstant %uint 99
+%array = OpTypeArray %uint %three
+%array_ptr = OpTypePointer Function %array
+%local_word = OpTypePointer Function %uint
+%initial = OpConstantComposite %array %eleven %twenty_three %forty_seven
+%launch = OpVariable %input_ptr Input
+%output = OpVariable %buffer_ptr StorageBuffer
+%fn = OpTypeFunction %void
+%main = OpFunction %void None %fn
+%entry = OpLabel
+%local = OpVariable %array_ptr Function
+%launch_id = OpLoad %v3uint %launch
+%id = OpCompositeExtract %uint %launch_id 0
+%source_ptr = OpAccessChain %buffer_word %output %zero %id
+%seed = OpLoad %uint %source_ptr
+%selector = OpUMod %uint %seed %three
+OpStore %local %initial
+%alias = OpAccessChain %local_word %local %selector
+%saved_alias = OpCopyObject %local_word %alias
+OpBranch %consume
+%consume = OpLabel
+OpStore %source_ptr %poison
+%selected = OpLoad %uint %saved_alias Volatile
+OpStore %source_ptr %selected
+OpReturn
+OpFunctionEnd
+)spv");
+    const auto program = CompileTypedContinuationSteps(source, "main", spv::ExecutionModelRayGenerationKHR);
+    if (!execute) return true;
+    constexpr uint32_t count = 32;
+    const auto frame_bytes = program.frame_stride_words * count * 4;
+    const auto output_offset = (frame_bytes + 255u) & ~255u;
+    GPU gpu;
+    if (!gpu.Init(program.spirv, output_offset + count * 4, output_offset, false, frame_bytes)) {
+        std::cout << "Delayed selector ordinary-edge SPIR-V validated; Vulkan execution unavailable\n";
+        return false;
+    }
+    const uint32_t choices[] = {11, 23, 47};
+    for (uint32_t activation = 0; activation < 2; ++activation) {
+        for (uint32_t id = 0; id < count; ++id) {
+            std::fill_n(gpu.mapped + id * program.frame_stride_words + program.control_word, kTypedContinuationControlWords, 0);
+            gpu.mapped[output_offset / 4 + id] = id * 5 + activation + 7;
+        }
+        gpu.Dispatch(0, 0, count);
+        for (uint32_t id = 0; id < count; ++id) {
+            Require(gpu.mapped[id * program.frame_stride_words + program.control_word] == UINT32_MAX,
+                    "Delayed selector ordinary-edge program did not complete");
+            Require(gpu.mapped[output_offset / 4 + id] == choices[(id * 5 + activation + 7) % 3],
+                    "Delayed local-array pointer lost its selector across an ordinary CFG edge");
+        }
+    }
+    std::cout << "Delayed selector ordinary edge executed: copied local-array pointer, poisoned selector source, "
+                 "32 invocations and two activations\n";
+    return true;
+}
 void LargeDescriptorResourceTypes() {
     // A full native storage-buffer budget is a descriptor declaration, not a
     // million-element value to spill into each invocation's continuation frame.
@@ -539,32 +623,52 @@ OpFunctionEnd
     Require(logical_copies >= 5 && volatile_loads == 3, "Aggregate conversion lost or duplicated a volatile source read");
 }
 void SourcePrivateFrameBounds() {
+    // Keep the private value observable across suspension. A store with no
+    // later read can be removed before any private frame storage is needed.
     const char *source = R"spv(
 OpCapability Shader
 OpCapability RayTracingKHR
 OpCapability Int64
 OpExtension "SPV_KHR_ray_tracing"
 OpMemoryModel Logical GLSL450
-OpEntryPoint IntersectionKHR %main "main" %large
+OpEntryPoint IntersectionKHR %main "main" %large %io
+OpDecorate %io_block Block
+OpMemberDecorate %io_block 0 Offset 0
+OpMemberDecorate %io_block 1 Offset 8
+OpDecorate %io DescriptorSet 0
+OpDecorate %io Binding 1
 %void = OpTypeVoid
 %bool = OpTypeBool
 %u32 = OpTypeInt 32 0
 %u64 = OpTypeInt 64 0
 %f32 = OpTypeFloat 32
 %zero = OpConstant %u32 0
-%wide_zero = OpConstant %u64 0
+%one_index = OpConstant %u32 1
+%index_mask = OpConstant %u32 1073741823
 %one = OpConstant %f32 1
 %count = OpConstant %u32 1073741824
 %array = OpTypeArray %u64 %count
 %array_ptr = OpTypePointer Private %array
 %word_ptr = OpTypePointer Private %u64
 %large = OpVariable %array_ptr Private
+%io_block = OpTypeStruct %u64 %u32
+%io_ptr = OpTypePointer StorageBuffer %io_block
+%io_word_ptr = OpTypePointer StorageBuffer %u64
+%io_index_ptr = OpTypePointer StorageBuffer %u32
+%io = OpVariable %io_ptr StorageBuffer
 %fn = OpTypeFunction %void
 %main = OpFunction %void None %fn
 %entry = OpLabel
-%element = OpAccessChain %word_ptr %large %zero
+%native_value = OpAccessChain %io_word_ptr %io %zero
+%native_index = OpAccessChain %io_index_ptr %io %one_index
+%input = OpLoad %u64 %native_value
+%unbounded_index = OpLoad %u32 %native_index
+%index = OpBitwiseAnd %u32 %unbounded_index %index_mask
+%element = OpAccessChain %word_ptr %large %index
+OpStore %element %input
 %reported = OpReportIntersectionKHR %bool %one %zero
-OpStore %element %wide_zero
+%restored = OpLoad %u64 %element
+OpStore %native_value %restored
 OpReturn
 OpFunctionEnd
 )spv";
@@ -688,17 +792,30 @@ OpFunctionEnd
     Replace(live_texel, "RayGenerationKHR %main", "IntersectionKHR %main");
     Replace(live_texel, "OpAtomicStore %texel", "%reported = OpReportIntersectionKHR %bool %fone %uzero\nOpAtomicStore %texel");
     atomic_check(live_texel, spv::ExecutionModelIntersectionKHR, 2);
-    // A selector is source data, not a rematerializable load. Both a texel
-    // pointer and its copy must snapshot that data before its backing changes.
+    // Read a runtime selector, then poison its backing after pointer capture.
+    // An initialized Function-only selector can legally become a constant and
+    // no longer exercises independent descriptor snapshots after SSA cleanup.
     std::string dynamic_texel = live_texel;
-    Replace(dynamic_texel, "%fn = OpTypeFunction", "%local_pointer = OpTypePointer Function %i32\n%fn = OpTypeFunction");
+    Replace(dynamic_texel, "\"main\" %image", "\"main\" %image %indices");
+    Replace(dynamic_texel, "%void = OpTypeVoid",
+            "OpDecorate %index_block Block\nOpMemberDecorate %index_block 0 Offset 0\n"
+            "OpDecorate %indices DescriptorSet 0\nOpDecorate %indices Binding 2\n%void = OpTypeVoid");
+    Replace(dynamic_texel, "%fn = OpTypeFunction",
+            "%local_pointer = OpTypePointer Function %i32\n"
+            "%index_block = OpTypeStruct %i32\n%index_block_ptr = OpTypePointer StorageBuffer %index_block\n"
+            "%index_word_ptr = OpTypePointer StorageBuffer %i32\n%indices = OpVariable %index_block_ptr StorageBuffer\n"
+            "%fn = OpTypeFunction");
     Replace(dynamic_texel, "%entry = OpLabel",
             "%entry = OpLabel\n%selector_storage = OpVariable %local_pointer Function %one\n"
+            "%index_address = OpAccessChain %index_word_ptr %indices %uzero\n"
+            "%input_index = OpLoad %i32 %index_address\n%bounded_index = OpBitwiseAnd %i32 %input_index %one\n"
+            "OpStore %selector_storage %bounded_index\n"
             "%selector = OpLoad %i32 %selector_storage\n"
             "%dynamic_coord = OpCompositeConstruct %v3i %selector %selector %selector");
     Replace(dynamic_texel, "%image %coord %uzero", "%image %dynamic_coord %uzero");
     Replace(dynamic_texel, "%prior = OpAtomicSMin",
-            "%saved_texel = OpCopyObject %texel_pointer %texel\nOpStore %selector_storage %zero\n%prior = OpAtomicSMin");
+            "%saved_texel = OpCopyObject %texel_pointer %texel\nOpStore %selector_storage %zero\n"
+            "OpStore %index_address %zero\n%prior = OpAtomicSMin");
     Replace(dynamic_texel, "OpAtomicStore %texel", "OpAtomicStore %saved_texel");
     atomic_check(dynamic_texel, spv::ExecutionModelIntersectionKHR, 2);
     auto dynamic_program = CompileTypedContinuationSteps(Source(dynamic_texel), "main", spv::ExecutionModelIntersectionKHR);
@@ -1271,6 +1388,8 @@ void CheckQualifiedPointerCode(const std::vector<uint32_t> &words, TypedFrameTra
 }
 
 void CopyMemoryMaskSemantics() {
+    // Copy runtime data to an independently observable output. An unused
+    // Function-to-Function copy may legally disappear during source cleanup.
     const std::map<std::string, std::pair<uint32_t, uint32_t>> masks = {{"", {0, 0}},
                                                                         {"Aligned 4", {0, 0}},
                                                                         {"Volatile|Aligned 4", {1, 1}},
@@ -1284,18 +1403,33 @@ OpCapability Shader
 OpCapability RayTracingKHR
 OpExtension "SPV_KHR_ray_tracing"
 OpMemoryModel Logical GLSL450
-OpEntryPoint RayGenerationKHR %main "main"
+OpEntryPoint RayGenerationKHR %main "main" %io
+OpDecorate %io_block Block
+OpMemberDecorate %io_block 0 Offset 0
+OpMemberDecorate %io_block 1 Offset 4
+OpDecorate %io DescriptorSet 0
+OpDecorate %io Binding 1
 %void = OpTypeVoid
 %uint = OpTypeInt 32 0
+%zero = OpConstant %uint 0
 %one = OpConstant %uint 1
 %pointer = OpTypePointer Function %uint
+%io_block = OpTypeStruct %uint %uint
+%io_ptr = OpTypePointer StorageBuffer %io_block
+%io_word_ptr = OpTypePointer StorageBuffer %uint
+%io = OpVariable %io_ptr StorageBuffer
 %fn = OpTypeFunction %void
 %main = OpFunction %void None %fn
 %entry = OpLabel
-%a = OpVariable %pointer Function %one
+%a = OpVariable %pointer Function
 %b = OpVariable %pointer Function
+%source_value = OpAccessChain %io_word_ptr %io %zero
+%destination_value = OpAccessChain %io_word_ptr %io %one
+%incoming = OpLoad %uint %source_value
+OpStore %a %incoming
 OpCopyMemory %b %a )spv" + operands +
-                                   "\nOpReturn\nOpFunctionEnd\n");
+                                   "\n%copied = OpLoad %uint %b\nOpStore %source_value %zero\n"
+                                   "OpStore %destination_value %copied\nOpReturn\nOpFunctionEnd\n");
         for (const auto transport : {TypedFrameTransport::StorageBuffer, TypedFrameTransport::PhysicalAddress}) {
             TypedContinuationCompileOptions options;
             options.transport = transport;
@@ -1615,9 +1749,11 @@ int main(int argc, char **argv) {
         const bool pointer_only = argc == 2 && std::string(argv[1]) == "--pointer-only";
         const bool qualified_only = argc == 2 && std::string(argv[1]) == "--qualified-pointer-only";
         const bool transport_only = argc == 2 && std::string(argv[1]) == "--transport-pointer-only";
-        Require(
-            argc == 1 || compile_only || pointer_only || qualified_only || transport_only,
-            "Usage: vel_rt_state_compiler_tests [--compile-only|--pointer-only|--qualified-pointer-only|--transport-pointer-only]");
+        const bool delayed_selector_only = argc == 2 && std::string(argv[1]) == "--delayed-selector-only";
+        Require(argc == 1 || compile_only || pointer_only || qualified_only || transport_only || delayed_selector_only,
+                "Usage: vel_rt_state_compiler_tests "
+                "[--compile-only|--pointer-only|--qualified-pointer-only|--transport-pointer-only|--delayed-selector-only]");
+        if (delayed_selector_only) return DelayedSelectorOrdinaryEdge(true) ? 0 : 77;
         if (pointer_only || qualified_only || transport_only) {
             CopyMemoryMaskSemantics();
             if (pointer_only) {
@@ -1632,6 +1768,7 @@ int main(int argc, char **argv) {
             return 0;
         }
         BoundariesAndSourcePreservation();
+        if (!DelayedSelectorOrdinaryEdge(!compile_only)) return 77;
         PhysicalSourceSemantics();
         LargeDescriptorResourceTypes();
         ResourceValueTypes();

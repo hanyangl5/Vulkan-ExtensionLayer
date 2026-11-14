@@ -252,6 +252,7 @@ class Compiler {
         }
         PlanResourceRecipes(persistent_size, preview.types);
         PlanPointerSnapshots(persistent_size);
+        PlanStateValues(preview, persistent_size);
         const auto bounds = PlanTypedContinuationFrameBounds(persistent_size);
         output.frame_stride_words = bounds.stride_words;
         output.max_invocations = bounds.max_invocations;
@@ -375,6 +376,7 @@ class Compiler {
     std::map<uint32_t, ContinuationTypeCodec> codecs;
     std::map<uint32_t, std::map<std::string, std::string>> qualified_codecs;
     std::map<uint32_t, const ContinuationFrameSlot *> slots;
+    std::map<uint32_t, uint32_t> state_value_offsets;
     std::map<uint32_t, const TypedInvocationVariable *> invocation_variables;
     std::map<uint32_t, const TypedPrivateVariable *> private_variables;
     std::map<uint32_t, const TypedBuiltinVariable *> builtin_variables;
@@ -529,6 +531,46 @@ class Compiler {
     std::string Fresh() { return "%sc_v" + std::to_string(++serial); }
     static std::string SourceID(uint32_t id) { return "%sc_s" + std::to_string(id); }
     static std::string Register(uint32_t id) { return "%sc_r" + std::to_string(id); }
+    void PlanStateValues(const ContinuationFrames &preview, uint64_t &size) {
+        std::set<uint32_t> values;
+        for (const auto &function : preview.analysis.functions) {
+            if (function.function != preview.analysis.entry) continue;
+            for (const auto &block : function.blocks) values.insert(block.live_out.begin(), block.live_out.end());
+        }
+        for (const auto &instruction : parsed.instructions)
+            if (instruction.op == spv::OpPhi) values.insert(instruction.result);
+        for (const auto &function : preview.functions) {
+            if (function.function != preview.analysis.entry) continue;
+            for (const auto &slot : function.slots)
+                if (!slot.local_storage) state_value_offsets[slot.value] = static_cast<uint32_t>(slot.offset);
+        }
+        // Logical access chains can be rebuilt in a later state. Their numeric
+        // selectors must remain available even when source liveness only sees
+        // the pointer. Physical pointers and opaque recipes own their snapshots.
+        std::set<uint32_t> visited;
+        std::function<void(uint32_t)> retain = [&](uint32_t id) {
+            if (!visited.insert(id).second) return;
+            const auto &value = Def(id);
+            if (!value.in_function || !value.type) return;
+            if (IsPointer(value.type) && !PhysicalPointer(value.type)) {
+                if (!pointer_plans.count(id) && !RecipeValue(id))
+                    for (auto operand : value.uses) retain(operand);
+                return;
+            }
+            if (Ephemeral(value.type) || Def(value.type).op == spv::OpTypeVoid || MatrixPointer(id) ||
+                state_value_offsets.count(id))
+                return;
+            const auto layout =
+                std::find_if(preview.types.begin(), preview.types.end(), [&](const auto &type) { return type.type == value.type; });
+            if (layout == preview.types.end()) Unsupported("cross-state value has no typed layout");
+            size = (size + layout->alignment - 1) & ~uint64_t(layout->alignment - 1);
+            if (layout->size > UINT32_MAX || size > UINT32_MAX - layout->size)
+                Unsupported("cross-state storage exceeds 32-bit byte indexing");
+            state_value_offsets[id] = static_cast<uint32_t>(size);
+            size += layout->size;
+        };
+        for (auto value : values) retain(value);
+    }
     std::string Op(const std::string &text) {
         auto id = Fresh();
         functions << id << " = " << text << "\n";
@@ -1617,6 +1659,13 @@ class Compiler {
     }
     std::string Value(uint32_t id) {
         const auto &d = Def(id);
+        const auto stored = state_value_offsets.find(id);
+        if (stored != state_value_offsets.end()) {
+            auto result =
+                Op("OpFunctionCall " + ValueType(d.type) + " " + codecs.at(d.type).load + " %sc_base " + Constant(stored->second));
+            DecorateResult(id, result, true);
+            return result;
+        }
         if (PhysicalPointer(d.type)) {
             if (!d.in_function) return Global(id);
             auto result = Op("OpLoad " + ValueType(d.type) + " " + Register(id));
@@ -1653,6 +1702,9 @@ class Compiler {
             WritePointerSnapshot(id, words);
         } else if (Ephemeral(Def(id).type))
             ephemeral_values[id] = value;
+        else if (state_value_offsets.count(id))
+            Op("OpFunctionCall " + code.void_type + " " + codecs.at(Def(id).type).store + " %sc_base " +
+               Constant(state_value_offsets.at(id)) + " " + value);
         else
             functions << "OpStore " << Register(id) << " " << value << "\n";
     }
@@ -1846,7 +1898,11 @@ class Compiler {
     void Suspend(const Instruction &i, uint32_t resume_state) {
         const auto &site = *sites.at(i.offset);
         std::string spill = "OpFunctionCall " + code.void_type + " " + site.spill + " %sc_base";
-        for (auto value : site.saved_values) spill += " " + Value(value);
+        if (!site.saved_values.empty()) {
+            std::string values = "OpCompositeConstruct " + site.restored_type;
+            for (auto value : site.saved_values) values += " " + Value(value);
+            spill += " " + Op(values);
+        }
         Op(spill);
         for (uint32_t word = 20; word <= 25; ++word) StoreWord(word, Constant(0));
         uint32_t kind = 0;
@@ -2280,7 +2336,7 @@ class Compiler {
         functions << pc_pointer << " = OpVariable " << pc_type << " Function\n";
         for (const auto &i : parsed.instructions) {
             if (!i.in_function || !i.result || !i.type || (IsPointer(i.type) && !PhysicalPointer(i.type)) || Ephemeral(i.type) ||
-                Def(i.type).op == spv::OpTypeVoid)
+                Def(i.type).op == spv::OpTypeVoid || state_value_offsets.count(i.result))
                 continue;
             auto pointer = PointerType(spv::StorageClassFunction, ValueType(i.type));
             functions << Register(i.result) << " = OpVariable " << pointer << " Function\n";
@@ -2481,46 +2537,70 @@ TypedContinuationProgram CompileTypedContinuationSteps(const std::vector<uint32_
     // semantics and removes the need to pretend helper returns are RT returns.
     const auto selected_entry = AnalyzeContinuations(source, entry, execution_model).entry;
     std::vector<uint32_t> selected(source.begin(), source.begin() + 5);
-    bool has_uint32 = false, has_uint64 = false, has_int64 = false, pointer_arithmetic = false;
-    for (size_t p = 5; p < source.size(); p += source[p] >> 16) {
-        const auto op = source[p] & 0xffff;
-        if (op == spv::OpTypeInt && source[p + 2] == 32 && source[p + 3] == 0) has_uint32 = true;
-        if (op == spv::OpTypeInt && source[p + 2] == 64 && source[p + 3] == 0) has_uint64 = true;
-        if (op == spv::OpCapability && source[p + 1] == spv::CapabilityInt64) has_int64 = true;
-        pointer_arithmetic |= op == spv::OpPtrAccessChain || op == spv::OpInBoundsPtrAccessChain;
-    }
-    if (pointer_arithmetic && !has_int64) selected.insert(selected.end(), {(2u << 16) | spv::OpCapability, spv::CapabilityInt64});
-    bool inserted_control_type = has_uint32;
-    bool inserted_arithmetic_type = has_uint64 || !pointer_arithmetic;
     for (size_t p = 5; p < source.size(); p += source[p] >> 16) {
         auto op = static_cast<spv::Op>(source[p] & 0xffff);
         if (op == spv::OpEntryPoint && source.at(p + 2) != selected_entry) continue;
         if ((op == spv::OpExecutionMode || op == spv::OpExecutionModeId) && source.at(p + 1) != selected_entry) continue;
-        if (op == spv::OpFunction && !inserted_control_type) {
-            auto id = selected[3]++;
-            selected.insert(selected.end(), {(4u << 16) | spv::OpTypeInt, id, 32, 0});
-            inserted_control_type = true;
-        }
-        if (op == spv::OpFunction && !inserted_arithmetic_type) {
-            const auto id = selected[3]++;
-            selected.insert(selected.end(), {(4u << 16) | spv::OpTypeInt, id, 64, 0});
-            inserted_arithmetic_type = true;
-        }
         selected.insert(selected.end(), source.begin() + p, source.begin() + p + (source[p] >> 16));
     }
     spvtools::Optimizer optimizer(VulkanEnvironmentForSPIRV(selected.at(1)));
     std::string error;
     optimizer.SetMessageConsumer(
         [&](spv_message_level_t, const char *, const spv_position_t &, const char *message) { error += message; });
+    // Exhaustive inlining cannot consume helpers with early returns. This
+    // includes the shared traversal's bounds checks and ordinary source
+    // helpers. Merge them first; dead branches satisfy MergeReturn's CFG
+    // precondition while preserving all reachable source behavior.
+    optimizer.RegisterPass(spvtools::CreateDeadBranchElimPass());
+    optimizer.RegisterPass(spvtools::CreateMergeReturnPass());
     optimizer.RegisterPass(spvtools::CreateInlineExhaustivePass());
     optimizer.RegisterPass(spvtools::CreateEliminateDeadFunctionsPass());
     optimizer.RegisterPass(spvtools::CreateFlattenDecorationPass());
+    // Inlining exposes glslc's temporary Function variables. Promote eligible
+    // locals to SSA, then remove their dead loads/stores before frame planning:
+    // every surviving addressable local needs persistent invocation storage.
+    // Keep the entry interface. The pinned SDK's SSA and ADCE passes remove
+    // unused volatile loads, so those sources retain their original accesses
+    // through the ordinary typed path instead of using this optional cleanup.
+    if (!HasVolatileAccess(selected)) {
+        optimizer.RegisterPass(spvtools::CreateSSARewritePass());
+        optimizer.RegisterPass(spvtools::CreateAggressiveDCEPass(true));
+    }
     std::vector<uint32_t> inlined;
     spvtools::ValidatorOptions validation;
     validation.SetScalarBlockLayout(true);
     spvtools::OptimizerOptions optimization;
     optimization.set_validator_options(validation);
     if (!optimizer.Run(selected.data(), selected.size(), &inlined, optimization)) Unsupported("helper inlining failed: " + error);
-    return Compiler(std::move(inlined), entry, execution_model, options).Run();
+    // Request/control and pointer-route arithmetic are private compiler ABI.
+    // Add their scalar types after source cleanup, so even an empty entry has
+    // its codecs without artificial source uses keeping declarations alive.
+    std::vector<uint32_t> prepared(inlined.begin(), inlined.begin() + 5);
+    bool has_uint32 = false, has_uint64 = false, has_int64 = false, pointer_arithmetic = false;
+    for (size_t p = 5; p < inlined.size(); p += inlined[p] >> 16) {
+        const auto op = inlined[p] & 0xffff;
+        if (op == spv::OpTypeInt && inlined[p + 2] == 32 && inlined[p + 3] == 0) has_uint32 = true;
+        if (op == spv::OpTypeInt && inlined[p + 2] == 64 && inlined[p + 3] == 0) has_uint64 = true;
+        if (op == spv::OpCapability && inlined[p + 1] == spv::CapabilityInt64) has_int64 = true;
+        pointer_arithmetic |= op == spv::OpPtrAccessChain || op == spv::OpInBoundsPtrAccessChain;
+    }
+    if (pointer_arithmetic && !has_int64) prepared.insert(prepared.end(), {(2u << 16) | spv::OpCapability, spv::CapabilityInt64});
+    bool inserted_control_type = has_uint32;
+    bool inserted_arithmetic_type = has_uint64 || !pointer_arithmetic;
+    for (size_t p = 5; p < inlined.size(); p += inlined[p] >> 16) {
+        auto op = static_cast<spv::Op>(inlined[p] & 0xffff);
+        if (op == spv::OpFunction && !inserted_control_type) {
+            auto id = prepared[3]++;
+            prepared.insert(prepared.end(), {(4u << 16) | spv::OpTypeInt, id, 32, 0});
+            inserted_control_type = true;
+        }
+        if (op == spv::OpFunction && !inserted_arithmetic_type) {
+            const auto id = prepared[3]++;
+            prepared.insert(prepared.end(), {(4u << 16) | spv::OpTypeInt, id, 64, 0});
+            inserted_arithmetic_type = true;
+        }
+        prepared.insert(prepared.end(), inlined.begin() + p, inlined.begin() + p + (inlined[p] >> 16));
+    }
+    return Compiler(std::move(prepared), entry, execution_model, options).Run();
 }
 }  // namespace vel::rt

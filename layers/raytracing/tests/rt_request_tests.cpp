@@ -8,7 +8,6 @@
 #include <array>
 #include <cstring>
 #include <iostream>
-#include <map>
 #include <stdexcept>
 
 namespace {
@@ -98,7 +97,7 @@ const char *kTypes = R"spv(
 )spv";
 std::string Caller() {
     return std::string(kPrefix) + R"spv(
-OpEntryPoint RayGenerationKHR %main "main" %launch %config %scene %ray_data %call_data
+OpEntryPoint RayGenerationKHR %main "main" %launch %config %scene %ray_data %call_data %shadow %result
 OpName %ray_data "ray_data"
 OpName %call_data "call_data"
 OpName %actual_as "actual_as"
@@ -111,6 +110,8 @@ OpDecorate %scene DescriptorSet 0
 OpDecorate %scene Binding 1
 OpDecorate %ray_data Location 7
 OpDecorate %call_data Location 13
+OpDecorate %shadow Location 29
+OpDecorate %result Location 30
 )spv" + kTypes +
            R"spv(
 %as_type = OpTypeAccelerationStructureKHR
@@ -119,8 +120,7 @@ OpDecorate %call_data Location 13
 %call_ptr = OpTypePointer CallableDataKHR %payload_type
 %ray_half_ptr = OpTypePointer RayPayloadKHR %u16
 %call_half_ptr = OpTypePointer CallableDataKHR %u16
-%local_payload_ptr = OpTypePointer Function %payload_type
-%local_word = OpTypePointer Function %u32
+%ray_word_ptr = OpTypePointer RayPayloadKHR %u32
 %config_type = OpTypeStruct %u32
 %config_ptr = OpTypePointer PushConstant %config_type
 %config_word = OpTypePointer PushConstant %u32
@@ -131,10 +131,10 @@ OpDecorate %call_data Location 13
 %scene = OpVariable %as_ptr UniformConstant
 %ray_data = OpVariable %ray_ptr RayPayloadKHR
 %call_data = OpVariable %call_ptr CallableDataKHR
+%shadow = OpVariable %ray_ptr RayPayloadKHR
+%result = OpVariable %ray_word_ptr RayPayloadKHR
 %main = OpFunction %void None %fn_void
 %entry = OpLabel
-%shadow = OpVariable %local_payload_ptr Function
-%result = OpVariable %local_word Function
 %launch_value = OpLoad %v3u %launch
 %id = OpCompositeExtract %u32 %launch_value 0
 %index = OpUMod %u32 %id %c3
@@ -290,22 +290,10 @@ std::vector<uint32_t> Assemble(const std::string &source) {
     Require(success, "Source validation: " + error);
     return binary;
 }
-std::map<std::string, uint32_t> Names(const std::vector<uint32_t> &source) {
-    std::map<std::string, uint32_t> result;
-    for (size_t p = 5; p < source.size(); p += source[p] >> 16)
-        if ((source[p] & 0xffff) == spv::OpName) result[reinterpret_cast<const char *>(&source[p + 2])] = source[p + 1];
-    return result;
-}
-const TypedInvocationVariable &Invocation(const TypedContinuationProgram &p, uint32_t storage) {
+const TypedInvocationVariable &Invocation(const TypedContinuationProgram &p, uint32_t storage, uint32_t location = UINT32_MAX) {
     for (const auto &v : p.invocation_variables)
-        if (v.storage_class == storage) return v;
+        if (v.storage_class == storage && (location == UINT32_MAX || v.location == location)) return v;
     throw std::runtime_error("Missing invocation variable");
-}
-const ContinuationFrameSlot &Slot(const TypedContinuationProgram &p, const char *name) {
-    auto id = Names(p.source).at(name);
-    for (const auto &s : p.frames.functions.at(0).slots)
-        if (s.value == id) return s;
-    throw std::runtime_error("Missing function frame slot");
 }
 template <class T>
 T Read(const unsigned char *bytes, size_t offset) {
@@ -368,9 +356,15 @@ bool CrossStageExecution() {
     Require(caller.acceleration_structure_descriptors.size() == 1 && caller.acceleration_structure_descriptors[0].binding == 1,
             "AS descriptor value-cell remap lost its original binding");
     Require(caller.frames.options.acceleration_structure_addresses, "AS serialization was not an explicit backend policy");
-    const auto &as_slot = Slot(caller, "actual_as");
-    Require(as_slot.size == 8 && !as_slot.local_storage, "Live AS value was replayed instead of captured as uint64");
-    const auto &ray = Invocation(caller, spv::StorageClassRayPayloadKHR);
+    uint32_t as_type = 0;
+    for (size_t p = 5; p < caller.source.size(); p += caller.source[p] >> 16)
+        if ((caller.source[p] & 65535) == spv::OpTypeAccelerationStructureKHR) as_type = caller.source[p + 1];
+    const auto &slots = caller.frames.functions.at(0).slots;
+    Require(std::any_of(slots.begin(), slots.end(), [&](const auto &slot) {
+                return as_type && slot.type == as_type && slot.size == 8 && !slot.local_storage;
+            }),
+            "Live AS value was replayed instead of captured as uint64");
+    const auto &ray = Invocation(caller, spv::StorageClassRayPayloadKHR, 7);
     const auto &call = Invocation(caller, spv::StorageClassCallableDataKHR);
     const auto &incoming_hit = Invocation(hit, spv::StorageClassIncomingRayPayloadKHR);
     const auto &attribute = Invocation(hit, spv::StorageClassHitAttributeKHR);
@@ -482,8 +476,10 @@ bool CrossStageExecution() {
         source_gpu.Dispatch(iterations, 0, count);
     }
     Require(finished, "Trace/callable source state machine did not terminate");
-    const auto &shadow = Slot(caller, "shadow");
-    const auto &result = Slot(caller, "result");
+    // Observe shader-written invocation outputs, rather than dead Function
+    // variables whose stores and debug names source optimization may remove.
+    const auto &shadow = Invocation(caller, spv::StorageClassRayPayloadKHR, 29);
+    const auto &result = Invocation(caller, spv::StorageClassRayPayloadKHR, 30);
     for (uint32_t id = 0; id < count; ++id) {
         auto bytes = Frame(source_gpu, caller, id);
         Require(phase[id] == 2 * (iterations + id % 3), "Source skipped a Trace/Callable request");
@@ -585,21 +581,15 @@ bool AdditionalCompilation() {
 bool IntersectionAttributes() {
     auto source = std::string(kPrefix) + R"spv(
 OpEntryPoint IntersectionKHR %main "main" %attribute %launch
-OpName %result "result"
-OpName %untouched "untouched"
 OpDecorate %launch BuiltIn LaunchIdKHR
 )spv" + kTypes + R"spv(
 %attribute_ptr = OpTypePointer HitAttributeKHR %v2f
 %attribute_float_ptr = OpTypePointer HitAttributeKHR %f32
-%local_float_ptr = OpTypePointer Function %f32
-%local_word_ptr = OpTypePointer Function %u32
 %attribute = OpVariable %attribute_ptr HitAttributeKHR
 %launch = OpVariable %input_ptr Input
 %initial = OpConstantComposite %v2f %fquarter %fhalf
 %main = OpFunction %void None %fn_void
 %entry = OpLabel
-%result = OpVariable %local_float_ptr Function
-%untouched = OpVariable %local_word_ptr Function
 %launch_value = OpLoad %v3u %launch
 %id = OpCompositeExtract %u32 %launch_value 0
 %index64 = OpUConvert %u64 %c1
@@ -613,7 +603,6 @@ OpStore %attribute %initial
 %delta = OpSelect %f32 %accepted %f1 %f2
 %updated = OpFAdd %f32 %prior %delta
 OpStore %alias %updated
-OpStore %result %updated
 OpReturn
 OpFunctionEnd
 )spv";
@@ -643,11 +632,8 @@ OpFunctionEnd
     for (uint32_t id = 0; id < count; ++id) {
         auto bytes = Frame(gpu, program, id);
         auto expected = id & 1 ? 1.5f : 2.5f;
-        Require(Control(gpu, program, id)[0] == UINT32_MAX && Read<float>(bytes, attribute.offset + 4) == expected &&
-                    Read<float>(bytes, Slot(program, "result").offset) == expected,
+        Require(Control(gpu, program, id)[0] == UINT32_MAX && Read<float>(bytes, attribute.offset + 4) == expected,
                 "Late Report bool/attribute alias was lost");
-        Require(Read<uint32_t>(bytes, Slot(program, "untouched").offset) == 0xcdcdcdcd,
-                "Unused local was read at attribute suspension");
     }
     return true;
 }

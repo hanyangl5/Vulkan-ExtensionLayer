@@ -439,19 +439,19 @@ class Emitter {
             types << "\n";
         }
         std::vector<std::string> spill_parameters{output.base_type};
-        for (auto slot : slots) spill_parameters.push_back(Type(slot->type));
+        if (!slots.empty()) spill_parameters.push_back(codec.restored_type);
         const auto spill_signature = Signature(suffix + "_spill_sig", ID("void"), spill_parameters);
         const auto restore_signature = Signature(suffix + "_restore_sig", codec.restored_type, {output.base_type});
 
         functions << codec.spill << " = OpFunction " << ID("void") << " None " << spill_signature << "\n";
         auto base = Op("OpFunctionParameter " + output.base_type);
-        std::vector<std::string> parameters;
-        for (auto slot : slots) parameters.push_back(Op("OpFunctionParameter " + Type(slot->type)));
+        const auto values = slots.empty() ? std::string() : Op("OpFunctionParameter " + codec.restored_type);
         Op("OpLabel");
         for (size_t n = 0; n < slots.size(); ++n) {
             auto slot = slots[n];
+            const auto value = Op("OpCompositeExtract " + Type(slot->type) + " " + values + " " + std::to_string(n));
             Op("OpFunctionCall " + ID("void") + " " + Store(slot->type) + " " + base + " " +
-               Constant(static_cast<uint32_t>(slot->offset)) + " " + parameters[n]);
+               Constant(static_cast<uint32_t>(slot->offset)) + " " + value);
         }
         functions << "OpReturn\nOpFunctionEnd\n";
 

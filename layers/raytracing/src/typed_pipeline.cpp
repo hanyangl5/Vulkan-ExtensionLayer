@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #include "typed_pipeline.h"
 #include "vkrt_spirv_lower.h"
+#include "sw_ray_query.spv.h"
 #include "spirv_environment.h"
 #include "spirv_memory_model.h"
 #include <spirv-tools/libspirv.hpp>
@@ -9,11 +10,13 @@
 #include <spirv-tools/optimizer.hpp>
 #include <spirv/unified1/spirv.hpp>
 #include <algorithm>
+#include <cctype>
 #include <cstddef>
 #include <cstdlib>
 #include <cstring>
 #include <limits>
 #include <map>
+#include <memory>
 #include <new>
 #include <set>
 #include <stdexcept>
@@ -309,7 +312,56 @@ Words UpgradeTypedMemoryModel(const Words &module) {
 }
 }  // namespace
 
-Words SelectNativeShaderEntry(const Words &source, const std::string &entry, VkShaderStageFlagBits stage) {
+namespace {
+bool TypeAnnotation(uint32_t op) {
+    return op == spv::OpName || op == spv::OpMemberName || op == spv::OpDecorate || op == spv::OpMemberDecorate ||
+           op == spv::OpDecorateId || op == spv::OpDecorateString || op == spv::OpMemberDecorateString;
+}
+
+Words RemoveUnusedTypes(const Words &source) {
+    struct Types {
+        std::map<uint32_t, std::set<uint32_t>> dependencies;
+        std::set<uint32_t> live;
+    } types;
+    auto collect = [](void *user, const spv_parsed_instruction_t *instruction) {
+        auto &data = *static_cast<Types *>(user);
+        if (TypeAnnotation(instruction->opcode)) return SPV_SUCCESS;
+        const bool type = std::strncmp(spvOpcodeString(instruction->opcode), "Type", 4) == 0;
+        // A forward pointer and its eventual pointer definition share one ID.
+        const auto id = instruction->opcode == spv::OpTypeForwardPointer ? instruction->words[1] : instruction->result_id;
+        auto &uses = type ? data.dependencies[id] : data.live;
+        for (uint32_t n = 0; n < instruction->num_operands; ++n) {
+            const auto &operand = instruction->operands[n];
+            if (operand.type == SPV_OPERAND_TYPE_ID || operand.type == SPV_OPERAND_TYPE_TYPE_ID)
+                uses.insert(instruction->words + operand.offset, instruction->words + operand.offset + operand.num_words);
+        }
+        return SPV_SUCCESS;
+    };
+    auto context = spvContextCreate(UniversalEnvironmentForSPIRV(source.at(1)));
+    const auto parsed = spvBinaryParse(context, &types, source.data(), source.size(), nullptr, collect, nullptr);
+    spvContextDestroy(context);
+    Require(parsed == SPV_SUCCESS, "cannot inspect selected entry type dependencies");
+    std::vector<uint32_t> pending(types.live.begin(), types.live.end());
+    while (!pending.empty()) {
+        const auto id = pending.back();
+        pending.pop_back();
+        const auto found = types.dependencies.find(id);
+        if (found == types.dependencies.end()) continue;
+        for (auto dependency : found->second)
+            if (types.live.insert(dependency).second) pending.push_back(dependency);
+    }
+    Words result(source.begin(), source.begin() + 5);
+    for (size_t p = 5; p < source.size(); p += source[p] >> 16) {
+        const auto op = source[p] & 65535;
+        if ((std::strncmp(spvOpcodeString(op), "Type", 4) == 0 || TypeAnnotation(op)) && types.dependencies.count(source[p + 1]) &&
+            !types.live.count(source[p + 1]))
+            continue;
+        result.insert(result.end(), source.begin() + p, source.begin() + p + (source[p] >> 16));
+    }
+    return result;
+}
+
+Words SelectShaderEntry(const Words &source, const std::string &entry, VkShaderStageFlagBits stage) {
     const auto environment = VulkanEnvironmentForSPIRV(source.size() > 1 ? source[1] : 0);
     Validate(source, environment);
     auto matches = [&](uint32_t model) {
@@ -330,6 +382,13 @@ Words SelectNativeShaderEntry(const Words &source, const std::string &entry, VkS
                 return model == spv::ExecutionModelTaskEXT || model == spv::ExecutionModelTaskNV;
             case VK_SHADER_STAGE_MESH_BIT_EXT:
                 return model == spv::ExecutionModelMeshEXT || model == spv::ExecutionModelMeshNV;
+            case VK_SHADER_STAGE_RAYGEN_BIT_KHR:
+            case VK_SHADER_STAGE_MISS_BIT_KHR:
+            case VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR:
+            case VK_SHADER_STAGE_ANY_HIT_BIT_KHR:
+            case VK_SHADER_STAGE_INTERSECTION_BIT_KHR:
+            case VK_SHADER_STAGE_CALLABLE_BIT_KHR:
+                return model == Model(stage);
             default:
                 return false;
         }
@@ -349,18 +408,73 @@ Words SelectNativeShaderEntry(const Words &source, const std::string &entry, VkS
         if ((op == spv::OpExecutionMode || op == spv::OpExecutionModeId) && source[p + 1] != selected) continue;
         module.insert(module.end(), source.begin() + p, source.begin() + p + (source[p] >> 16));
     }
+    const bool volatile_access = HasVolatileAccess(module);
     spvtools::Optimizer cleanup(environment);
+    if (volatile_access) cleanup.RegisterPass(spvtools::CreateFlattenDecorationPass());
     cleanup.RegisterPass(spvtools::CreateEliminateDeadFunctionsPass());
-    cleanup.RegisterPass(spvtools::CreateAggressiveDCEPass(true));
+    if (!volatile_access) cleanup.RegisterPass(spvtools::CreateAggressiveDCEPass(true));
     cleanup.RegisterPass(spvtools::CreateDeadVariableEliminationPass());
     cleanup.RegisterPass(spvtools::CreateEliminateDeadConstantPass());
-    cleanup.RegisterPass(spvtools::CreateTrimCapabilitiesPass());
+    if (!volatile_access) cleanup.RegisterPass(spvtools::CreateTrimCapabilitiesPass());
     spvtools::ValidatorOptions validation;
     validation.SetScalarBlockLayout(true);
     spvtools::OptimizerOptions options;
     options.set_validator_options(validation);
     Words cleaned;
     Require(cleanup.Run(module.data(), module.size(), &cleaned, options), "native entry cleanup failed");
+    if (volatile_access) {
+        // Unselected RT entries can leave AS/payload types after safe cleanup.
+        // Remove only unused declarations; executable volatile reads stay put.
+        cleaned = RemoveUnusedTypes(cleaned);
+        spvtools::Optimizer trim(environment);
+        trim.RegisterPass(spvtools::CreateTrimCapabilitiesPass());
+        Words trimmed;
+        Require(trim.Run(cleaned.data(), cleaned.size(), &trimmed, options), "selected entry capability cleanup failed");
+        return trimmed;
+    }
+    return cleaned;
+}
+
+struct DescriptorSource {
+    uint32_t variable, descriptor_set, binding;
+    bool acceleration_structure;
+};
+std::vector<DescriptorSource> DescriptorSources(const Words &source) {
+    std::set<uint32_t> as_types;
+    std::map<uint32_t, uint32_t> variables, sets, bindings;
+    for (size_t p = 5; p < source.size(); p += source[p] >> 16) {
+        const auto op = source[p] & 65535;
+        if (op == spv::OpTypeAccelerationStructureKHR ||
+            ((op == spv::OpTypeArray || op == spv::OpTypeRuntimeArray) && as_types.count(source[p + 2])) ||
+            (op == spv::OpTypePointer && as_types.count(source[p + 3])))
+            as_types.insert(source[p + 1]);
+        if (op == spv::OpVariable) variables.emplace(source[p + 2], source[p + 1]);
+        if (op == spv::OpDecorate && source[p + 2] == spv::DecorationDescriptorSet) sets[source[p + 1]] = source[p + 3];
+        if (op == spv::OpDecorate && source[p + 2] == spv::DecorationBinding) bindings[source[p + 1]] = source[p + 3];
+    }
+    std::vector<DescriptorSource> result;
+    for (const auto &[variable, type] : variables)
+        if (sets.count(variable) && bindings.count(variable))
+            result.push_back({variable, sets.at(variable), bindings.at(variable), as_types.count(type) != 0});
+    return result;
+}
+Words LowerStageQueries(const Words &source, uint64_t context) {
+    uint32_t *output = nullptr;
+    size_t count = 0;
+    char error[512]{};
+    const auto result = vkrt_spirv_lower_rt_with_context(source.data(), source.size(), vkrt_spv_traversal,
+                                                         sizeof(vkrt_spv_traversal) / sizeof(uint32_t), context, &output, &count,
+                                                         error, sizeof(error));
+    std::unique_ptr<uint32_t, decltype(&vkrt_spirv_lower_free)> owner(output, vkrt_spirv_lower_free);
+    Require(result == 0, std::string("stage Ray Query lowering failed: ") + error);
+    return {output, output + count};
+}
+}  // namespace
+
+Words SelectNativeShaderEntry(const Words &source, const std::string &entry, VkShaderStageFlagBits stage) {
+    const auto cleaned = SelectShaderEntry(source, entry, stage);
+    const auto environment = VulkanEnvironmentForSPIRV(source.size() > 1 ? source[1] : 0);
+    Words module;
     // The generic trimmer does not cover every RT capability. Source validation
     // and reachable-code elimination precede this removal; validating again
     // proves that no retained declaration/operation requires the RT capability.
@@ -387,7 +501,68 @@ TypedContinuationProgram CompileTypedPipelineStage(const Words &source, const st
     auto options = configuration;
     options.emit_compute_entry = false;
     options.step_export_name = export_name;
-    return CompileTypedContinuationSteps(Specialize(source, specialization), entry, Model(stage), options);
+    auto selected = Specialize(source, specialization);
+    auto has_queries = [](const Words &words) {
+        for (size_t p = 5; p < words.size(); p += words[p] >> 16)
+            if ((words[p] & 65535) == spv::OpTypeRayQueryKHR) return true;
+        return false;
+    };
+    if (has_queries(selected)) selected = SelectShaderEntry(selected, entry, stage);
+    if (!has_queries(selected)) return CompileTypedContinuationSteps(selected, entry, Model(stage), options);
+
+    // The query object becomes the shared traversal's ordinary typed state
+    // before continuation planning, so every live query survives suspension.
+    // Descriptor values are lowered once; TraceRay retains its typed AS bridge.
+    const auto original_descriptors = DescriptorSources(selected);
+    selected = LowerStageQueries(selected, options.ray_query_as_context);
+    auto program = CompileTypedContinuationSteps(selected, entry, Model(stage), options);
+    // RQ already translated AS descriptors to address-cell SSBOs. Preserve
+    // their semantic classification with the final source IDs, not stale IDs
+    // from the pre-link source or traversal library.
+    for (const auto &descriptor : DescriptorSources(program.source))
+        if (std::any_of(original_descriptors.begin(), original_descriptors.end(), [&](const auto &original) {
+                return original.acceleration_structure && original.descriptor_set == descriptor.descriptor_set &&
+                       original.binding == descriptor.binding;
+            }))
+            program.acceleration_structure_descriptors.push_back(
+                {descriptor.variable, descriptor.descriptor_set, descriptor.binding});
+    return program;
+}
+
+TypedContinuationProgram RenameTypedPipelineStage(const TypedContinuationProgram &stage, const std::string &export_name) {
+    Require(!export_name.empty() &&
+                std::all_of(export_name.begin(), export_name.end(), [](unsigned char c) { return std::isalnum(c) || c == '_'; }),
+            "invalid stage export name");
+    Require(stage.transport == TypedFrameTransport::PhysicalAddress && !stage.step_export_name.empty(),
+            "stage does not expose a physical frame library");
+    const auto &source = stage.spirv;
+    Require(source.size() >= 5, "missing compiled stage library");
+    Words renamed(source.begin(), source.begin() + 5);
+    renamed.reserve(source.size());
+    uint32_t exports = 0;
+    const auto name = Literal(export_name);
+    Require(name.size() <= UINT16_MAX - 4, "stage export name exceeds the SPIR-V instruction limit");
+    for (size_t p = 5; p < source.size();) {
+        const auto length = source[p] >> 16, op = source[p] & 65535;
+        Require(length != 0 && length <= source.size() - p, "invalid compiled stage instruction");
+        if (op == spv::OpDecorate && length >= 3 && source[p + 2] == spv::DecorationLinkageAttributes) {
+            Require(length >= 5 && source[p + length - 1] == spv::LinkageTypeExport &&
+                        String(source, p + 3, p + length - 1) == stage.step_export_name,
+                    "compiled stage has unexpected linkage");
+            ++exports;
+            renamed.insert(renamed.end(),
+                           {(uint32_t(name.size() + 4) << 16) | spv::OpDecorate, source[p + 1], spv::DecorationLinkageAttributes});
+            renamed.insert(renamed.end(), name.begin(), name.end());
+            renamed.push_back(spv::LinkageTypeExport);
+        } else
+            renamed.insert(renamed.end(), source.begin() + p, source.begin() + p + length);
+        p += length;
+    }
+    Require(exports == 1, "compiled stage must have one export");
+    auto result = stage;
+    result.spirv = std::move(renamed);
+    result.step_export_name = export_name;
+    return result;
 }
 
 Words LinkTypedPipelineProgram(const Words &scheduler, const std::vector<TypedContinuationProgram> &stages) {

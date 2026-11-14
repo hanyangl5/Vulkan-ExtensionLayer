@@ -18,7 +18,17 @@ work prioritizes the mandatory AS/RQ/RTP baseline; known newer-feature exclusion
 must be explicit. CTS/regression outcomes remain categorized evidence, with no
 requirement to make unrelated optional suites all pass. See the goal's
 [compatibility and test scope](ray_tracing_fallback_goal.md#compatibility-and-test-scope).
-The latest slice is the [DescriptorSetLayout ownership checkpoint](rt_descriptor_layout_ownership_2026-10-29.md).
+The latest slice is the [Ray Query inside RT stages checkpoint](rt_query_rt_stages_2026-10-29.md).
+It lowers query state before typed continuation planning and places cross-state
+numeric values in invocation frames, removing the dispatcher register explosion.
+The public two-query TraceRay suspension oracle now executes correctly with both
+GLSL450 and Vulkan memory models. The checkpoint records the exact CTS results
+and the remaining pipeline compilation cost; it does not claim complete fallback
+qualification. QueryPool destruction allocator routing is separately fixed in
+`92dbd60` ([evidence](rt_query_allocator_2026-10-29.json)).
+The user requested pausing goal execution after this checkpoint is finished.
+
+The preceding slice is the [DescriptorSetLayout ownership checkpoint](rt_descriptor_layout_ownership_2026-10-29.md).
 It preserves different original descriptor definitions across native aliases,
 including compatible trace recording and portable shader-interface recipes.
 The preceding [PipelineLayout ownership checkpoint](rt_layout_ownership_2026-10-29.md)
@@ -487,7 +497,7 @@ features absent on the destination. Unknown extension chains, complete source
 environment constraints and private resource budgets still require qualification.
 The [context-free address candidate](rt_context_free_address_design.md) records
 one potential way to eliminate resolver-specialized replay; it is not adopted.
-The complete M0-M5 goal remains active.
+The complete M0-M5 goal remains unfinished.
 
 The following resource/construction work after `c88decf` is currently in
 validation. The [resource profile](rt_resource_profile_2026-10-26.md) now applies
@@ -830,6 +840,11 @@ timestamp injection, with 16,116 checked calls and zero rejected boundaries,
 timestamp writes or validation markers. No full milestone closes.
 
 ## Next work
+
+After the requested pause, resume with the RT-stage query compiler cost and
+frame-memory tradeoff recorded in the latest checkpoint. In particular, keep
+the callable-stage watchdog result open; longer watchdog intervals are separate
+diagnostic runs, not a performance fix or a replacement for original results.
 
 Execution-owned BDA RTP arenas, generic replay and the software discovery
 candidate have public observations. Next work prioritizes mandatory queue and

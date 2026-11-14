@@ -3,6 +3,7 @@
 #include "typed_runtime.h"
 #include "glsl_compiler.h"
 #include "spirv_environment.h"
+#include "spirv_memory_model.h"
 #include "typed_runtime_sources.h"
 #include <spirv/unified1/spirv.hpp>
 #include <spirv-tools/optimizer.hpp>
@@ -315,7 +316,7 @@ TypedRuntimeProgram BuildTypedRuntimeProgram(const std::vector<TypedContinuation
     // Eliminate aggregate parameter shuttles and trivial codec calls before
     // native compilation. No fast-math or floating-point contraction passes
     // are used; source NoContraction and execution controls remain intact.
-    if (options.optimize) {
+    if (options.optimize && !HasVolatileAccess(result.spirv)) {
         spvtools::Optimizer optimizer(VulkanEnvironmentForSPIRV(result.spirv.at(1)));
         std::string cleanup_error;
         optimizer.SetMessageConsumer([&](spv_message_level_t, const char *, const spv_position_t &, const char *message) {

@@ -3,13 +3,92 @@
 # SPDX-License-Identifier: Apache-2.0
 """Check that missing, rejected, or incomplete downstream proof cannot pass."""
 import json
+import contextlib
+import io
 from pathlib import Path
 import runpy
+import sys
 import tempfile
 import unittest
 from unittest.mock import patch
 
-from run_rt_cts import guard_evidence, run_environment
+from run_rt_cts import classify, guard_evidence, main, qpa_result, run_environment
+
+
+class RunnerTimeoutTests(unittest.TestCase):
+    case = "dEQP-VK.ray_query.example"
+
+    def test_terminated_qpa_timeout_matches_selected_case(self):
+        with tempfile.TemporaryDirectory() as directory:
+            log = Path(directory) / "case.qpa"
+            for result in ("Timeout", "WatchdogTimeout"):
+                with self.subTest(result=result):
+                    log.write_text(f'#sessionInfo releaseName test\n#beginTestCaseResult {self.case}\n'
+                                   f'<TestCaseResult CasePath="{self.case}">\n'
+                                   f'#terminateTestCaseResult {result}\n', encoding="utf-8")
+                    status, reason, session = qpa_result(log, self.case)
+                    self.assertEqual(status, result)
+                    self.assertEqual(classify(status, reason, 3221226505, False, None)[0], "timeout")
+                    self.assertEqual(session, {"releaseName": "test"})
+
+    def test_timeout_marker_does_not_hide_wrong_case_or_other_crash(self):
+        with tempfile.TemporaryDirectory() as directory:
+            log = Path(directory) / "case.qpa"
+            for text in (f"#beginTestCaseResult {self.case}.other\n#terminateTestCaseResult Timeout\n",
+                         f"#beginTestCaseResult {self.case}\n#terminateTestCaseResult Crash\n",
+                         f"#terminateTestCaseResult Timeout\n#beginTestCaseResult {self.case}\n"):
+                with self.subTest(text=text):
+                    log.write_text(text, encoding="utf-8")
+                    result, reason, _ = qpa_result(log, self.case)
+                    self.assertIsNone(result)
+                    self.assertEqual(classify(result, reason, 1, False, None)[0], "crash")
+            self.assertEqual(classify("Pass", "OK", 1, False, None)[0], "crash")
+
+    def test_watchdog_defaults_override_and_summary(self):
+        for timeout, requested, effective in ((90, None, 30), (12.25, None, 13),
+                                               (180, 60, 60), (180, 120, 120), (90, 0.25, 1)):
+            with self.subTest(timeout=timeout, requested=requested), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                cts, cases, output = root / "fake-cts", root / "cases.txt", root / "evidence"
+                cts.write_bytes(b"fake CTS executable; no process is launched")
+                cases.write_text(self.case + "\n", encoding="utf-8")
+                argv = ["run_rt_cts.py", "--cts", str(cts), "--cases", str(cases), "--mode", "native",
+                        "--archive-dir", str(root), "--output-dir", str(output), "--timeout", str(timeout)]
+                if requested is not None:
+                    argv += ["--watchdog-interval", str(requested)]
+
+                class WatchdogProcess:
+                    def wait(self, timeout):
+                        return 3
+
+                def launch(command, **kwargs):
+                    qpa = Path(next(arg.split("=", 1)[1] for arg in command if arg.startswith("--deqp-log-filename=")))
+                    qpa.write_text(f"#beginTestCaseResult {self.case}\n#terminateTestCaseResult Timeout\n", encoding="utf-8")
+                    kwargs["stdout"].write(b"FATAL ERROR: Watchdog timer timeout for touch interval\n")
+                    return WatchdogProcess()
+
+                with patch.object(sys, "argv", argv), patch("run_rt_cts.subprocess.Popen", side_effect=launch), \
+                        patch("run_rt_cts.suppress_windows_error_dialogs"), contextlib.redirect_stdout(io.StringIO()):
+                    self.assertEqual(main(), 1)
+                summary = json.loads((output / "summary.json").read_text(encoding="utf-8"))
+                self.assertEqual(summary["watchdog_interval_seconds"], effective)
+                self.assertEqual(summary["watchdog_interval_requested_seconds"], requested)
+                self.assertEqual(summary["counts"]["timeout"], 1)
+                self.assertEqual(summary["counts"]["pass"], 0)
+                self.assertIn(f"--deqp-watchdog-interval-time-limit={effective}", summary["cases"][0]["command"])
+
+    def test_invalid_watchdog_interval_rejected(self):
+        for value in ("0", "-1", "nan", "inf", "-inf"):
+            with self.subTest(value=value):
+                argv = ["run_rt_cts.py", "--cts", "unused", "--cases", "unused", "--mode", "native",
+                        "--archive-dir", "unused", "--output-dir", "unused", "--watchdog-interval=" + value]
+                error = io.StringIO()
+                with patch.object(sys, "argv", argv), patch("run_rt_cts.execute") as execute, \
+                        contextlib.redirect_stderr(error), self.assertRaises(SystemExit) as failure:
+                    main()
+                self.assertEqual(failure.exception.code, 2)
+                self.assertIn("--watchdog-interval must be positive and finite", error.getvalue())
+                execute.assert_not_called()
 
 
 class GuardEvidenceTests(unittest.TestCase):

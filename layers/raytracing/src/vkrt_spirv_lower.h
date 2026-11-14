@@ -37,6 +37,14 @@ int vkrt_spirv_lower_with_context(const uint32_t *user_words, size_t user_word_c
                                   size_t lib_word_count, uint64_t as_context, uint32_t **out_words, size_t *out_word_count,
                                   char *errbuf, size_t errbuf_len);
 
+/* Intermediate RT-stage lowering for the typed continuation compiler. Remove
+ * Ray Query types/instructions while retaining RT entry points and TraceRay.
+ * TraceRay's AS operand is reconstructed from its translated address value.
+ * This output still requires typed RTP lowering before reaching a native ICD. */
+int vkrt_spirv_lower_rt_with_context(const uint32_t *user_words, size_t user_word_count, const uint32_t *lib_words,
+                                     size_t lib_word_count, uint64_t as_context, uint32_t **out_words, size_t *out_word_count,
+                                     char *errbuf, size_t errbuf_len);
+
 void
 vkrt_spirv_lower_free(uint32_t *words);
 

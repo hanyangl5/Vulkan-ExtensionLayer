@@ -17,7 +17,8 @@ struct ContinuationTypeCodec {
 };
 struct ContinuationSuspensionCodec {
     uint32_t function, word_offset;
-    // Parameters/results are in this order. Function storage is already in
+    // The spill argument/restore result struct has fields in this order.
+    // Function storage is already in
     // persistent backing and is deliberately absent. The suspended operation's
     // result is also absent: the scheduler must supply it after completion.
     std::vector<uint32_t> saved_values;
@@ -51,8 +52,9 @@ struct ContinuationFrameCodecs {
 // A store is emitted only at an actual source write: this component never
 // speculatively reads uninitialized locals. It deliberately does not lower the
 // source CFG, pointer recipes, calls, RT operations, or suspension return ABI.
-// Each planned suspension also gets a spill(base_word, saved SSA values...)
-// and restore(base_word)->typed struct function; empty restore sets return void.
+// Each planned suspension also gets spill(base, typed struct of saved values)
+// and restore(base)->the same struct. This avoids a parameter per live value;
+// an empty spill set takes only base and its restore returns void.
 // With logical_pointer_words, StorageBuffer pointer values use the owning
 // compiler's numeric identity record, including within Function/Private
 // aggregates. Its size is unrelated to native logical pointer size or bits.

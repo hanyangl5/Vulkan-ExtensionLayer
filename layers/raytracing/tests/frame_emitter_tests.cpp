@@ -92,6 +92,48 @@ OpFunctionEnd
     rejected(array_fixture(1073741825ULL), "probe_", "smaller than 4 GiB");
 }
 
+void WideSuspensionSpill() {
+    constexpr uint32_t count = 300;
+    std::ostringstream source;
+    source << R"spv(
+OpCapability Shader
+OpCapability RayTracingKHR
+OpExtension "SPV_KHR_ray_tracing"
+OpMemoryModel Logical GLSL450
+OpEntryPoint IntersectionKHR %main "main" %output
+OpDecorate %array ArrayStride 4
+OpMemberDecorate %block 0 Offset 0
+OpDecorate %block Block
+OpDecorate %output DescriptorSet 0
+OpDecorate %output Binding 0
+%void = OpTypeVoid
+%bool = OpTypeBool
+%u32 = OpTypeInt 32 0
+%f32 = OpTypeFloat 32
+%distance = OpConstant %f32 1
+%zero = OpConstant %u32 0
+%count = OpConstant %u32 300
+%array = OpTypeArray %u32 %count
+%block = OpTypeStruct %array
+%block_ptr = OpTypePointer StorageBuffer %block
+%word_ptr = OpTypePointer StorageBuffer %u32
+%output = OpVariable %block_ptr StorageBuffer
+%fn = OpTypeFunction %void
+)spv";
+    for (uint32_t n = 0; n < count; ++n) source << "%c" << n << " = OpConstant %u32 " << n << "\n";
+    source << "%main = OpFunction %void None %fn\n%entry = OpLabel\n"
+              "%seed_ptr = OpAccessChain %word_ptr %output %zero %zero\n%seed = OpLoad %u32 %seed_ptr\n";
+    for (uint32_t n = 0; n < count; ++n) source << "%v" << n << " = OpIAdd %u32 %seed %c" << n << "\n";
+    source << "%accepted = OpReportIntersectionKHR %bool %distance %zero\n";
+    for (uint32_t n = 0; n < count; ++n)
+        source << "%p" << n << " = OpAccessChain %word_ptr %output %zero %c" << n << "\nOpStore %p" << n << " %v" << n << "\n";
+    source << "OpReturn\nOpFunctionEnd\n";
+    const auto code = EmitContinuationFrameCodecs(Assemble(source.str()), "main", spv::ExecutionModelIntersectionKHR, 2, 7);
+    Require(code.suspensions.size() == 1 && code.suspensions.front().saved_values.size() == count,
+            "Wide suspension fixture lost observable live values");
+    ValidateComponent(code);
+}
+
 // A real RT entry with live aggregate SSA, full-lifetime local backing, a
 // dynamic access-chain alias, and a bool produced only upon suspension return.
 // It is analyzed, never executed; the component's compute proof follows below.
@@ -222,7 +264,7 @@ struct Proof {
             Require(where != site.saved_values.end(), "Missing restored field " + name);
             return std::to_string(where - site.saved_values.begin());
         };
-        std::string spill = "%spill = OpFunctionCall " + code.void_type + " " + site.spill + " %base";
+        std::string spill = "%saved_values = OpCompositeConstruct " + site.restored_type;
         for (auto value : site.saved_values) {
             if (value == names.at("payload"))
                 spill += " %aggregate_value";
@@ -233,6 +275,7 @@ struct Proof {
             else
                 throw std::runtime_error("Unexpected suspension spill field");
         }
+        spill += "\n%spill = OpFunctionCall " + code.void_type + " " + site.spill + " %base %saved_values";
         // Find the constituent symbols through the typed aggregate's emitted
         // declaration, avoiding assumptions about binary type ID allocation.
         auto type_line = code.declarations.find(aggregate.spirv_type + " = OpTypeStruct ");
@@ -383,6 +426,7 @@ int main(int argc, char **argv) {
         const bool compile_only = argc == 2 && std::string(argv[1]) == "--compile-only";
         Require(argc == 1 || compile_only, "Usage: vel_rt_frame_emitter_tests [--compile-only]");
         RejectionsAndEmptySpills();
+        WideSuspensionSpill();
         Proof proof;
         auto binary = Assemble(proof.Program());
         Require(proof.code.capabilities.find("RayTracing") == std::string::npos, "Codec retained RT capability");

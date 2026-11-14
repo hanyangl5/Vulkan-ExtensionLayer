@@ -1,6 +1,7 @@
 // Copyright 2026 The Khronos Group Inc.
 // SPDX-License-Identifier: Apache-2.0
 #include "typed_pipeline.h"
+#include "typed_runtime.h"
 #include "glsl_compiler.h"
 #include <spirv-tools/libspirv.hpp>
 #include <spirv-tools/optimizer.hpp>
@@ -322,8 +323,10 @@ layout(local_size_x=1) in;
 layout(constant_id=0) const uint root_lo=0;
 layout(constant_id=1) const uint root_hi=0;
 layout(buffer_reference,std430,buffer_reference_align=4) buffer Words { uint w[]; };
-void vel_rt_stage_0(uint64_t frame) {}
-void vel_rt_stage_1(uint64_t frame) {}
+)glsl";
+    text << "void " << caller.step_export_name << "(uint64_t frame) {}\n";
+    text << "void " << callee.step_export_name << "(uint64_t frame) {}\n";
+    text << R"glsl(
 uint64_t address(Words b,uint word) { return uint64_t(b.w[word]) | (uint64_t(b.w[word+1])<<32); }
 void main() {
     Words root=Words(uint64_t(root_lo)|(uint64_t(root_hi)<<32));
@@ -339,7 +342,9 @@ void main() {
     text << R"glsl(
     r.w[0]=id; r.w[3]=count; r.w[4]=1u; r.w[5]=1u;
     uint errors=0u;
-    vel_rt_stage_0(ra);
+)glsl";
+    text << caller.step_export_name << "(ra);\n";
+    text << R"glsl(
     memoryBarrierBuffer();
     for(uint iteration=0;iteration<3u;++iteration) {
         if(r.w[rc+1u]!=3u) errors|=1u;
@@ -351,7 +356,9 @@ void main() {
     text << R"glsl(
         uint pc=r.w[rc];
         // A pending stage called before Ready must perform no source work.
-        vel_rt_stage_0(ra);
+)glsl";
+    text << caller.step_export_name << "(ra);\n";
+    text << R"glsl(
         memoryBarrierBuffer();
         if(r.w[rc]!=pc || r.w[rc+1u]!=3u || r.w[rc+2u]!=0u) errors|=32u;
 )glsl";
@@ -360,7 +367,9 @@ void main() {
     text << "for(uint n=0;n<" << outgoing.size / 4 << "u;++n) c.w[" << incoming.offset / 4 << "u+n]=r.w[r.w[rc+20u]/4u+n];\n";
     text << R"glsl(
         memoryBarrierBuffer();
-        vel_rt_stage_1(ca);
+)glsl";
+    text << callee.step_export_name << "(ca);\n";
+    text << R"glsl(
         memoryBarrierBuffer();
         if(c.w[cc]!=0xffffffffu || c.w[cc+1u]!=0u) errors|=64u;
 )glsl";
@@ -368,7 +377,9 @@ void main() {
     text << R"glsl(
         r.w[rc+2u]=1u;
         memoryBarrierBuffer();
-        vel_rt_stage_0(ra);
+)glsl";
+    text << caller.step_export_name << "(ra);\n";
+    text << R"glsl(
         memoryBarrierBuffer();
     }
     if(r.w[rc]!=0xffffffffu || r.w[rc+1u]!=0u || r.w[rc+2u]!=0u) errors|=128u;
@@ -490,7 +501,44 @@ Words WithShaderCallMemoryBarriers(const Words &source) {
 }
 
 #include "typed_memory_model_tests.h"
+#include "typed_volatile_tests.h"
+void StageRenameChecks(const TypedContinuationProgram &caller, const TypedContinuationProgram &callee) {
+    const auto a = RenameTypedPipelineStage(caller, "vel_rt_stage_123456789");
+    const auto b = RenameTypedPipelineStage(callee, "s");
+    auto stable_words = [](const Words &words) {
+        Words result(words.begin(), words.begin() + 5);
+        for (size_t p = 5; p < words.size(); p += words[p] >> 16) {
+            const auto count = words[p] >> 16;
+            if ((words[p] & 65535) == spv::OpDecorate && words[p + 2] == spv::DecorationLinkageAttributes) {
+                Require(words[p + count - 1] == spv::LinkageTypeExport, "Renamed stage linkage is not an export");
+                // Keep the target ID and linkage kind; only the literal name
+                // and its encoded word count may change.
+                result.insert(result.end(), {spv::OpDecorate, words[p + 1], words[p + 2], words[p + count - 1]});
+            } else
+                result.insert(result.end(), words.begin() + p, words.begin() + p + count);
+        }
+        return result;
+    };
+    for (const auto &pair : {std::make_pair(&caller, &a), std::make_pair(&callee, &b)}) {
+        const auto &before = *pair.first, &after = *pair.second;
+        Require(stable_words(before.spirv) == stable_words(after.spirv), "Stage rename changed compiled instructions or IDs");
+        Require(before.source == after.source && before.frame_stride_bytes == after.frame_stride_bytes &&
+                    before.control_byte_offset == after.control_byte_offset && before.state_count == after.state_count &&
+                    before.invocation_variables.size() == after.invocation_variables.size() &&
+                    before.required_execution_modes.size() == after.required_execution_modes.size(),
+                "Stage rename changed source or runtime metadata");
+        Require(RenameTypedPipelineStage(after, before.step_export_name).spirv == before.spirv,
+                "Stage export rename did not round trip");
+    }
+    CheckNative(LinkTypedPipelineProgram(CompileGLSL(Scheduler(a, b), VK_SHADER_STAGE_COMPUTE_BIT), {a, b}));
+    auto mismatched = caller;
+    mismatched.step_export_name = "missing";
+    Reject([&] { RenameTypedPipelineStage(mismatched, "valid"); }, "mismatched source export");
+    Reject([&] { RenameTypedPipelineStage(caller, "bad name"); }, "invalid export name");
+}
 void CPUChecks(const TypedContinuationProgram &caller, const TypedContinuationProgram &callee) {
+    VolatileOptimizationBoundaries();
+    StageRenameChecks(caller, callee);
     VulkanMemoryModelChecks(caller, callee);
     Require(NamedConstant(caller.source, "flag_spec") == 1 && NamedConstant(caller.source, "small_spec") == 19 &&
                 NamedConstant(caller.source, "wide_spec") == UINT64_C(0x100000007),

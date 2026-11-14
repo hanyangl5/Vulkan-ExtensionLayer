@@ -4,10 +4,46 @@
 #include "spirv_environment.h"
 #include <spirv/unified1/spirv.hpp>
 #include <map>
+#include <set>
 #include <stdexcept>
 #include <vector>
 
 namespace vel::rt {
+// The pinned SDK removes unused volatile loads in SSA/ADCE. Keep required
+// accesses out of those optional optimizations at every compilation boundary.
+// Parsed operands distinguish masks/semantics from unrelated literal values.
+inline bool HasVolatileAccess(const std::vector<uint32_t> &source) {
+    struct Accesses {
+        bool volatile_access = false;
+        std::map<uint32_t, uint32_t> constants;
+        std::set<uint32_t> semantics;
+    } accesses;
+    auto collect = [](void *user, const spv_parsed_instruction_t *instruction) {
+        auto &data = *static_cast<Accesses *>(user);
+        if (instruction->opcode == spv::OpConstant && instruction->num_words == 4)
+            data.constants[instruction->result_id] = instruction->words[3];
+        if (instruction->opcode == spv::OpConstantNull) data.constants[instruction->result_id] = 0;
+        for (uint32_t n = 0; n < instruction->num_operands; ++n) {
+            const auto &operand = instruction->operands[n];
+            const auto value = instruction->words[operand.offset];
+            data.volatile_access |= (operand.type == SPV_OPERAND_TYPE_MEMORY_ACCESS && (value & spv::MemoryAccessVolatileMask)) ||
+                                    (operand.type == SPV_OPERAND_TYPE_IMAGE && (value & spv::ImageOperandsVolatileTexelMask)) ||
+                                    (operand.type == SPV_OPERAND_TYPE_DECORATION && value == spv::DecorationVolatile);
+            if (operand.type == SPV_OPERAND_TYPE_MEMORY_SEMANTICS_ID) data.semantics.insert(value);
+        }
+        return SPV_SUCCESS;
+    };
+    auto context = spvContextCreate(UniversalEnvironmentForSPIRV(source.at(1)));
+    const auto status = spvBinaryParse(context, &accesses, source.data(), source.size(), nullptr, collect, nullptr);
+    spvContextDestroy(context);
+    if (status != SPV_SUCCESS) throw std::runtime_error("cannot inspect source memory operands");
+    for (auto id : accesses.semantics) {
+        const auto constant = accesses.constants.find(id);
+        if (constant == accesses.constants.end() || (constant->second & spv::MemorySemanticsVolatileMask)) return true;
+    }
+    return accesses.volatile_access;
+}
+
 // A native compute invocation executes the complete logical RT call tree.
 // Device scope includes every such tree and keeps acquire/release and explicit
 // availability/visibility semantics. Invocation scope would require Relaxed
