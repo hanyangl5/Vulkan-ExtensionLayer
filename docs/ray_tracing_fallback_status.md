@@ -6,6 +6,7 @@
 Checkpoint: 2026-10-30 (Asia/Hong_Kong). Branch
 `codex/ray-tracing-pipeline-only`, based on `219ad90`.
 **The complete AS/RTP fallback is not implemented.**
+Latest local qualification: [RTP-only checkpoint](rt_pipeline_only_checkpoint_2026-10-30.md).
 
 ## Scope pivot: Ray Query removed
 
@@ -51,17 +52,31 @@ These are intentional and must not be reported as passes:
 
 ## Verified on this branch
 
+See the [RTP-only local qualification checkpoint](rt_pipeline_only_checkpoint_2026-10-30.md)
+for commands, per-matrix results and measured compile cost.
+
 - Standalone build (`-DBUILD_TESTING=ON`) completes with the SDK toolchain.
-- Offline suite: **49/49 pass** in `build-rtp-only`
-  (compiler, concurrency, no-native-RT host/guard, AS/BVH4, descriptor,
-  shader-object and translation checks).
-- Removed from the suite: 4 Ray Query tests (typed query pipeline, spirv lower,
-  spirv ids, shader-object RQ) and the ray-differential GPU tests.
+- Offline suite: **49/49 pass** in `build-rtp-only`.
+- Software GPU matrix (`-L no_native_rt`): **75/75 pass**.
+- Typed RTP GPU matrix (`-L typed_rtp`): **46/47**; the one failure is the
+  documented native-control segfault in `physical_interfaces.native`, which
+  runs without the layer.
+- Public RTP fixtures end to end (AS build + pipeline compile + trace):
+  5.3 s (`test_rtp_api`) and 5.4 s (large-array nested-callable
+  `test_rtp_arenas`). The Ray Query era compile-cost watchdog problem does not
+  reproduce on the RTP fixtures.
+
+Removed before these runs: 4 Ray Query tests, the ray-differential GPU tests,
+and the two shader-binary envelope fixtures that only exercised Ray Query
+source/binary envelopes. The latter fail identically without the layer on this
+host, so they cannot provide fallback evidence; shader-object transport stays
+covered by `vkrt.shader_objects*` and `vkrt.rtp_api.shader_object_mixed`.
 
 Not yet re-qualified on this branch:
 
-- GPU and external CTS runs. The last recorded RTP/AS CTS results belong to the
-  pre-pivot tree and must be re-run with the new DLL before they are quoted.
+- External CTS. The corpus is absent on this host (`D:\Codes\VK-GL-CTS` does not
+  exist), so no case could be executed. The 74-case RTP-only selection and the
+  exact runner command are recorded in the checkpoint.
 - `dEQP-VK.ray_query.*` cases are no longer applicable.
 
 ## Code in this checkpoint
@@ -103,13 +118,11 @@ environment.
 
 ## Next work
 
-1. Re-run the AS/RTP external CTS selection with this DLL and record it as a
-   new checkpoint. Do not reuse Ray Query era numbers.
-2. Reduce per-pipeline compile/link cost; the pre-pivot RTP stage compile was
-   tens of seconds and a whole-pipeline `-O` took minutes, which trips CTS
-   watchdogs before any result is produced.
-3. Re-baseline the GPU test label matrix; several tests lost their traversal
-   oracle in this pivot and need RTP-based replacements where the object under
-   test is the AS itself.
-4. Complete the mandatory resource budget, query-schema and physical no-RT
-   qualification items carried over from the pre-pivot status history.
+1. Restore the external CTS corpus and run the prepared 74-case selection with
+   this DLL; record it as a new checkpoint. Do not reuse Ray Query era numbers.
+2. Re-run the same matrix on a physical device without native RT.
+3. Qualify mandatory resource budgets, remaining pipeline options and command
+   schemas carried over from the pre-pivot status.
+4. Re-baseline the GPU label matrix where AS verification lost its Ray Query
+   traversal oracle; build RTP-based replacements for the copy/update/
+   serialization cases.

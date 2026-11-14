@@ -11,5 +11,3 @@ dEQP-VK.ray_tracing_pipeline.acceleration_structures.update.traditional_structur
 dEQP-VK.ray_tracing_pipeline.acceleration_structures.update.traditional_structures.gpu.compact.transform
 dEQP-VK.ray_tracing_pipeline.acceleration_structures.update.traditional_structures.gpu.compact.geometry_transform
 dEQP-VK.ray_tracing_pipeline.acceleration_structures.update.traditional_structures.gpu.compact.degenerate
-dEQP-VK.ray_query.acceleration_structures.instance_update.traditional_structures.gpu_built.update
-dEQP-VK.ray_query.acceleration_structures.instance_update.traditional_structures.gpu_built.update_in_place

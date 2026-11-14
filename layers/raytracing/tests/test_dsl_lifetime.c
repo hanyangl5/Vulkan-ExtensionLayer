@@ -31,9 +31,14 @@ int main(int argc, char **argv) {
     VkInstanceCreateInfo ici = {.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO, .pApplicationInfo = &app};
     VkInstance instance;
     CHECK(vkCreateInstance(&ici, NULL, &instance));
-    uint32_t count = 1;
-    VkPhysicalDevice physical;
-    CHECK(vkEnumeratePhysicalDevices(instance, &count, &physical));
+    uint32_t count = 0;
+    CHECK(vkEnumeratePhysicalDevices(instance, &count, NULL));
+    if (!count) return 77;
+    VkPhysicalDevice *devices = calloc(count, sizeof(*devices));
+    if (!devices) return 1;
+    CHECK(vkEnumeratePhysicalDevices(instance, &count, devices));
+    VkPhysicalDevice physical = devices[0];
+    free(devices);
     uint32_t family_count = 0;
     vkGetPhysicalDeviceQueueFamilyProperties(physical, &family_count, NULL);
     VkQueueFamilyProperties *families = calloc(family_count, sizeof(*families));

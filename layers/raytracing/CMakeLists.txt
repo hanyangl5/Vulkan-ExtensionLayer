@@ -313,43 +313,6 @@ target_include_directories(vkrt_cpu_bvh PUBLIC
 )
 set_target_properties(vkrt_cpu_bvh PROPERTIES C_STANDARD 11 POSITION_INDEPENDENT_CODE ON)
 
-# ------------------------------------------------------------------
-# Shader-binary and ray-tracing-pipeline fixtures (no consumer-stage
-# Ray Query lowering exists in this layer).
-# ------------------------------------------------------------------
-set(VKRT_SHADER_IMMUTABLE_SPV ${CMAKE_CURRENT_BINARY_DIR}/shader_binary_immutable.comp.spv)
-add_custom_command(OUTPUT ${VKRT_SHADER_IMMUTABLE_SPV}
-   COMMAND ${VKRT_GLSLC} --target-env=vulkan1.2 ${CMAKE_CURRENT_SOURCE_DIR}/tests/shader_binary_immutable.comp -o ${VKRT_SHADER_IMMUTABLE_SPV}
-   COMMAND ${VKRT_SPIRV_VAL} --target-env vulkan1.2 ${VKRT_SHADER_IMMUTABLE_SPV}
-   DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/tests/shader_binary_immutable.comp VERBATIM)
-add_custom_target(vkrt_shader_immutable_spv DEPENDS ${VKRT_SHADER_IMMUTABLE_SPV})
-add_executable(test_shader_binary_immutable tests/test_shader_binary_immutable.c)
-target_link_libraries(test_shader_binary_immutable PRIVATE vkrt_cpu_bvh ${Vulkan_LIBRARIES})
-set_target_properties(test_shader_binary_immutable PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED ON)
-add_dependencies(test_shader_binary_immutable vkrt_shader_immutable_spv)
-set(VKRT_SHADER_BINARY_PROFILE_SPV)
-foreach(profile plain)
-   set(output ${CMAKE_CURRENT_BINARY_DIR}/shader_binary_profile_${profile}.comp.spv)
-   add_custom_command(OUTPUT ${output}
-      COMMAND ${VKRT_GLSLC} --target-env=vulkan1.2 ${CMAKE_CURRENT_SOURCE_DIR}/tests/shader_binary_profile_${profile}.comp -o ${output}
-      COMMAND ${VKRT_SPIRV_VAL} --target-env vulkan1.2 ${output}
-      DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/tests/shader_binary_profile_${profile}.comp VERBATIM)
-   list(APPEND VKRT_SHADER_BINARY_PROFILE_SPV ${output})
-endforeach()
-foreach(stage vert frag)
-   set(output ${CMAKE_CURRENT_BINARY_DIR}/shader_binary_linked.${stage}.spv)
-   add_custom_command(OUTPUT ${output}
-      COMMAND ${VKRT_GLSLC} --target-env=vulkan1.2 ${CMAKE_CURRENT_SOURCE_DIR}/tests/shader_binary_linked.${stage} -o ${output}
-      COMMAND ${VKRT_SPIRV_VAL} --target-env vulkan1.2 ${output}
-      DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/tests/shader_binary_linked.${stage} VERBATIM)
-   list(APPEND VKRT_SHADER_BINARY_PROFILE_SPV ${output})
-endforeach()
-add_custom_target(vkrt_shader_binary_profile_spv DEPENDS ${VKRT_SHADER_BINARY_PROFILE_SPV})
-add_executable(test_shader_binary_profiles tests/test_shader_binary_profiles.c)
-target_link_libraries(test_shader_binary_profiles PRIVATE vkrt_cpu_bvh ${Vulkan_LIBRARIES})
-set_target_properties(test_shader_binary_profiles PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED ON)
-add_dependencies(test_shader_binary_profiles vkrt_shader_binary_profile_spv)
-
 add_executable(test_as_copy tests/test_as_copy.c)
 target_link_libraries(test_as_copy PRIVATE vkrt_cpu_bvh ${Vulkan_LIBRARIES})
 set_target_properties(test_as_copy PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED ON)
@@ -816,20 +779,6 @@ if(BUILD_TESTING)
    set_target_properties(test_shader_interface PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED ON)
    add_test(NAME vkrt.shader_interface COMMAND test_shader_interface)
    set_tests_properties(vkrt.shader_interface PROPERTIES LABELS "offline;no_native_rt")
-   add_test(NAME vkrt.shader_binary_immutable.software COMMAND test_shader_binary_immutable ${VKRT_SHADER_IMMUTABLE_SPV})
-   set_tests_properties(vkrt.shader_binary_immutable.software PROPERTIES
-      ENVIRONMENT "VK_LAYER_PATH=${CMAKE_BINARY_DIR}/layers;VK_INSTANCE_LAYERS=VK_LAYER_VKRT_SOFTWARE_RAY_QUERY"
-      LABELS "gpu;no_native_rt" SKIP_RETURN_CODE 77 TIMEOUT 120)
-   add_test(NAME vkrt.shader_binary_immutable.native COMMAND test_shader_binary_immutable ${VKRT_SHADER_IMMUTABLE_SPV})
-   set_tests_properties(vkrt.shader_binary_immutable.native PROPERTIES
-      ENVIRONMENT "VK_INSTANCE_LAYERS=" LABELS "gpu;native_rt" SKIP_RETURN_CODE 77 TIMEOUT 120)
-   add_test(NAME vkrt.shader_binary_profiles.software COMMAND test_shader_binary_profiles ${VKRT_SHADER_BINARY_PROFILE_SPV})
-   set_tests_properties(vkrt.shader_binary_profiles.software PROPERTIES
-      ENVIRONMENT "VK_LAYER_PATH=${CMAKE_BINARY_DIR}/layers;VK_INSTANCE_LAYERS=VK_LAYER_VKRT_SOFTWARE_RAY_QUERY"
-      LABELS "gpu;no_native_rt" SKIP_RETURN_CODE 77 TIMEOUT 600)
-   add_test(NAME vkrt.shader_binary_profiles.native COMMAND test_shader_binary_profiles ${VKRT_SHADER_BINARY_PROFILE_SPV})
-   set_tests_properties(vkrt.shader_binary_profiles.native PROPERTIES
-      ENVIRONMENT "VK_INSTANCE_LAYERS=" LABELS "gpu;native_rt" SKIP_RETURN_CODE 77 TIMEOUT 600)
    set_tests_properties(vkrt.memory_queries PROPERTIES LABELS "offline;no_native_rt")
    add_executable(test_memory_queries_gpu tests/test_memory_queries_gpu.c)
    target_include_directories(test_memory_queries_gpu PRIVATE ${Vulkan_INCLUDE_DIRS})
