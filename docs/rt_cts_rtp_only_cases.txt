@@ -1,21 +1,5 @@
-# Copyright 2026 The Khronos Group Inc.
-# Exact external CTS controls for source-envelope interface reconstruction.
-# Exact externalCTS d18e4c68543103371715845cd914c71e5859963e linked/unlinked binary execution.
-# Exact pipeline-library regression selection, VK-GL-CTS d18e4c68543103371715845cd914c71e5859963e.
-# GPU UPDATE/refit selection, VK-GL-CTS d18e4c68543103371715845cd914c71e5859963e.
-# Post-directory-consolidation regression slice, including four prior crashes.
-# Source: external/vulkancts/modules/vulkan/shader_object/vktShaderObjectBinaryTests.cpp
-# SPDX-License-Identifier: Apache-2.0
-# VK-GL-CTS d18e4c68543103371715845cd914c71e5859963e
-# VK-GL-CTS source pin: d18e4c68543103371715845cd914c71e5859963e
-dEQP-VK.pipeline.shader_object_linked_binary.descriptor_limits.fragment_shader.sampled_images_10
-dEQP-VK.pipeline.shader_object_linked_binary.early_destroy.cache_destroy_layout
-dEQP-VK.pipeline.shader_object_linked_binary.push_constant.graphics_pipeline.count_1_shader_vert_frag
-dEQP-VK.pipeline.shader_object_linked_binary.spec_constant.graphics.fragment.basic.bool
-dEQP-VK.pipeline.shader_object_unlinked_binary.descriptor_limits.fragment_shader.sampled_images_10
-dEQP-VK.pipeline.shader_object_unlinked_binary.early_destroy.cache_destroy_layout
-dEQP-VK.pipeline.shader_object_unlinked_binary.push_constant.graphics_pipeline.count_1_shader_vert_frag
-dEQP-VK.pipeline.shader_object_unlinked_binary.spec_constant.graphics.fragment.basic.bool
+# RTP-only external CTS selection: ray_tracing_pipeline namespace only.
+# dEQP-VK.ray_query.* and generic dEQP-VK.pipeline.shader_object_* cases are excluded.
 dEQP-VK.ray_tracing_pipeline.acceleration_structures.operations.sparse_binding_structures.compaction.gpu_built.bottom_acceleration_structure.aabbs
 dEQP-VK.ray_tracing_pipeline.acceleration_structures.operations.sparse_binding_structures.compaction.gpu_built.bottom_acceleration_structure.triangles
 dEQP-VK.ray_tracing_pipeline.acceleration_structures.operations.sparse_binding_structures.compaction.gpu_built.top_acceleration_structure.aabbs
@@ -76,9 +60,3 @@ dEQP-VK.ray_tracing_pipeline.pipeline_library.configurations.singlethreaded_comp
 dEQP-VK.ray_tracing_pipeline.pipeline_library.configurations.singlethreaded_compilation.s3_l11_aabbs
 dEQP-VK.ray_tracing_pipeline.pipeline_library.configurations.singlethreaded_compilation.s3_l22_l22
 dEQP-VK.ray_tracing_pipeline.pipeline_library.configurations.singlethreaded_compilation.s3_l22_l22_aabbs
-dEQP-VK.shader_object.binary.query.comp.unlinked.same_shader
-dEQP-VK.shader_object.binary.query.comp.unlinked.shader_from_binary
-dEQP-VK.shader_object.binary.query.comp.unlinked.shader_from_binary_different_layout
-dEQP-VK.shader_object.binary.query.comp.unlinked.shader_from_binary_null_layout
-dEQP-VK.shader_object.create.all.fail
-dEQP-VK.shader_object.create.all_with_mesh.fail

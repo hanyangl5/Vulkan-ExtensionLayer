@@ -6,7 +6,9 @@
 Checkpoint: 2026-10-30 (Asia/Hong_Kong). Branch
 `codex/ray-tracing-pipeline-only`, based on `219ad90`.
 **The complete AS/RTP fallback is not implemented.**
-Latest local qualification: [RTP-only checkpoint](rt_pipeline_only_checkpoint_2026-10-30.md).
+Latest local qualification: [RTP-only external CTS](rt_pipeline_only_cts_2026-11-15.md)
+(60-case RTP selection, software 54 pass + 6 timeouts, native control 60/60) and
+the preceding [local GPU checkpoint](rt_pipeline_only_checkpoint_2026-10-30.md).
 
 ## Scope pivot: Ray Query removed
 
@@ -72,12 +74,15 @@ source/binary envelopes. The latter fail identically without the layer on this
 host, so they cannot provide fallback evidence; shader-object transport stays
 covered by `vkrt.shader_objects*` and `vkrt.rtp_api.shader_object_mixed`.
 
-Not yet re-qualified on this branch:
-
-- External CTS. The corpus is absent on this host (`D:\Codes\VK-GL-CTS` does not
-  exist), so no case could be executed. The 74-case RTP-only selection and the
-  exact runner command are recorded in the checkpoint.
-- `dEQP-VK.ray_query.*` cases are no longer applicable.
+External CTS: the corpus was rebuilt locally (VK-GL-CTS `main` tarball,
+2026-11-15) and the 60-case `dEQP-VK.ray_tracing_pipeline.*` selection ran
+against this DLL. Software result: **54 pass, 0 fail, 0 NotSupported, 0 crash,
+6 timeout**, with 148,881 downstream guard checks and zero rejections,
+timestamp writes or validation markers. A separate 120 s-interval diagnostic
+rerun passed all six timed-out cases in 4.77-7.00 s; the original timeouts are
+retained and point at cold pipeline-compile cost. The matching native control
+passed **60/60**. See the [CTS checkpoint](rt_pipeline_only_cts_2026-11-15.md).
+`dEQP-VK.ray_query.*` cases are no longer applicable.
 
 ## Code in this checkpoint
 
@@ -118,11 +123,15 @@ environment.
 
 ## Next work
 
-1. Restore the external CTS corpus and run the prepared 74-case selection with
-   this DLL; record it as a new checkpoint. Do not reuse Ray Query era numbers.
-2. Re-run the same matrix on a physical device without native RT.
-3. Qualify mandatory resource budgets, remaining pipeline options and command
+1. Investigate the 30-47 s first-execution cost behind the six CTS timeouts
+   (the same cases finish in ~5 s when rerun); per-pipeline compile caching is
+   the likely target.
+2. Expand the external selection toward the full `dEQP-VK.ray_tracing_pipeline`
+   suite and rerun after the cost fix.
+3. Re-run the same matrix on a physical device without native RT and on a
+   second vendor.
+4. Qualify mandatory resource budgets, remaining pipeline options and command
    schemas carried over from the pre-pivot status.
-4. Re-baseline the GPU label matrix where AS verification lost its Ray Query
+5. Re-baseline the GPU label matrix where AS verification lost its Ray Query
    traversal oracle; build RTP-based replacements for the copy/update/
    serialization cases.

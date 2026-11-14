@@ -65,6 +65,12 @@ oracles, not product behavior changes:
 
 ## External CTS: blocked on missing corpus
 
+**Superseded on 2026-11-15:** the corpus was rebuilt locally and the run is
+recorded in the [RTP-only CTS checkpoint](rt_pipeline_only_cts_2026-11-15.md).
+The selection was narrowed from 74 to 60 cases, all
+`dEQP-VK.ray_tracing_pipeline.*`; generic `dEQP-VK.pipeline.shader_object_*`
+cases were dropped after the guard boundary rejected binary shader creation.
+
 The required CTS checkout is not present on this host. `D:\Codes\VK-GL-CTS`,
 `C:\VK-GL-CTS` and the usual SDK-registry locations do not exist; the only
 `deqp-vk.exe` on disk is a 27-byte audit fixture. No CTS case can be executed
