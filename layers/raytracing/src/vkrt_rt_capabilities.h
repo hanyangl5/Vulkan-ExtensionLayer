@@ -32,8 +32,23 @@ static inline bool vkrt_incompatible_device_extension(const char *name) {
 /* The legacy EXT address ABI cannot mix with the private core/KHR BDA
  * backend. It remains a legal native-only device extension. Pipeline binary
  * key queries likewise need a name gate because their feature may be false. */
+/* The software RT backend owns AS objects, but VK_KHR_device_address_commands
+ * creates and consumes AS objects through device-address commands that this
+ * layer does not virtualize. Hide it from a software RT profile: a native
+ * driver advertising it would otherwise pass CTS selection and then create
+ * driver-owned AS objects behind the layer's back. Ordinary non-RT devices
+ * keep native support. */
+static inline bool vkrt_device_address_commands_extension(const char *name) {
+#ifdef VK_KHR_device_address_commands
+    return !strcmp(name, VK_KHR_DEVICE_ADDRESS_COMMANDS_EXTENSION_NAME);
+#else
+    return !strcmp(name, "VK_KHR_device_address_commands");
+#endif
+}
+
 static inline bool vkrt_virtual_rt_incompatible_extension(const char *name) {
-    return !strcmp(name, VK_EXT_BUFFER_DEVICE_ADDRESS_EXTENSION_NAME) || !strcmp(name, VK_KHR_PIPELINE_BINARY_EXTENSION_NAME);
+    return !strcmp(name, VK_EXT_BUFFER_DEVICE_ADDRESS_EXTENSION_NAME) || !strcmp(name, VK_KHR_PIPELINE_BINARY_EXTENSION_NAME) ||
+           vkrt_device_address_commands_extension(name);
 }
 
 /* These optional interfaces consume shader/pipeline objects that the software
