@@ -15,6 +15,9 @@ extern "C" {
 #include <spirv/unified1/spirv.hpp>
 #include <algorithm>
 #include <atomic>
+#include <chrono>
+#include <cstdio>
+#include <cstdlib>
 #include <map>
 #include <memory>
 #include <mutex>
@@ -38,6 +41,17 @@ void Need(bool b) {
 }
 void Check(VkResult r) {
     if (r != VK_SUCCESS) throw Failure{r};
+}
+/* Temporary, opt-in compile profiling: VKRT_PROFILE_COMPILE=1 prints the host
+ * typed-compile and native pipeline-compile split for first-execution cost
+ * investigations. It has no effect on execution semantics. */
+bool ProfileCompile() {
+    static const bool enabled = std::getenv("VKRT_PROFILE_COMPILE") != nullptr;
+    return enabled;
+}
+using CompileClock = std::chrono::steady_clock;
+double SinceMs(CompileClock::time_point start) {
+    return std::chrono::duration<double, std::milli>(CompileClock::now() - start).count();
 }
 template <class F>
 VkResult Guard(F f) noexcept {
@@ -353,6 +367,7 @@ bool PushCompatible(const Layout &a, const Layout &b) {
 std::shared_ptr<Variant> Build(Pipeline &p, VkPipelineCache cache = VK_NULL_HANDLE) {
     std::lock_guard<std::mutex> lock(p.lock);
     if (p.initial) return p.initial;
+    const auto build_start = CompileClock::now();
     std::vector<TypedContinuationProgram> stages;
     for (size_t n = 0; n < p.metadata.size(); ++n)
         stages.push_back(RenameTypedPipelineStage(p.metadata[n], "vel_rt_stage_" + std::to_string(n)));
@@ -361,6 +376,7 @@ std::shared_ptr<Variant> Build(Pipeline &p, VkPipelineCache cache = VK_NULL_HAND
     const bool optimize = (p.flags & VK_PIPELINE_CREATE_DISABLE_OPTIMIZATION_BIT) == 0;
     v->program = BuildTypedRuntimeProgram(stages, p.groups, {p.depth, p.identity, true, optimize, true});
     const auto &words = v->program.spirv;
+    const double assemble_ms = SinceMs(build_start);
     for (size_t word = 5; word < words.size(); word += words[word] >> 16)
         if ((words[word] & 65535) == spv::OpDecorate && words[word + 2] == spv::DecorationDescriptorSet)
             v->used_sets.insert(words[word + 3]);
@@ -384,11 +400,16 @@ std::shared_ptr<Variant> Build(Pipeline &p, VkPipelineCache cache = VK_NULL_HAND
     ci.stage.pName = "main";
     ci.layout = p.layout->rt_native;
     VkPipeline native{};
+    const double module_ms = SinceMs(build_start);
     VkResult result = p.dev->vtable.CreateComputePipelinesInternal(p.dev->device, cache, 1, &ci, nullptr, &native);
     if (result != VK_SUCCESS) {
         if (native) p.dev->vtable.DestroyPipeline(p.dev->device, native, nullptr);
         Check(result);
     }
+    if (ProfileCompile())
+        std::fprintf(stderr, "VKRT PROFILE rtp: assemble=%.1fms module=%.1fms native_pipeline=%.1fms total=%.1fms words=%zu\n",
+                     assemble_ms, module_ms - assemble_ms, SinceMs(build_start) - module_ms, SinceMs(build_start),
+                     v->program.spirv.size());
     v->native = native;
     Need(v->native != VK_NULL_HANDLE);
     p.initial = v;
@@ -727,8 +748,12 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateRayTracingPipelinesKHR(VkDevice device, VkD
                     Need(!stage.pNext && !stage.flags && stage.pName);
                     auto source = ShaderWords(d, stage.module);
                     p->kinds.push_back(stage.stage);
+                    const auto stage_start = CompileClock::now();
                     p->metadata.push_back(CompileTypedPipelineStage(source, stage.pName, stage.stage, stage.pSpecializationInfo,
                                                                     "vel_rt_stage_" + std::to_string(s), compile_options));
+                    if (ProfileCompile())
+                        std::fprintf(stderr, "VKRT PROFILE stage: index=%u stage=0x%x words_in=%zu words_out=%zu host=%.1fms\n", s,
+                                     (unsigned)stage.stage, source.size(), p->metadata.back().spirv.size(), SinceMs(stage_start));
                 }
                 // Vulkan implicitly appends each library's complete stage and
                 // group lists in pLibraries order. A library already owns its

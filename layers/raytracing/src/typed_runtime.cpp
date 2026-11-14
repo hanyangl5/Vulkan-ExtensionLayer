@@ -8,6 +8,9 @@
 #include <spirv/unified1/spirv.hpp>
 #include <spirv-tools/optimizer.hpp>
 #include <algorithm>
+#include <chrono>
+#include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <functional>
 #include <limits>
@@ -311,8 +314,11 @@ TypedRuntimeProgram BuildTypedRuntimeProgram(const std::vector<TypedContinuation
         out << "}break;\n";
     }
     out << "}return uvec4(0u);}\n" << kTypedRuntimeBody;
+    const auto scheduler_start = std::chrono::steady_clock::now();
     auto scheduler = CompileGLSL(out.str(), VK_SHADER_STAGE_COMPUTE_BIT, GLSLTarget::Vulkan11Spirv14);
+    const auto compile_ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - scheduler_start).count();
     result.spirv = LinkTypedPipelineProgram(scheduler, stages);
+    const auto link_ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - scheduler_start).count();
     // Eliminate aggregate parameter shuttles and trivial codec calls before
     // native compilation. No fast-math or floating-point contraction passes
     // are used; source NoContraction and execution controls remain intact.
@@ -322,7 +328,23 @@ TypedRuntimeProgram BuildTypedRuntimeProgram(const std::vector<TypedContinuation
         optimizer.SetMessageConsumer([&](spv_message_level_t, const char *, const spv_position_t &, const char *message) {
             cleanup_error += std::string(message) + "\n";
         });
-        optimizer.RegisterPerformancePasses();
+        /* Target the aggregate parameter shuttles and dead codec calls that
+         * inflate the generated module. The full performance pipeline costs
+         * seconds on the ~10^5-word runtime, grows the module, and does not
+         * change semantics observed by the conformance fixtures;
+         * VKRT_RUNTIME_OPT_FULL=1 retains it for diagnostic comparison. */
+        const bool full = std::getenv("VKRT_RUNTIME_OPT_FULL") != nullptr;
+        if (full) {
+            optimizer.RegisterPerformancePasses();
+        } else {
+            optimizer.RegisterPass(spvtools::CreateAggressiveDCEPass());
+            optimizer.RegisterPass(spvtools::CreateSimplificationPass());
+            optimizer.RegisterPass(spvtools::CreateLocalSingleBlockLoadStoreElimPass());
+            optimizer.RegisterPass(spvtools::CreateLocalSingleStoreElimPass());
+            optimizer.RegisterPass(spvtools::CreateLocalAccessChainConvertPass());
+            optimizer.RegisterPass(spvtools::CreateDeadBranchElimPass());
+            optimizer.RegisterPass(spvtools::CreateAggressiveDCEPass());
+        }
         W cleaned;
         spvtools::ValidatorOptions validation;
         validation.SetScalarBlockLayout(true);
@@ -331,6 +353,11 @@ TypedRuntimeProgram BuildTypedRuntimeProgram(const std::vector<TypedContinuation
         bool optimized = optimizer.Run(result.spirv.data(), result.spirv.size(), &cleaned, cleanup_options);
         Need(optimized, "native runtime cleanup failed: " + cleanup_error);
         result.spirv = std::move(cleaned);
+    }
+    const auto optimize_ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - scheduler_start).count();
+    if (std::getenv("VKRT_PROFILE_COMPILE")) {
+        std::fprintf(stderr, "VKRT PROFILE runtime: glslang=%.1fms link=%.1fms optimize=%.1fms words=%zu glsl_bytes=%zu\n",
+                     compile_ms, link_ms - compile_ms, optimize_ms - link_ms, result.spirv.size(), out.str().size());
     }
     for (uint32_t i = 0; i < groups.size(); ++i) {
         std::array<uint32_t, 8> words{i,

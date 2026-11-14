@@ -3,6 +3,11 @@
 
 # RTP-only external CTS: November 15
 
+**Follow-up:** the [compile-cost fix](rt_compile_cost_2026-11-15.md) removes the
+six timeouts below. With the optimized runtime the same 60 cases pass 60/60 in
+an average of 1.17 s (maximum 1.42 s). This page keeps the original run and its
+diagnostic rerun as history; the two runs use different DLLs.
+
 First external Vulkan CTS run of branch `codex/ray-tracing-pipeline-only`
 (`f6ed969`) after Ray Query was removed from the delivered contract. It
 supersedes the "CTS corpus missing" blocker recorded in the
