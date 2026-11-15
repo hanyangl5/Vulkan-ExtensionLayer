@@ -97,6 +97,16 @@ passed **60/60 with zero timeouts**, average 1.17 s and maximum 1.42 s, with
 156,088 downstream checks and no validation markers. Native control: 60/60.
 `dEQP-VK.ray_query.*` cases are no longer applicable.
 
+The selection was then expanded to a stratified **1,405-case** sample of
+`dEQP-VK.ray_tracing_pipeline.*`. Software: **917 pass, 33 fail, 386
+NotSupported, 3 timeout, 0 crash** over the 1,339 non-heavy cases, with
+1,472,224 downstream checks and zero rejections; the 12-case heavy diagnostic
+passes 9, times out 1 and device-losts 2 (recursion depth 15). Native control
+over all 1,405 cases: **1,184 pass, 221 NotSupported, 0 fail**. The real failure
+clusters (SBT miss indexing, `NO_NULL` shader flags, large-grid any-hit,
+watertightness, hit kind) and the open limitations are recorded in the
+[expanded CTS checkpoint](rt_cts_expanded_2026-11-15.md).
+
 ## Code in this checkpoint
 
 | Component | State | Remaining boundary |
