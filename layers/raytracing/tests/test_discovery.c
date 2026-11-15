@@ -619,8 +619,8 @@ static void properties(void) {
                     tail.sentinel == UINT64_C(0xabcdef0123456789));
             REQUIRE(as.maxPerStageDescriptorAccelerationStructures == (apply ? 16u : 0u));
             REQUIRE(as.maxDescriptorSetAccelerationStructures == (apply ? 16u : 0u));
-            REQUIRE(as.maxPerStageDescriptorUpdateAfterBindAccelerationStructures == (apply ? 16u : 0u));
-            REQUIRE(as.maxDescriptorSetUpdateAfterBindAccelerationStructures == (apply ? 16u : 0u));
+            REQUIRE(as.maxPerStageDescriptorUpdateAfterBindAccelerationStructures == (apply ? 500000u : 0u));
+            REQUIRE(as.maxDescriptorSetUpdateAfterBindAccelerationStructures == (apply ? 500000u : 0u));
             REQUIRE(as.maxGeometryCount == (apply ? 0xffffffu : 0u) && as.maxInstanceCount == (apply ? 0xffffffu : 0u) &&
                     as.maxPrimitiveCount == (apply ? 0x1fffffffu : 0u) &&
                     as.minAccelerationStructureScratchOffsetAlignment == (apply ? 256u : 0u));

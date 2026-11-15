@@ -39,9 +39,10 @@ static void expect_as(VkPhysicalDeviceAccelerationStructurePropertiesKHR *p, uin
     p->maxInstanceCount = UINT64_C(16777215);
     p->maxPrimitiveCount = UINT64_C(536870911);
     p->maxPerStageDescriptorAccelerationStructures = stage;
-    p->maxPerStageDescriptorUpdateAfterBindAccelerationStructures = stage;
+    /* UAB AS limits have a 500000 Vulkan minimum and describe native pools. */
+    p->maxPerStageDescriptorUpdateAfterBindAccelerationStructures = 500000;
     p->maxDescriptorSetAccelerationStructures = set;
-    p->maxDescriptorSetUpdateAfterBindAccelerationStructures = set;
+    p->maxDescriptorSetUpdateAfterBindAccelerationStructures = 500000;
     p->minAccelerationStructureScratchOffsetAlignment = 256;
 }
 static void expect_rtp(VkPhysicalDeviceRayTracingPipelinePropertiesKHR *p) {

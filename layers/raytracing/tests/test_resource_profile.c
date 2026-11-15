@@ -304,8 +304,8 @@ static void application(void) {
     REQUIRE(core.pNext == &u && u.pNext == &i && i.pNext == &a && a.pNext == &m && m.pNext == &tail);
     REQUIRE(tail.sentinel == UINT64_C(0xabcdef0123456789));
     REQUIRE(a.maxGeometryCount == 777 && a.maxPerStageDescriptorAccelerationStructures == 16 &&
-            a.maxDescriptorSetAccelerationStructures == 16 && a.maxPerStageDescriptorUpdateAfterBindAccelerationStructures == 16 &&
-            a.maxDescriptorSetUpdateAfterBindAccelerationStructures == 16);
+            a.maxDescriptorSetAccelerationStructures == 16 && a.maxPerStageDescriptorUpdateAfterBindAccelerationStructures == 500000 &&
+            a.maxDescriptorSetUpdateAfterBindAccelerationStructures == 500000);
     /* A legal normal layout with one or sixteen AS descriptors also meets
      * unconditional ALL-layout limits 03572/03574; zero would reject both. */
     for (uint32_t ordinary_as = 1; ordinary_as <= 16; ordinary_as += 15) {
