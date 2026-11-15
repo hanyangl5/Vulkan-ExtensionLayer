@@ -24,9 +24,12 @@ void vkrt_software_rt_profile_init(const struct vkrt_resource_profile *resources
     p.as.maxInstanceCount = UINT64_C(0xffffff);
     p.as.maxPrimitiveCount = BVH_IR_MAX_LEAVES;
     p.as.maxPerStageDescriptorAccelerationStructures = p.resources.as_per_stage;
-    p.as.maxPerStageDescriptorUpdateAfterBindAccelerationStructures = p.resources.as_per_stage;
+    /* Update-after-bind AS descriptors are native pool resources, and the
+     * Vulkan minimum for both UAB AS limits is 500000; keep them there instead
+     * of the reserved software budget. Non-UAB limits stay at the budget. */
+    p.as.maxPerStageDescriptorUpdateAfterBindAccelerationStructures = UINT32_C(500000);
     p.as.maxDescriptorSetAccelerationStructures = p.resources.as_per_set;
-    p.as.maxDescriptorSetUpdateAfterBindAccelerationStructures = p.resources.as_per_set;
+    p.as.maxDescriptorSetUpdateAfterBindAccelerationStructures = UINT32_C(500000);
     p.as.minAccelerationStructureScratchOffsetAlignment = 256;
     p.rtp.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_PROPERTIES_KHR;
     p.rtp.shaderGroupHandleSize = VEL_RT_SBT_HANDLE_BYTES;

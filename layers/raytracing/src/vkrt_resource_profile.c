@@ -364,8 +364,11 @@ void vkrt_apply_resource_profile(const struct vkrt_resource_profile *profile, Vk
                 /* In the pinned 1.4.357 rules, 03572/03574 count ordinary AS
                  * bindings too. These ALL-layout caps retain the same reserved
                  * AS budget; they do not enable the optional UAB binding bit. */
-                target->maxPerStageDescriptorUpdateAfterBindAccelerationStructures = profile->as_per_stage;
-                target->maxDescriptorSetUpdateAfterBindAccelerationStructures = profile->as_per_set;
+                /* UAB AS descriptors are native pool resources and both limits
+                 * have a 500000 Vulkan minimum; the reserved budget only caps
+                 * the ordinary bindings. */
+                target->maxPerStageDescriptorUpdateAfterBindAccelerationStructures = UINT32_C(500000);
+                target->maxDescriptorSetUpdateAfterBindAccelerationStructures = UINT32_C(500000);
                 break;
             }
             default:

@@ -6,9 +6,11 @@
 Checkpoint: 2026-10-30 (Asia/Hong_Kong). Branch
 `codex/ray-tracing-pipeline-only`, based on `219ad90`.
 **The complete AS/RTP fallback is not implemented.**
-Latest local qualification: [RTP compile-cost fix](rt_compile_cost_2026-11-15.md)
-(60/60 CTS quick cases after the optimization, average 1.17 s), the
-[RTP-only external CTS](rt_pipeline_only_cts_2026-11-15.md) and the preceding
+Latest local qualification: [Vulkan-Samples RTP validation](rt_samples_validation_2026-11-15.md)
+(`ray_tracing_basic` and `ray_tracing_reflection` pass with pixel parity;
+`ray_tracing_extended` still device-losts), the
+[expanded RTP-only CTS](rt_pipeline_only_cts_2026-11-15.md) quick slice, the
+[RTP compile-cost fix](rt_compile_cost_2026-11-15.md) and the preceding
 [local GPU checkpoint](rt_pipeline_only_checkpoint_2026-10-30.md).
 
 ## Scope pivot: Ray Query removed
@@ -68,6 +70,13 @@ for commands, per-matrix results and measured compile cost.
   5.3 s (`test_rtp_api`) and 5.4 s (large-array nested-callable
   `test_rtp_arenas`). The Ray Query era compile-cost watchdog problem does not
   reproduce on the RTP fixtures.
+- Vulkan-Samples `ray_tracing_basic`: native and software runs exit cleanly;
+  software screenshot differs from the native one only in the UI text region
+  (mean channel difference 0.39), with 13,403 downstream guard checks and 0
+  rejections. `ray_tracing_reflection` passes after the scalar-block-layout
+  continuation fix (mean 0.335). `ray_tracing_extended` still device-losts after
+  its TLAS build; native control passes. See the
+  [samples checkpoint](rt_samples_validation_2026-11-15.md).
 
 Removed before these runs: 4 Ray Query tests, the ray-differential GPU tests,
 and the two shader-binary envelope fixtures that only exercised Ray Query
@@ -127,8 +136,9 @@ environment.
 
 ## Next work
 
-1. Expand the external selection toward the full `dEQP-VK.ray_tracing_pipeline`
-   suite with the optimized runtime.
+1. Diagnose the `ray_tracing_extended` device lost (GPU debugger or a reduced
+   Sponza-size reproduction) and the remaining `builtin.indirect.*` /
+   `hitkindext` CTS failures from the expanded run.
 2. Re-run the same matrix on a physical device without native RT and on a
    second vendor.
 3. Qualify mandatory resource budgets, remaining pipeline options and command
