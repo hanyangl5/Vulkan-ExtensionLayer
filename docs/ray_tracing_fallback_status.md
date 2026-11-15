@@ -9,9 +9,9 @@ Checkpoint: 2026-10-30 (Asia/Hong_Kong). Branch
 Latest local qualification: [Vulkan-Samples RTP validation](rt_samples_validation_2026-11-15.md)
 (`ray_tracing_basic` and `ray_tracing_reflection` pass with pixel parity;
 `ray_tracing_extended` still device-losts), the
-[expanded RTP-only CTS](rt_pipeline_only_cts_2026-11-15.md) quick slice, the
-[RTP compile-cost fix](rt_compile_cost_2026-11-15.md) and the preceding
-[local GPU checkpoint](rt_pipeline_only_checkpoint_2026-10-30.md).
+[expanded RTP-only CTS](rt_cts_expanded_2026-11-15.md) (1,405-case stratified
+sample plus native control), the [compile-cost fix](rt_compile_cost_2026-11-15.md)
+and the preceding [local GPU checkpoint](rt_pipeline_only_checkpoint_2026-10-30.md).
 
 ## Scope pivot: Ray Query removed
 
