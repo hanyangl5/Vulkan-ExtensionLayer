@@ -435,10 +435,17 @@ class FramePlanner {
 ContinuationAnalysis AnalyzeContinuations(const std::vector<uint32_t> &spirv, const std::string &entry, uint32_t execution_model) {
     std::string error;
     spvtools::SpirvTools validator(VulkanEnvironmentForSPIRV(spirv.size() > 1 ? spirv[1] : 0));
+    /* The virtual device always enables scalar block layout (the software
+     * runtime depends on it), so application BDA structs with arrays whose
+     * stride is not 16-byte aligned are valid input here. Match the other
+     * validators in this layer instead of rejecting them in this one. */
+    spvtools::ValidatorOptions options;
+    options.SetScalarBlockLayout(true);
+    options.SetWorkgroupScalarBlockLayout(true);
     validator.SetMessageConsumer([&](spv_message_level_t, const char *, const spv_position_t &where, const char *message) {
         error += std::to_string(where.index) + ": " + message + "\n";
     });
-    if (!validator.Validate(spirv)) throw std::runtime_error("Invalid continuation input: " + error);
+    if (!validator.Validate(spirv.data(), spirv.size(), options)) throw std::runtime_error("Invalid continuation input: " + error);
     auto m = ParseModule(spirv);
     uint32_t entry_id = 0;
     for (const auto &i : m.instructions) {

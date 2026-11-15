@@ -53,6 +53,25 @@ using CompileClock = std::chrono::steady_clock;
 double SinceMs(CompileClock::time_point start) {
     return std::chrono::duration<double, std::milli>(CompileClock::now() - start).count();
 }
+/* Opt-in failure trace: VKRT_TRACE_FILE=<path> appends pipeline/shader
+ * creation results, so a GUI sample without a usable console can still be
+ * diagnosed. Inert unless the variable is set. */
+void TraceResult(const char *what, VkResult result) {
+    const char *path = std::getenv("VKRT_TRACE_FILE");
+    if (!path) return;
+    if (std::FILE *file = std::fopen(path, "a")) {
+        std::fprintf(file, "%s result=%d\n", what, static_cast<int>(result));
+        std::fclose(file);
+    }
+}
+void TraceMessage(const char *what, const char *message) {
+    const char *path = std::getenv("VKRT_TRACE_FILE");
+    if (!path) return;
+    if (std::FILE *file = std::fopen(path, "a")) {
+        std::fprintf(file, "%s: %s\n", what, message);
+        std::fclose(file);
+    }
+}
 template <class F>
 VkResult Guard(F f) noexcept {
     try {
@@ -63,6 +82,7 @@ VkResult Guard(F f) noexcept {
         return VK_ERROR_OUT_OF_HOST_MEMORY;
     } catch (const std::exception &e) {
         VKRT_LOG_ERR("typed RTP: %s", e.what());
+        TraceMessage("typed RTP", e.what());
         return VK_ERROR_FEATURE_NOT_PRESENT;
     } catch (...) {
         return VK_ERROR_UNKNOWN;
@@ -625,7 +645,7 @@ struct NativeStageModules {
 VKAPI_ATTR VkResult VKAPI_CALL CreateComputePipelines(VkDevice device, VkPipelineCache cache, uint32_t count,
                                                       const VkComputePipelineCreateInfo *infos, const VkAllocationCallbacks *a,
                                                       VkPipeline *out) {
-    return Guard([&] {
+    VkResult traced = Guard([&] {
         auto d = Device(device);
         std::fill(out, out + count, VK_NULL_HANDLE);
         std::vector<VkComputePipelineCreateInfo> copy(infos, infos + count);
@@ -643,6 +663,8 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateComputePipelines(VkDevice device, VkPipelin
         }
         return d->vtable.CreateComputePipelines(device, cache, count, copy.data(), a, out);
     });
+    TraceResult("CreateComputePipelines", traced);
+    return traced;
 }
 VKAPI_ATTR VkResult VKAPI_CALL CreateGraphicsPipelines(VkDevice device, VkPipelineCache cache, uint32_t count,
                                                        const VkGraphicsPipelineCreateInfo *infos, const VkAllocationCallbacks *a,
@@ -674,13 +696,32 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateRayTracingPipelinesKHR(VkDevice device, VkD
                                                             uint32_t count, const VkRayTracingPipelineCreateInfoKHR *infos,
                                                             const VkAllocationCallbacks *a, VkPipeline *out) {
     std::fill(out, out + count, VK_NULL_HANDLE);
-    return Guard([&] {
+    VkResult traced = Guard([&] {
         auto d = Device(device);
         Need(d->rtp && vkrt_deferred_valid(d, deferred));
         VkResult overall = VK_SUCCESS;
         for (uint32_t n = 0; n < count; ++n) {
             VkResult one = Guard([&] {
                 auto ci = infos[n];
+                if (const char *trace = std::getenv("VKRT_TRACE_FILE")) {
+                    if (std::FILE *file = std::fopen(trace, "a")) {
+                        const auto *next = reinterpret_cast<const VkBaseInStructure *>(ci.pNext);
+                        std::fprintf(file,
+                                     "pipeline[%u] flags=0x%llx stages=%u groups=%u pNext=%d layout=%p library=%d "
+                                     "interface=%d depth=%u\n",
+                                     n, (unsigned long long)ci.flags, ci.stageCount, ci.groupCount, next ? (int)next->sType : -1,
+                                     (void *)ci.layout, ci.pLibraryInfo != nullptr, ci.pLibraryInterface != nullptr,
+                                     ci.maxPipelineRayRecursionDepth);
+                        if (ci.pStages) {
+                            for (uint32_t s = 0; s < ci.stageCount; ++s) {
+                                const auto &st = ci.pStages[s];
+                                std::fprintf(file, "  stage[%u] flags=0x%x pNext=%d module=%p name=%s\n", s, st.flags,
+                                             st.pNext ? 1 : 0, (void *)st.module, st.pName ? st.pName : "(null)");
+                            }
+                        }
+                        std::fclose(file);
+                    }
+                }
                 constexpr VkPipelineCreateFlags supported = VK_PIPELINE_CREATE_DISABLE_OPTIMIZATION_BIT |
                                                             VK_PIPELINE_CREATE_ALLOW_DERIVATIVES_BIT |
                                                             VK_PIPELINE_CREATE_DERIVATIVE_BIT | VK_PIPELINE_CREATE_LIBRARY_BIT_KHR |
@@ -813,6 +854,8 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateRayTracingPipelinesKHR(VkDevice device, VkD
         if (overall != VK_SUCCESS) return overall;
         return deferred ? VK_OPERATION_NOT_DEFERRED_KHR : VK_SUCCESS;
     });
+    TraceResult("CreateRayTracingPipelinesKHR", traced);
+    return traced;
 }
 VKAPI_ATTR void VKAPI_CALL DestroyPipeline(VkDevice device, VkPipeline h, const VkAllocationCallbacks *a) {
     Guard([&] {
