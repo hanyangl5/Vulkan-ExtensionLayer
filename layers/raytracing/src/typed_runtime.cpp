@@ -279,6 +279,7 @@ TypedRuntimeProgram BuildTypedRuntimeProgram(const std::vector<TypedContinuation
         << "ul;\nconst uint64_t rt_attr_stride=" << Align(result.max_hit_attribute_bytes) << "ul;\n";
     Table(out, "rt_frame_size", stages.size(), [&](size_t i) { return stages[i].frame_stride_bytes; }, "uint64_t");
     Table(out, "rt_control_offset", stages.size(), [&](size_t i) { return stages[i].control_byte_offset; });
+    Table(out, "rt_sys_mask", stages.size(), [&](size_t i) { return stages[i].system_mask; });
     Table(out, "rt_models", stages.size(), [&](size_t i) { return types[i].model; });
     Table(out, "rt_general", groups.size(), [&](size_t i) { return groups[i].generalShader; });
     Table(out, "rt_closest", groups.size(), [&](size_t i) { return groups[i].closestHitShader; });

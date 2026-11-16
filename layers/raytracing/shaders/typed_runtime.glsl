@@ -301,25 +301,31 @@ void rt_hit_system(uint64_t shader, uint64_t trace, bool committed, uint kind, f
     uint64_t f = rt_frame(shader);
     sw_traversal_state q = rt_load_q(trace);
     q.want_committed = committed ? 1u : 0u;
-    rt_w(f + uint64_t(VEL_RT_SYS_RAY_FLAGS), q.ray_flags);
-    rt_w(f + uint64_t(VEL_RT_SYS_CULL_MASK), rt_u(trace + 176ul));
-    rt_wv3(f + uint64_t(VEL_RT_SYS_WORLD_ORIGIN), q.ray.origin);
-    rt_wv3(f + uint64_t(VEL_RT_SYS_WORLD_DIRECTION), q.ray.direction);
-    rt_wf(f + uint64_t(VEL_RT_SYS_TMIN), q.tmin);
-    rt_wf(f + uint64_t(VEL_RT_SYS_TMAX), distance);
-    rt_w(f + uint64_t(VEL_RT_SYS_HIT_KIND), kind);
+    /* Materialize only the system fields the entered stage actually reads. */
+    uint mask = rt_sys_mask[rt_u(shader + 4ul)];
+    if ((mask & (1u << 0)) != 0u) rt_w(f + uint64_t(VEL_RT_SYS_RAY_FLAGS), q.ray_flags);
+    if ((mask & (1u << 14)) != 0u) rt_w(f + uint64_t(VEL_RT_SYS_CULL_MASK), rt_u(trace + 176ul));
+    if ((mask & (1u << 1)) != 0u) rt_wv3(f + uint64_t(VEL_RT_SYS_WORLD_ORIGIN), q.ray.origin);
+    if ((mask & (1u << 2)) != 0u) rt_wv3(f + uint64_t(VEL_RT_SYS_WORLD_DIRECTION), q.ray.direction);
+    if ((mask & (1u << 5)) != 0u) rt_wf(f + uint64_t(VEL_RT_SYS_TMIN), q.tmin);
+    if ((mask & (1u << 6)) != 0u) rt_wf(f + uint64_t(VEL_RT_SYS_TMAX), distance);
+    if ((mask & (1u << 11)) != 0u) rt_w(f + uint64_t(VEL_RT_SYS_HIT_KIND), kind);
     bool hit = committed ? q.committed_intersection_type != SW_COMM_NONE : q.intersection_type != SW_CAND_NONE;
     if (hit) {
-        rt_w(f + uint64_t(VEL_RT_SYS_INSTANCE_CUSTOM_INDEX), uint(sw_get_intersection_instance_custom_index(q)));
-        rt_w(f + uint64_t(VEL_RT_SYS_INSTANCE_ID), uint(sw_get_intersection_instance_id(q)));
-        rt_w(f + uint64_t(VEL_RT_SYS_GEOMETRY_INDEX), uint(sw_get_intersection_geometry_index(q)));
-        rt_w(f + uint64_t(VEL_RT_SYS_PRIMITIVE_ID), uint(sw_get_intersection_primitive_index(q)));
-        rt_wv3(f + uint64_t(VEL_RT_SYS_OBJECT_ORIGIN), sw_get_object_ray_origin(q));
-        rt_wv3(f + uint64_t(VEL_RT_SYS_OBJECT_DIRECTION), sw_get_object_ray_direction(q));
-        mat4x3 otw = sw_get_object_to_world(q), wto = sw_get_world_to_object(q);
-        for (uint c = 0u; c < 4u; ++c) {
-            rt_wv3(f + uint64_t(VEL_RT_SYS_OBJECT_TO_WORLD + c * 12u), otw[c]);
-            rt_wv3(f + uint64_t(VEL_RT_SYS_WORLD_TO_OBJECT + c * 12u), wto[c]);
+        if ((mask & (1u << 7)) != 0u)
+            rt_w(f + uint64_t(VEL_RT_SYS_INSTANCE_CUSTOM_INDEX), uint(sw_get_intersection_instance_custom_index(q)));
+        if ((mask & (1u << 8)) != 0u) rt_w(f + uint64_t(VEL_RT_SYS_INSTANCE_ID), uint(sw_get_intersection_instance_id(q)));
+        if ((mask & (1u << 9)) != 0u) rt_w(f + uint64_t(VEL_RT_SYS_GEOMETRY_INDEX), uint(sw_get_intersection_geometry_index(q)));
+        if ((mask & (1u << 10)) != 0u) rt_w(f + uint64_t(VEL_RT_SYS_PRIMITIVE_ID), uint(sw_get_intersection_primitive_index(q)));
+        if ((mask & (1u << 3)) != 0u) rt_wv3(f + uint64_t(VEL_RT_SYS_OBJECT_ORIGIN), sw_get_object_ray_origin(q));
+        if ((mask & (1u << 4)) != 0u) rt_wv3(f + uint64_t(VEL_RT_SYS_OBJECT_DIRECTION), sw_get_object_ray_direction(q));
+        if ((mask & (1u << 12)) != 0u) {
+            mat4x3 otw = sw_get_object_to_world(q);
+            for (uint c = 0u; c < 4u; ++c) rt_wv3(f + uint64_t(VEL_RT_SYS_OBJECT_TO_WORLD + c * 12u), otw[c]);
+        }
+        if ((mask & (1u << 13)) != 0u) {
+            mat4x3 wto = sw_get_world_to_object(q);
+            for (uint c = 0u; c < 4u; ++c) rt_wv3(f + uint64_t(VEL_RT_SYS_WORLD_TO_OBJECT + c * 12u), wto[c]);
         }
     }
 }

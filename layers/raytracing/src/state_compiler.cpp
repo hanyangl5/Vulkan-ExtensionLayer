@@ -405,6 +405,48 @@ class Compiler {
     bool vulkan_source = false;
     std::string gid, gid_type, group_count, pc_pointer;
     bool BDA() const { return config.transport == TypedFrameTransport::PhysicalAddress; }
+    /* Bit per system-frame field written by the runtime for a stage. Stages that
+     * never read a field do not need it materialized on activation. */
+    static uint32_t SystemMaskBit(uint32_t offset) {
+        switch (offset) {
+            case VEL_RT_SYS_RAY_FLAGS:
+                return 1u << 0;
+            case VEL_RT_SYS_WORLD_ORIGIN:
+                return 1u << 1;
+            case VEL_RT_SYS_WORLD_DIRECTION:
+                return 1u << 2;
+            case VEL_RT_SYS_OBJECT_ORIGIN:
+                return 1u << 3;
+            case VEL_RT_SYS_OBJECT_DIRECTION:
+                return 1u << 4;
+            case VEL_RT_SYS_TMIN:
+                return 1u << 5;
+            case VEL_RT_SYS_TMAX:
+                return 1u << 6;
+            case VEL_RT_SYS_INSTANCE_CUSTOM_INDEX:
+                return 1u << 7;
+            case VEL_RT_SYS_INSTANCE_ID:
+                return 1u << 8;
+            case VEL_RT_SYS_GEOMETRY_INDEX:
+                return 1u << 9;
+            case VEL_RT_SYS_PRIMITIVE_ID:
+                return 1u << 10;
+            case VEL_RT_SYS_HIT_KIND:
+                return 1u << 11;
+            case VEL_RT_SYS_OBJECT_TO_WORLD:
+                return 1u << 12;
+            case VEL_RT_SYS_WORLD_TO_OBJECT:
+                return 1u << 13;
+            case VEL_RT_SYS_CULL_MASK:
+                return 1u << 14;
+            case VEL_RT_SYS_LAUNCH_ID:
+                return 1u << 15;
+            case VEL_RT_SYS_LAUNCH_SIZE:
+                return 1u << 16;
+            default:
+                return 1u << 17;
+        }
+    }
     void CollectBuiltins() {
         for (auto id : globals) {
             const auto &variable = Def(id);
@@ -488,6 +530,7 @@ class Compiler {
             }
             auto type = Def(variable.type).words.at(3);
             if (Layout(type).size != size) Unsupported("builtin system-frame type size mismatch");
+            output.system_mask |= SystemMaskBit(offset);
             output.builtin_variables.push_back({id, type, builtin, offset, size});
         }
         for (const auto &variable : output.builtin_variables) builtin_variables[variable.variable] = &variable;

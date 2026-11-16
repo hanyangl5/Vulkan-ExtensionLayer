@@ -204,6 +204,25 @@ and context are written per activation.
 Verification: offline 49/49, software GPU 75/75, typed RTP 46/47 (known native
 segfault), CTS 60-case slice 60/60, screenshot parity unchanged (0.0 / 0.012).
 
+## M1: materialize only the system fields a stage reads (landed)
+
+`rt_hit_system` used to write the whole hit system frame (ray flags, cull mask,
+world/object rays, hit kind, instance/geometry/primitive ids, and both 48-byte
+matrices) for every hit activation, whether or not the entered stage declared
+those builtins. The typed compiler now records a `system_mask` per stage from
+the input builtins it actually maps, the runtime emits it as `rt_sys_mask`, and
+`rt_hit_system` writes only the requested fields.
+
+| Measurement | before | after |
+| --- | --- | --- |
+| benchmark hit plane | 17.3 ns/ray | **16.75 ns/ray** |
+| benchmark all miss | 7.6 ns/ray | **7.34 ns/ray** |
+| `ray_tracing_basic` | 81.6 fps | **86.2 fps** |
+| `ray_tracing_reflection` | 19.9 fps | **20.6 fps** |
+
+Verification: offline 49/49, software GPU 75/75, typed RTP 46/47 (known native
+segfault), CTS 60-case slice 60/60, screenshot parity 0.0 / 0.012.
+
 ## Zeroing ablation at four-wide workgroups
 
 Re-measured after the workgroup change: removing the frame zero entirely takes

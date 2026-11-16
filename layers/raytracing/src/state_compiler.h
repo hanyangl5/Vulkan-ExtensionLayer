@@ -113,6 +113,8 @@ struct TypedContinuationProgram {
     // frame remains checked below4GiB; global pools have no such32-bit ceiling.
     uint64_t frame_stride_bytes = 0, max_invocations64 = 0;
     uint32_t system_header_bytes = 0, control_byte_offset = 0;
+    /* Which system-frame fields this stage actually reads; 0 = none. */
+    uint32_t system_mask = 0;
     bool uses_app_push_constants = false, uses_shader_record = false;
     uint64_t resource_snapshot_bytes = 0;
     uint32_t resource_snapshot_fields = 0;
