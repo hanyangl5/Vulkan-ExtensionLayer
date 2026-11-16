@@ -461,6 +461,30 @@ if(BUILD_TESTING)
       list(APPEND VKRT_RTP_PHYSICAL_INTERFACES_SPV ${output})
    endforeach()
    add_custom_target(vkrt_rtp_physical_interfaces_spv DEPENDS ${VKRT_RTP_PHYSICAL_INTERFACES_SPV})
+   set(VKRT_RTP_BENCH_SPV)
+   foreach(stage rgen rmiss rchit)
+      set(output ${CMAKE_CURRENT_BINARY_DIR}/rtp_bench.${stage}.spv)
+      add_custom_command(OUTPUT ${output}
+         COMMAND ${VKRT_GLSLC} --target-env=vulkan1.1 --target-spv=spv1.4
+            ${CMAKE_CURRENT_SOURCE_DIR}/tests/rtp_bench.${stage} -o ${output}
+         COMMAND ${VKRT_SPIRV_VAL} --target-env vulkan1.1spv1.4 ${output}
+         DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/tests/rtp_bench.${stage}
+         COMMENT "Compiling RTP traversal benchmark ${stage}" VERBATIM)
+      list(APPEND VKRT_RTP_BENCH_SPV ${output})
+   endforeach()
+   add_custom_target(vkrt_rtp_bench_spv DEPENDS ${VKRT_RTP_BENCH_SPV})
+   add_executable(test_rtp_bench tests/test_rtp_bench.c)
+   target_include_directories(test_rtp_bench PRIVATE src ${VKRT_SHARED_HEADERS} ${Vulkan_INCLUDE_DIRS})
+   target_link_libraries(test_rtp_bench PRIVATE ${Vulkan_LIBRARIES})
+   set_target_properties(test_rtp_bench PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED ON)
+   add_dependencies(test_rtp_bench vkrt_rtp_bench_spv)
+   add_test(NAME vkrt.rtp_bench COMMAND test_rtp_bench
+      ${CMAKE_CURRENT_BINARY_DIR}/rtp_bench.rgen.spv
+      ${CMAKE_CURRENT_BINARY_DIR}/rtp_bench.rmiss.spv
+      ${CMAKE_CURRENT_BINARY_DIR}/rtp_bench.rchit.spv 256 256 64 5)
+   set_tests_properties(vkrt.rtp_bench PROPERTIES
+      LABELS "gpu;benchmark" SKIP_RETURN_CODE 77 TIMEOUT 300
+      ENVIRONMENT "VK_LAYER_PATH=${CMAKE_BINARY_DIR}/layers;VK_INSTANCE_LAYERS=VK_LAYER_VKRT_SOFTWARE_RAY_QUERY;ENABLE_VKRT_SOFTWARE_RAY_QUERY=1;VK_LOADER_LAYERS_DISABLE=~implicit~")
    add_executable(test_rtp_api tests/test_rtp_api.c)
    target_include_directories(test_rtp_api PRIVATE src ${VKRT_SHARED_HEADERS} ${Vulkan_INCLUDE_DIRS})
    target_link_libraries(test_rtp_api PRIVATE vkrt_cpu_bvh ${Vulkan_LIBRARIES})

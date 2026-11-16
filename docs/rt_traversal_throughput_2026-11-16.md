@@ -73,9 +73,34 @@ traffic above to be essentially eliminated, not just tuned. M1 and M2 are
 prerequisites for judging whether the final target is reachable in this
 architecture.
 
+## M0 benchmark (implemented)
+
+`tests/test_rtp_bench.c` plus `tests/rtp_bench.{rgen,rmiss,rchit}`: a 128-triangle
+grid BLAS, one instance, an RTP pipeline whose raygen casts `spp` rays per
+invocation, GPU timestamps around `vkCmdTraceRaysKHR`. A push constant selects
+"hit plane" or "all miss" so traversal and hit-stage costs separate. It runs as
+`vkrt.rtp_bench` (labels `gpu;benchmark`; not part of the conformance matrices):
+
+```powershell
+ctest -R vkrt.rtp_bench -V   # 256x256 x 64 spp = 4,194,304 rays, 5 timed runs
+```
+
+Measured on this host, layer active, 5 runs each (best):
+
+| Mode | ns/ray | M ray/s | Meaning |
+| --- | --- | --- | --- |
+| all miss | **32.6** | 30.7 | traversal + miss + payload chain, no hit group |
+| hit plane | **68.4** | 14.6 | adds closest-hit stage, attribute/payload copies and the scheduler transition |
+
+Repeatability is within ~2% run to run. The ~36 ns/ray delta between the two
+modes is the cost of the hit path (stage activation, attribute copy, payload
+writeback) on top of traversal. This is the number M1 has to attack: removing
+the per-ray frame round-trip should move the hit mode toward the miss mode
+first, then the miss mode itself has to shrink.
+
 ## Next work
 
-1. Build the M0 benchmark fixture with timestamp queries (device time only,
-   excluding setup), and record it in this file.
-2. Use it to separate traversal, payload/attribute marshal, and scheduler cost
-   by compiling variants of the same raygen.
+1. Extend the benchmark with a larger payload variant and a multi-hit variant
+   (any-hit, shadow ray) so the payload copy and hit-stage costs are separable.
+2. M1: remove the per-ray frame round-trip for register-sized payloads and
+   re-run this benchmark plus the CTS 60-case slice and the two samples.
