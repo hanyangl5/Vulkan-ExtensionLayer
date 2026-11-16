@@ -223,6 +223,27 @@ the input builtins it actually maps, the runtime emits it as `rt_sys_mask`, and
 Verification: offline 49/49, software GPU 75/75, typed RTP 46/47 (known native
 segfault), CTS 60-case slice 60/60, screenshot parity 0.0 / 0.012.
 
+## M1: zero only the observable frame regions (landed)
+
+`rt_alloc` used to zero the whole 128-byte header plus the entire stage frame
+for every activation. The allocator now has a raw variant, and `rt_push_shader`
+zeroes only what can be observed before the stage writes it: the header, the
+system frame plus traversal-state prefix (up to 304 bytes or the frame size), the
+control block, and the full payload and attribute destination regions.
+
+| Measurement | before | after |
+| --- | --- | --- |
+| benchmark hit plane | 16.75 ns/ray | **17.10 ns/ray** (noise) |
+| benchmark all miss | 7.34 ns/ray | **6.73 ns/ray** (1.09×) |
+| `ray_tracing_basic` | 86.2 fps | **95.4 fps** (1.11×) |
+| `ray_tracing_reflection` | 20.6 fps | **20.1 fps** (noise) |
+
+The fixtures that previously rejected a fixed 448-byte prefix now pass, because
+the attribute and payload regions are zeroed wherever their offsets land. The
+remaining unzeroed bytes are stage locals, which the frame codec initializes
+before use. Verification: offline 49/49, software GPU 75/75, typed RTP 46/47
+(known native segfault), CTS 60-case slice 60/60, screenshot parity 0.0 / 0.012.
+
 ## Lazy hit-system loads (reverted)
 
 Replacing the full `rt_load_q` in `rt_hit_system` with direct field loads from

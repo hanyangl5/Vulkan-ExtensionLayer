@@ -105,6 +105,20 @@ uint64_t rt_alloc(uint64_t bytes) {
     rt_zero(p, bytes);
     return p;
 }
+uint64_t rt_alloc_raw(uint64_t bytes) {
+    if (bytes > ~0ul - 15ul) {
+        rt_fail(VEL_RT_STATUS_STACK_OVERFLOW);
+        return 0ul;
+    }
+    bytes = (bytes + 15ul) & ~15ul;
+    if (rt_cursor > rt_limit || bytes > rt_limit - rt_cursor) {
+        rt_fail(VEL_RT_STATUS_STACK_OVERFLOW);
+        return 0ul;
+    }
+    uint64_t p = rt_cursor;
+    rt_cursor += bytes;
+    return p;
+}
 uint64_t rt_frame(uint64_t node) { return rt_u64(node + 24ul); }
 uint64_t rt_control(uint64_t node) { return rt_frame(node) + uint64_t(rt_control_offset[rt_u(node + 4ul)]); }
 void rt_pop(uint64_t node) {
@@ -184,35 +198,44 @@ uint64_t rt_push_shader(uint stage, uint64_t record, uint64_t parent, uint64_t o
         rt_fail(VEL_RT_STATUS_SBT);
         return 0ul;
     }
-    uint64_t node = rt_alloc(128ul + rt_frame_size[stage]);
+    /* Allocate without the full zero: only the header, the system/traversal
+     * prefix, the control block and the payload/attribute destinations are
+     * observable before the stage writes them. */
+    uint64_t node = rt_alloc_raw(128ul + rt_frame_size[stage]);
     if (node == 0ul) return 0ul;
+    uint64_t frame = node + 128ul;
+    uvec4 data = rt_interface(stage, action == 1u ? 5329u : 5342u);
+    uvec4 attrInterface = rt_interface(stage, 5339u);
+    if (data.w != 0u && (data.y != payloadSize || data.z != payloadType || payload == 0ul)) {
+        rt_fail(VEL_RT_STATUS_PAYLOAD_TYPE);
+        return 0ul;
+    }
+    if (attrInterface.w != 0u && attrs != 0ul && attrType != rt_triangle_type &&
+        (attrInterface.y != attrSize || attrInterface.z != attrType)) {
+        rt_fail(VEL_RT_STATUS_ATTRIBUTE_TYPE);
+        return 0ul;
+    }
+    uint64_t prefix = 128ul + rt_frame_size[stage];
+    rt_zero(node, prefix < 304ul ? prefix : 304ul);  // header + system frame + traversal state
+    rt_zero(frame + uint64_t(rt_control_offset[stage]), 16ul);
+    if (data.w != 0u) rt_zero(frame + uint64_t(data.x), uint64_t(data.y));
+    if (attrInterface.w != 0u) rt_zero(frame + uint64_t(attrInterface.x), uint64_t(attrInterface.y));
     rt_w(node, 1u);
     rt_w(node + 4ul, stage);
     rt_w64(node + 8ul, parent);
     rt_w64(node + 16ul, node);
-    rt_w64(node + 24ul, node + 128ul);
+    rt_w64(node + 24ul, frame);
     rt_w64(node + 32ul, owner);
     rt_w64(node + 40ul, payload);
     rt_w(node + 60ul, action);
     rt_w(node + 64ul, depth);
-    uint64_t frame = node + 128ul;
     rt_system(frame, rt_owner_frame(parent), record, stage);
-    uvec4 data = rt_interface(stage, action == 1u ? 5329u : 5342u);
     if (data.w != 0u) {
-        if (data.y != payloadSize || data.z != payloadType || payload == 0ul) {
-            rt_fail(VEL_RT_STATUS_PAYLOAD_TYPE);
-            return 0ul;
-        }
         rt_copy(frame + uint64_t(data.x), payload, data.y);
         rt_w64(node + 48ul, uint64_t(data.x));
         rt_w(node + 56ul, data.y);
     }
-    uvec4 attrInterface = rt_interface(stage, 5339u);
     if (attrInterface.w != 0u && attrs != 0ul) {
-        if (attrType != rt_triangle_type && (attrInterface.y != attrSize || attrInterface.z != attrType)) {
-            rt_fail(VEL_RT_STATUS_ATTRIBUTE_TYPE);
-            return 0ul;
-        }
         // Triangle barycentrics have a built-in eight-byte representation,
         // including when consumed through a float array/block. Extra declared
         // components have no defined triangle value; leave their fresh frame
