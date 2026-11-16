@@ -223,6 +223,16 @@ the input builtins it actually maps, the runtime emits it as `rt_sys_mask`, and
 Verification: offline 49/49, software GPU 75/75, typed RTP 46/47 (known native
 segfault), CTS 60-case slice 60/60, screenshot parity 0.0 / 0.012.
 
+## Lazy hit-system loads (reverted)
+
+Replacing the full `rt_load_q` in `rt_hit_system` with direct field loads from
+the trace node measured 16.68 ns/ray (hit) and 7.24 ns/ray (miss), but the
+compiler/GPU test `ray_tracing_fallback_typed_runtime` failed with "Shared BVH4
+instance/object ray builtins changed": the raw offsets do not reproduce the
+candidate/committed selection used by the `sw_get_intersection_*` helpers for
+every stage kind. Reverted; the per-stage system mask (previous section) is the
+version that ships.
+
 ## Zeroing ablation at four-wide workgroups
 
 Re-measured after the workgroup change: removing the frame zero entirely takes
