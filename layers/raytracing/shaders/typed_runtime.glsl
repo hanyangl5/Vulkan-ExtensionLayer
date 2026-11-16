@@ -45,6 +45,20 @@ void rt_zero(uint64_t p, uint64_t n) {
 // Typed frame offsets can be byte-aligned (u8/u16/packed composites). Byte
 // copies preserve neighboring components; arenas never have concurrent writers.
 void rt_copy(uint64_t dst, uint64_t src, uint n) {
+    /* Payload/attribute copies usually share 4-byte alignment: move whole
+     * words first, then handle the byte tail with the unaligned path. */
+    if (((dst ^ src) & 3ul) == 0ul) {
+        uint words = n / 4u;
+        for (uint i = 0u; i < words; ++i) rt_w(dst + uint64_t(i) * 4ul, rt_u(src + uint64_t(i) * 4ul));
+        for (uint i = words * 4u; i < n; ++i) {
+            uint64_t s = src + uint64_t(i), d = dst + uint64_t(i);
+            uint byteValue = (rt_u(s & ~3ul) >> (uint(s & 3ul) * 8u)) & 255u;
+            uint shift = uint(d & 3ul) * 8u;
+            uint64_t aligned = d & ~3ul;
+            rt_w(aligned, (rt_u(aligned) & ~(255u << shift)) | (byteValue << shift));
+        }
+        return;
+    }
     for (uint i = 0u; i < n; ++i) {
         uint64_t s = src + uint64_t(i), d = dst + uint64_t(i);
         uint byteValue = (rt_u(s & ~3ul) >> (uint(s & 3ul) * 8u)) & 255u;

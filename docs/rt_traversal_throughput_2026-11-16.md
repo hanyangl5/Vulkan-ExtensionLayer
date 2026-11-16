@@ -149,6 +149,25 @@ Conclusion: capturing this 2.3× requires making frame initialisation
 every frame byte is written before it is read (or shrink the frame), after which
 `rt_alloc` can stop zeroing. That is the top M1 item.
 
+## M1: word-wise payload/attribute copies (landed)
+
+`rt_copy` moved one byte at a time with a read-modify-write per byte, for the
+payload, the hit attribute, attribute relocation and the copy-back path. It now
+takes a word path when source and destination share 4-byte alignment (the
+common case) and keeps the byte path only for the unaligned tail.
+
+| Measurement | before | after |
+| --- | --- | --- |
+| benchmark hit plane | 68.8 ns/ray | **56.3 ns/ray** (1.22×) |
+| benchmark all miss | 32.7 ns/ray | **19.8 ns/ray** (1.65×) |
+| benchmark loop only | 1.3 ns/ray | 1.3 ns/ray |
+| `ray_tracing_basic` | 24.6 fps | **35.9 fps** (1.46×) |
+| `ray_tracing_reflection` | 6.7 fps | **8.8 fps** (1.32×) |
+
+Verification: offline 49/49, software GPU matrix 75/75, typed RTP 46/47 (the
+known native-control segfault only), CTS 60-case slice **60/60**, screenshots
+match native (basic mean channel difference 0.0, reflection 0.335).
+
 ## Next work
 
 1. Extend the benchmark with a larger payload variant and a multi-hit variant
