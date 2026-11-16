@@ -262,6 +262,27 @@ attribute destinations are zeroed now; `node+48/56` are always written so
 Verification: offline 49/49, software GPU 75/75, typed RTP 46/47 (known native
 segfault), CTS 60-case slice 60/60, screenshot parity 0.0 / 0.012.
 
+## Where the remaining time goes: scene scaling
+
+The benchmark now takes an optional grid size (`cells`, default 8) so the
+traversal cost can be separated from the per-activation cost. Same dispatch
+(256x256, 64 spp), hit mode vs all-miss mode:
+
+| grid | triangles | hit ns/ray | miss ns/ray |
+| --- | --- | --- | --- |
+| 1 | 2 | 9.54 | 6.02 |
+| 4 | 32 | 13.47 | 5.92 |
+| 8 | 128 | 16.80 | 5.89 |
+| 16 | 512 | 20.23 | 6.04 |
+
+The miss path is flat (the root box rejects the away-going rays), so the ~6 ns
+floor is activation/push/pop cost. The hit path grows by about
+**0.021 ns per triangle** over this range: at 512 triangles traversal is roughly
+10.7 ns of the 20.2 ns hit cost, already more than the activation machinery.
+For a real scene this term dominates, which makes the next target explicit: the
+BVH4 walk (`sw_bvh4_first` / `sw_bvh4_after` re-test child boxes while walking
+parent links) rather than more activation trimming.
+
 ## Lazy hit-system loads (reverted)
 
 Replacing the full `rt_load_q` in `rt_hit_system` with direct field loads from

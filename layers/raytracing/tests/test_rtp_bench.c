@@ -80,6 +80,7 @@ int main(int argc, char **argv) {
     uint32_t height = argc > 5 ? (uint32_t)strtoul(argv[5], NULL, 10) : 256;
     uint32_t spp = argc > 6 ? (uint32_t)strtoul(argv[6], NULL, 10) : 64;
     uint32_t iterations = argc > 7 ? (uint32_t)strtoul(argv[7], NULL, 10) : 5;
+    uint32_t cells = argc > 8 ? (uint32_t)strtoul(argv[8], NULL, 10) : 8;
     init_vulkan();
 
     VkPhysicalDeviceRayTracingPipelinePropertiesKHR rtp = {
@@ -113,7 +114,7 @@ int main(int argc, char **argv) {
     if (g_fail) return 1;
 
     /* Triangle grid in the z=0 plane, two triangles per cell. */
-    const uint32_t cells = 8;
+    if (!cells) cells = 8;
     const uint32_t triangle_count = cells * cells * 2;
     const uint32_t vertex_count = triangle_count * 3;
     struct gpu_buf vertices;
