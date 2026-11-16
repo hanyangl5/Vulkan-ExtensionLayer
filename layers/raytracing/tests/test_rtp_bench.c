@@ -294,7 +294,7 @@ int main(int argc, char **argv) {
                                                        {0, 0, 0}};
     const uint32_t total_rays = width * height * spp;
     uint32_t mode0_hits = 0;
-    for (uint32_t mode = 0; mode < 2; ++mode) {
+    for (uint32_t mode = 0; mode < 3; ++mode) {
         double best_ns_per_ray = 1e30;
         double best_mrays = 0.0;
         uint32_t best_ticks = 0;
@@ -330,7 +330,10 @@ int main(int argc, char **argv) {
             const double nanoseconds = (double)ticks * (double)properties.properties.limits.timestampPeriod;
             const double ns_per_ray = nanoseconds / (double)total_rays;
             const double mrays = (double)total_rays / nanoseconds * 1e3;
-            printf("mode %u (%s) run %u: %u ticks, %.3f ms, %.2f M ray/s, %.2f ns/ray\n", mode, mode ? "all miss" : "hit plane",
+            printf("mode %u (%s) run %u: %u ticks, %.3f ms, %.2f M ray/s, %.2f ns/ray\n", mode,
+                   mode == 0   ? "hit plane"
+                   : mode == 1 ? "all miss"
+                               : "loop only",
                    iteration, ticks, nanoseconds / 1e6, mrays, ns_per_ray);
             if (ns_per_ray < best_ns_per_ray) {
                 best_ns_per_ray = ns_per_ray;
@@ -341,7 +344,10 @@ int main(int argc, char **argv) {
         const uint32_t hits = ((const uint32_t *)result.mapped)[0];
         if (mode == 0) mode0_hits = hits;
         printf("mode %u (%s): %ux%u x %u spp = %u rays; best %u ticks, %.2f M ray/s, %.2f ns/ray; invocation-0 hits=%u\n", mode,
-               mode ? "all miss" : "hit plane", width, height, spp, total_rays, best_ticks, best_mrays, best_ns_per_ray, hits);
+               mode == 0   ? "hit plane"
+               : mode == 1 ? "all miss"
+                           : "loop only",
+               width, height, spp, total_rays, best_ticks, best_mrays, best_ns_per_ray, hits);
     }
     if (!mode0_hits) {
         fprintf(stderr, "benchmark rays did not hit the acceleration structure\n");

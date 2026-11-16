@@ -89,14 +89,37 @@ Measured on this host, layer active, 5 runs each (best):
 
 | Mode | ns/ray | M ray/s | Meaning |
 | --- | --- | --- | --- |
-| all miss | **32.6** | 30.7 | traversal + miss + payload chain, no hit group |
-| hit plane | **68.4** | 14.6 | adds closest-hit stage, attribute/payload copies and the scheduler transition |
+| loop only (no TraceRay) | **1.3** | 768 | the raygen hash/jitter loop itself |
+| all miss | **32.7** | 30.5 | traversal + miss stage + payload chain, no hit group |
+| hit plane | **68.8** | 14.4 | adds closest-hit stage, attribute/payload copies and the scheduler transition |
 
-Repeatability is within ~2% run to run. The ~36 ns/ray delta between the two
-modes is the cost of the hit path (stage activation, attribute copy, payload
-writeback) on top of traversal. This is the number M1 has to attack: removing
-the per-ray frame round-trip should move the hit mode toward the miss mode
-first, then the miss mode itself has to shrink.
+Repeatability is within ~2% run to run. Subtracting the loop cost, one
+`TraceRay` costs about **31 ns** on a miss and **68 ns** when it hits, in a scene
+whose BVH is only 128 triangles. The per-ray stage machinery, not the loop or
+the arithmetic, is the cost centre.
+
+## Workgroup-size experiment (reverted)
+
+The typed runtime dispatches one *thread* per invocation with
+`local_size = 1`, so a workgroup carries one thread and the GPU can keep only a
+limited number of threads resident per SM. Raising the workgroup to 64
+invocations (and dispatching `ceil(tile/64)` groups, with the launch mapping
+fixed to count invocations rather than groups) was tried:
+
+| Measurement | local_size = 1 | local_size = 64 |
+| --- | --- | --- |
+| benchmark all miss | 32.7 ns/ray | 47.0 ns/ray |
+| benchmark hit plane | 68.8 ns/ray | 35.9 ns/ray |
+| benchmark loop only | 1.3 ns/ray | 2.8 ns/ray |
+| `ray_tracing_basic` | 24.6 fps | 9.2 fps |
+| `ray_tracing_reflection` | 5.4-6.7 fps | 7.0 fps |
+
+The results are mixed and, for the simplest sample, a 2.5× regression, so the
+change was reverted. The likely explanation is per-thread resource pressure
+(registers/local memory in the generated scheduler): packing 64 threads into one
+group multiplies the group's resource footprint and can reduce resident groups
+instead of increasing occupancy. Workgroup size alone is not a free win; M1 has
+to reduce what each ray does, not just how many threads are in flight.
 
 ## Next work
 
