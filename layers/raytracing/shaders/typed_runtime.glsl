@@ -40,7 +40,14 @@ void rt_wv3(uint64_t p, vec3 v) {
     rt_wf(p + 8ul, v.z);
 }
 void rt_zero(uint64_t p, uint64_t n) {
-    for (uint64_t i = 0ul; i < n; i += 4ul) rt_w(p + i, 0u);
+    uint64_t i = 0ul;
+    for (; i + 16ul <= n; i += 16ul) {
+        rt_w(p + i, 0u);
+        rt_w(p + i + 4ul, 0u);
+        rt_w(p + i + 8ul, 0u);
+        rt_w(p + i + 12ul, 0u);
+    }
+    for (; i < n; i += 4ul) rt_w(p + i, 0u);
 }
 // Typed frame offsets can be byte-aligned (u8/u16/packed composites). Byte
 // copies preserve neighboring components; arenas never have concurrent writers.
@@ -159,10 +166,15 @@ bool rt_general_record(uint region, uint index, uint model, out uint stage, out 
     return true;
 }
 void rt_system(uint64_t frame, uint64_t inherited, uint64_t record, uint stage) {
-    if (inherited != 0ul) rt_copy(frame, inherited, VEL_RT_SYSTEM_BYTES);
-    for (uint i = 0u; i < 3u; ++i) {
-        rt_w(frame + uint64_t(VEL_RT_SYS_LAUNCH_ID + i * 4u), rt_launch[i]);
-        rt_w(frame + uint64_t(VEL_RT_SYS_LAUNCH_SIZE + i * 4u), rt_launch_size[i]);
+    if (inherited != 0ul) {
+        /* The inherited frame already carries this invocation's launch id and
+         * size; every activation of the invocation shares them. */
+        rt_copy(frame, inherited, VEL_RT_SYSTEM_BYTES);
+    } else {
+        for (uint i = 0u; i < 3u; ++i) {
+            rt_w(frame + uint64_t(VEL_RT_SYS_LAUNCH_ID + i * 4u), rt_launch[i]);
+            rt_w(frame + uint64_t(VEL_RT_SYS_LAUNCH_SIZE + i * 4u), rt_launch_size[i]);
+        }
     }
     rt_w64(frame + uint64_t(VEL_RT_SYS_SHADER_RECORD_ADDRESS), record);
     uint64_t pushes = rt_p64(rt_ctx + uint64_t(VEL_RT_RUN_PUSH_TABLE));
