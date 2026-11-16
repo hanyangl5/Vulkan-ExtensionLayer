@@ -186,6 +186,29 @@ Verification: offline 49/49, software GPU matrix 75/75, typed RTP 46/47 (the
 known native-control segfault only), CTS 60-case slice **60/60**, screenshots
 match native (basic mean channel difference 0.0, reflection 0.335).
 
+## M1: skip redundant launch-id writes (landed)
+
+Each activation copied the parent system frame (256 B, which already carries
+this invocation's launch id and size) and then rewrote those six words. They are
+now written only for the entry activation:
+
+| Measurement | before | after |
+| --- | --- | --- |
+| benchmark hit plane | 18.5 ns/ray | **17.9 ns/ray** |
+| benchmark all miss | 9.4 ns/ray | **9.3 ns/ray** |
+
+Samples are unchanged within noise (71.5 / 17.9 fps, screenshot parity 0.0 /
+0.012) and every matrix still passes.
+
+## Zeroing ablation at four-wide workgroups
+
+Re-measured after the workgroup change: removing the frame zero entirely takes
+the benchmark to 7.2 ns/ray (hit, traversal broken) and 2.9 ns/ray (miss), so
+zeroing still costs roughly 6 ns/ray on the miss path and more on hits.
+Vectorising the zero loop to 16-byte stores changes nothing, and capping the
+zero at 256 B only helps while corrupting traversal state. The remaining path to
+that cost is compiler-guaranteed frame initialisation, as above.
+
 ## Next work
 
 1. Extend the benchmark with a larger payload variant and a multi-hit variant
