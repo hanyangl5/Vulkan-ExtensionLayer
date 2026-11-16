@@ -215,8 +215,9 @@ uint64_t rt_push_shader(uint stage, uint64_t record, uint64_t parent, uint64_t o
         rt_fail(VEL_RT_STATUS_ATTRIBUTE_TYPE);
         return 0ul;
     }
-    uint64_t prefix = 128ul + rt_frame_size[stage];
-    rt_zero(node, prefix < 304ul ? prefix : 304ul);  // header + system frame + traversal state
+    /* Header fields are all written below; the system frame is written by
+     * rt_system/rt_hit_system. Only the control block and the payload and
+     * attribute destinations need defaults. */
     rt_zero(frame + uint64_t(rt_control_offset[stage]), 16ul);
     if (data.w != 0u) rt_zero(frame + uint64_t(data.x), uint64_t(data.y));
     if (attrInterface.w != 0u) rt_zero(frame + uint64_t(attrInterface.x), uint64_t(attrInterface.y));
@@ -234,6 +235,9 @@ uint64_t rt_push_shader(uint stage, uint64_t record, uint64_t parent, uint64_t o
         rt_copy(frame + uint64_t(data.x), payload, data.y);
         rt_w64(node + 48ul, uint64_t(data.x));
         rt_w(node + 56ul, data.y);
+    } else {
+        rt_w64(node + 48ul, 0ul);
+        rt_w(node + 56ul, 0u);
     }
     if (attrInterface.w != 0u && attrs != 0ul) {
         // Triangle barycentrics have a built-in eight-byte representation,

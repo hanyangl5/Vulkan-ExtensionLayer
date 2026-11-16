@@ -244,6 +244,24 @@ remaining unzeroed bytes are stage locals, which the frame codec initializes
 before use. Verification: offline 49/49, software GPU 75/75, typed RTP 46/47
 (known native segfault), CTS 60-case slice 60/60, screenshot parity 0.0 / 0.012.
 
+## M1: no zeroing for activation headers (landed)
+
+The activation header is fully written by `rt_push_shader` and the system frame
+by `rt_system`/`rt_hit_system`, so the header and system/traversal zero fill is
+gone from the activation path. Only the control block and the payload and
+attribute destinations are zeroed now; `node+48/56` are always written so
+`rt_writeback` never reads a stale payload length.
+
+| Measurement | before | after |
+| --- | --- | --- |
+| benchmark hit plane | 16.75 ns/ray | **16.78 ns/ray** (noise) |
+| benchmark all miss | 6.73 ns/ray | **5.91 ns/ray** (1.15×) |
+| `ray_tracing_basic` | 95.4 fps | **105.2 fps** (1.10×) |
+| `ray_tracing_reflection` | 20.1 fps | **20.5 fps** |
+
+Verification: offline 49/49, software GPU 75/75, typed RTP 46/47 (known native
+segfault), CTS 60-case slice 60/60, screenshot parity 0.0 / 0.012.
+
 ## Lazy hit-system loads (reverted)
 
 Replacing the full `rt_load_q` in `rt_hit_system` with direct field loads from
