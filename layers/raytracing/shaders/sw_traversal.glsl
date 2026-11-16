@@ -617,16 +617,23 @@ bool sw_bottom_traversal(inout sw_traversal_state q) {
    uint64_t base = blas_u64(instance, 0u);
    sw_ray ray;
    sw_make_object_ray(q.as_address, q.current_instance, q.ray, ray);
+   /* A child selected by first/after already passed its box test. */
+   bool trusted = false;
    while (q.blas_next != SW_HANDLE_INVALID) {
       uint handle = q.blas_next;
-      if (!sw_bvh4_cursor_hit(base, handle, ray, q.tmin, q.tclosest)) {
+      if (!trusted && !sw_bvh4_cursor_hit(base, handle, ray, q.tmin, q.tclosest)) {
          q.blas_next = sw_bvh4_after(base, handle, ray, q.tmin, q.tclosest);
          continue;
       }
+      trusted = false;
       uint kind = vel_rt_bvh4_kind(handle);
       if (kind == VEL_RT_BVH4_INTERNAL) {
          uint child = sw_bvh4_first(base, handle, ray, q.tmin, q.tclosest);
-         q.blas_next = child == SW_HANDLE_INVALID ? sw_bvh4_after(base, handle, ray, q.tmin, q.tclosest) : child;
+         if (child != SW_HANDLE_INVALID) {
+            q.blas_next = child;
+            trusted = true;
+         } else
+            q.blas_next = sw_bvh4_after(base, handle, ray, q.tmin, q.tclosest);
          continue;
       }
       /* Consume this leaf before suspending. Resume can never return the same
@@ -646,22 +653,30 @@ bool sw_bottom_traversal(inout sw_traversal_state q) {
 bool sw_traversal_proceed(inout sw_traversal_state q) {
    if (q.cull_mask == 0u) return false;
    q.intersection_type = SW_CAND_NONE;
+   /* A child selected by first/after already passed its box test. */
+   bool trusted = false;
    for (;;) {
       if (q.blas_active) {
          if (sw_bottom_traversal(q)) return true;
          q.blas_active = false;
+         trusted = false;
          if (q.cull_mask == 0u) return false;
       }
       if (q.tlas_next == SW_HANDLE_INVALID) return false;
       uint handle = q.tlas_next;
-      if (!sw_bvh4_cursor_hit(q.as_address, handle, q.ray, q.tmin, q.tclosest)) {
+      if (!trusted && !sw_bvh4_cursor_hit(q.as_address, handle, q.ray, q.tmin, q.tclosest)) {
          q.tlas_next = sw_bvh4_after(q.as_address, handle, q.ray, q.tmin, q.tclosest);
          continue;
       }
+      trusted = false;
       uint kind = vel_rt_bvh4_kind(handle);
       if (kind == VEL_RT_BVH4_INTERNAL) {
          uint child = sw_bvh4_first(q.as_address, handle, q.ray, q.tmin, q.tclosest);
-         q.tlas_next = child == SW_HANDLE_INVALID ? sw_bvh4_after(q.as_address, handle, q.ray, q.tmin, q.tclosest) : child;
+         if (child != SW_HANDLE_INVALID) {
+            q.tlas_next = child;
+            trusted = true;
+         } else
+            q.tlas_next = sw_bvh4_after(q.as_address, handle, q.ray, q.tmin, q.tclosest);
          continue;
       }
       q.tlas_next = sw_bvh4_after(q.as_address, handle, q.ray, q.tmin, q.tclosest);

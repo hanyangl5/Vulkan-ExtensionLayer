@@ -283,6 +283,28 @@ For a real scene this term dominates, which makes the next target explicit: the
 BVH4 walk (`sw_bvh4_first` / `sw_bvh4_after` re-test child boxes while walking
 parent links) rather than more activation trimming.
 
+## M1: skip redundant box tests in the BVH4 walk (landed)
+
+`sw_traversal_proceed` and `sw_bottom_traversal` tested the box of every cursor
+handle and then, for internal nodes, `sw_bvh4_first`/`sw_bvh4_after` tested the
+children again. A local `trusted` flag now records that the handle was returned
+by `first`/`after` (already box-tested) so the cursor test is skipped once per
+descent.
+
+| Measurement | before | after |
+| --- | --- | --- |
+| benchmark hit, 128 triangles | 16.80 ns/ray | **15.92 ns/ray** |
+| benchmark hit, 512 triangles | 20.23 ns/ray | **15.99 ns/ray** (1.27×) |
+| benchmark all miss | 5.89-6.04 ns/ray | 6.05 ns/ray |
+| `ray_tracing_basic` | 105.2 fps | 105.0 fps |
+| `ray_tracing_reflection` | 20.5 fps | **21.5 fps** |
+
+The gain grows with scene size, as expected for a saved slab test per descent,
+and it also flattens the 512-triangle case to the 128-triangle cost.
+
+Verification: offline 49/49, software GPU 75/75, typed RTP 46/47 (known native
+segfault), CTS 60-case slice 60/60, screenshot parity 0.0 / 0.012.
+
 ## Lazy hit-system loads (reverted)
 
 Replacing the full `rt_load_q` in `rt_hit_system` with direct field loads from
