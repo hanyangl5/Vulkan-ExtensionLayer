@@ -166,15 +166,12 @@ bool rt_general_record(uint region, uint index, uint model, out uint stage, out 
     return true;
 }
 void rt_system(uint64_t frame, uint64_t inherited, uint64_t record, uint stage) {
-    if (inherited != 0ul) {
-        /* The inherited frame already carries this invocation's launch id and
-         * size; every activation of the invocation shares them. */
-        rt_copy(frame, inherited, VEL_RT_SYSTEM_BYTES);
-    } else {
-        for (uint i = 0u; i < 3u; ++i) {
-            rt_w(frame + uint64_t(VEL_RT_SYS_LAUNCH_ID + i * 4u), rt_launch[i]);
-            rt_w(frame + uint64_t(VEL_RT_SYS_LAUNCH_SIZE + i * 4u), rt_launch_size[i]);
-        }
+    /* Ray-specific system fields are written by rt_hit_system for the stage
+     * being entered, and the frame was zeroed by the allocator. Only the
+     * per-activation fields below differ from those defaults. */
+    for (uint i = 0u; i < 3u; ++i) {
+        rt_w(frame + uint64_t(VEL_RT_SYS_LAUNCH_ID + i * 4u), rt_launch[i]);
+        rt_w(frame + uint64_t(VEL_RT_SYS_LAUNCH_SIZE + i * 4u), rt_launch_size[i]);
     }
     rt_w64(frame + uint64_t(VEL_RT_SYS_SHADER_RECORD_ADDRESS), record);
     uint64_t pushes = rt_p64(rt_ctx + uint64_t(VEL_RT_RUN_PUSH_TABLE));

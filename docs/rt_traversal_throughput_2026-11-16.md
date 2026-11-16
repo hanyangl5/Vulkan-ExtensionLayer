@@ -186,19 +186,23 @@ Verification: offline 49/49, software GPU matrix 75/75, typed RTP 46/47 (the
 known native-control segfault only), CTS 60-case slice **60/60**, screenshots
 match native (basic mean channel difference 0.0, reflection 0.335).
 
-## M1: skip redundant launch-id writes (landed)
+## M1: stop copying the inherited system frame (landed)
 
-Each activation copied the parent system frame (256 B, which already carries
-this invocation's launch id and size) and then rewrote those six words. They are
-now written only for the entry activation:
+Each activation copied the parent's 256-byte system frame and then overwrote the
+per-activation fields, while `rt_hit_system` already writes the ray-specific
+system fields for the stage being entered. The copy is removed; the allocator's
+zero fill provides the defaults and only launch id/size, record, push address
+and context are written per activation.
 
 | Measurement | before | after |
 | --- | --- | --- |
-| benchmark hit plane | 18.5 ns/ray | **17.9 ns/ray** |
-| benchmark all miss | 9.4 ns/ray | **9.3 ns/ray** |
+| benchmark hit plane | 17.9 ns/ray | **17.3 ns/ray** |
+| benchmark all miss | 9.3 ns/ray | **7.6 ns/ray** (1.2×) |
+| `ray_tracing_basic` | 71.5 fps | **81.6 fps** |
+| `ray_tracing_reflection` | 17.9 fps | **19.9 fps** |
 
-Samples are unchanged within noise (71.5 / 17.9 fps, screenshot parity 0.0 /
-0.012) and every matrix still passes.
+Verification: offline 49/49, software GPU 75/75, typed RTP 46/47 (known native
+segfault), CTS 60-case slice 60/60, screenshot parity unchanged (0.0 / 0.012).
 
 ## Zeroing ablation at four-wide workgroups
 
