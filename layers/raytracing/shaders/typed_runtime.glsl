@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // One invocation owns one checked BDA arena. Nodes are dynamically linked;
 // suspension, traversal and nested stage calls do not unroll the source CFG.
-layout(local_size_x = 1, local_size_y = 1, local_size_z = 1) in;
+layout(local_size_x = 4, local_size_y = 1, local_size_z = 1) in;
 #ifdef RT_CONTEXT_PUSH
 layout(push_constant, std430) uniform RtContextPush {
     uint low;
@@ -554,7 +554,8 @@ void main() {
     if (rt_ctx == 0ul || (rt_ctx & 7ul) != 0ul || rt_p(rt_ctx) != VEL_RT_RUNTIME_MAGIC ||
         rt_p(rt_ctx + 4ul) != VEL_RT_RUNTIME_VERSION)
         return;
-    uint64_t dispatchX = uint64_t(gl_NumWorkGroups.x), dispatchY = uint64_t(gl_NumWorkGroups.y), row, localIndex;
+    uint64_t dispatchX = uint64_t(gl_NumWorkGroups.x) * uint64_t(gl_WorkGroupSize.x),
+             dispatchY = uint64_t(gl_NumWorkGroups.y) * uint64_t(gl_WorkGroupSize.y), row, localIndex;
     if (!rt_product(dispatchY, uint64_t(gl_GlobalInvocationID.z), row) || row > ~0ul - uint64_t(gl_GlobalInvocationID.y)) return;
     row += uint64_t(gl_GlobalInvocationID.y);
     if (!rt_product(dispatchX, row, localIndex) || localIndex > ~0ul - uint64_t(gl_GlobalInvocationID.x)) return;

@@ -1370,7 +1370,7 @@ VKAPI_ATTR void VKAPI_CALL CmdTraceRaysKHR(VkCommandBuffer command, const VkStri
             const uint32_t words[] = {uint32_t(owned->address), uint32_t(owned->address >> 32), uint32_t(base),
                                       uint32_t(base >> 32)};
             d->vtable.CmdPushConstants(command, p->layout->rt_native, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(words), words);
-            d->vtable.CmdDispatch(command, count, 1, 1);
+            d->vtable.CmdDispatch(command, (count + 3) / 4, 1, 1);
             base += count;  // count <= invocations - base by the checked planner.
         }
         vkrt_replay_compute_binding(cb);

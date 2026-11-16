@@ -826,8 +826,8 @@ OpFunctionEnd
     trace(command, &raygen, &empty, &empty, &empty, 5, 1, 1);
     CHECK(cb.record_result == VK_SUCCESS && native_creates == compiled && arena_attempts == prior_arenas + 2 &&
           context_attempts == prior_contexts + 1 && leases.size() == 2);
-    CHECK(dispatches == std::vector<uint32_t>({2, 2, 1}) && trace_pushes.size() == 3 && trace_barriers.size() == 3);
-    CheckDescriptorRestore(descriptor_history, {2, 2, 1});
+    CHECK(dispatches == std::vector<uint32_t>({1, 1, 1}) && trace_pushes.size() == 3 && trace_barriers.size() == 3);
+    CheckDescriptorRestore(descriptor_history, {1, 1, 1});
     const uint64_t root = trace_pushes.empty() ? 0 : trace_pushes[0][0];
     for (size_t n = 0; n < trace_pushes.size(); ++n) CHECK(trace_pushes[n][0] == root && trace_pushes[n][1] == n * 2);
     for (const auto &[identity, lease] : leases) {
