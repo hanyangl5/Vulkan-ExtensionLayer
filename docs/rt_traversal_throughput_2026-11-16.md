@@ -98,28 +98,46 @@ Repeatability is within ~2% run to run. Subtracting the loop cost, one
 whose BVH is only 128 triangles. The per-ray stage machinery, not the loop or
 the arithmetic, is the cost centre.
 
-## Workgroup-size experiment (reverted)
+## M1: four-invocation workgroups (landed)
 
-The typed runtime dispatches one *thread* per invocation with
-`local_size = 1`, so a workgroup carries one thread and the GPU can keep only a
-limited number of threads resident per SM. Raising the workgroup to 64
-invocations (and dispatching `ceil(tile/64)` groups, with the launch mapping
-fixed to count invocations rather than groups) was tried:
+The typed runtime used one *thread* per workgroup (`local_size = 1`), so each
+workgroup carried one thread and memory-level parallelism per SM was minimal.
+A workgroup-64 experiment was mixed (hit improved, but `ray_tracing_basic` fell
+from 24.6 to 9.2 fps), so it was reverted and the size swept instead. The runtime
+now uses **four invocations per workgroup**, with the layer dispatching
+`ceil(tile/4)` groups and the launch mapping counting invocations
+(`NumWorkGroups * WorkGroupSize`) rather than groups.
 
-| Measurement | local_size = 1 | local_size = 64 |
+| workgroup | benchmark hit | `ray_tracing_basic` |
 | --- | --- | --- |
-| benchmark all miss | 32.7 ns/ray | 47.0 ns/ray |
-| benchmark hit plane | 68.8 ns/ray | 35.9 ns/ray |
-| benchmark loop only | 1.3 ns/ray | 2.8 ns/ray |
-| `ray_tracing_basic` | 24.6 fps | 9.2 fps |
-| `ray_tracing_reflection` | 5.4-6.7 fps | 7.0 fps |
+| 1 | 56.3 ns/ray | 35.9 fps |
+| 2 | 32.9 ns/ray | 58.5 fps |
+| **4** | **18.5 ns/ray** | **73.5 fps** |
+| 8 | 16.2 ns/ray | 44.9 fps |
+| 64 | 35.9 ns/ray | 9.2 fps |
 
-The results are mixed and, for the simplest sample, a 2.5× regression, so the
-change was reverted. The likely explanation is per-thread resource pressure
-(registers/local memory in the generated scheduler): packing 64 threads into one
-group multiplies the group's resource footprint and can reduce resident groups
-instead of increasing occupancy. Workgroup size alone is not a free win; M1 has
-to reduce what each ray does, not just how many threads are in flight.
+Four is the balance point: wider groups help the many-rays-per-thread benchmark
+but lose on the one-ray-per-invocation sample, and very wide groups lose
+everywhere, consistent with per-group resource pressure.
+
+Final numbers with four-invocation workgroups:
+
+| Measurement | before | after |
+| --- | --- | --- |
+| benchmark hit plane | 56.3 ns/ray | **18.5 ns/ray** (3.0×) |
+| benchmark all miss | 19.8 ns/ray | **9.2 ns/ray** (2.2×) |
+| `ray_tracing_basic` | 35.9 fps | **73.5 fps** (2.0×) |
+| `ray_tracing_reflection` | 8.8 fps | **17.8 fps** (2.0×) |
+
+Verification: offline 49/49 (the binding fixture now expects one dispatch group
+for its two-invocation tiles), software GPU matrix 75/75, typed RTP 46/47 (the
+known native-control segfault only), CTS 60-case slice **60/60**, screenshots
+match native (basic mean channel difference 0.0, reflection 0.012).
+
+Two measurement notes: the benchmark timestamps must be read with only the layer
+active (the no-native-RT guard distorts the query values), and an accidental
+native run of the same benchmark measured the hardware RT path at **7.2 G ray/s
+(0.14 ns/ray)** on this scene.
 
 ## Frame-zeroing experiment (reverted, but the largest measured lever)
 
