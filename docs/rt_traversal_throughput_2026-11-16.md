@@ -121,6 +121,34 @@ group multiplies the group's resource footprint and can reduce resident groups
 instead of increasing occupancy. Workgroup size alone is not a free win; M1 has
 to reduce what each ray does, not just how many threads are in flight.
 
+## Frame-zeroing experiment (reverted, but the largest measured lever)
+
+`rt_alloc` zeroes every 16-byte-rounded node and stage frame on each TraceRay,
+and the arena stride is about 2.1 KB for the benchmark pipeline. Zeroing only the
+node header plus the traversal-state prefix (448 B) gives:
+
+| Mode | full zero | header + prefix only |
+| --- | --- | --- |
+| hit plane | 68.8 ns/ray | **30.1 ns/ray** |
+| all miss | 32.7 ns/ray | **14.2 ns/ray** |
+| loop only | 1.3 ns/ray | 0.6 ns/ray |
+
+That is a 2.3× win, and the benchmark's hit count stayed correct. However
+`vkrt.rtp_api.physical_interfaces.software` and
+`vkrt.rtp_api.memory_model_interfaces.software` then fail with mismatched output
+words: the fixtures observe fresh-frame zeros (attribute/padding bytes and
+locals beyond the prefix), so a zeroed frame is part of the layer's defined
+stage semantics, not an implementation detail.
+
+Vectorising the zero loop into 16-byte stores changed nothing (67.8 ns/ray), so
+the path is bandwidth-bound: roughly 8.6 GB of zero writes for 4.19 M rays with
+a 2.1 KB stride.
+
+Conclusion: capturing this 2.3× requires making frame initialisation
+*guaranteed by construction* rather than defensive — the compiler must prove
+every frame byte is written before it is read (or shrink the frame), after which
+`rt_alloc` can stop zeroing. That is the top M1 item.
+
 ## Next work
 
 1. Extend the benchmark with a larger payload variant and a multi-hit variant
