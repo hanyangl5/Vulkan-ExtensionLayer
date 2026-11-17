@@ -365,9 +365,12 @@ bool rt_hit_record(uint64_t trace, bool committed, out uint group, out uint64_t 
                      uint64_t(uint(sw_get_intersection_geometry_index(q))) * uint64_t(rt_u(trace + 76ul) & 15u);
     if (!rt_sbt(VEL_RT_RUN_HIT_ADDRESS, index, group, record)) return false;
     if (group == 0xffffffffu) return true;
-    uint expected =
-        (committed ? q.committed_intersection_type == SW_COMM_TRIANGLE : q.intersection_type == SW_CAND_TRIANGLE) ? 1u : 2u;
-    if (rt_group_type[group] != expected) {
+    bool triangle = committed ? q.committed_intersection_type == SW_COMM_TRIANGLE : q.intersection_type == SW_CAND_TRIANGLE;
+    /* Triangles use the built-in intersection, so a procedural group's
+     * any-hit/closest-hit also serve triangle geometry (its intersection
+     * shader is ignored). AABB geometry requires a procedural group. */
+    uint type = rt_group_type[group];
+    if (triangle ? (type != 1u && type != 2u) : type != 2u) {
         rt_fail(VEL_RT_STATUS_SBT);
         return false;
     }
