@@ -165,18 +165,6 @@ sw_setup_ray(vec3 origin, vec3 direction)
    return r;
 }
 
-/* Lexicographic compare on float bits -- tie-break for the top-left rule
- * on exactly axis-aligned degeneracies (verbatim from Avalon). */
-bool
-sw_lexicographic_compare(vec3 v0, vec3 v1)
-{
-   uvec3 a = floatBitsToUint(v0);
-   uvec3 b = floatBitsToUint(v1);
-   if (a.z != b.z) return a.z > b.z;
-   if (a.y != b.y) return a.y > b.y;
-   return a.x > b.x;
-}
-
 /* Only called for nonzero normal values with enough margin to zero/Inf for
  * the requested number of steps. Integer stepping preserves exact float bits. */
 float sw_float_step_down(float value, uint steps) {
