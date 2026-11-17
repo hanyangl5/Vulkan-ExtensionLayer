@@ -436,8 +436,13 @@ void rt_begin_trace(uint64_t shader) {
         rt_fail(VEL_RT_STATUS_RECURSION);
         return;
     }
-    uint64_t c = rt_control(shader), node = rt_alloc(512ul + 2ul * rt_attr_stride);
+    uint64_t c = rt_control(shader), node = rt_alloc_raw(512ul + 2ul * rt_attr_stride);
     if (node == 0ul) return;
+    /* Header words read from a trace node are written here or by
+     * rt_trace_step/rt_report before use, and sw_traversal_initialize_data
+     * defines every traversal field read before a hit sets it. Only the
+     * attribute buffers are observable before a report fills them. */
+    rt_zero(node + 512ul, 2ul * rt_attr_stride);
     rt_w(node, 2u);
     rt_w64(node + 8ul, shader);
     rt_w64(node + 16ul, node);

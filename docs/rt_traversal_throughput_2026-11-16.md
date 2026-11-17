@@ -324,6 +324,25 @@ Vectorising the zero loop to 16-byte stores changes nothing, and capping the
 zero at 256 B only helps while corrupting traversal state. The remaining path to
 that cost is compiler-guaranteed frame initialisation, as above.
 
+## M1: no zeroing for trace nodes (landed)
+
+`rt_begin_trace` allocated each 512-byte trace node plus its two attribute
+buffers through the zeroing allocator. Every header word read from a trace node
+is written by `rt_begin_trace`, `rt_trace_step` or `rt_report` before use, and
+`sw_traversal_initialize_data` defines every traversal field read before a hit
+sets it, so only the two attribute buffers are still zeroed.
+
+Measured back to back in one session (best of 5, two runs each):
+
+| Measurement | before | after |
+| --- | --- | --- |
+| benchmark hit plane | 13.96 ns/ray | **13.1 ns/ray** (1.07×) |
+| benchmark all miss | 6.15 ns/ray | **4.78 ns/ray** (1.29×) |
+
+Verification: offline 49/49, software GPU 75/75, typed RTP 46/47 (known native
+segfault), CTS 60-case slice 60/60. The sample screenshots were not re-run for
+this change.
+
 ## Next work
 
 1. Extend the benchmark with a larger payload variant and a multi-hit variant
