@@ -152,9 +152,7 @@ contract; if none remains, report the blocker with its evidence.
 
 ## References
 
-- [Current status](ray_tracing_fallback_status.md)
-- [Baseline review](ray_tracing_fallback_review.md)
-- [D3D12 source provenance](ray_tracing_fallback_port.md)
+- [Overview and current status](rtp_overview.md)
 - [Vulkan ray traversal specification](https://docs.vulkan.org/spec/latest/chapters/raytraversal.html)
 - [SPV_KHR_ray_tracing](https://github.khronos.org/SPIRV-Registry/extensions/KHR/SPV_KHR_ray_tracing.html)
 - [Pinned Mesa builder](https://github.com/chaotic-cx/mesa-mirror/blob/837ab0e30740abb9ebb60bcd40a5114c68c673d9/src/vulkan/runtime/vk_acceleration_structure.c)

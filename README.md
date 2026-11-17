@@ -21,13 +21,11 @@ NOTE: Not all layers are supported on every platform, please read the documentat
 
 | Layer | Status | Point of Contact |
 | --- | --- | --- |
-| [VK_LAYER_VKRT_SOFTWARE_RAY_QUERY](layers/raytracing/README.md) | Shared software AS, Ray Query, and typed RT Pipeline implementation; active development with selected CTS evidence | [@hanyangl5](https://github.com/hanyangl5) |
+| [VK_LAYER_PA_RTP](layers/raytracing/README.md) | Software acceleration structure and ray tracing pipeline implementation for GPUs without native RT; active development with selected CTS evidence | [@hanyangl5](https://github.com/hanyangl5) |
 
-The active [software RT implementation goal](docs/ray_tracing_fallback_goal.md) is complete mandatory Vulkan AS, Ray Query, and RT Pipeline functionality on qualifying devices without native RT. The selected route is Mesa build algorithms and build IR, a portable BVH4 runtime shared by RQ/RTP, and typed SPIR-V continuation lowering. See the [baseline audit and feasibility review](docs/ray_tracing_fallback_review.md).
+The [goal](docs/ray_tracing_fallback_goal.md) is complete mandatory Vulkan AS and RT Pipeline functionality on qualifying devices without native RT; Ray Query is out of scope. The route is Mesa build algorithms, a portable BVH4 runtime, and typed SPIR-V continuation lowering. The implementation is under `layers/raytracing`; the full goal remains unfinished and experimental builds remain opt-in.
 
-The canonical implementation is under `layers/raytracing`, including its host adapter, Mesa-derived builder, BVH4 backend, traversal, typed compiler, and tests. The full goal remains unfinished. The [D3D12 port record](docs/ray_tracing_fallback_port.md) retains source provenance and historical implementation evidence; its earlier exact D3D12 AS-builder target is superseded by the Mesa/BVH4 decision. Experimental builds remain opt-in.
-
-Track completed components, test evidence, and next work in the [implementation status](docs/ray_tracing_fallback_status.md).
+Build/run instructions, current status, open issues and next work: [PA RTP overview](docs/rtp_overview.md).
 
 ## Information for Developing or Contributing:
 

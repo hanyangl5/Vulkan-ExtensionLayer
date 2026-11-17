@@ -1,18 +1,16 @@
 # Software ray tracing layer
 
-`VK_LAYER_VKRT_SOFTWARE_RAY_QUERY` is the canonical implementation of the
+`VK_LAYER_PA_RTP` is the canonical implementation of the
 [software AS + RT Pipeline goal](../../docs/ray_tracing_fallback_goal.md).
-Its layer name is retained for application, script and test compatibility even
-though Ray Query is no longer part of the delivered contract. AS and RT Pipeline
-share the layer's object model, GPU builder, portable BVH4 representation, AS
+It was named `VK_LAYER_VKRT_SOFTWARE_RAY_QUERY` before 2026-11-17; Ray Query
+is not part of the delivered contract. AS and RT Pipeline share the layer's object model, GPU builder, portable BVH4 representation, AS
 address resolver, and resumable traversal core.
 
 The complete mandatory Vulkan RT contract remains unfinished. Public API tests
 and selected external Khronos CTS cases have native controls and validation
 records for specific revisions. These results do not establish full conformance
 or qualification on physical GPUs without native RT. See the
-[implementation status](../../docs/ray_tracing_fallback_status.md) and
-[baseline review](../../docs/ray_tracing_fallback_review.md).
+[overview](../../docs/rtp_overview.md).
 
 ## Source layout
 
@@ -77,7 +75,7 @@ For an individual application:
 
 ```sh
 export VK_LAYER_PATH="$PWD/build-raytracing/layers"
-export VK_INSTANCE_LAYERS=VK_LAYER_VKRT_SOFTWARE_RAY_QUERY
+export VK_INSTANCE_LAYERS=VK_LAYER_PA_RTP
 ./your-application
 ```
 
@@ -85,7 +83,7 @@ Windows PowerShell:
 
 ```powershell
 $env:VK_LAYER_PATH="$PWD/build-raytracing/layers"
-$env:VK_INSTANCE_LAYERS='VK_LAYER_VKRT_SOFTWARE_RAY_QUERY'
+$env:VK_INSTANCE_LAYERS='VK_LAYER_PA_RTP'
 ./your-application.exe
 ```
 
@@ -111,16 +109,15 @@ must request Vulkan 1.1 or later; the backend currently requires native Vulkan
 1.2 and available private dependencies. Private shaders use genuine SPIR-V 1.4.
 Complete queue/group/protected and resource qualification remains open. Newer
 optional object interfaces may be explicitly excluded, and every test need not
-pass; see the [compatibility checkpoint](../../docs/rt_software_discovery_2026-10-28.md).
+pass.
 The normal query backend uses per-execution native Events and accepts compute
 families without timestamps, without privately requiring hostQueryReset.
 The no-Event portability fallback has explicit timestamp prerequisites.
-See the [query Event checkpoint](../../docs/rt_query_events_2026-10-28.md).
 
 External CTS is part of development validation. The repository's
 [`run_rt_cts.py`](../../scripts/run_rt_cts.py) records exact cases, executable and
-layer hashes, QPA results, and failures. Use the case lists and commands in the
-linked records to reproduce a slice. Local fixtures and selected CTS slices serve
+layer hashes, QPA results, and failures. Case lists are in
+[`scripts/rt_cts_cases`](../../scripts/rt_cts_cases). Local fixtures and selected CTS slices serve
 different purposes; neither completes the full goal by itself.
 
 ## Current implementation and evidence
@@ -146,17 +143,8 @@ software traversal is embedded as GLSL (`shaders/sw_traversal.glsl`) and
 compiled into each generated stage. The adapter restores application compute
 pipeline, descriptor, push and shader-object state after internal work.
 
-Evidence records (all pre-pivot numbers must be re-qualified on this branch):
-
-- [AS query publication without native timestamps](../../docs/rt_query_events_2026-10-28.md).
-- [Mesa pipeline comparison, source BDA pointers, allocation counts](../../docs/rt_mesa_pipeline_2026-10-29.md).
-- [Software discovery, SPIR-V 1.4 and compatibility gates](../../docs/rt_software_discovery_2026-10-28.md).
-- [Execution-owned RTP arenas](../../docs/rtp_execution_arenas_2026-10-28.md).
-- [Opaque resource provenance across suspension](../../docs/rt_opaque_provenance_2026-10-26.md).
-- [Pipeline creation hints and derivatives](../../docs/rt_pipeline_creation_2026-10-26.md).
-- [Resource profile and boundary checks](../../docs/rt_resource_profile_2026-10-26.md).
-- [Shader-object source and binary interoperability](../../docs/rt_shader_objects_2026-10-26.md).
-- [DescriptorSetLayout ownership](../../docs/rt_descriptor_layout_ownership_2026-10-29.md).
+Dated evidence records (Oct/Nov 2026) are summarized in the
+[overview](../../docs/rtp_overview.md) and kept in Git history (last at `6bc7c24`).
 
 Logical StorageBuffer pointer Phi/Select and inlined helper values use typed
 route/selector snapshots across suspension. RT pipeline libraries retain typed

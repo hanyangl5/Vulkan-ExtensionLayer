@@ -46,7 +46,7 @@ including a depth140/fourth-child regression. Production CLONE/COMPACT and GPU
 serialization now use this representation. Complete property-query publication,
 query replay/synchronization and full API/resource qualification remain open.
 Topology-preserving GPU UPDATE now refreshes original-ID leaves and propagates
-bounds through retained parents; the [refit checkpoint](../../../docs/rt_refit_pointer_libraries_2026-10-28.md)
+bounds through retained parents; the refit checkpoint (in Git history (last at `6bc7c24`))
 records recoverable degenerate instances, memory publication and remaining
 qualification. Canonical typed RTP uses the same backend.
 
@@ -142,8 +142,8 @@ contract. Refit, large construction IDs, builder variants and complete
 qualification remain open. Output regions and total_size still follow the
 capacity plan; fewer live internal nodes do not make COMPACT shrink storage.
 Production RQ/RTP use shared nodes/leaves/header/parent data only. The
-[collapse record](../../../docs/rt_bvh4_collapse_2026-10-26.md) preserves the
-algorithm and component evidence; the [implementation status](../../../docs/ray_tracing_fallback_status.md)
+collapse record (in Git history (last at `6bc7c24`)) preserves the
+algorithm and component evidence; the [overview](../../../docs/rtp_overview.md)
 tracks external CTS snapshots and remaining goal gates.
 
 Build and run independently:

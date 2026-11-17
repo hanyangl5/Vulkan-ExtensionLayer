@@ -6,7 +6,7 @@
 Status: independently tested planning component; **not connected to native queue
 submission**. Production query COPY now uses a native acquire-to-compute bridge;
 its former narrow-wait rejection and historical-wait tracking were removed.
-See the [acquisition checkpoint](../../../docs/rt_indexed_build_acquire_2026-10-28.md).
+The acquisition checkpoint is in Git history (last at `6bc7c24`).
 The planner below retains a distinct experimental executor contract.
 
 ## Production query acquisition

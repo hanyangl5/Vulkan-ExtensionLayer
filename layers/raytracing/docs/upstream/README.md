@@ -29,4 +29,4 @@ are part of the baseline; callable shaders, true compact copies, and other
 unsupported upstream features must not be claimed merely because the Vulkan
 API has commands for them.
 
-See `docs/ray_tracing_fallback_port.md` for the port contract and actual status.
+The D3D12 port record (`docs/ray_tracing_fallback_port.md`) is in Git history (last at `6bc7c24`); see `docs/rtp_overview.md` for current status.
