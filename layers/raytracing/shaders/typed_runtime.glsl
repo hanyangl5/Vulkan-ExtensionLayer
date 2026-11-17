@@ -136,8 +136,10 @@ bool rt_sbt(uint region, uint64_t index, out uint group, out uint64_t record) {
     group = 0xffffffffu;
     record = 0ul;
     if (base == 0ul && size == 0ul) return true;
-    if (base == 0ul || (base & 3ul) != 0ul || stride < 32ul || stride % 4ul != 0ul || size < 32ul ||
-        index > (size - 32ul) / stride) {
+    /* A zero stride is valid for hit/miss/callable regions: every index
+     * selects the first record. */
+    if (base == 0ul || (base & 3ul) != 0ul || (stride != 0ul && (stride < 32ul || stride % 4ul != 0ul)) || size < 32ul ||
+        (stride != 0ul && index > (size - 32ul) / stride)) {
         rt_fail(VEL_RT_STATUS_SBT);
         return false;
     }
