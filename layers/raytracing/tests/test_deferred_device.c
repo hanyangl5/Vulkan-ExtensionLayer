@@ -15,7 +15,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-static const char *software_layer = "VK_LAYER_VKRT_SOFTWARE_RAY_QUERY";
+static const char *software_layer = "VK_LAYER_PA_RTP";
 static const char *validation_layer = "VK_LAYER_KHRONOS_validation";
 static atomic_uint validation_errors;
 static unsigned failures;

@@ -631,7 +631,7 @@ static void wait_history_acquisition(const struct scene *scene, bool sync2, bool
 
 int main(void) {
     const char *layers = getenv("VK_INSTANCE_LAYERS");
-    if (!layers || !strstr(layers, "VK_LAYER_VKRT_SOFTWARE_RAY_QUERY")) {
+    if (!layers || !strstr(layers, "VK_LAYER_PA_RTP")) {
         fputs("SKIP query replay exact property oracle requires the canonical software layer\n", stderr);
         return 77;
     }

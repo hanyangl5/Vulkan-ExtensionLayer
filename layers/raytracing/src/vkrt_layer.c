@@ -5,7 +5,7 @@
  *
  * AS/RQ/RTP requests use the shared software backend and candidate capability
  * profile independently of native RT discovery. Complete mandatory-function
- * and M0-M5 qualification remains tracked in docs/ray_tracing_fallback_status.md.
+ * and M0-M5 qualification remains tracked in docs/rtp_overview.md.
  * Native control runs are separate processes without this layer.
  */
 

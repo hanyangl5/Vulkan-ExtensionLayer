@@ -111,7 +111,7 @@ static VKAPI_ATTR VkResult VKAPI_CALL EnumerateDeviceExtensionProperties(VkPhysi
      * host operations dependency is advertised on every device. */
     const uint32_t first = eligible ? 0 : 3;
     const uint32_t software_count = (uint32_t)VKRT_ARRAY_SIZE(software_extensions) - first;
-    if (layer && !strcmp(layer, "VK_LAYER_VKRT_SOFTWARE_RAY_QUERY")) {
+    if (layer && !strcmp(layer, "VK_LAYER_PA_RTP")) {
         const uint32_t written = properties && *count < software_count ? *count : software_count;
         if (properties) memcpy(properties, software_extensions + first, written * sizeof(*properties));
         *count = written;

@@ -143,7 +143,7 @@ int main(int argc, char **argv) {
         return 1;
     }
     const char *layers = getenv("VK_INSTANCE_LAYERS");
-    const bool software = layers && strstr(layers, "VK_LAYER_VKRT_SOFTWARE_RAY_QUERY");
+    const bool software = layers && strstr(layers, "VK_LAYER_PA_RTP");
     init_vulkan();
     build_as = (PFN_vkCmdBuildAccelerationStructuresKHR)vkGetDeviceProcAddr(g_dev, "vkCmdBuildAccelerationStructuresKHR");
     write_as = (PFN_vkCmdWriteAccelerationStructuresPropertiesKHR)vkGetInstanceProcAddr(

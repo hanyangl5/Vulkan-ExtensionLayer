@@ -36,13 +36,13 @@ import xml.etree.ElementTree as ET
 
 
 LAYERS = {
-    "software-rt": "VK_LAYER_VKRT_SOFTWARE_RAY_QUERY",
+    "software-rt": "VK_LAYER_PA_RTP",
 }
 STATUSES = ("pass", "fail", "notSupported", "crash", "timeout", "noresult")
 LAYER_ENV = (
     "VK_INSTANCE_LAYERS", "VK_LAYER_PATH", "VK_ADD_LAYER_PATH",
     "VK_LOADER_LAYERS_ENABLE", "VK_LOADER_LAYERS_ALLOW", "VK_LOADER_LAYERS_DISABLE",
-    "ENABLE_VKRT_SOFTWARE_RAY_QUERY", "DISABLE_VKRT_SOFTWARE_RAY_QUERY",
+    "ENABLE_PA_RTP", "DISABLE_PA_RTP",
 )
 
 
@@ -157,7 +157,7 @@ def run_environment(mode, snapshot, validation_dir=None, guard_dir=None, mask_na
         if guard_dir:
             overrides["VK_INSTANCE_LAYERS"] += os.pathsep + "VK_LAYER_VKRT_NO_NATIVE_RT_GUARD"
         if mode == "software-rt":
-            overrides["ENABLE_VKRT_SOFTWARE_RAY_QUERY"] = "1"
+            overrides["ENABLE_PA_RTP"] = "1"
     if validation_dir or guard_dir:
         overrides["VK_LAYER_PATH"] = os.pathsep.join(
             [str(path) for path in (snapshot, guard_dir, validation_dir) if path is not None])

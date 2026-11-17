@@ -425,16 +425,16 @@ static void enumeration(PFN_vkEnumerateDeviceExtensionProperties enumerate) {
     REQUIRE(enumerate(physical, "missing_layer", &count, NULL) == VK_ERROR_LAYER_NOT_PRESENT);
     unsigned before = enumeration_calls;
     count = 42;
-    REQUIRE(enumerate(VK_NULL_HANDLE, "VK_LAYER_VKRT_SOFTWARE_RAY_QUERY", &count, NULL) == VK_SUCCESS && count == 1);
+    REQUIRE(enumerate(VK_NULL_HANDLE, "VK_LAYER_PA_RTP", &count, NULL) == VK_SUCCESS && count == 1);
     count = 0;
-    REQUIRE(enumerate(physical, "VK_LAYER_VKRT_SOFTWARE_RAY_QUERY", &count, &property) == VK_INCOMPLETE && count == 0);
+    REQUIRE(enumerate(physical, "VK_LAYER_PA_RTP", &count, &property) == VK_INCOMPLETE && count == 0);
     count = 1;
-    REQUIRE(enumerate(physical, "VK_LAYER_VKRT_SOFTWARE_RAY_QUERY", &count, &property) == VK_INCOMPLETE && count == 1);
+    REQUIRE(enumerate(physical, "VK_LAYER_PA_RTP", &count, &property) == VK_INCOMPLETE && count == 1);
     REQUIRE(!strcmp(property.extensionName, VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME));
     REQUIRE(property.specVersion == VK_KHR_ACCELERATION_STRUCTURE_SPEC_VERSION);
     VkExtensionProperties owned[5];
     count = 5;
-    REQUIRE(enumerate(physical, "VK_LAYER_VKRT_SOFTWARE_RAY_QUERY", &count, owned) == VK_SUCCESS && count == 4);
+    REQUIRE(enumerate(physical, "VK_LAYER_PA_RTP", &count, owned) == VK_SUCCESS && count == 4);
     for (uint32_t i = 0; i < count; ++i) {
         REQUIRE(!strcmp(owned[i].extensionName, visible_names[i + 2]));
         REQUIRE(owned[i].specVersion == extension_version(owned[i].extensionName));
@@ -476,7 +476,7 @@ static void ineligible_library(PFN_vkEnumerateDeviceExtensionProperties enumerat
         REQUIRE(libraries == !absent);
         REQUIRE(legacy_addresses == 1); /* The software-ineligible native profile preserves EXT BDA. */
         count = 10;
-        REQUIRE(enumerate(physical, "VK_LAYER_VKRT_SOFTWARE_RAY_QUERY", &count, output) == VK_SUCCESS && count == 1);
+        REQUIRE(enumerate(physical, "VK_LAYER_PA_RTP", &count, output) == VK_SUCCESS && count == 1);
         REQUIRE(!strcmp(output[0].extensionName, VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME));
     }
     query_capabilities = 3;

@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: MIT
  *
- * vkrt_common.h - shared types for the VKRT software ray-query layer.
+ * vkrt_common.h - shared types for the PA RTP software ray tracing pipeline layer.
  *
  * Self-contained by design: this layer must build and run without linking
  * Mesa (see layers/raytracing/docs/rayquery_software_rt_layer_design.md). Utilities that

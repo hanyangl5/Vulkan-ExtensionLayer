@@ -125,7 +125,7 @@ int main(int argc, char **argv) {
     struct vkrt_resource_profile profile = {0};
     enum vkrt_resource_failure why;
     const char *layers = getenv("VK_INSTANCE_LAYERS");
-    bool software = layers && strstr(layers, "VK_LAYER_VKRT_SOFTWARE_RAY_QUERY");
+    bool software = layers && strstr(layers, "VK_LAYER_PA_RTP");
     if (!software &&
         !vkrt_query_resource_profile(vkGetPhysicalDeviceProperties2, vkGetPhysicalDeviceFeatures2, g_pdev, &profile, &why)) {
         fprintf(stderr, "Descriptor profile unavailable: %d\n", why);

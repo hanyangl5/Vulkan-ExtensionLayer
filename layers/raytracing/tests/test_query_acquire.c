@@ -458,7 +458,7 @@ int main(int argc, char **argv) {
     if ((!legacy && !sync2) || (!single && !cross)) return 2;
     const char *layers = getenv("VK_INSTANCE_LAYERS");
     if (expect_rejection && layers) {
-        const char *software = strstr(layers, "VK_LAYER_VKRT_SOFTWARE_RAY_QUERY"),
+        const char *software = strstr(layers, "VK_LAYER_PA_RTP"),
                    *validation = strstr(layers, "VK_LAYER_KHRONOS_validation");
         if (software && validation && validation < software) {
             fputs("Expected-rejection controls require software above VVL; outer VVL retains rejected submits as pending.\n",

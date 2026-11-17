@@ -55,7 +55,7 @@ endforeach()
 include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/pnext_sizes.cmake)
 include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/command_replay.cmake)
 
-set(VKRT_LAYER_NAME VkLayer_VKRT_SOFTWARE_RAY_QUERY)
+set(VKRT_LAYER_NAME VkLayer_PA_RTP)
 set(VKRT_SHARED_HEADERS ${CMAKE_CURRENT_SOURCE_DIR}/src)
 
 add_library(${VKRT_LAYER_NAME} SHARED
@@ -272,11 +272,11 @@ set_target_properties(${VKRT_LAYER_NAME} PROPERTIES
 # ------------------------------------------------------------------
 # Use the actual target path, including the platform filename and build
 # configuration, rather than guessing a library prefix or output directory.
-file(READ ${CMAKE_CURRENT_SOURCE_DIR}/cmake/VkLayer_VKRT_SOFTWARE_RAY_QUERY.json.in _vkrt_manifest_template)
+file(READ ${CMAKE_CURRENT_SOURCE_DIR}/cmake/VkLayer_PA_RTP.json.in _vkrt_manifest_template)
 set(library_path "$<TARGET_FILE:${VKRT_LAYER_NAME}>")
 string(CONFIGURE "${_vkrt_manifest_template}" _vkrt_manifest @ONLY)
 file(GENERATE
-   OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/$<CONFIG>/VkLayer_VKRT_SOFTWARE_RAY_QUERY.json"
+   OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/$<CONFIG>/VkLayer_PA_RTP.json"
    CONTENT "${_vkrt_manifest}")
 
 # Stage the DLL + bare-name manifest into <build>/layers so the enablement
@@ -286,13 +286,13 @@ add_custom_command(TARGET ${VKRT_LAYER_NAME} POST_BUILD
    COMMAND ${CMAKE_COMMAND} -E copy_if_different
       $<TARGET_FILE:${VKRT_LAYER_NAME}> ${CMAKE_BINARY_DIR}/layers/
    COMMAND ${CMAKE_COMMAND} -E copy_if_different
-      ${CMAKE_CURRENT_BINARY_DIR}/$<CONFIG>/VkLayer_VKRT_SOFTWARE_RAY_QUERY.json
-      ${CMAKE_BINARY_DIR}/layers/VkLayer_VKRT_SOFTWARE_RAY_QUERY.json
+      ${CMAKE_CURRENT_BINARY_DIR}/$<CONFIG>/VkLayer_PA_RTP.json
+      ${CMAKE_BINARY_DIR}/layers/VkLayer_PA_RTP.json
    COMMENT "Staging VKRT layer into ${CMAKE_BINARY_DIR}/layers"
 )
 
-message(STATUS "VKRT software ray-query layer: ${VKRT_LAYER_NAME}")
-message(STATUS "  enable with: VK_INSTANCE_LAYERS=VK_LAYER_VKRT_SOFTWARE_RAY_QUERY")
+message(STATUS "PA RTP software ray tracing pipeline layer: ${VKRT_LAYER_NAME}")
+message(STATUS "  enable with: VK_INSTANCE_LAYERS=VK_LAYER_PA_RTP")
 message(STATUS "               VK_LAYER_PATH=<build>/layers")
 
 # ------------------------------------------------------------------
@@ -343,8 +343,15 @@ if(BUILD_TESTING)
    set(VKRT_NO_RT_GUARD_LIBRARY "$<TARGET_FILE:vkrt_no_native_rt_guard>")
    file(READ "${CMAKE_CURRENT_SOURCE_DIR}/tests/no_native_rt_guard.json.in" _vkrt_guard_manifest)
    string(CONFIGURE "${_vkrt_guard_manifest}" _vkrt_guard_manifest @ONLY)
-   file(GENERATE OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/no-native-rt-guard/VkLayer_VKRT_NO_NATIVE_RT_GUARD.json"
+   # Per-config manifest (multi-config generators evaluate TARGET_FILE once
+   # per configuration), staged to a single directory after the build.
+   file(GENERATE OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/$<CONFIG>/VkLayer_VKRT_NO_NATIVE_RT_GUARD.json"
       CONTENT "${_vkrt_guard_manifest}")
+   add_custom_command(TARGET vkrt_no_native_rt_guard POST_BUILD
+      COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_CURRENT_BINARY_DIR}/no-native-rt-guard
+      COMMAND ${CMAKE_COMMAND} -E copy_if_different
+         ${CMAKE_CURRENT_BINARY_DIR}/$<CONFIG>/VkLayer_VKRT_NO_NATIVE_RT_GUARD.json
+         ${CMAKE_CURRENT_BINARY_DIR}/no-native-rt-guard/VkLayer_VKRT_NO_NATIVE_RT_GUARD.json)
    add_executable(test_no_native_rt_guard tests/test_no_native_rt_guard.c)
    target_include_directories(test_no_native_rt_guard PRIVATE ${Vulkan_INCLUDE_DIRS})
    target_link_libraries(test_no_native_rt_guard PRIVATE Threads::Threads)
@@ -406,7 +413,7 @@ if(BUILD_TESTING)
          LABELS "gpu;pipeline_creation" SKIP_RETURN_CODE 77 TIMEOUT 120)
    endforeach()
    set_tests_properties(vkrt.shader_inline.plain.software PROPERTIES
-      ENVIRONMENT "VK_LAYER_PATH=${CMAKE_BINARY_DIR}/layers;VK_INSTANCE_LAYERS=VK_LAYER_VKRT_SOFTWARE_RAY_QUERY;ENABLE_VKRT_SOFTWARE_RAY_QUERY=1;VK_LOADER_LAYERS_DISABLE=~implicit~")
+      ENVIRONMENT "VK_LAYER_PATH=${CMAKE_BINARY_DIR}/layers;VK_INSTANCE_LAYERS=VK_LAYER_PA_RTP;ENABLE_PA_RTP=1;VK_LOADER_LAYERS_DISABLE=~implicit~")
    set_property(TEST vkrt.shader_inline.plain.software APPEND PROPERTY LABELS no_native_rt)
    set_tests_properties(vkrt.shader_inline.plain.native PROPERTIES
       ENVIRONMENT "VK_INSTANCE_LAYERS=;VK_LOADER_LAYERS_DISABLE=~implicit~")
@@ -484,7 +491,7 @@ if(BUILD_TESTING)
       ${CMAKE_CURRENT_BINARY_DIR}/rtp_bench.rchit.spv 256 256 64 5)
    set_tests_properties(vkrt.rtp_bench PROPERTIES
       LABELS "gpu;benchmark" SKIP_RETURN_CODE 77 TIMEOUT 300
-      ENVIRONMENT "VK_LAYER_PATH=${CMAKE_BINARY_DIR}/layers;VK_INSTANCE_LAYERS=VK_LAYER_VKRT_SOFTWARE_RAY_QUERY;ENABLE_VKRT_SOFTWARE_RAY_QUERY=1;VK_LOADER_LAYERS_DISABLE=~implicit~")
+      ENVIRONMENT "VK_LAYER_PATH=${CMAKE_BINARY_DIR}/layers;VK_INSTANCE_LAYERS=VK_LAYER_PA_RTP;ENABLE_PA_RTP=1;VK_LOADER_LAYERS_DISABLE=~implicit~")
    add_executable(test_rtp_api tests/test_rtp_api.c)
    target_include_directories(test_rtp_api PRIVATE src ${VKRT_SHARED_HEADERS} ${Vulkan_INCLUDE_DIRS})
    target_link_libraries(test_rtp_api PRIVATE vkrt_cpu_bvh ${Vulkan_LIBRARIES})
@@ -527,7 +534,7 @@ if(BUILD_TESTING)
          LABELS "gpu;typed_rtp" TIMEOUT 600 SKIP_RETURN_CODE 77)
    endforeach()
    set_tests_properties(vkrt.rtp_api.mixed_entry.software PROPERTIES
-      ENVIRONMENT "VK_LAYER_PATH=${CMAKE_BINARY_DIR}/layers;VK_INSTANCE_LAYERS=VK_LAYER_VKRT_SOFTWARE_RAY_QUERY;ENABLE_VKRT_SOFTWARE_RAY_QUERY=1;VK_LOADER_LAYERS_DISABLE=~implicit~")
+      ENVIRONMENT "VK_LAYER_PATH=${CMAKE_BINARY_DIR}/layers;VK_INSTANCE_LAYERS=VK_LAYER_PA_RTP;ENABLE_PA_RTP=1;VK_LOADER_LAYERS_DISABLE=~implicit~")
    set_tests_properties(vkrt.rtp_api.mixed_entry.native PROPERTIES
       ENVIRONMENT "VK_INSTANCE_LAYERS=;VK_LOADER_LAYERS_DISABLE=~implicit~")
    foreach(mode software native)
@@ -538,12 +545,12 @@ if(BUILD_TESTING)
          LABELS "gpu;typed_rtp" SKIP_RETURN_CODE 77 TIMEOUT 180)
    endforeach()
    set_tests_properties(vkrt.rtp_api.memory_model.software vkrt.rtp_api.mixed_memory_model.software PROPERTIES
-      ENVIRONMENT "VK_LAYER_PATH=${CMAKE_BINARY_DIR}/layers;VK_INSTANCE_LAYERS=VK_LAYER_VKRT_SOFTWARE_RAY_QUERY;ENABLE_VKRT_SOFTWARE_RAY_QUERY=1;VK_LOADER_LAYERS_DISABLE=~implicit~")
+      ENVIRONMENT "VK_LAYER_PATH=${CMAKE_BINARY_DIR}/layers;VK_INSTANCE_LAYERS=VK_LAYER_PA_RTP;ENABLE_PA_RTP=1;VK_LOADER_LAYERS_DISABLE=~implicit~")
    set_tests_properties(vkrt.rtp_api.memory_model.native vkrt.rtp_api.mixed_memory_model.native PROPERTIES
       ENVIRONMENT "VK_INSTANCE_LAYERS=;VK_LOADER_LAYERS_DISABLE=~implicit~")
    add_test(NAME vkrt.rtp_api.memory_model_interfaces.software COMMAND test_rtp_api ${VKRT_RTP_VMM_INTERFACES_SPV} --memory-model-interfaces)
    set_tests_properties(vkrt.rtp_api.memory_model_interfaces.software PROPERTIES
-      ENVIRONMENT "VK_LAYER_PATH=${CMAKE_BINARY_DIR}/layers;VK_INSTANCE_LAYERS=VK_LAYER_VKRT_SOFTWARE_RAY_QUERY;ENABLE_VKRT_SOFTWARE_RAY_QUERY=1;VK_LOADER_LAYERS_DISABLE=~implicit~"
+      ENVIRONMENT "VK_LAYER_PATH=${CMAKE_BINARY_DIR}/layers;VK_INSTANCE_LAYERS=VK_LAYER_PA_RTP;ENABLE_PA_RTP=1;VK_LOADER_LAYERS_DISABLE=~implicit~"
       LABELS "gpu;typed_rtp" SKIP_RETURN_CODE 77 TIMEOUT 180)
    foreach(mode software native)
       add_test(NAME vkrt.rtp_api.physical_interfaces.${mode} COMMAND test_rtp_api
@@ -552,7 +559,7 @@ if(BUILD_TESTING)
          LABELS "gpu;typed_rtp" SKIP_RETURN_CODE 77 TIMEOUT 180)
    endforeach()
    set_tests_properties(vkrt.rtp_api.physical_interfaces.software PROPERTIES
-      ENVIRONMENT "VK_LAYER_PATH=${CMAKE_BINARY_DIR}/layers;VK_INSTANCE_LAYERS=VK_LAYER_VKRT_SOFTWARE_RAY_QUERY")
+      ENVIRONMENT "VK_LAYER_PATH=${CMAKE_BINARY_DIR}/layers;VK_INSTANCE_LAYERS=VK_LAYER_PA_RTP")
    set_tests_properties(vkrt.rtp_api.physical_interfaces.native PROPERTIES ENVIRONMENT "VK_INSTANCE_LAYERS=")
    foreach(mode software native)
       add_test(NAME vkrt.rtp_api.physical_source.${mode} COMMAND test_rtp_api ${VKRT_RTP_PHYSICAL_SPV} --physical-source)
@@ -560,7 +567,7 @@ if(BUILD_TESTING)
          LABELS "gpu;typed_rtp" SKIP_RETURN_CODE 77 TIMEOUT 180)
    endforeach()
    set_tests_properties(vkrt.rtp_api.physical_source.software PROPERTIES
-      ENVIRONMENT "VK_LAYER_PATH=${CMAKE_BINARY_DIR}/layers;VK_INSTANCE_LAYERS=VK_LAYER_VKRT_SOFTWARE_RAY_QUERY")
+      ENVIRONMENT "VK_LAYER_PATH=${CMAKE_BINARY_DIR}/layers;VK_INSTANCE_LAYERS=VK_LAYER_PA_RTP")
    set_tests_properties(vkrt.rtp_api.physical_source.native PROPERTIES ENVIRONMENT "VK_INSTANCE_LAYERS=")
    foreach(family vkrt.rtp_api.mixed_entry vkrt.rtp_api.memory_model
          vkrt.rtp_api.mixed_memory_model vkrt.rtp_api.physical_interfaces vkrt.rtp_api.physical_source)
@@ -591,7 +598,7 @@ if(BUILD_TESTING)
    add_test(NAME vkrt.rtp_arenas.submit2 COMMAND test_rtp_arenas ${VKRT_RTP_ARENA_SPV} --submit2)
    add_test(NAME vkrt.rtp_arenas.disable_optimization COMMAND test_rtp_arenas ${VKRT_RTP_ARENA_SPV} --disable-optimization)
    set_tests_properties(vkrt.rtp_arenas.software vkrt.rtp_arenas.submit2 vkrt.rtp_arenas.disable_optimization PROPERTIES
-      ENVIRONMENT "VK_LAYER_PATH=${CMAKE_BINARY_DIR}/layers;VK_INSTANCE_LAYERS=VK_LAYER_VKRT_SOFTWARE_RAY_QUERY;ENABLE_VKRT_SOFTWARE_RAY_QUERY=1;VK_LOADER_LAYERS_DISABLE=~implicit~"
+      ENVIRONMENT "VK_LAYER_PATH=${CMAKE_BINARY_DIR}/layers;VK_INSTANCE_LAYERS=VK_LAYER_PA_RTP;ENABLE_PA_RTP=1;VK_LOADER_LAYERS_DISABLE=~implicit~"
       LABELS "gpu;typed_rtp;no_native_rt" SKIP_RETURN_CODE 77 TIMEOUT 600)
    add_executable(test_rtp_launch_plan tests/rtp_launch_plan_tests.cpp)
    target_include_directories(test_rtp_launch_plan PRIVATE src)
@@ -606,7 +613,7 @@ if(BUILD_TESTING)
    set_tests_properties(vkrt.private_pool PROPERTIES LABELS "offline;no_native_rt")
    add_test(NAME vkrt.rtp_api.software COMMAND test_rtp_api ${VKRT_RTP_API_SPV})
    set_tests_properties(vkrt.rtp_api.software PROPERTIES
-      ENVIRONMENT "VK_LAYER_PATH=${CMAKE_BINARY_DIR}/layers;VK_INSTANCE_LAYERS=VK_LAYER_VKRT_SOFTWARE_RAY_QUERY"
+      ENVIRONMENT "VK_LAYER_PATH=${CMAKE_BINARY_DIR}/layers;VK_INSTANCE_LAYERS=VK_LAYER_PA_RTP"
       LABELS "gpu;typed_rtp" SKIP_RETURN_CODE 77 TIMEOUT 600)
    # Manual capability probe; its observed address/alignment is device-specific.
    add_executable(probe_bda_alignment tests/probe_bda_alignment.c)
@@ -660,7 +667,7 @@ if(BUILD_TESTING)
    add_test(NAME vkrt.query_scope.software COMMAND test_query_scope)
    add_test(NAME vkrt.query_scope.native COMMAND test_query_scope)
    set_tests_properties(vkrt.query_scope.software PROPERTIES
-      ENVIRONMENT "VK_LAYER_PATH=${CMAKE_BINARY_DIR}/layers;VK_INSTANCE_LAYERS=VK_LAYER_VKRT_SOFTWARE_RAY_QUERY"
+      ENVIRONMENT "VK_LAYER_PATH=${CMAKE_BINARY_DIR}/layers;VK_INSTANCE_LAYERS=VK_LAYER_PA_RTP"
       LABELS "gpu;no_native_rt" SKIP_RETURN_CODE 77 TIMEOUT 120)
    set_tests_properties(vkrt.query_scope.native PROPERTIES
       ENVIRONMENT "VK_INSTANCE_LAYERS=" LABELS "gpu;native_rt" SKIP_RETURN_CODE 77 TIMEOUT 120)
@@ -699,7 +706,7 @@ if(BUILD_TESTING)
    set_target_properties(test_query_replay PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED ON)
    add_test(NAME vkrt.query_replay.software COMMAND test_query_replay)
    set_tests_properties(vkrt.query_replay.software PROPERTIES
-      ENVIRONMENT "VK_LAYER_PATH=${CMAKE_BINARY_DIR}/layers;VK_INSTANCE_LAYERS=VK_LAYER_VKRT_SOFTWARE_RAY_QUERY;VK_LOADER_LAYERS_DISABLE=~implicit~"
+      ENVIRONMENT "VK_LAYER_PATH=${CMAKE_BINARY_DIR}/layers;VK_INSTANCE_LAYERS=VK_LAYER_PA_RTP;VK_LOADER_LAYERS_DISABLE=~implicit~"
       LABELS "gpu;query_publication" SKIP_RETURN_CODE 77 TIMEOUT 180)
    add_executable(test_query_acquire tests/test_query_acquire.c)
    target_include_directories(test_query_acquire PRIVATE src tests ${Vulkan_INCLUDE_DIRS})
@@ -707,7 +714,7 @@ if(BUILD_TESTING)
    set_target_properties(test_query_acquire PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED ON)
    add_test(NAME vkrt.query_acquire.software COMMAND test_query_acquire)
    set_tests_properties(vkrt.query_acquire.software PROPERTIES
-      ENVIRONMENT "VK_LAYER_PATH=${CMAKE_BINARY_DIR}/layers;VK_INSTANCE_LAYERS=VK_LAYER_VKRT_SOFTWARE_RAY_QUERY;ENABLE_VKRT_SOFTWARE_RAY_QUERY=1;VK_LOADER_LAYERS_DISABLE=~implicit~"
+      ENVIRONMENT "VK_LAYER_PATH=${CMAKE_BINARY_DIR}/layers;VK_INSTANCE_LAYERS=VK_LAYER_PA_RTP;ENABLE_PA_RTP=1;VK_LOADER_LAYERS_DISABLE=~implicit~"
       LABELS "gpu;query_publication;no_native_rt" SKIP_RETURN_CODE 77 TIMEOUT 180)
    add_test(NAME vkrt.query_acquire.native COMMAND test_query_acquire)
    set_tests_properties(vkrt.query_acquire.native PROPERTIES
@@ -719,7 +726,7 @@ if(BUILD_TESTING)
    set_target_properties(test_query_events PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED ON)
    add_test(NAME vkrt.query_events.software COMMAND test_query_events)
    set_tests_properties(vkrt.query_events.software PROPERTIES
-      ENVIRONMENT "VK_LAYER_PATH=${CMAKE_BINARY_DIR}/layers;VK_INSTANCE_LAYERS=VK_LAYER_VKRT_SOFTWARE_RAY_QUERY;ENABLE_VKRT_SOFTWARE_RAY_QUERY=1;VK_LOADER_LAYERS_DISABLE=~implicit~"
+      ENVIRONMENT "VK_LAYER_PATH=${CMAKE_BINARY_DIR}/layers;VK_INSTANCE_LAYERS=VK_LAYER_PA_RTP;ENABLE_PA_RTP=1;VK_LOADER_LAYERS_DISABLE=~implicit~"
       LABELS "gpu;query_publication;no_native_rt" TIMEOUT 180)
    add_test(NAME vkrt.query_events.native COMMAND test_query_events)
    set_tests_properties(vkrt.query_events.native PROPERTIES
@@ -735,14 +742,14 @@ if(BUILD_TESTING)
       set(VKRT_EVENT_LAYERS VK_LAYER_VKRT_NO_NATIVE_RT_GUARD)
       set(VKRT_EVENT_MASK 0)
       if(mode STREQUAL "software")
-         set(VKRT_EVENT_LAYERS "VK_LAYER_VKRT_SOFTWARE_RAY_QUERY${VKRT_EVENT_ENV_SEPARATOR}VK_LAYER_VKRT_NO_NATIVE_RT_GUARD")
+         set(VKRT_EVENT_LAYERS "VK_LAYER_PA_RTP${VKRT_EVENT_ENV_SEPARATOR}VK_LAYER_VKRT_NO_NATIVE_RT_GUARD")
          set(VKRT_EVENT_MASK 1)
       endif()
       add_test(NAME vkrt.query_events.zero_timestamps.${mode} COMMAND "${CMAKE_COMMAND}" -E env
          "VK_LAYER_PATH=${VKRT_EVENT_LAYER_PATH}"
          "VK_INSTANCE_LAYERS=${VKRT_EVENT_LAYERS}"
          "VK_LOADER_LAYERS_DISABLE=~implicit~"
-         "ENABLE_VKRT_SOFTWARE_RAY_QUERY=1"
+         "ENABLE_PA_RTP=1"
          "VKRT_NO_RT_GUARD_ZERO_TIMESTAMPS=1"
          "VKRT_NO_RT_GUARD_MASK_DISCOVERY=${VKRT_EVENT_MASK}"
          "VKRT_NO_RT_GUARD_LOG=${CMAKE_CURRENT_BINARY_DIR}/no-native-rt-guard/query-events-${mode}.jsonl"
@@ -760,7 +767,7 @@ if(BUILD_TESTING)
    set_tests_properties(vkrt.query_signal_order.oracle PROPERTIES LABELS "offline;no_native_rt")
    add_test(NAME vkrt.query_signal_order.software COMMAND test_query_signal_order)
    set_tests_properties(vkrt.query_signal_order.software PROPERTIES
-      ENVIRONMENT "VK_LAYER_PATH=${CMAKE_BINARY_DIR}/layers;VK_INSTANCE_LAYERS=VK_LAYER_VKRT_SOFTWARE_RAY_QUERY;VK_LOADER_LAYERS_DISABLE=~implicit~"
+      ENVIRONMENT "VK_LAYER_PATH=${CMAKE_BINARY_DIR}/layers;VK_INSTANCE_LAYERS=VK_LAYER_PA_RTP;VK_LOADER_LAYERS_DISABLE=~implicit~"
       LABELS "gpu;query_publication" SKIP_RETURN_CODE 77 TIMEOUT 90)
    add_test(NAME vkrt.query_signal_order.native COMMAND test_query_signal_order)
    set_tests_properties(vkrt.query_signal_order.native PROPERTIES
@@ -810,7 +817,7 @@ if(BUILD_TESTING)
    set_target_properties(test_memory_queries_gpu PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED ON)
    add_test(NAME vkrt.memory_queries.gpu COMMAND test_memory_queries_gpu)
    set_tests_properties(vkrt.memory_queries.gpu PROPERTIES
-      ENVIRONMENT "VK_LAYER_PATH=${CMAKE_BINARY_DIR}/layers;VK_INSTANCE_LAYERS=VK_LAYER_VKRT_SOFTWARE_RAY_QUERY"
+      ENVIRONMENT "VK_LAYER_PATH=${CMAKE_BINARY_DIR}/layers;VK_INSTANCE_LAYERS=VK_LAYER_PA_RTP"
       LABELS "gpu" SKIP_RETURN_CODE 77 TIMEOUT 120)
    add_executable(test_resource_profile tests/test_resource_profile.c src/vkrt_resource_profile.c)
    target_include_directories(test_resource_profile PRIVATE src ${Vulkan_INCLUDE_DIRS})
@@ -849,7 +856,7 @@ if(BUILD_TESTING)
    add_dependencies(test_resource_boundary vkrt_resource_boundary_spv)
    add_test(NAME vkrt.resource_boundary.software COMMAND test_resource_boundary ${VKRT_RESOURCE_BOUNDARY_SPV})
    set_tests_properties(vkrt.resource_boundary.software PROPERTIES
-      ENVIRONMENT "VK_LAYER_PATH=${CMAKE_BINARY_DIR}/layers;VK_INSTANCE_LAYERS=VK_LAYER_VKRT_SOFTWARE_RAY_QUERY"
+      ENVIRONMENT "VK_LAYER_PATH=${CMAKE_BINARY_DIR}/layers;VK_INSTANCE_LAYERS=VK_LAYER_PA_RTP"
       LABELS "gpu;typed_rtp" SKIP_RETURN_CODE 77 TIMEOUT 600)
    add_test(NAME vkrt.resource_boundary.native COMMAND test_resource_boundary ${VKRT_RESOURCE_BOUNDARY_SPV})
    set_tests_properties(vkrt.resource_boundary.native PROPERTIES
@@ -857,7 +864,7 @@ if(BUILD_TESTING)
    add_test(NAME vkrt.resource_boundary.dsl_lifetime.software COMMAND test_resource_boundary
       ${VKRT_RESOURCE_BOUNDARY_SPV} --destroy-dsl-before-pipeline)
    set_tests_properties(vkrt.resource_boundary.dsl_lifetime.software PROPERTIES
-      ENVIRONMENT "VK_LAYER_PATH=${CMAKE_BINARY_DIR}/layers;VK_INSTANCE_LAYERS=VK_LAYER_VKRT_SOFTWARE_RAY_QUERY"
+      ENVIRONMENT "VK_LAYER_PATH=${CMAKE_BINARY_DIR}/layers;VK_INSTANCE_LAYERS=VK_LAYER_PA_RTP"
       LABELS "gpu;typed_rtp" SKIP_RETURN_CODE 77 TIMEOUT 600)
    add_test(NAME vkrt.resource_boundary.dsl_lifetime.native COMMAND test_resource_boundary
       ${VKRT_RESOURCE_BOUNDARY_SPV} --destroy-dsl-before-pipeline)
@@ -889,11 +896,11 @@ if(BUILD_TESTING)
    set_tests_properties(vkrt.rtp_bindings PROPERTIES LABELS "offline;no_native_rt")
    add_test(NAME vkrt.rtp_api.maintenance6 COMMAND test_rtp_api ${VKRT_RTP_API_SPV} --maintenance6)
    set_tests_properties(vkrt.rtp_api.maintenance6 PROPERTIES
-      ENVIRONMENT "VK_LAYER_PATH=${CMAKE_BINARY_DIR}/layers;VK_INSTANCE_LAYERS=VK_LAYER_VKRT_SOFTWARE_RAY_QUERY"
+      ENVIRONMENT "VK_LAYER_PATH=${CMAKE_BINARY_DIR}/layers;VK_INSTANCE_LAYERS=VK_LAYER_PA_RTP"
       LABELS "gpu;typed_rtp" SKIP_RETURN_CODE 77 TIMEOUT 600)
    add_test(NAME vkrt.rtp_api.shader_object COMMAND test_rtp_api ${VKRT_RTP_API_SPV} --shader-object)
    set_tests_properties(vkrt.rtp_api.shader_object PROPERTIES
-      ENVIRONMENT "VK_LAYER_PATH=${CMAKE_BINARY_DIR}/layers;VK_INSTANCE_LAYERS=VK_LAYER_VKRT_SOFTWARE_RAY_QUERY"
+      ENVIRONMENT "VK_LAYER_PATH=${CMAKE_BINARY_DIR}/layers;VK_INSTANCE_LAYERS=VK_LAYER_PA_RTP"
       LABELS "gpu;typed_rtp" SKIP_RETURN_CODE 77 TIMEOUT 600)
    foreach(mode software native)
       add_test(NAME vkrt.rtp_api.shader_object_mixed.${mode} COMMAND test_rtp_api
@@ -903,13 +910,13 @@ if(BUILD_TESTING)
          LABELS "gpu;typed_rtp" SKIP_RETURN_CODE 77 TIMEOUT 600)
    endforeach()
    set_tests_properties(vkrt.rtp_api.shader_object_mixed.software PROPERTIES
-      ENVIRONMENT "VK_LAYER_PATH=${CMAKE_BINARY_DIR}/layers;VK_INSTANCE_LAYERS=VK_LAYER_VKRT_SOFTWARE_RAY_QUERY;ENABLE_VKRT_SOFTWARE_RAY_QUERY=1;VK_LOADER_LAYERS_DISABLE=~implicit~")
+      ENVIRONMENT "VK_LAYER_PATH=${CMAKE_BINARY_DIR}/layers;VK_INSTANCE_LAYERS=VK_LAYER_PA_RTP;ENABLE_PA_RTP=1;VK_LOADER_LAYERS_DISABLE=~implicit~")
    set_tests_properties(vkrt.rtp_api.shader_object_mixed.native PROPERTIES ENVIRONMENT "VK_INSTANCE_LAYERS=")
    set_property(TEST vkrt.rtp_api.shader_object_mixed.software APPEND PROPERTY LABELS no_native_rt)
    set_property(TEST vkrt.rtp_api.shader_object_mixed.native APPEND PROPERTY LABELS native_rt)
    add_test(NAME vkrt.rtp_api.derivatives.software COMMAND test_rtp_api ${VKRT_RTP_API_SPV} --derivatives)
    set_tests_properties(vkrt.rtp_api.derivatives.software PROPERTIES
-      ENVIRONMENT "VK_LAYER_PATH=${CMAKE_BINARY_DIR}/layers;VK_INSTANCE_LAYERS=VK_LAYER_VKRT_SOFTWARE_RAY_QUERY"
+      ENVIRONMENT "VK_LAYER_PATH=${CMAKE_BINARY_DIR}/layers;VK_INSTANCE_LAYERS=VK_LAYER_PA_RTP"
       LABELS "gpu;typed_rtp" SKIP_RETURN_CODE 77 TIMEOUT 600)
    add_test(NAME vkrt.rtp_api.derivatives.native COMMAND test_rtp_api ${VKRT_RTP_API_SPV} --derivatives)
    set_tests_properties(vkrt.rtp_api.derivatives.native PROPERTIES
@@ -919,7 +926,7 @@ if(BUILD_TESTING)
          descriptor-buffer descriptor-buffer-maintenance6)
       add_test(NAME vkrt.rtp_api.${mode}.software COMMAND test_rtp_api ${VKRT_RTP_API_SPV} --${mode})
       set_tests_properties(vkrt.rtp_api.${mode}.software PROPERTIES
-         ENVIRONMENT "VK_LAYER_PATH=${CMAKE_BINARY_DIR}/layers;VK_INSTANCE_LAYERS=VK_LAYER_VKRT_SOFTWARE_RAY_QUERY"
+         ENVIRONMENT "VK_LAYER_PATH=${CMAKE_BINARY_DIR}/layers;VK_INSTANCE_LAYERS=VK_LAYER_PA_RTP"
          LABELS "gpu;typed_rtp" SKIP_RETURN_CODE 77 TIMEOUT 600)
       add_test(NAME vkrt.rtp_api.${mode}.native COMMAND test_rtp_api ${VKRT_RTP_API_SPV} --${mode})
       set_tests_properties(vkrt.rtp_api.${mode}.native PROPERTIES
@@ -927,7 +934,7 @@ if(BUILD_TESTING)
    endforeach()
    add_test(NAME vkrt.rtp_api.vulkan11.software COMMAND test_rtp_api ${VKRT_RTP_API11_SPV} --vulkan11)
    set_tests_properties(vkrt.rtp_api.vulkan11.software PROPERTIES
-      ENVIRONMENT "VK_LAYER_PATH=${CMAKE_BINARY_DIR}/layers;VK_INSTANCE_LAYERS=VK_LAYER_VKRT_SOFTWARE_RAY_QUERY;ENABLE_VKRT_SOFTWARE_RAY_QUERY=1;VK_LOADER_LAYERS_DISABLE=~implicit~"
+      ENVIRONMENT "VK_LAYER_PATH=${CMAKE_BINARY_DIR}/layers;VK_INSTANCE_LAYERS=VK_LAYER_PA_RTP;ENABLE_PA_RTP=1;VK_LOADER_LAYERS_DISABLE=~implicit~"
       LABELS "gpu;typed_rtp;no_native_rt" SKIP_RETURN_CODE 77 TIMEOUT 600)
    add_test(NAME vkrt.rtp_api.vulkan11.native COMMAND test_rtp_api ${VKRT_RTP_API11_SPV} --vulkan11)
    set_tests_properties(vkrt.rtp_api.vulkan11.native PROPERTIES
@@ -935,7 +942,7 @@ if(BUILD_TESTING)
       LABELS "gpu;typed_rtp;native_rt" SKIP_RETURN_CODE 77 TIMEOUT 600)
    add_test(NAME vkrt.rtp_api.nested_trace.software COMMAND test_rtp_api ${VKRT_RTP_NESTED_SPV} --nested-trace)
    set_tests_properties(vkrt.rtp_api.nested_trace.software PROPERTIES
-      ENVIRONMENT "VK_LAYER_PATH=${CMAKE_BINARY_DIR}/layers;VK_INSTANCE_LAYERS=VK_LAYER_VKRT_SOFTWARE_RAY_QUERY;ENABLE_VKRT_SOFTWARE_RAY_QUERY=1;VK_LOADER_LAYERS_DISABLE=~implicit~"
+      ENVIRONMENT "VK_LAYER_PATH=${CMAKE_BINARY_DIR}/layers;VK_INSTANCE_LAYERS=VK_LAYER_PA_RTP;ENABLE_PA_RTP=1;VK_LOADER_LAYERS_DISABLE=~implicit~"
       LABELS "gpu;typed_rtp;no_native_rt" SKIP_RETURN_CODE 77 TIMEOUT 600)
    add_test(NAME vkrt.rtp_api.nested_trace.native COMMAND test_rtp_api ${VKRT_RTP_NESTED_SPV} --nested-trace)
    set_tests_properties(vkrt.rtp_api.nested_trace.native PROPERTIES
@@ -979,7 +986,7 @@ if(BUILD_TESTING)
    set_target_properties(test_software_discovery_gpu PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED ON)
    add_test(NAME vkrt.software_discovery.software COMMAND test_software_discovery_gpu --software-abi)
    set_tests_properties(vkrt.software_discovery.software PROPERTIES
-      ENVIRONMENT "VK_LAYER_PATH=${CMAKE_BINARY_DIR}/layers;VK_INSTANCE_LAYERS=VK_LAYER_VKRT_SOFTWARE_RAY_QUERY;ENABLE_VKRT_SOFTWARE_RAY_QUERY=1;VK_LOADER_LAYERS_DISABLE=~implicit~"
+      ENVIRONMENT "VK_LAYER_PATH=${CMAKE_BINARY_DIR}/layers;VK_INSTANCE_LAYERS=VK_LAYER_PA_RTP;ENABLE_PA_RTP=1;VK_LOADER_LAYERS_DISABLE=~implicit~"
       LABELS "gpu;no_native_rt" SKIP_RETURN_CODE 77 TIMEOUT 180)
    add_test(NAME vkrt.software_discovery.native COMMAND test_software_discovery_gpu)
    set_tests_properties(vkrt.software_discovery.native PROPERTIES
@@ -993,7 +1000,7 @@ if(BUILD_TESTING)
       add_test(NAME vkrt.software_discovery.vulkan11.${scope}.software
          COMMAND test_software_discovery_gpu --software-abi ${_discovery_args})
       set_tests_properties(vkrt.software_discovery.vulkan11.${scope}.software PROPERTIES
-         ENVIRONMENT "VK_LAYER_PATH=${CMAKE_BINARY_DIR}/layers;VK_INSTANCE_LAYERS=VK_LAYER_VKRT_SOFTWARE_RAY_QUERY;ENABLE_VKRT_SOFTWARE_RAY_QUERY=1;VK_LOADER_LAYERS_DISABLE=~implicit~"
+         ENVIRONMENT "VK_LAYER_PATH=${CMAKE_BINARY_DIR}/layers;VK_INSTANCE_LAYERS=VK_LAYER_PA_RTP;ENABLE_PA_RTP=1;VK_LOADER_LAYERS_DISABLE=~implicit~"
          LABELS "gpu;no_native_rt" SKIP_RETURN_CODE 77 TIMEOUT 180)
       add_test(NAME vkrt.software_discovery.vulkan11.${scope}.native
          COMMAND test_software_discovery_gpu ${_discovery_args})
@@ -1080,7 +1087,7 @@ if(BUILD_TESTING)
       ${CMAKE_CURRENT_BINARY_DIR}/bvh/vkrt_as_query.spv ${CMAKE_CURRENT_BINARY_DIR}/bvh/vkrt_query_format.spv)
    set_tests_properties(vkrt.as_copy.software
       vkrt.as_update.software vkrt.as_serialization.software vkrt.query_properties.software PROPERTIES
-      ENVIRONMENT "VK_LAYER_PATH=${CMAKE_BINARY_DIR}/layers;VK_INSTANCE_LAYERS=VK_LAYER_VKRT_SOFTWARE_RAY_QUERY"
+      ENVIRONMENT "VK_LAYER_PATH=${CMAKE_BINARY_DIR}/layers;VK_INSTANCE_LAYERS=VK_LAYER_PA_RTP"
       LABELS "gpu" TIMEOUT 600)
    set_tests_properties(vkrt.host_translation PROPERTIES LABELS "offline")
 endif()

@@ -399,7 +399,7 @@ int main(int argc, char **argv) {
     exact_stack = rg_stack + 2 * call_stack;
     REQUIRE(exact_stack && exact_stack <= UINT32_MAX - 64);
     const char *layers = getenv("VK_INSTANCE_LAYERS");
-    if (layers && strstr(layers, "VK_LAYER_VKRT_SOFTWARE_RAY_QUERY")) REQUIRE(rg_stack >= CELLS * sizeof(uint32_t));
+    if (layers && strstr(layers, "VK_LAYER_PA_RTP")) REQUIRE(rg_stack >= CELLS * sizeof(uint32_t));
     printf("RTP arenas: source array=%u bytes, public stack equation=%llu (raygen=%llu callable=%llu), optimization=%s\n",
            CELLS * 4, (unsigned long long)exact_stack, (unsigned long long)rg_stack, (unsigned long long)call_stack,
            no_opt ? "disabled" : "enabled");

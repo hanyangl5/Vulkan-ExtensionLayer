@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: MIT
  *
- * vkrt_layer.h - per-object layer state for the VKRT software ray-query layer.
+ * vkrt_layer.h - per-object layer state for the PA RTP software ray tracing pipeline layer.
  */
 
 #ifndef VKRT_LAYER_H

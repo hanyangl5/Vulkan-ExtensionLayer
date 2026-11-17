@@ -186,7 +186,7 @@ class GuardEvidenceTests(unittest.TestCase):
         import os
         env, _ = run_environment("software-rt", Path("fallback"), Path("validation"), Path("guard"))
         self.assertEqual(env["VK_INSTANCE_LAYERS"].split(os.pathsep),
-                         ["VK_LAYER_VKRT_SOFTWARE_RAY_QUERY", "VK_LAYER_VKRT_NO_NATIVE_RT_GUARD"])
+                         ["VK_LAYER_PA_RTP", "VK_LAYER_VKRT_NO_NATIVE_RT_GUARD"])
         self.assertEqual(env["VK_LAYER_PATH"].split(os.pathsep), ["fallback", "guard", "validation"])
         env, _ = run_environment("native", None)
         self.assertNotIn("VK_INSTANCE_LAYERS", env)

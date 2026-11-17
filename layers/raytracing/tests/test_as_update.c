@@ -173,7 +173,7 @@ static void degenerate_instances(const struct built_as *blas, const VkAccelerati
 }
 int main(void) {
     init_vulkan();
-    g_software = getenv("VK_INSTANCE_LAYERS") && strstr(getenv("VK_INSTANCE_LAYERS"), "VK_LAYER_VKRT_SOFTWARE_RAY_QUERY");
+    g_software = getenv("VK_INSTANCE_LAYERS") && strstr(getenv("VK_INSTANCE_LAYERS"), "VK_LAYER_PA_RTP");
     pBuild = (void *)vkGetDeviceProcAddr(g_dev, "vkCmdBuildAccelerationStructuresKHR");
     if (!pBuild) return 1;
     struct gpu_buf vertices, instances, readback;

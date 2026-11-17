@@ -322,7 +322,7 @@ int main(int argc, char **argv) {
         return 1;
     }
     const char *layers = getenv("VK_INSTANCE_LAYERS");
-    if (!layers || !strstr(layers, "VK_LAYER_VKRT_SOFTWARE_RAY_QUERY")) {
+    if (!layers || !strstr(layers, "VK_LAYER_PA_RTP")) {
         fprintf(stderr, "This component requires the canonical software BVH4 producer layer\n");
         return 1;
     }
