@@ -441,9 +441,9 @@ void rt_begin_trace(uint64_t shader) {
     uint64_t c = rt_control(shader), node = rt_alloc_raw(512ul + 2ul * rt_attr_stride);
     if (node == 0ul) return;
     /* Header words read from a trace node are written here or by
-     * rt_trace_step/rt_report before use, and sw_traversal_initialize_data
-     * defines every traversal field read before a hit sets it. Only the
-     * attribute buffers are observable before a report fills them. */
+     * rt_trace_step/rt_report before use; the traversal state is initialized
+     * below (sw_traversal_initialize_data plus the call-argument fields). Only
+     * the attribute buffers are observable before a report fills them. */
     rt_zero(node + 512ul, 2ul * rt_attr_stride);
     rt_w(node, 2u);
     rt_w64(node + 8ul, shader);
@@ -464,6 +464,8 @@ void rt_begin_trace(uint64_t shader) {
     q.ray.direction = rt_v3(c + 64ul);
     q.tmin = rt_f(c + 60ul);
     q.tclosest = rt_f(c + 76ul);
+    q.gen_thit = 0.0;
+    q.want_committed = 0u;
     sw_traversal_initialize_data(q);
     rt_store_q(node, q);
     rt_top = node;
@@ -545,7 +547,10 @@ void rt_trace_step(uint64_t trace) {
         rt_wf(trace + 516ul, q.candidate.barycentrics.y);
         uint64_t child = rt_push_shader(any, record, trace, trace, 3u, rt_u(trace + 64ul), rt_u64(trace + 136ul),
                                         rt_u(trace + 132ul), rt_u(trace + 128ul), trace + 512ul, 8u, rt_triangle_type);
-        if (child != 0ul) rt_hit_system(child, trace, false, sw_get_intersection_hit_kind(q), q.candidate.distance);
+        if (child != 0ul) {
+            q.want_committed = 0u;
+            rt_hit_system(child, trace, false, sw_get_intersection_hit_kind(q), q.candidate.distance);
+        }
         return;
     }
     uint stage;
@@ -570,6 +575,7 @@ void rt_trace_step(uint64_t trace) {
             return;
         }
         if (q.committed_intersection_type == SW_COMM_TRIANGLE) {
+            q.want_committed = 1u;
             kind = sw_get_intersection_hit_kind(q);
             attrs = trace + 512ul;
             attrSize = 8u;

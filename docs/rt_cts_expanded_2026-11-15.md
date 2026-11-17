@@ -54,6 +54,13 @@ which is valid (every index selects the first record), and `rt_sbt` rejected
 any stride below 32. All 12 pass with the fix; the 53 sampled
 `shader_binding_table.*` cases plus the 60-case slice show 0 failures.
 
+Fixed after this run (2026-11-17): `builtin.hitkindext.chit_triangles` read the
+stale candidate hit instead of the committed one. `rt_trace_step` evaluated
+`gl_HitKindEXT` for closest-hit and any-hit without selecting the committed or
+candidate hit, so opaque front faces reported back-facing and non-opaque hits
+reported 0. All four `hitkindext` cases pass; 271 sampled `builtin.*` cases
+plus the 60-case slice show 0 failures.
+
 ### Timeouts (30 s watchdog, all just over the limit)
 
 `build.gpu.level_instances.triangles_65536_1_1` (32.1 s),
