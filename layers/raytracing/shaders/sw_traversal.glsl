@@ -705,7 +705,14 @@ sw_traversal_initialize_data(inout sw_traversal_state q)
    q.intersection_type          = SW_CAND_NONE;
    q.committed_intersection_type = SW_COMM_NONE;
 
-   q.tlas_next = sw_bvh4_root(q.as_address, 0u, q.ray, q.tmin, q.tclosest);
+   /* NaN/Inf origins or directions and a zero direction are invalid
+    * (VUID-RuntimeSpirv-OpTraceRayKHR-04353/04354). The slab test treats a
+    * non-finite slab as unbounded, so such a ray would visit every node; a
+    * large scene then runs into the OS GPU timeout. Treat it as a miss. */
+   bool valid_ray = !any(isnan(q.ray.origin)) && !any(isinf(q.ray.origin)) &&
+                    !any(isnan(q.ray.direction)) && !any(isinf(q.ray.direction)) &&
+                    any(notEqual(q.ray.direction, vec3(0.0)));
+   q.tlas_next = valid_ray ? sw_bvh4_root(q.as_address, 0u, q.ray, q.tmin, q.tclosest) : SW_HANDLE_INVALID;
    q.blas_next = SW_HANDLE_INVALID;
    q.current_instance = SW_HANDLE_INVALID;
    q.blas_active = false;
