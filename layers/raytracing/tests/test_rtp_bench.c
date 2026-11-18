@@ -113,57 +113,92 @@ int main(int argc, char **argv) {
     REQUIRE(create && handles && stack_size && set_stack && trace && build);
     if (g_fail) return 1;
 
-    /* Triangle grid in the z=0 plane, two triangles per cell. */
-    if (!cells) cells = 8;
-    const uint32_t triangle_count = cells * cells * 2;
+    /* Geometry: either a triangle grid in the z=0 plane (two triangles per
+     * cell), or, with a scene file as argument 9, one BLAS per mesh and one
+     * TLAS instance per BLAS. The scene file is uint32 mesh_count, uint32
+     * triangle counts[mesh_count], then non-indexed float3 vertices. */
+    const char *scene_path = argc > 9 ? argv[9] : NULL;
+    uint32_t mesh_count = 1;
+    uint32_t *mesh_triangles = NULL;
+    float *scene_vertices = NULL;
+    uint32_t triangle_count = 0;
+    if (scene_path) {
+        FILE *file = fopen(scene_path, "rb");
+        REQUIRE(file);
+        REQUIRE(fread(&mesh_count, 4, 1, file) == 1 && mesh_count > 0 && mesh_count <= 4096);
+        mesh_triangles = calloc(mesh_count, sizeof(uint32_t));
+        REQUIRE(mesh_triangles && fread(mesh_triangles, 4, mesh_count, file) == mesh_count);
+        for (uint32_t m = 0; m < mesh_count; ++m) triangle_count += mesh_triangles[m];
+        scene_vertices = malloc((size_t)triangle_count * 9 * sizeof(float));
+        REQUIRE(scene_vertices && fread(scene_vertices, sizeof(float) * 9, triangle_count, file) == triangle_count);
+        fclose(file);
+    } else {
+        if (!cells) cells = 8;
+        triangle_count = cells * cells * 2;
+        mesh_triangles = calloc(1, sizeof(uint32_t));
+        REQUIRE(mesh_triangles);
+        mesh_triangles[0] = triangle_count;
+    }
     const uint32_t vertex_count = triangle_count * 3;
     struct gpu_buf vertices;
     buf_create(vertex_count * 3 * sizeof(float),
                VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
                VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, &vertices);
     float *vertex_data = vertices.mapped;
-    uint32_t vertex = 0;
-    for (uint32_t y = 0; y < cells; ++y)
-        for (uint32_t x = 0; x < cells; ++x) {
-            const float x0 = -1.0f + 2.0f * (float)x / (float)cells;
-            const float x1 = -1.0f + 2.0f * (float)(x + 1) / (float)cells;
-            const float y0 = -1.0f + 2.0f * (float)y / (float)cells;
-            const float y1 = -1.0f + 2.0f * (float)(y + 1) / (float)cells;
-            const float quad[6][3] = {{x0, y0, 0.0f}, {x1, y0, 0.0f}, {x1, y1, 0.0f},
-                                      {x0, y0, 0.0f}, {x1, y1, 0.0f}, {x0, y1, 0.0f}};
-            for (uint32_t i = 0; i < 6; ++i) {
-                memcpy(vertex_data + vertex * 3, quad[i], sizeof(quad[i]));
-                vertex++;
+    if (scene_vertices) {
+        memcpy(vertex_data, scene_vertices, (size_t)vertex_count * 3 * sizeof(float));
+        free(scene_vertices);
+    } else {
+        uint32_t vertex = 0;
+        for (uint32_t y = 0; y < cells; ++y)
+            for (uint32_t x = 0; x < cells; ++x) {
+                const float x0 = -1.0f + 2.0f * (float)x / (float)cells;
+                const float x1 = -1.0f + 2.0f * (float)(x + 1) / (float)cells;
+                const float y0 = -1.0f + 2.0f * (float)y / (float)cells;
+                const float y1 = -1.0f + 2.0f * (float)(y + 1) / (float)cells;
+                const float quad[6][3] = {{x0, y0, 0.0f}, {x1, y0, 0.0f}, {x1, y1, 0.0f},
+                                          {x0, y0, 0.0f}, {x1, y1, 0.0f}, {x0, y1, 0.0f}};
+                for (uint32_t i = 0; i < 6; ++i) {
+                    memcpy(vertex_data + vertex * 3, quad[i], sizeof(quad[i]));
+                    vertex++;
+                }
             }
-        }
-    VkAccelerationStructureGeometryKHR geometry = {
-        .sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR,
-        .geometryType = VK_GEOMETRY_TYPE_TRIANGLES_KHR,
-        .flags = VK_GEOMETRY_OPAQUE_BIT_KHR,
-        .geometry.triangles = {.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_TRIANGLES_DATA_KHR,
-                               .vertexFormat = VK_FORMAT_R32G32B32_SFLOAT,
-                               .vertexData.deviceAddress = vertices.addr,
-                               .vertexStride = 3 * sizeof(float),
-                               .maxVertex = vertex_count - 1,
-                               .indexType = VK_INDEX_TYPE_NONE_KHR}};
-    struct acceleration blas;
-    prepare_count(&blas, VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR, &geometry, triangle_count);
+    }
+    VkAccelerationStructureGeometryKHR *geometries = calloc(mesh_count, sizeof(*geometries));
+    struct acceleration *blases = calloc(mesh_count, sizeof(*blases));
+    REQUIRE(geometries && blases);
+    uint64_t first_vertex = 0;
+    for (uint32_t m = 0; m < mesh_count; ++m) {
+        geometries[m] = (VkAccelerationStructureGeometryKHR){
+            .sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR,
+            .geometryType = VK_GEOMETRY_TYPE_TRIANGLES_KHR,
+            .flags = VK_GEOMETRY_OPAQUE_BIT_KHR,
+            .geometry.triangles = {.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_TRIANGLES_DATA_KHR,
+                                   .vertexFormat = VK_FORMAT_R32G32B32_SFLOAT,
+                                   .vertexData.deviceAddress = vertices.addr + first_vertex * 3 * sizeof(float),
+                                   .vertexStride = 3 * sizeof(float),
+                                   .maxVertex = mesh_triangles[m] * 3 - 1,
+                                   .indexType = VK_INDEX_TYPE_NONE_KHR}};
+        prepare_count(&blases[m], VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR, &geometries[m], mesh_triangles[m]);
+        first_vertex += (uint64_t)mesh_triangles[m] * 3;
+    }
 
     struct gpu_buf instances;
-    buf_create(sizeof(VkAccelerationStructureInstanceKHR),
+    buf_create(mesh_count * sizeof(VkAccelerationStructureInstanceKHR),
                VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
                VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, &instances);
-    *(VkAccelerationStructureInstanceKHR *)instances.mapped =
-        (VkAccelerationStructureInstanceKHR){.transform = {.matrix = {{1, 0, 0, 0}, {0, 1, 0, 0}, {0, 0, 1, 0}}},
-                                             .mask = 255,
-                                             .accelerationStructureReference = blas.address};
+    for (uint32_t m = 0; m < mesh_count; ++m)
+        ((VkAccelerationStructureInstanceKHR *)instances.mapped)[m] =
+            (VkAccelerationStructureInstanceKHR){.transform = {.matrix = {{1, 0, 0, 0}, {0, 1, 0, 0}, {0, 0, 1, 0}}},
+                                                 .mask = 255,
+                                                 .accelerationStructureReference = blases[m].address};
     VkAccelerationStructureGeometryKHR instance_geometry = {
         .sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR,
         .geometryType = VK_GEOMETRY_TYPE_INSTANCES_KHR,
         .geometry.instances = {.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_INSTANCES_DATA_KHR,
                                .data.deviceAddress = instances.addr}};
     struct acceleration tlas;
-    prepare_count(&tlas, VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR, &instance_geometry, 1);
+    prepare_count(&tlas, VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR, &instance_geometry, mesh_count);
 
     struct gpu_buf result;
     buf_create(2 * sizeof(uint32_t), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
@@ -273,8 +308,11 @@ int main(int argc, char **argv) {
     VkCommandBuffer build_command = begin();
     memory_barrier(build_command, VK_PIPELINE_STAGE_HOST_BIT, VK_ACCESS_HOST_WRITE_BIT,
                    VK_PIPELINE_STAGE_ACCELERATION_STRUCTURE_BUILD_BIT_KHR, VK_ACCESS_ACCELERATION_STRUCTURE_READ_BIT_KHR);
-    const VkAccelerationStructureBuildRangeInfoKHR *range = &blas.range;
-    build(build_command, 1, &blas.info, &range);
+    const VkAccelerationStructureBuildRangeInfoKHR *range;
+    for (uint32_t m = 0; m < mesh_count; ++m) {
+        range = &blases[m].range;
+        build(build_command, 1, &blases[m].info, &range);
+    }
     memory_barrier(build_command, VK_PIPELINE_STAGE_ACCELERATION_STRUCTURE_BUILD_BIT_KHR,
                    VK_ACCESS_ACCELERATION_STRUCTURE_WRITE_BIT_KHR, VK_PIPELINE_STAGE_ACCELERATION_STRUCTURE_BUILD_BIT_KHR,
                    VK_ACCESS_ACCELERATION_STRUCTURE_READ_BIT_KHR);
@@ -362,11 +400,16 @@ int main(int argc, char **argv) {
     vkDestroyPipelineLayout(g_dev, layout, NULL);
     vkDestroyDescriptorSetLayout(g_dev, descriptor_layout, NULL);
     pDestroyAS(g_dev, tlas.handle, NULL);
-    pDestroyAS(g_dev, blas.handle, NULL);
     buf_destroy(&tlas.scratch);
     buf_destroy(&tlas.storage);
-    buf_destroy(&blas.scratch);
-    buf_destroy(&blas.storage);
+    for (uint32_t m = 0; m < mesh_count; ++m) {
+        pDestroyAS(g_dev, blases[m].handle, NULL);
+        buf_destroy(&blases[m].scratch);
+        buf_destroy(&blases[m].storage);
+    }
+    free(blases);
+    free(geometries);
+    free(mesh_triangles);
     buf_destroy(&sbt);
     buf_destroy(&result);
     buf_destroy(&instances);

@@ -1,0 +1,45 @@
+#version 460
+#extension GL_EXT_ray_tracing : require
+// Scene benchmark ray generator: a pinhole camera inside the scene. spp
+// jittered primary rays per invocation; mode 1 adds one secondary ray per
+// primary hit (toward a fixed point light), mode 2 skips tracing entirely.
+layout(location = 0) rayPayloadEXT float payload;
+layout(set = 0, binding = 0, std430) buffer Result { uint hits; uint rays; } result;
+layout(set = 0, binding = 1) uniform accelerationStructureEXT tlas;
+layout(push_constant) uniform Push { uint spp; uint mode; } pc;
+void main() {
+    ivec2 id = ivec2(gl_LaunchIDEXT.xy);
+    ivec2 size = ivec2(gl_LaunchSizeEXT.xy);
+    uint hash = (uint(id.y) * uint(size.x) + uint(id.x)) * 747796405u + 2891336453u;
+    const vec3 eye = vec3(0.0, -1.5, 0.0);
+    const vec3 light = vec3(0.0, -10.0, 0.0);
+    uint local_hits = 0u;
+    for (uint i = 0u; i < pc.spp; ++i) {
+        hash = hash * 1664525u + 1013904223u;
+        vec2 jitter = vec2(float(hash & 0xffffu), float(hash >> 16)) / 65535.0;
+        vec2 uv = (vec2(id) + jitter) / vec2(size) * 2.0 - 1.0;
+        float aspect = float(size.x) / float(size.y);
+        vec3 direction = normalize(vec3(uv.x * aspect * 0.577, uv.y * 0.577, 1.0));
+        if (pc.mode == 2u) {
+            local_hits += uint(direction.x > 2.0);
+            continue;
+        }
+        payload = -1.0;
+        traceRayEXT(tlas, gl_RayFlagsOpaqueEXT, 0xffu, 0u, 0u, 0u, eye, 0.001, direction, 10000.0, 0);
+        if (payload > 0.0) {
+            local_hits++;
+            if (pc.mode == 1u) {
+                vec3 p = eye + payload * direction;
+                vec3 to_light = light - p;
+                float distance = length(to_light);
+                payload = -1.0;
+                traceRayEXT(tlas, gl_RayFlagsOpaqueEXT | gl_RayFlagsTerminateOnFirstHitEXT, 0xffu, 0u, 0u, 0u, p,
+                            0.001, to_light / distance, distance, 0);
+            }
+        }
+    }
+    if (id.x == 0 && id.y == 0) {
+        result.hits = local_hits;
+        result.rays = pc.spp;
+    }
+}

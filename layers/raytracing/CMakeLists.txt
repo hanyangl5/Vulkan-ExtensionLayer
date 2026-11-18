@@ -469,14 +469,14 @@ if(BUILD_TESTING)
    endforeach()
    add_custom_target(vkrt_rtp_physical_interfaces_spv DEPENDS ${VKRT_RTP_PHYSICAL_INTERFACES_SPV})
    set(VKRT_RTP_BENCH_SPV)
-   foreach(stage rgen rmiss rchit)
-      set(output ${CMAKE_CURRENT_BINARY_DIR}/rtp_bench.${stage}.spv)
+   foreach(shader rtp_bench.rgen rtp_bench.rmiss rtp_bench.rchit rtp_bench_scene.rgen rtp_bench_scene.rchit)
+      set(output ${CMAKE_CURRENT_BINARY_DIR}/${shader}.spv)
       add_custom_command(OUTPUT ${output}
          COMMAND ${VKRT_GLSLC} --target-env=vulkan1.1 --target-spv=spv1.4
-            ${CMAKE_CURRENT_SOURCE_DIR}/tests/rtp_bench.${stage} -o ${output}
+            ${CMAKE_CURRENT_SOURCE_DIR}/tests/${shader} -o ${output}
          COMMAND ${VKRT_SPIRV_VAL} --target-env vulkan1.1spv1.4 ${output}
-         DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/tests/rtp_bench.${stage}
-         COMMENT "Compiling RTP traversal benchmark ${stage}" VERBATIM)
+         DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/tests/${shader}
+         COMMENT "Compiling RTP traversal benchmark ${shader}" VERBATIM)
       list(APPEND VKRT_RTP_BENCH_SPV ${output})
    endforeach()
    add_custom_target(vkrt_rtp_bench_spv DEPENDS ${VKRT_RTP_BENCH_SPV})
