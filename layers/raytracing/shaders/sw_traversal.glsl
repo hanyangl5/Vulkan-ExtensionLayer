@@ -155,13 +155,23 @@ sw_max_dimension(vec3 v)
              : ((abs(v.y) > abs(v.z)) ? 1u : 2u);
 }
 
+/* Reciprocal for the slab test. Components outside Vulkan's guaranteed
+ * division domain [2^-126, 2^126] are handled per axis in sw_ray_box_test, so
+ * they only need a finite placeholder here. */
+vec3
+sw_safe_inverse(vec3 direction)
+{
+   bvec3 exact = lessThan(abs(direction), vec3(1.17549435e-38));
+   return 1.0 / mix(direction, vec3(1.0), exact);
+}
+
 sw_ray
 sw_setup_ray(vec3 origin, vec3 direction)
 {
    sw_ray r;
    r.origin        = origin;
    r.direction     = direction;
-   r.inv_direction = 1.0 / direction;
+   r.inv_direction = sw_safe_inverse(direction);
    return r;
 }
 
@@ -177,74 +187,34 @@ sw_lexicographic_compare(vec3 v0, vec3 v1)
    return a.x > b.x;
 }
 
-/* Only called for nonzero normal values with enough margin to zero/Inf for
- * the requested number of steps. Integer stepping preserves exact float bits. */
-float sw_float_step_down(float value, uint steps) {
-   uint bits = floatBitsToUint(value);
-   return uintBitsToFloat((bits & 0x80000000u) != 0u ? bits + steps : bits - steps);
-}
-float sw_float_step_up(float value, uint steps) {
-   uint bits = floatBitsToUint(value);
-   return uintBitsToFloat((bits & 0x80000000u) != 0u ? bits - steps : bits + steps);
-}
-
-/* Enclose the exact (bound-origin)/direction, independently of reciprocal
- * rounding. A false return denotes an unbounded interval, never a ray miss. */
-bool sw_slab_endpoint(float bound, float origin, float direction, out float lower, out float upper) {
-   uint bb = floatBitsToUint(bound) & 0x7fffffffu;
-   uint ob = floatBitsToUint(origin) & 0x7fffffffu;
-   uint db = floatBitsToUint(direction) & 0x7fffffffu;
-   /* Avoid flushed input values, overflowing subtraction, and division outside
-    * Vulkan's guaranteed 2.5-ULP denominator domain [2^-126,2^126]. */
-   if ((bb != 0u && bb < 0x00800000u) || (ob != 0u && ob < 0x00800000u) ||
-       bb >= 0x7f000000u || ob >= 0x7f000000u || db < 0x00800000u || db > 0x7e800000u)
-      return false;
-   precise float numerator = bound - origin;
-   uint nb = floatBitsToUint(numerator) & 0x7fffffffu;
-   if (nb == 0u) {
-      if (bound != origin) return false; // A nonzero result may have flushed.
-      lower = 0.0;
-      upper = 0.0;
-      return true;
-   }
-   if (nb <= 0x00800000u || nb >= 0x7f7fffffu) return false;
-   // Correctly rounded subtraction lies between the two adjacent floats.
-   float nlo = sw_float_step_down(numerator, 1u);
-   float nhi = sw_float_step_up(numerator, 1u);
-   int de = int(db >> 23);
-   int elo = int((floatBitsToUint(nlo) & 0x7fffffffu) >> 23) - de;
-   int ehi = int((floatBitsToUint(nhi) & 0x7fffffffu) >> 23) - de;
-   // The quotient is then within [2^-125,2^125] in magnitude: no flush,
-   // overflow, or exceptional operand can invalidate the ULP error bound.
-   if (elo < -124 || elo > 124 || ehi < -124 || ehi > 124) return false;
-   precise float qlo = nlo / direction;
-   precise float qhi = nhi / direction;
-   // A 2.5-ULP division error can cross one binade boundary. Six adjacent
-   // floats cover the resulting at-most-five steps plus the endpoint.
-   lower = sw_float_step_down(min(qlo, qhi), 6u);
-   upper = sw_float_step_up(max(qlo, qhi), 6u);
-   return true;
-}
-
 bool
 sw_ray_box_test(sw_ray ray, vec3 bmin, vec3 bmax, float tmin, float tmax)
 {
-   if (any(greaterThan(bmin, bmax))) return false;
-   for (uint axis = 0; axis < 3; ++axis) {
-      uint direction_bits = floatBitsToUint(ray.direction[axis]) & 0x7fffffffu;
-      if (direction_bits == 0u) {
-         if (ray.origin[axis] < bmin[axis] || ray.origin[axis] > bmax[axis]) return false;
-      } else {
-         float amin, amax, bmin_t, bmax_t;
-         if (!sw_slab_endpoint(bmin[axis], ray.origin[axis], ray.direction[axis], amin, amax) ||
-             !sw_slab_endpoint(bmax[axis], ray.origin[axis], ray.direction[axis], bmin_t, bmax_t))
-            continue;
-         tmin = max(tmin, min(amin, bmin_t));
-         tmax = min(tmax, max(amax, bmax_t));
-         if (tmin > tmax) return false;
-      }
-   }
-   return true;
+   /* Also rejects inactive slots with NaN bounds. */
+   if (!all(lessThanEqual(bmin, bmax))) return false;
+   /* Reciprocal slab test. Vulkan guarantees 2.5 ULP for the reciprocal and
+    * correct rounding for the subtraction and product, so each t is within
+    * about 7 * 2^-24 (4.2e-7) relative of the exact (bound - origin) / dir.
+    * Widening both interval ends by 1e-6 relative, away from the interval and
+    * for either sign, keeps the test conservative. Origins are finite here. */
+   precise vec3 t0 = (bmin - ray.origin) * ray.inv_direction;
+   precise vec3 t1 = (bmax - ray.origin) * ray.inv_direction;
+   vec3 lo = min(t0, t1), hi = max(t0, t1);
+   /* A zero direction component keeps the ray inside or outside that slab for
+    * every t. A component outside [2^-126, 2^125] leaves the division error
+    * unbounded, so that axis does not constrain the interval. */
+   vec3 dir = abs(ray.direction);
+   bvec3 zero = equal(dir, vec3(0.0));
+   bvec3 unbounded = bvec3(uvec3(lessThan(dir, vec3(1.17549435e-38))) | uvec3(greaterThan(dir, vec3(4.2535296e37))));
+   bvec3 inside = bvec3(uvec3(greaterThanEqual(ray.origin, bmin)) & uvec3(lessThanEqual(ray.origin, bmax)));
+   lo = mix(lo, vec3(-1e38), unbounded);
+   hi = mix(hi, vec3(1e38), unbounded);
+   if (any(bvec3(uvec3(zero) & uvec3(not(inside))))) return false;
+   float tn = max(max(lo.x, lo.y), lo.z);
+   float tf = min(min(hi.x, hi.y), hi.z);
+   tn *= tn > 0.0 ? 0.999999 : 1.000001;
+   tf *= tf > 0.0 ? 1.000001 : 0.999999;
+   return max(tn, tmin) <= min(tf, tmax);
 }
 
 /* Root identity and bounds are checked before following any runtime ID. */
@@ -700,7 +670,7 @@ bool sw_traversal_proceed(inout sw_traversal_state q) {
 void
 sw_traversal_initialize_data(inout sw_traversal_state q)
 {
-   q.ray.inv_direction = 1.0 / q.ray.direction;
+   q.ray.inv_direction = sw_safe_inverse(q.ray.direction);
 
    q.intersection_type          = SW_CAND_NONE;
    q.committed_intersection_type = SW_COMM_NONE;
